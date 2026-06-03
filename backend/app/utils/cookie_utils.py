@@ -20,20 +20,23 @@ def auth_cookie_path() -> str:
 
 
 def auth_cookie_domain() -> str | None:
+    configured_domain = str(settings.AUTH_COOKIE_DOMAIN or "").strip().lower().lstrip(".").rstrip(".")
+    if not configured_domain:
+        return None
     try:
         hostname = (urlparse(settings.APP_URL).hostname or "").strip().lower().rstrip(".")
     except Exception:
         return None
-    if not hostname or hostname in {"localhost", "127.0.0.1", "::1"}:
+    if not hostname or configured_domain in {"localhost", "127.0.0.1", "::1"}:
         return None
     try:
-        ipaddress.ip_address(hostname)
+        ipaddress.ip_address(configured_domain)
         return None
     except ValueError:
         pass
-    if hostname.startswith("www."):
-        hostname = hostname[4:]
-    return hostname or None
+    if hostname != configured_domain and not hostname.endswith(f".{configured_domain}"):
+        return None
+    return configured_domain
 
 
 def set_cookie(response: Response, key: str, value: str, **kwargs) -> None:

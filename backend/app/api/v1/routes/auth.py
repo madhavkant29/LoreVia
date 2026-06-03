@@ -20,16 +20,16 @@ from app.core.config import is_local_mode, settings
 from app.core.database import get_db
 from app.core.redis import (
     begin_password_reset_cooldown,
+    consume_refresh_session,
     consume_email_verification_token,
     consume_password_reset_token,
     mark_user_dashboard_cache_dirty,
-    refresh_session_active,
-    revoke_refresh_session,
     store_email_verification_token,
     store_password_reset_token,
     store_refresh_session,
 )
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -53,9 +53,9 @@ from app.schemas.auth import (
     VerifyEmailResendBody,
 )
 from app.services.auth_service import (
+    device_account_limit_message,
     DeviceTrialLimitError,
-    build_device_trial,
-    ensure_device_trial_available,
+    link_device_to_user_if_allowed,
 )
 from app.services.email_service import (
     deliver_password_reset_email,
@@ -64,17 +64,20 @@ from app.services.email_service import (
 )
 from app.services.trial_email_service import schedule_trial_email_events
 from app.utils.auth_cookies import (
+    get_device_cookie,
     REFRESH_TOKEN_COOKIE_NAME,
     clear_auth_cookies,
     get_auth_token,
+    resolve_device_id,
+    resolve_device_id_optional,
     set_auth_cookies,
+    set_device_cookie,
 )
 from app.utils.auth_csrf import enforce_cookie_csrf
 from app.utils.auth_utils import (
     current_token_version,
     get_user_for_auth_subject,
     next_token_version,
-    normalize_device_id,
     normalize_email,
     parse_auth_subject_uuid,
     password_is_valid,
@@ -118,8 +121,17 @@ async def _mint_token_pair(user: User, db: AsyncSession | None = None) -> tuple[
     )
 
 
-def _user_response_with_cookies(response: Response, user_out: UserOut | None, access_token: str, refresh_token: str) -> UserOut | None:
+def _user_response_with_cookies(
+    response: Response,
+    user_out: UserOut | None,
+    access_token: str,
+    refresh_token: str,
+    *,
+    device_id: str | None = None,
+) -> UserOut | None:
     set_auth_cookies(response, access_token, refresh_token)
+    if device_id is not None:
+        set_device_cookie(response, device_id)
     return user_out
 
 
@@ -206,15 +218,16 @@ def _schedule_onboarding_email(background_tasks: BackgroundTasks | None, email: 
 
 @router.post("/register", response_model=RegisterOut, status_code=201)
 async def register(
+    request: Request,
     body: RegisterBody,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_register),
 ):
     email = normalize_email(body.email)
     try:
-        device_id = normalize_device_id(body.device_id)
-    except ValueError:
-        raise HTTPException(400, "Invalid device identifier.")
+        device_id = resolve_device_id(request, body.device_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     username = (body.username or "").strip()
     if not body.accepted_terms:
         raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA to create an account.")
@@ -225,10 +238,6 @@ async def register(
         raise HTTPException(400, "Username is required")
     if (await db.execute(select(User).where(func.lower(User.username) == username.lower()))).scalar():
         raise HTTPException(400, "Username already taken")
-    try:
-        await ensure_device_trial_available(db, device_id)
-    except DeviceTrialLimitError:
-        raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
     user = User(
         email=email,
         username=username,
@@ -239,12 +248,15 @@ async def register(
     try:
         db.add(user)
         await db.flush()
+        await link_device_to_user_if_allowed(db, user.id, device_id)
         await _schedule_trial_email_events_best_effort(db, user)
-        db.add(build_device_trial(user.id, device_id))
         await db.commit()
+    except DeviceTrialLimitError as exc:
+        await db.rollback()
+        raise HTTPException(403, str(exc))
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
+        raise HTTPException(403, device_account_limit_message())
     await db.refresh(user)
     delivered, verification_url = await _issue_email_verification(user)
     return RegisterOut(
@@ -258,14 +270,17 @@ async def register(
 
 @router.post("/login", response_model=UserOut)
 async def login(
+    request: Request,
     body: LoginBody,
     response: Response,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
+    device_id = resolve_device_id_optional(request, body.device_id)
     email = normalize_email(body.email)
     user = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
     if not user:
+        verify_password(body.password, DUMMY_PASSWORD_HASH)
         raise HTTPException(401, "Invalid credentials")
     try:
         valid = verify_password(body.password, user.password_hash)
@@ -275,21 +290,28 @@ async def login(
         raise HTTPException(401, "Invalid credentials")
     if not user.email_verified_at:
         raise HTTPException(403, "Please verify your email before signing in.")
-    await _record_login_activity(db, user)
+    if device_id is not None:
+        try:
+            await link_device_to_user_if_allowed(db, user.id, device_id, strict=False)
+        except DeviceTrialLimitError:
+            pass
+    await _record_login_activity(db, user, device_id=device_id)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(user, db)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
 
 
 @router.post("/oauth/supabase", response_model=UserOut)
 async def oauth_supabase(
+    request: Request,
     body: SupabaseOAuthBody,
     response: Response,
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
+    device_id = resolve_device_id_optional(request, body.device_id)
     if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
         raise HTTPException(503, "Supabase OAuth is not configured")
     try:
@@ -331,62 +353,45 @@ async def oauth_supabase(
         ).scalar_one_or_none()
         if not existing:
             existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
-        created = False
-        if not existing:
-            try:
-                device_id = normalize_device_id(body.device_id)
-            except ValueError:
-                raise HTTPException(400, "Invalid device identifier.")
-            local_supabase_recovery = settings.DEBUG
-            if not body.accepted_terms and not local_supabase_recovery:
-                raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA before creating an account with Google.")
-            if not local_supabase_recovery:
-                try:
-                    await ensure_device_trial_available(db, device_id)
-                except DeviceTrialLimitError:
-                    raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
-            existing = User(
-                id=supabase_auth_id,
-                email=email,
-                supabase_auth_id=supabase_auth_id,
-                password_hash=hash_password(str(uuid.uuid4())),
-                legal_accepted_at=datetime.now(UTC) if (body.accepted_terms or local_supabase_recovery) else None,
-                legal_version=LEGAL_VERSION,
-                email_verified_at=datetime.now(UTC),
+        if existing and existing.supabase_auth_id is not None and existing.supabase_auth_id != supabase_auth_id:
+            log.warning(
+                "supabase_identity_mismatch",
+                extra={
+                    "existing_user_id": str(existing.id),
+                    "existing_supabase_id": str(existing.supabase_auth_id),
+                    "new_supabase_id": str(supabase_auth_id),
+                    "email": email,
+                },
             )
+            raise HTTPException(409, "This email is already linked to another Supabase identity.")
+        if not existing:
+            raise HTTPException(
+                401,
+                "No account found for this Google login. Please create an account first via the Register page.",
+            )
+
+        if device_id is not None:
             try:
-                db.add(existing)
-                await db.flush()
-                await _schedule_trial_email_events_best_effort(db, existing)
-                if not local_supabase_recovery:
-                    db.add(build_device_trial(existing.id, device_id))
-                await db.commit()
-            except IntegrityError:
-                await db.rollback()
-                raise HTTPException(403, f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts.")
+                await link_device_to_user_if_allowed(db, existing.id, device_id, strict=False)
+            except DeviceTrialLimitError:
+                pass
+        mutated = False
+        if existing.supabase_auth_id is None:
+            existing.supabase_auth_id = supabase_auth_id
+            mutated = True
+        if not existing.email_verified_at:
+            existing.email_verified_at = datetime.now(UTC)
+            await _schedule_trial_email_events_best_effort(db, existing)
+            mutated = True
+        if mutated:
+            await db.commit()
             await db.refresh(existing)
-            created = True
-        else:
-            mutated = False
-            if existing.supabase_auth_id is None:
-                existing.supabase_auth_id = supabase_auth_id
-                mutated = True
-            if not existing.email_verified_at:
-                existing.email_verified_at = datetime.now(UTC)
-                await _schedule_trial_email_events_best_effort(db, existing)
-                mutated = True
-            if mutated:
-                await db.commit()
-                await db.refresh(existing)
 
-        if created:
-            _schedule_onboarding_email(background_tasks, existing.email)
-
-        await _record_login_activity(db, existing)
+        await _record_login_activity(db, existing, device_id=device_id)
         await db.commit()
         await db.refresh(existing)
         user_out, access_token, refresh_token = await _mint_token_pair(existing, db)
-        return _user_response_with_cookies(response, user_out, access_token, refresh_token)
+        return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
     except HTTPException:
         raise
     except Exception:
@@ -480,20 +485,21 @@ async def refresh(
     current_version = current_token_version(user)
     if int(claimed_version) != current_version:
         raise HTTPException(401, "Refresh token expired")
-    if not await refresh_session_active(payload["sub"], session_id):
+    if not await consume_refresh_session(payload["sub"], session_id):
         raise HTTPException(401, "Refresh token expired")
     if not user.email_verified_at:
         raise HTTPException(403, "Please verify your email before signing in.")
-    await revoke_refresh_session(payload["sub"], session_id)
-    await _record_login_activity(db, user)
+    device_id = get_device_cookie(request)
+    await _record_login_activity(db, user, device_id=device_id)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(user, db)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
 
 
 @router.post("/verify-email", response_model=UserOut)
 async def verify_email(
+    request: Request,
     body: VerifyEmailBody,
     response: Response,
     background_tasks: BackgroundTasks = None,
@@ -517,11 +523,12 @@ async def verify_email(
         await db.commit()
         _schedule_onboarding_email(background_tasks, user.email)
 
-    await _record_login_activity(db, user)
+    device_id = get_device_cookie(request)
+    await _record_login_activity(db, user, device_id=device_id)
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(user, db)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
 
 
 @router.post("/resend-verification")
@@ -557,10 +564,11 @@ async def logout(
 
 @router.get("/me", response_model=UserOut)
 async def me(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _record_login_activity(db, current_user)
+    await _record_login_activity(db, current_user, device_id=get_device_cookie(request))
     await db.commit()
     await db.refresh(current_user)
     return await _build_user_out(current_user, db)

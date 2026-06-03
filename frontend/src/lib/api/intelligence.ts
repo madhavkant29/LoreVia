@@ -121,6 +121,8 @@ async function requestSse<T>(
   return finalPayload
 }
 
+// Intentional sequential polling: the backend async task needs time to complete.
+// Each iteration waits for the server to finish processing; parallel requests would be redundant.
 async function pollAdvisorMessage(bookId: string, taskId: string): Promise<AdvisorResponse> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const response = await apiClient.get<AdvisorTaskStatusResponse>(
@@ -137,6 +139,8 @@ async function pollAdvisorMessage(bookId: string, taskId: string): Promise<Advis
   throw new Error("Advisor generation timed out")
 }
 
+// Intentional sequential polling: the backend async task needs time to complete.
+// Each iteration waits for the server to finish processing; parallel requests would be redundant.
 async function pollSeriesAdvisorMessage(seriesId: string, taskId: string): Promise<AdvisorResponse> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const response = await apiClient.get<AdvisorTaskStatusResponse>(

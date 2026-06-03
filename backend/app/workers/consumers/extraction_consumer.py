@@ -411,11 +411,56 @@ async def _process_book_impl(book_id: str, queue_wait_ms: int | None = None) -> 
         chapters = cast(list[dict[str, Any]], parsed_payload["chapters"])
         screenplay_payload = cast(dict[str, Any] | None, parsed_payload.get("screenplay_payload"))
         parser_diagnostics = cast(dict[str, Any] | None, parsed_payload.get("parser_diagnostics"))
+
+        # Set detected language on the book
+        detected_language = parsed_payload.get("detected_language", "en")
+        if detected_language and detected_language != "en":
+            book.language = detected_language
+            await db.commit()
+
+        # Store import structure snapshot for later re-display
+        if parser_diagnostics:
+            sections = []
+            for ch in chapters:
+                sections.append({
+                    "title": ch.get("title", ""),
+                    "type": ch.get("section_type", "unknown"),
+                    "number": ch.get("number"),
+                    "include_in_analysis": ch.get("section_type") not in {
+                        "toc", "copyright", "dedication", "acknowledgements",
+                        "glossary", "notes", "title_page",
+                    },
+                })
+            book.import_structure = {
+                "detected_language": detected_language,
+                "chapter_count": len(chapters),
+                "toc_detected": parser_diagnostics.get("toc_detected", False),
+                "front_matter_count": parser_diagnostics.get("front_matter_count", 0),
+                "sections": sections,
+            }
+            await db.commit()
         all_chapters = apply_chapter_number_strategy(
             chapters,
             preserve_chapter_numbers=(book.preserve_chapter_numbers or book.preserve_source_chapters) and book.work_type != "screenplay",
             generic_titles=book.work_type != "screenplay" and not (book.preserve_chapter_numbers or book.preserve_source_chapters),
         )
+
+        # Fallback: merge all chapters into a single manuscript when requested
+        if book.force_single_manuscript and len(all_chapters) > 1:
+            merged_text = "\n\n".join(
+                ch.get("text", "") for ch in all_chapters if ch.get("text", "").strip()
+            )
+            all_chapters = [{
+                "number": 1,
+                "title": book.title or "Full Manuscript",
+                "text": merged_text,
+            }]
+            log.info(
+                "ingestion_merged_single_manuscript book_id=%s original_chapters=%s",
+                book_id,
+                len(chapters),
+            )
+
         log.info(
             "ingestion_timing stage=parse book_id=%s elapsed_ms=%s chapters=%s",
             book_id,
@@ -610,19 +655,27 @@ async def _process_book_impl(book_id: str, queue_wait_ms: int | None = None) -> 
         return {"book_id": book_id, "chapters": len(all_chapters)}
 
 
-async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = None):
+async def _process_chapter(
+    db,
+    book,
+    ch_data: dict,
+    queue_wait_ms: int | None = None,
+    rebuild_run_id: str | None = None,
+):
     """Extract characters, relationships, store chunks for one chapter."""
     if book.hidden_at is not None:
         log.info("Skipping chapter processing for hidden book %s", book.id)
         return
 
-    if getattr(book, "is_editor_project", False):
-        from app.services.editor_project_service import get_rebuild_run_id
+    from app.services.editor_project_service import get_rebuild_run_id
 
-        rebuild_id = get_rebuild_run_id(book)
-        if not rebuild_id:
-            log.info("Skipping stale editor-project extraction book_id=%s", book.id)
-            return
+    active_rebuild_run_id = get_rebuild_run_id(book)
+    if rebuild_run_id is not None and active_rebuild_run_id != rebuild_run_id:
+        log.info("Skipping stale rebuild extraction book_id=%s", book.id)
+        return
+    if getattr(book, "is_editor_project", False) and not active_rebuild_run_id:
+        log.info("Skipping stale editor-project extraction book_id=%s", book.id)
+        return
 
     chapter_number = int(ch_data["number"])
     inflight_key = key_extraction_inflight(str(book.id), chapter_number)
@@ -819,6 +872,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     book_id=book.id,
                     known_characters=roster_snapshot,
                     usage_db=db,
+                    language=book.language,
                 )
                 for batch_text in extraction_batch_texts
             ),
@@ -884,6 +938,7 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                     user_id=book.user_id,
                     book_id=book.id,
                     usage_db=db,
+                    language=book.language,
                 )
                 extraction_fallback_batches += 1
                 extraction_fallback_character_count += len(result.get("characters", []))
@@ -1586,6 +1641,10 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 chapter_title=chapter.title,
                 parser_diagnostics=extraction_diagnostics,
             )
+            if processing_status == "ready":
+                from app.services.editor_project_service import complete_rebuild_if_ready
+
+                await complete_rebuild_if_ready(db, book)
 
             if book.mode == "author" and book.total_chapters:
                 from app.models.progress import ReadingProgress
@@ -1629,10 +1688,13 @@ async def _process_chapter(db, book, ch_data: dict, queue_wait_ms: int | None = 
                 )
 
         from app.workers.tasks.analysis_tasks import analyse_chapter_task
-
+        analysis_task_options: dict[str, Any] = {}
+        if rebuild_run_id is not None:
+            analysis_task_options["kwargs"] = {"rebuild_run_id": rebuild_run_id}
         analyse_chapter_task.apply_async(
             args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
             queue=queue_for_user(user, "analysis") if user else "analysis",
+            **analysis_task_options,
         )
 
         log.info(

@@ -54,6 +54,7 @@ from app.api.deps.rate_limit import (
 from app.core.config import allowed_hosts, settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
+import app.models
 from app.main import app
 from app.utils.migration_utils import (
     drop_orphan_table_rowtype_if_present_on_connection,
@@ -185,6 +186,12 @@ def mock_redis(monkeypatch, request):
 
         async def get(self, key):
             return self.store.get(key)
+
+        async def getdel(self, key):
+            value = self.store.get(key)
+            if value is not None:
+                del self.store[key]
+            return value
 
         async def set(self, key, value, ex=None, nx=False):
             if nx and key in self.store:

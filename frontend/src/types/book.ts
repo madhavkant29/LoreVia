@@ -939,15 +939,64 @@ export interface MajorEvent {
 export interface CharacterEvent {
   character_id: string
   character_name: string
-  chapter_number: number
-  event_title: string
-  description: string
-  impact_score: number
+  event_id: string
+  ordinal: number | null
+  impact_score?: number
   role?: string | null
-  accomplishments: string[]
-  growth_direction: string
-  growth_magnitude: number
-  is_major: boolean
+  accomplishments?: string[]
+  growth_direction?: string
+  growth_magnitude?: number
+  is_major?: boolean
+}
+
+export interface BookEventsPaginated {
+  items: BookEventsItem[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface BookEvents {
+  major_events: MajorEvent[]
+  character_events: CharacterEvent[]
+}
+
+// ── Import Preview ─────────────────────────────────────────────────────────
+
+export type SectionType =
+  | "title_page" | "copyright" | "dedication" | "toc" | "foreword"
+  | "preface" | "acknowledgements" | "prologue" | "part" | "chapter"
+  | "interlude" | "epilogue" | "afterword" | "appendix" | "glossary"
+  | "notes" | "unknown"
+
+export interface SectionMeta {
+  id: string
+  type: SectionType
+  title: string
+  number: number | null
+  start_page: number | null
+  end_page: number | null
+  confidence: number
+  include_in_analysis: boolean
+}
+
+export interface ImportWarning {
+  message: string
+  severity: "info" | "warning" | "error"
+}
+
+export interface ImportPreview {
+  detected_language: string
+  language_confidence: number
+  title: string
+  author: string
+  sections: SectionMeta[]
+  chapter_count: number
+  toc_detected: boolean
+  front_matter_count: number
+  confidence: number
+  warnings: ImportWarning[]
 }
 
 export interface BookEventsItem {

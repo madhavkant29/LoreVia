@@ -25,10 +25,12 @@ const SAFE_TAGS = new Set([
 
 const SAFE_ALIGNMENTS = new Set(["left", "center", "right", "justify"])
 
+const MAX_PLAIN_TEXT_LENGTH = 500_000
+
 export function htmlToPlainText(html: string) {
-  if (typeof window === "undefined") return html.replace(/<[^>]+>/g, " ")
+  if (typeof window === "undefined") return html.replace(/<[^>]+>/g, " ").slice(0, MAX_PLAIN_TEXT_LENGTH)
   const container = document.createElement("div")
-  container.innerHTML = html
+  container.innerHTML = html.slice(0, MAX_PLAIN_TEXT_LENGTH)
   const blocks = Array.from(container.querySelectorAll("h1,h2,h3,p,blockquote,li,div"))
     .map((node) => node.textContent?.trim() ?? "")
     .filter(Boolean)
@@ -53,7 +55,7 @@ export function renderMarkdownHtml(value: string) {
 }
 
 export function sanitizeRichTextHtml(html: string, onCharacterClick?: (characterName: string) => void) {
-  if (typeof window === "undefined") return html
+  if (typeof window === "undefined") return serverSafeHtmlFallback(html)
   const container = document.createElement("div")
   container.innerHTML = html
 
@@ -161,15 +163,29 @@ function inlineMarkdownToHtml(value: string) {
 
 function sanitizeHref(value: string) {
   const trimmed = value.trim()
-  if (/^(https?:|mailto:|tel:|\/|#)/i.test(trimmed)) return trimmed
+  if (/^(https?:|mailto:|tel:|#)/i.test(trimmed)) return trimmed
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return trimmed
   return null
 }
 
 function sanitizeImageSrc(value: string | null) {
   if (!value) return null
   const trimmed = value.trim()
-  if (/^(https?:\/\/|data:image\/|\/)/i.test(trimmed)) return trimmed
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return trimmed
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(trimmed)) return trimmed
   return null
+}
+
+function serverSafeHtmlFallback(value: string) {
+  const text = value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|h[1-3]|blockquote|li)>/gi, "\n\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+  return plainTextToHtml(text)
 }
 
 function escapeHtml(value: string) {

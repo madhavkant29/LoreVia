@@ -85,7 +85,7 @@ export default function BookNotesPage() {
   })
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#010409_0%,#07111c_50%,#0b1523_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f6f3ea_0%,#eef5ef_50%,#eef3f8_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-[108rem] px-4 pb-20 pt-6 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav
@@ -123,19 +123,19 @@ export default function BookNotesPage() {
                 </div>
                 <Link
                   href={`/${bookId}/manuscript`}
-                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}
+                  className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-[#1f615d] text-white" : "bg-[#1f615d] text-white"}`}
                 >
                   Open manuscript notes
                 </Link>
                 <Link
                   href={`/${bookId}/scenes`}
-                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                  className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
                 >
                   Open scene workspace
                 </Link>
                 <Link
                   href={`/${bookId}/voice` as Route}
-                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                  className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
                 >
                   Open voice workspace
                 </Link>
@@ -175,14 +175,14 @@ export default function BookNotesPage() {
                       <div className="mt-4 flex flex-wrap gap-2">
                         <Link
                           href={`/${bookId}/manuscript`}
-                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                          className={`rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
                         >
                           Open manuscript
                         </Link>
                         {note.chapter_number ? (
                           <Link
                             href={`/${bookId}/chapter/${note.chapter_number}`}
-                            className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 text-slate-200" : "border-stone-200 text-stone-700"}`}
+                            className={`rounded-md border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 text-slate-200" : "border-stone-200 text-stone-700"}`}
                           >
                             Open chapter
                           </Link>

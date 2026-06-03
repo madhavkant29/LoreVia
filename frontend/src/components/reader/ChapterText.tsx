@@ -1,5 +1,5 @@
 "use client"
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { parsePublishedTextBlocks } from "@/lib/utils/publishedLayout"
 import { resolveReaderFontStack } from "@/lib/utils/readerTypography"
 import { renderRichTextHtml } from "@/lib/utils/richText"
@@ -95,6 +95,60 @@ export function ChapterText({
     }
   }, [canCopyManuscript])
 
+  const isPublishedLayout = displayStyle === "published"
+
+  const hasHtmlImages = useMemo(
+    () => Boolean(htmlContent && /<img\b/i.test(htmlContent)),
+    [htmlContent],
+  )
+  const shouldRenderHtml = Boolean(htmlContent && (hasHtmlImages || !text))
+
+  const blocks = useMemo(
+    () => annotateWithMedia(text, characters, media, isPublishedLayout),
+    [text, characters, media, isPublishedLayout],
+  )
+
+  const mentionClass = useMemo(
+    () =>
+      theme === "dark"
+        ? "cursor-pointer rounded border-b border-dashed border-indigo-200/45 px-0.5 text-stone-100 transition-colors hover:bg-indigo-200/10 hover:text-white"
+        : "cursor-pointer rounded border-b border-dashed border-violet-500/55 px-0.5 text-stone-900 transition-colors hover:bg-violet-50",
+    [theme],
+  )
+
+  const cardTone = useMemo(
+    () =>
+      theme === "dark"
+        ? {
+            shell: "border-white/10 bg-white/[0.03] text-stone-100",
+            helper: "text-stone-400",
+            prose: "text-stone-100",
+            heading: "text-white",
+            media: "border-white/10 bg-white/5",
+            aside: "border-white/10 bg-white/[0.04]",
+            asideBox: "bg-black/20 text-stone-300",
+            nav: "border-white/10 bg-white/5 text-stone-100 hover:bg-white/10",
+            divider: "bg-white/10",
+          }
+        : {
+            shell: "border-stone-200 bg-white text-stone-950",
+            helper: "text-stone-500",
+            prose: "text-stone-900",
+            heading: "text-stone-950",
+            media: "border-stone-200 bg-[#f7f3ee]",
+            aside: "border-stone-200 bg-white",
+            asideBox: "bg-[#f6f1ff] text-stone-600",
+            nav: "border-stone-200 bg-white text-stone-700 hover:bg-stone-50",
+            divider: "bg-violet-400",
+          },
+    [theme],
+  )
+
+  const fontStack = useMemo(
+    () => resolveReaderFontStack(fontFamily, displayStyle),
+    [fontFamily, displayStyle],
+  )
+
   if (!text && !htmlContent) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-12">
@@ -105,40 +159,6 @@ export function ChapterText({
     )
   }
 
-  const hasHtmlImages = Boolean(htmlContent && /<img\b/i.test(htmlContent))
-  const shouldRenderHtml = Boolean(htmlContent && (hasHtmlImages || !text))
-  const isPublishedLayout = displayStyle === "published"
-  const blocks = annotateWithMedia(text, characters, media, isPublishedLayout)
-  const mentionClass = theme === "dark"
-    ? "cursor-pointer rounded border-b border-dashed border-indigo-200/45 px-0.5 text-stone-100 transition-colors hover:bg-indigo-200/10 hover:text-white"
-    : "cursor-pointer rounded border-b border-dashed border-violet-500/55 px-0.5 text-stone-900 transition-colors hover:bg-violet-50"
-
-  const cardTone = theme === "dark"
-    ? {
-        shell: "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] text-stone-100",
-        helper: "text-stone-400",
-        prose: "text-stone-100",
-        heading: "text-white",
-        media: "border-white/10 bg-white/5",
-        aside: "border-white/10 bg-white/[0.04]",
-        asideBox: "bg-black/20 text-stone-300",
-        nav: "border-white/10 bg-white/5 text-stone-100 hover:bg-white/10",
-        divider: "bg-white/10",
-      }
-    : {
-        shell: "border-white/75 bg-[radial-gradient(circle_at_top,#f8f4ff,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.97),rgba(255,255,255,0.84))] text-stone-950",
-        helper: "text-stone-500",
-        prose: "text-stone-900",
-        heading: "text-stone-950",
-        media: "border-stone-200 bg-[#f7f3ee]",
-        aside: "border-stone-200 bg-white/78 backdrop-blur",
-        asideBox: "bg-[#f6f1ff] text-stone-600",
-        nav: "border-stone-200 bg-white text-stone-700 hover:bg-stone-50",
-        divider: "bg-violet-400",
-      }
-
-  const fontStack = resolveReaderFontStack(fontFamily, displayStyle)
-
   return (
     <div
       className={`mx-auto w-full max-w-[960px] px-1 pb-20 pt-2 sm:px-2 lg:px-3 ${isPublishedLayout ? "reader-display-published" : "reader-display-relaxed"}`}
@@ -146,7 +166,7 @@ export function ChapterText({
       onCopyCapture={handleProtectedCopy}
       onCutCapture={handleProtectedCopy}
     >
-      <section className={`book-layout overflow-hidden rounded-lg border shadow-[0_36px_110px_-82px_rgba(15,23,42,0.96)] ${cardTone.shell}`}>
+      <section className={`book-layout overflow-hidden rounded-lg border ${cardTone.shell}`}>
         <div className={isPublishedLayout ? "book-layout__page mx-auto px-5 py-8 sm:px-10 sm:py-12 lg:px-12 lg:py-14" : "mx-auto max-w-[82ch] px-5 py-8 sm:px-10 sm:py-12"}>
           <div className="reader-nonprint mb-14 text-center">
             <p className={`inline-flex items-center gap-2 text-3xs italic tracking-[0.01em] ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>

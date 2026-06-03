@@ -930,6 +930,21 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
     assert results[2]["chapter_number"] == 4
 
 
+@pytest.mark.asyncio
+async def test_search_author_workspace_rejects_nested_regex_repetition():
+    with pytest.raises(HTTPException) as exc_info:
+        await search_author_workspace(
+            None,
+            book=SimpleNamespace(id=uuid.uuid4()),
+            user_id=uuid.uuid4(),
+            query="(a+)+$",
+            scopes=["manuscript"],
+            regex=True,
+        )
+
+    assert exc_info.value.status_code == 400
+
+
 def test_build_narration_signature_detects_first_person_anchor():
     signature = _build_narration_signature("I ran through the gate. My hands shook. I tasted blood on my lip.")
 
@@ -978,7 +993,7 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
 
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, diagnostics),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, diagnostics),
     )
 
     payload = await parse_book_upload_for_ingestion(
@@ -997,7 +1012,7 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
 async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_source_preservation(monkeypatch):
     parse_calls: list[bool] = []
 
-    def _fake_parse_pdf(raw, *, split_large_chapters=True):
+    def _fake_parse_pdf(raw, *, split_large_chapters=True, language=None):
         parse_calls.append(split_large_chapters)
         return ([{"number": 1, "title": "Chapter 7", "text": "Original full chapter"}], {"source": "pdf"})
 

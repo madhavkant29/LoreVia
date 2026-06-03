@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -767,6 +767,7 @@ export const booksApi = {
       autoExtractCover?: boolean
       preserveChapterNumbers?: boolean
       preserveSourceChapters?: boolean
+      forceSingleManuscript?: boolean
       workType?: BookWorkType
       coverFile?: File | null
       mode?: "reader" | "author"
@@ -788,6 +789,7 @@ export const booksApi = {
     form.append("auto_extract_cover", options?.autoExtractCover === false ? "false" : "true")
     form.append("preserve_chapter_numbers", options?.preserveChapterNumbers ? "true" : "false")
     form.append("preserve_source_chapters", options?.preserveSourceChapters ? "true" : "false")
+    form.append("force_single_manuscript", options?.forceSingleManuscript ? "true" : "false")
     if (options?.coverFile) form.append("cover_file", options.coverFile)
     return apiClient.post("/books/upload", form, {
       onUploadProgress: (event) => {
@@ -853,9 +855,23 @@ export const booksApi = {
       void invalidateQueryKeys(booksStatsCacheKey())
       return r.data
     }),
+  previewUpload: (file: File, workType?: BookWorkType) => {
+    const form = new FormData()
+    form.append("file", file)
+    if (workType) form.append("work_type", workType)
+    return apiClient.post<ImportPreview>("/books/upload/preview", form).then(r => r.data)
+  },
   reprocessManuscript: (bookId: string) =>
-    apiClient.post<{ book_id: string; status: string; chapters_queued: number; total_words: number }>(
-      bookPath(bookId, "/manuscript/reprocess")
+    apiClient.post<{
+      book_id: string
+      status: string
+      chapters_queued: number
+      total_words: number
+      upload_charge_consumed: boolean
+      charge_kind?: "manual_reprocess" | null
+    }>(
+      bookPath(bookId, "/manuscript/reprocess"),
+      { confirm_upload_charge: true }
     ).then(r => {
       invalidateBookCache(bookId)
       return r.data

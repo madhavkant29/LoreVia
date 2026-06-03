@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { betaReadsApi } from "@/lib/api/betaReads"
@@ -18,7 +18,7 @@ type ReaderChapterFeedbackProps = {
   chapterFeedback: ChapterBetaFeedback[]
 }
 
-export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedback }: ReaderChapterFeedbackProps) {
+export const ReaderChapterFeedback = memo(function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedback }: ReaderChapterFeedbackProps) {
   const { data: book } = useBookDetail(bookId)
   const [chapterComment, setChapterComment] = useState("")
   const [commentStatus, setCommentStatus] = useState<string | null>(null)
@@ -169,7 +169,7 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
           {visibleFeedback.map((item) => (
             <article
               key={item.id}
-              className={`rounded-2xl border px-4 py-4 ${
+              className={`rounded-md border px-4 py-4 ${
                 theme === "dark"
                   ? "border-white/10 bg-[#121722]"
                   : "border-stone-200 bg-stone-50"
@@ -205,7 +205,7 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
             value={chapterComment}
             onChange={(event) => setChapterComment(event.target.value)}
             placeholder="What landed, confused you, or needs another pass in this chapter?"
-            className={`mt-4 min-h-28 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+            className={`mt-4 min-h-28 w-full rounded-md border px-4 py-3 text-sm outline-none ${
               theme === "dark"
                 ? "border-white/10 bg-[#121722] text-white placeholder:text-slate-500"
                 : "border-stone-200 bg-white text-slate-950 placeholder:text-stone-400"
@@ -236,7 +236,7 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
       ) : null}
     </section>
   )
-}
+})
 
 function chapterMatchesAssignment(chapterNum: number, assignment: BetaReadAssignment) {
   if (typeof assignment.chapter_start === "number" && chapterNum < assignment.chapter_start) return false

@@ -14,7 +14,7 @@ export function ComparisonCTA({
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-8 md:pb-20">
-      <div className="rounded-lg border border-white/10 bg-[linear-gradient(180deg,rgba(15,35,32,0.94),rgba(8,17,15,0.98))] px-6 py-8 md:px-10 md:py-10">
+      <div className="rounded-lg border border-white/10 bg-[#0d1715] px-6 py-8 md:px-10 md:py-10">
         <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
             <h2 className="font-display text-4xl font-semibold leading-tight text-white md:text-5xl">{title}</h2>
@@ -23,13 +23,13 @@ export function ComparisonCTA({
           <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
             <Link
               href={ctaHref}
-              className="inline-flex items-center justify-center rounded-xl bg-[#1f615d] px-7 py-3.5 text-base font-semibold text-white transition hover:bg-[#25756f]"
+              className="inline-flex items-center justify-center rounded-md bg-[#1f615d] px-7 py-3.5 text-base font-semibold text-white transition hover:bg-[#25756f]"
             >
               Start free
             </Link>
             <Link
               href="/compare"
-              className="inline-flex items-center justify-center rounded-xl border border-white/12 bg-white/5 px-7 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
+              className="inline-flex items-center justify-center rounded-md border border-white/12 bg-white/5 px-7 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
             >
               See all comparisons
             </Link>

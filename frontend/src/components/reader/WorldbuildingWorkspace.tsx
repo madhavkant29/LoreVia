@@ -2,7 +2,7 @@
 
 import axios from "axios"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import Link from "next/link"
 import type { Route } from "next"
@@ -37,7 +37,7 @@ function getApiErrorDetail(error: unknown) {
   return typeof detail === "string" ? detail : null
 }
 
-export function WorldbuildingWorkspace({
+export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   bookId,
   isDark,
   focus = "editor",
@@ -482,7 +482,7 @@ export function WorldbuildingWorkspace({
       </div>
 
       {statusMessage ? (
-        <div className={`rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-teal-400/20 bg-teal-500/10 text-teal-100" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
+        <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-teal-400/20 bg-teal-500/10 text-teal-100" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
           {statusMessage}
         </div>
       ) : null}
@@ -529,7 +529,7 @@ export function WorldbuildingWorkspace({
                       setSelectedDocumentId(document.id)
                       setDocumentDraftDirty(false)
                     }}
-                    className={`w-full rounded-2xl border px-4 py-3 text-left transition ${active
+                    className={`w-full rounded-md border px-4 py-3 text-left transition ${active
                       ? isDark
                         ? "border-teal-400/35 bg-teal-500/12 text-white"
                         : "border-teal-300 bg-teal-50 text-stone-950"
@@ -573,7 +573,7 @@ export function WorldbuildingWorkspace({
           >
             <div className="space-y-4">
               {uploadLimitNote ? (
-                <div className={`rounded-2xl border px-4 py-3 text-xs leading-5 ${softPanelClass(isDark)}`}>
+                <div className={`rounded-md border px-4 py-3 text-xs leading-5 ${softPanelClass(isDark)}`}>
                   {uploadLimitNote}
                 </div>
               ) : null}
@@ -623,7 +623,7 @@ export function WorldbuildingWorkspace({
                 </div>
 
                 <div className="flex flex-col gap-3 lg:min-w-[12rem]">
-                  <label className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${softPanelClass(isDark)}`}>
+                  <label className={`flex items-start gap-3 rounded-md border px-4 py-3 text-sm ${softPanelClass(isDark)}`}>
                     <input
                       type="checkbox"
                       checked={replaceCorpusOnUpload}
@@ -685,7 +685,7 @@ export function WorldbuildingWorkspace({
                   >
                     <div className="grid gap-3">
                       {analysis.consistency_flags.map((flag, index) => (
-                        <article key={String(flag.id ?? `consistency-${index}`)} className={`rounded-2xl border p-4 ${softPanelClass(isDark)}`}>
+                        <article key={String(flag.id ?? `consistency-${index}`)} className={`rounded-md border p-4 ${softPanelClass(isDark)}`}>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className={severityClass("high", isDark)}>high</span>
                             {flag.type ? <span className={badgeClass(isDark)}>{String(flag.type).replaceAll("_", " ")}</span> : null}
@@ -717,7 +717,7 @@ export function WorldbuildingWorkspace({
                         {(expandedGapGroups[group.key] ? group.items : group.items.slice(0, INITIAL_GAP_ITEMS_PER_GROUP)).map((item) => {
                           const alreadySaved = openGapIds.has(item.id)
                           return (
-                            <article key={item.id} className={`rounded-2xl border p-4 ${softPanelClass(isDark)}`}>
+                            <article key={item.id} className={`rounded-md border p-4 ${softPanelClass(isDark)}`}>
                               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
@@ -754,7 +754,7 @@ export function WorldbuildingWorkspace({
                                 <EvidencePanel title="Story evidence" body={item.story_evidence || "No direct story excerpt was attached to this item."} isDark={isDark} />
                               </div>
 
-                              <div className={`mt-4 rounded-2xl border px-4 py-3 ${isDark ? "border-amber-300/15 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                              <div className={`mt-4 rounded-md border px-4 py-3 ${isDark ? "border-amber-300/15 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
                                 <p className="text-3xs font-semibold uppercase tracking-[0.22em]">Suggested fix</p>
                                 <p className="mt-2 text-sm leading-6">{item.suggested_fix}</p>
                               </div>
@@ -813,7 +813,7 @@ export function WorldbuildingWorkspace({
                   />
                 ) : (
                   visibleOpportunities.map((item) => (
-                    <article key={item.id} className={`rounded-2xl border p-4 ${softPanelClass(isDark)}`}>
+                    <article key={item.id} className={`rounded-md border p-4 ${softPanelClass(isDark)}`}>
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap gap-2">
@@ -929,7 +929,7 @@ export function WorldbuildingWorkspace({
                   <EmptyState title="No element suggestions yet." description="No element suggestions yet." isDark={isDark} compact />
                 ) : (
                   visibleSuggestionElements.map((element) => (
-                    <article key={element.id} className={`rounded-2xl border p-4 ${softPanelClass(isDark)}`}>
+                    <article key={element.id} className={`rounded-md border p-4 ${softPanelClass(isDark)}`}>
                       <h3 className={`text-sm font-semibold ${titleTextClass(isDark)}`}>{element.name}</h3>
                       <div className="mt-3 grid gap-2">
                         {element.suggestions.map((suggestion, index) => (
@@ -991,7 +991,7 @@ export function WorldbuildingWorkspace({
                 ) : (
                   <div className="grid gap-3">
                     {visibleElementCards.map((element) => (
-                      <article key={element.id} className={`rounded-2xl border p-4 ${softPanelClass(isDark)}`}>
+                      <article key={element.id} className={`rounded-md border p-4 ${softPanelClass(isDark)}`}>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={accentBadgeClass("blue", isDark)}>{formatElementType(element.element_type)}</span>
                           <span className={badgeClass(isDark)}>{element.source_scope}</span>
@@ -1064,7 +1064,7 @@ export function WorldbuildingWorkspace({
                 </div>
 
                 {logicResult ? (
-                  <div className={`mt-4 rounded-2xl border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                  <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
                     <div className="flex flex-wrap gap-2">
                       <span className={accentBadgeClass("teal", isDark)}>{logicResult.mode === "gap_detection" ? "Canon stress test" : "Story integration"}</span>
                       {logicResult.logic_alerts.length > 0 ? <span className={accentBadgeClass("amber", isDark)}>{logicResult.logic_alerts.length} alerts</span> : null}
@@ -1132,7 +1132,7 @@ export function WorldbuildingWorkspace({
                     />
                   ) : null}
                   {visibleWikiEntries.map((entry) => (
-                    <article key={entry.id} className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+                    <article key={entry.id} className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <h4 className={`text-sm font-semibold ${titleTextClass(isDark)}`}>{entry.name}</h4>
                         <span className={badgeClass(isDark)}>{entry.entry_type}</span>
@@ -1289,7 +1289,7 @@ export function WorldbuildingWorkspace({
       </div>
     </div>
   )
-}
+})
 
 function WorkspaceCard({
   number,
@@ -1401,7 +1401,7 @@ function SectionPanel({
 
 function EvidencePanel({ title, body, isDark }: { title: string; body: string; isDark: boolean }) {
   return (
-    <div className={`rounded-2xl border p-3 ${softPanelClass(isDark)}`}>
+    <div className={`rounded-md border p-3 ${softPanelClass(isDark)}`}>
       <p className={eyebrowClass(isDark)}>{title}</p>
       <p className={`mt-2 text-sm leading-6 ${bodyTextClass(isDark)}`}>{body}</p>
     </div>
@@ -1479,7 +1479,7 @@ function NoteCard({
   addressed?: boolean
 }) {
   return (
-    <article className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+    <article className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h4 className={`text-sm font-semibold ${titleTextClass(isDark)}`}>{note.title || "Untitled note"}</h4>
@@ -1543,7 +1543,7 @@ function mutedTextClass(isDark: boolean) {
 }
 
 function inputClass(isDark: boolean) {
-  return `w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-black/25 text-slate-100 placeholder:text-slate-500 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-sky-300"}`
+  return `w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-black/25 text-slate-100 placeholder:text-slate-500 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-sky-300"}`
 }
 
 function secondaryButtonClass(isDark: boolean) {

@@ -2,8 +2,7 @@
 
 import Link from "next/link"
 import dynamic from "next/dynamic"
-import React from "react"
-import { useEffect, useRef, useState } from "react"
+import React, { memo, useEffect, useRef, useState } from "react"
 import { useNotificationsState } from "@/lib/hooks/useNotifications"
 import { prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -36,7 +35,7 @@ function preloadNotificationsPanel() {
   void loadNotificationsPanel()
 }
 
-export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
+export const NotificationBell = memo(function NotificationBell({ enabled = true }: { enabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const [panelMounted, setPanelMounted] = useState(false)
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -144,7 +143,7 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
             ref={panelRef}
             inert={open ? undefined : true}
             aria-hidden={!open}
-            className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l shadow-modal transition duration-150 lg:block ${open ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-full opacity-0"} ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}
+            className={`fixed right-0 top-0 z-50 hidden h-screen w-[26rem] border-l transition duration-150 lg:block ${open ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-full opacity-0"} ${isDark ? "border-white/10 bg-[#050505]" : "border-stone-200 bg-stone-50"}`}
           >
             <NotificationsPanel mode="sidebar" enabled={open} />
           </aside>
@@ -152,7 +151,7 @@ export function NotificationBell({ enabled = true }: { enabled?: boolean }) {
       ) : null}
     </>
   )
-}
+})
 
 function PanelLoadingState({ label }: { label: string }) {
   return (

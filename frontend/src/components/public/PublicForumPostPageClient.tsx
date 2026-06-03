@@ -338,10 +338,10 @@ export function PublicForumPostPageClient({
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#0a0f14] text-slate-100" : "bg-[#edf1f5] text-slate-950"}`}>
-      <div className={`border-b backdrop-blur ${isDark ? "border-white/10 bg-[#0f141b]/95" : "border-slate-200 bg-white/95"}`}>
+      <div className={`border-b ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-white"}`}>
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Link href="/library" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Back to library</Link>
+            <Link href="/public" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Public library</Link>
             <MetaDivider isDark={isDark} />
             <Link href="/public/forum" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Forum</Link>
             <MetaDivider isDark={isDark} />
@@ -362,7 +362,7 @@ export function PublicForumPostPageClient({
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_312px] lg:px-8">
         <main className="min-w-0">
-          <article className={`overflow-hidden rounded-3xl border shadow-[0_18px_40px_rgba(15,23,42,0.08)] ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+          <article className={`overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
             <div className="flex">
               <div className={`hidden w-[72px] shrink-0 flex-col items-center justify-start gap-2 border-r px-3 py-4 md:flex ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50/70"}`}>
                 <VoteArrowIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
@@ -455,7 +455,7 @@ export function PublicForumPostPageClient({
                           setEditing((current) => !current)
                           setStatus(null)
                         }}
-                        className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                        className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                       >
                         {editing ? "Close editor" : "Edit discussion"}
                       </button>
@@ -464,7 +464,7 @@ export function PublicForumPostPageClient({
                       type="button"
                       disabled={savingEdit || (isNovelThread && !canManagePublicAuthoring && !isPubliclyInteractive)}
                       onClick={() => void saveDiscussionStatus(isPubliclyInteractive ? "closed" : "open")}
-                      className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+                      className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
                     >
                       {savingEdit ? "Saving..." : isPubliclyInteractive ? "Close discussion" : isNovelThread ? (canManagePublicAuthoring ? "Reopen discussion" : "Closed on free plan") : "Reopen discussion"}
                     </button>
@@ -472,13 +472,13 @@ export function PublicForumPostPageClient({
                 ) : null}
 
                 {isAuthorViewer && isNovelThread && !canManagePublicAuthoring ? (
-                  <div className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                  <div className={`mt-4 rounded-md border px-4 py-4 text-sm ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
                     Public discussions require an Author or Architect plan. You can still close this discussion, but editing or reopening it needs a paid author plan.
                   </div>
                 ) : null}
 
                 {!isPubliclyInteractive ? (
-                  <div className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                  <div className={`mt-4 rounded-md border px-4 py-4 text-sm ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
                     This discussion is closed. It stays visible for reference, but new comments, reactions, and collaborator requests are paused until the author reopens it.
                   </div>
                 ) : null}
@@ -487,7 +487,7 @@ export function PublicForumPostPageClient({
           </article>
 
           {isAuthorViewer && (canManagePublicAuthoring || !isNovelThread) && editing ? (
-            <section className={`mt-5 rounded-3xl border p-5 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+            <section className={`mt-5 rounded-lg border p-5 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
               <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author controls</p>
               <h2 className="mt-2 text-xl font-semibold">Refine this thread</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
@@ -498,13 +498,13 @@ export function PublicForumPostPageClient({
                   value={editHeadline}
                   onChange={(event) => setEditHeadline(event.target.value)}
                   placeholder="Headline"
-                  className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                  className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                 />
                 <textarea
                   value={editBody}
                   onChange={(event) => setEditBody(event.target.value)}
                   placeholder="What kind of beta feedback are you looking for?"
-                  className={`min-h-[10rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                  className={`min-h-[10rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                 />
                 {isNovelThread ? (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -513,9 +513,9 @@ export function PublicForumPostPageClient({
                       onChange={(event) => setEditDesiredCount(event.target.value)}
                       placeholder="Desired beta readers"
                       inputMode="numeric"
-                      className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                      className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                     />
-                    <label className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
+                    <label className={`flex items-center justify-between rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
                       <span>Allow collaborator contact requests</span>
                       <input
                         type="checkbox"
@@ -531,7 +531,7 @@ export function PublicForumPostPageClient({
                     type="button"
                     onClick={() => void saveEdit()}
                     disabled={savingEdit}
-                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+                    className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
                   >
                     {savingEdit ? "Saving..." : "Save discussion"}
                   </button>
@@ -541,7 +541,7 @@ export function PublicForumPostPageClient({
                       setEditing(false)
                       resetEditorFromPost(post)
                     }}
-                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                    className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                   >
                     Cancel
                   </button>
@@ -550,7 +550,7 @@ export function PublicForumPostPageClient({
             </section>
           ) : null}
 
-          <section className={`mt-5 rounded-3xl border ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+          <section className={`mt-5 rounded-lg border ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
             <div className={`border-b px-4 py-4 sm:px-5 ${isDark ? "border-white/10" : "border-slate-200"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -563,15 +563,15 @@ export function PublicForumPostPageClient({
               {status ? <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{status}</p> : null}
 
               {isPubliclyInteractive ? (
-                <div className="mt-4 rounded-2xl border p-3 md:p-4">
-                  <div className={`rounded-2xl ${isDark ? "border-white/10 bg-[#0f141b]" : "bg-slate-50"}`}>
+                <div className="mt-4 rounded-md border p-3 md:p-4">
+                  <div className={`rounded-md ${isDark ? "border-white/10 bg-[#0f141b]" : "bg-slate-50"}`}>
                     <textarea
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       onInput={(event) => setDraft((event.target as HTMLTextAreaElement).value)}
                       disabled={!interactiveReady}
                       placeholder="Add a thoughtful public comment about pacing, clarity, emotional payoff, or what you'd want to review."
-                      className={`min-h-[8.5rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                      className={`min-h-[8.5rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                     />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -579,7 +579,7 @@ export function PublicForumPostPageClient({
                       type="button"
                       disabled={!interactiveReady || submitting || !draft.trim()}
                       onClick={() => void submitComment()}
-                      className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+                      className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
                     >
                       {submitting ? "Posting..." : "Post comment"}
                     </button>
@@ -587,7 +587,7 @@ export function PublicForumPostPageClient({
                   </div>
                 </div>
               ) : (
-                <div className={`mt-4 rounded-2xl border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-200 text-slate-500"}`}>
+                <div className={`mt-4 rounded-md border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-200 text-slate-500"}`}>
                   Public comments are paused while this discussion is closed.
                 </div>
               )}
@@ -622,15 +622,15 @@ export function PublicForumPostPageClient({
         </main>
 
         <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-          <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+          <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
             <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Thread snapshot</p>
             <div className="mt-4 grid gap-3 text-sm">
-              <div className={`rounded-2xl px-4 py-4 ${isDark ? "bg-[#0f141b]" : "bg-slate-50"}`}>
+              <div className={`rounded-md px-4 py-4 ${isDark ? "bg-[#0f141b]" : "bg-slate-50"}`}>
                 <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author</p>
                 <p className="mt-2 text-base font-semibold">@{post.author_username || post.author || "writer"}</p>
                 <p className={`mt-1 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{post.author_trust_level} / rep {formatReputationScore(post.author_reputation_score)}</p>
               </div>
-              <div className={`rounded-2xl px-4 py-4 ${isDark ? "bg-[#0f141b]" : "bg-slate-50"}`}>
+              <div className={`rounded-md px-4 py-4 ${isDark ? "bg-[#0f141b]" : "bg-slate-50"}`}>
                 <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Signals</p>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <MiniMetric isDark={isDark} value={String(post.comment_count)} label="comments" />
@@ -643,7 +643,7 @@ export function PublicForumPostPageClient({
           </section>
 
           {!isAuthorViewer && isNovelThread ? (
-            <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
               <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Collaborator contact</p>
               <h2 className="mt-2 text-lg font-semibold">Offer to beta read</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
@@ -651,7 +651,7 @@ export function PublicForumPostPageClient({
               </p>
 
               {post.viewer_interest_status ? (
-                <div className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${isDark ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                <div className={`mt-4 rounded-md border px-4 py-4 text-sm ${isDark ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
                   You already sent this author a collaborator note. Current status: {post.viewer_interest_status}.
                 </div>
               ) : post.allow_contact_requests && isPubliclyInteractive ? (
@@ -659,7 +659,7 @@ export function PublicForumPostPageClient({
                   {post.author_username ? (
                     <Link
                       href={`/chats?username=${encodeURIComponent(post.author_username)}` as Route}
-                      className={`mb-3 inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                      className={`mb-3 inline-flex rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                     >
                       Open direct chat
                     </Link>
@@ -670,21 +670,21 @@ export function PublicForumPostPageClient({
                     onInput={(event) => setInterestDraft((event.target as HTMLTextAreaElement).value)}
                     disabled={!interactiveReady}
                     placeholder="Tell the author what genres you read well, what feedback you can provide, and why you'd be a useful beta reader."
-                    className={`min-h-[8rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                    className={`min-h-[8rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                   />
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       disabled={!interactiveReady || interestSubmitting || !interestDraft.trim()}
                       onClick={() => void submitInterest()}
-                      className={`inline-flex h-10 w-full items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+                      className={`inline-flex h-10 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
                     >
                       {interestSubmitting ? "Sending..." : "Send collaborator note"}
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className={`mt-4 rounded-2xl border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-200 text-slate-500"}`}>
+                <div className={`mt-4 rounded-md border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-200 text-slate-500"}`}>
                   {isPubliclyInteractive
                     ? "This author is not taking direct collaborator requests through the public forum right now."
                     : "This discussion is closed, so direct collaborator requests are paused right now."}
@@ -692,7 +692,7 @@ export function PublicForumPostPageClient({
               )}
             </section>
           ) : isAuthorViewer && isNovelThread ? (
-            <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Incoming collaborators</p>
@@ -702,17 +702,17 @@ export function PublicForumPostPageClient({
               </div>
 
               {interestLoadFailed ? (
-                <div className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                <div className={`mt-4 rounded-md border px-4 py-4 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
                   Collaborator notes could not be loaded right now. Refresh this page to try again.
                 </div>
               ) : interests.length === 0 ? (
-                <div className={`mt-4 rounded-2xl border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-200 text-slate-500"}`}>
+                <div className={`mt-4 rounded-md border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-200 text-slate-500"}`}>
                   No collaborator notes have arrived for this public discussion yet.
                 </div>
               ) : (
                 <div className="mt-4 space-y-3">
                   {interests.map((interest) => (
-                    <article key={interest.id} className={`rounded-2xl border px-4 py-4 ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
+                    <article key={interest.id} className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <p className="font-semibold">@{interest.interested_username || interest.interested_email}</p>
@@ -830,27 +830,27 @@ function CommentRow({
         </div>
 
         {isReplyComposerOpen ? (
-          <div className={`mt-3 rounded-2xl border p-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
+          <div className={`mt-3 rounded-md border p-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
             <textarea
               value={replyDraft}
               onChange={(event) => onReplyDraftChange(event.target.value)}
               onInput={(event) => onReplyDraftChange((event.target as HTMLTextAreaElement).value)}
               placeholder={`Reply to @${comment.author_username || "commenter"}`}
-              className={`min-h-[6rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#121821] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+              className={`min-h-[6rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#121821] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
             />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 disabled={!isPubliclyInteractive || replySubmittingId === comment.id || !replyDraft.trim()}
                 onClick={() => void onReplySubmit(comment.id)}
-                className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+                className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
               >
                 {replySubmittingId === comment.id ? "Replying..." : "Post reply"}
               </button>
               <button
                 type="button"
                 onClick={() => onReplyToggle(comment.id)}
-                className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
               >
                 Cancel
               </button>
@@ -861,7 +861,7 @@ function CommentRow({
       </div>
 
       {hasReplies ? (
-        <div className={`ml-12 mt-4 space-y-0 rounded-2xl border-l pl-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
+        <div className={`ml-12 mt-4 space-y-0 rounded-md border-l pl-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
           {comment.replies.map((reply) => (
             <CommentRow
               key={reply.id}

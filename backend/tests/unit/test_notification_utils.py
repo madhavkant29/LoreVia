@@ -9,6 +9,7 @@ from app.utils.notification_utils import (
     _book_ready_diagnostic_totals,
     build_book_ready_notification,
     build_revision_digest_notification,
+    collect_book_ready_stats,
 )
 
 
@@ -185,3 +186,29 @@ def test_build_book_ready_notification_marks_partial_analysis_failure():
 def test_book_ready_diagnostic_totals_reads_extraction_totals(writer_workspace, expected):
     book = SimpleNamespace(writer_workspace=writer_workspace)
     assert _book_ready_diagnostic_totals(book) == expected
+
+
+@pytest.mark.asyncio
+async def test_collect_book_ready_stats_ignores_empty_chapters(db):
+    from app.models.book import Book, Chapter
+    from app.models.intelligence import ChapterSummary
+    from app.models.user import User
+
+    user = User(email="ready-empty@lorevia.app", username="readyempty", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Ready Draft", format="txt", s3_key="ready.txt", status="processing")
+    db.add(book)
+    await db.flush()
+    populated = Chapter(book_id=book.id, number=1, s3_key="chapter-1.txt", word_count=10)
+    empty = Chapter(book_id=book.id, number=2, s3_key="chapter-2.txt", word_count=0)
+    db.add_all([populated, empty])
+    await db.flush()
+    db.add(ChapterSummary(chapter_id=populated.id, mode="detailed", content="summary"))
+    await db.commit()
+
+    stats = await collect_book_ready_stats(db, book)
+
+    assert stats.chapter_count == 1
+    assert stats.analyzed_chapter_count == 1
+    assert stats.analysis_complete is True

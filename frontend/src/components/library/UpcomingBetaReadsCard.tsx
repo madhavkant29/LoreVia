@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { memo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
@@ -10,7 +10,7 @@ import { asQueryKey, readerUpcomingBetaReadsCacheKey } from "@/lib/query/cacheKe
 import { betaReadDeadlineLabel, betaReadIsUrgent, betaReadPrimaryHref, betaReadProgressLabel } from "@/lib/utils/betaReads"
 import type { BetaReadAssignment } from "@/types/reader"
 
-export function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
+export const UpcomingBetaReadsCard = memo(function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
   const router = useRouter()
   const [pendingId, setPendingId] = useState<string | null>(null)
   const { data: items = [], isLoading } = useQuery<BetaReadAssignment[]>({
@@ -55,7 +55,7 @@ export function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
     <section className={`rounded-lg border p-6 ${panelClass}`}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-start gap-4">
-          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${isDark ? "bg-[#292f33] text-[#d9b88a]" : "bg-[#f7efe5] text-[#b86a1b]"}`}>
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-md ${isDark ? "bg-[#292f33] text-[#d9b88a]" : "bg-[#f7efe5] text-[#b86a1b]"}`}>
             <CalendarIcon />
           </div>
           <div>
@@ -93,7 +93,7 @@ export function UpcomingBetaReadsCard({ isDark }: { isDark: boolean }) {
       </div>
     </section>
   )
-}
+})
 
 function CalendarIcon() {
   return (

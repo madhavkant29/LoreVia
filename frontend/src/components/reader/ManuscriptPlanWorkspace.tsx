@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import type { EmotionalArcOverview, ReadabilityMetrics, WriterWorkspace, WritingTemplate } from "@/types/book"
 
 type GoalField = "chapter_target" | "book_target" | "session_target"
@@ -37,7 +38,7 @@ type ManuscriptPlanWorkspaceProps = {
   emotionalArc: EmotionalArcOverview | null
 }
 
-export function ManuscriptPlanWorkspace({
+export const ManuscriptPlanWorkspace = memo(function ManuscriptPlanWorkspace({
   isDark,
   editorMode,
   writerWorkspace,
@@ -76,7 +77,7 @@ export function ManuscriptPlanWorkspace({
             type="button"
             onClick={onTightenSelectedText}
             disabled={tighteningSelection}
-            className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             {tighteningSelection ? "Tightening..." : "Tighten selected text"}
           </button>
@@ -102,7 +103,7 @@ export function ManuscriptPlanWorkspace({
           <MetricCard
             label="Readability"
             value={readabilityLoading ? "Scoring..." : readability ? `${readability.label} (${Math.round(readability.reading_ease)})` : "Waiting..."}
-            note={readability ? `${readability.average_sentence_length} words/sentence · grade ${readability.grade_level}` : "Live score updates while you write"}
+            note={readability ? `${readability.average_sentence_length} words/sentence - grade ${readability.grade_level}` : "Live score updates while you write"}
             isDark={isDark}
           />
         </div>
@@ -150,7 +151,7 @@ export function ManuscriptPlanWorkspace({
               type="button"
               onClick={onSaveGoals}
               disabled={!writerWorkspace || workspaceSaving}
-              className="mt-3 rounded-full bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              className="mt-3 rounded-md bg-[#1f615d] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
             >
               {workspaceSaving ? "Saving..." : "Save goals"}
             </button>
@@ -191,7 +192,7 @@ export function ManuscriptPlanWorkspace({
             placeholder="New corkboard card"
             className={`flex-1 rounded-md border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
           />
-          <button onClick={onAddCorkboardCard} disabled={!writerWorkspace || !newCorkboardTitle.trim()} className="rounded-md bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Add</button>
+          <button onClick={onAddCorkboardCard} disabled={!writerWorkspace || !newCorkboardTitle.trim()} className="rounded-md bg-[#1f615d] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Add</button>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {(["ideas", "drafting", "revised"] as const).map((lane) => (
@@ -204,7 +205,7 @@ export function ManuscriptPlanWorkspace({
               </div>
               <div className="mt-3 space-y-2">
                 {(writerWorkspace?.corkboard_cards ?? []).filter((card) => card.lane === lane).map((card) => (
-                  <article key={card.id} className={`rounded-md border p-3 transition hover:-translate-y-0.5 ${isDark ? "border-white/10 bg-white/[0.035] hover:border-white/15" : "border-white bg-white hover:border-stone-200"}`}>
+                  <article key={card.id} className={`rounded-md border p-3 transition-colors ${isDark ? "border-white/10 bg-white/[0.035] hover:border-white/15" : "border-white bg-white hover:border-stone-200"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{card.title}</p>
                     {card.chapter_number ? <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {card.chapter_number}</p> : null}
                     <div className="mt-3 flex gap-2">
@@ -251,7 +252,7 @@ export function ManuscriptPlanWorkspace({
       </section>
     </div>
   )
-}
+})
 
 function EmotionalArcMiniChart({
   character,
@@ -345,7 +346,7 @@ function ProgressStrip({
       </div>
       <div className={`mt-3 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
         <div
-          className="h-full rounded-full bg-[linear-gradient(135deg,#0891b2,#2563eb)] transition-[width]"
+          className="h-full rounded-full bg-[#1f615d] transition-[width]"
           style={{ width: `${progress !== null ? fill : 18}%` }}
         />
       </div>

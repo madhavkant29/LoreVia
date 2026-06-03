@@ -28,8 +28,10 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.api
+    # LOREVIA_ENV_FILE defaults to ./backend/.env for local/VPS use.
+    # Override for managed deployments: set LOREVIA_ENV_FILE=/etc/lorevia/lorevia.env
     env_file:
-      - ./backend/.env
+      - ${LOREVIA_ENV_FILE:-./backend/.env}
     environment:
       DATABASE_POOL_SIZE: "5"
       DATABASE_MAX_OVERFLOW: "5"
@@ -60,8 +62,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    env_file:
-      - ./backend/.env
+    # REDIS_PASSWORD must be set in the env file (backend/.env or LOREVIA_ENV_FILE override)
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured}
     command:
       [
         "sh",
@@ -84,7 +87,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./backend/.env
+      - ${LOREVIA_ENV_FILE:-./backend/.env}
     environment:
       DATABASE_POOL_SIZE: "5"
       DATABASE_MAX_OVERFLOW: "5"
@@ -111,7 +114,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./backend/.env
+      - ${LOREVIA_ENV_FILE:-./backend/.env}
     environment:
       DATABASE_POOL_SIZE: "5"
       DATABASE_MAX_OVERFLOW: "5"
@@ -138,7 +141,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./backend/.env
+      - ${LOREVIA_ENV_FILE:-./backend/.env}
     environment:
       DATABASE_POOL_SIZE: "5"
       DATABASE_MAX_OVERFLOW: "5"
@@ -165,7 +168,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./backend/.env
+      - ${LOREVIA_ENV_FILE:-./backend/.env}
     environment:
       DATABASE_POOL_SIZE: "5"
       DATABASE_MAX_OVERFLOW: "5"
@@ -198,7 +201,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile.worker
     env_file:
-      - ./backend/.env
+      - ${LOREVIA_ENV_FILE:-./backend/.env}
     environment:
       DATABASE_POOL_SIZE: "5"
       DATABASE_MAX_OVERFLOW: "5"

@@ -25,7 +25,7 @@ from app.utils.auth_cookies import (
     get_auth_token,
     set_access_cookie,
 )
-from app.utils.auth_csrf import enforce_cookie_csrf
+from app.utils.auth_csrf import _has_valid_bearer_access_token, enforce_cookie_csrf
 from app.utils.admin_security import validate_admin_csrf_token
 from app.utils.request_context import set_request_user_id
 
@@ -271,7 +271,7 @@ async def require_owner_admin(
 
 async def require_admin_csrf(request: Request) -> None:
     authorization = request.headers.get("authorization", "")
-    if authorization.lower().startswith("bearer "):
+    if _has_valid_bearer_access_token(authorization):
         return
     validate_admin_csrf_token(request)
 
@@ -280,6 +280,7 @@ def _current_admin_session_id(request: Request) -> str:
     refresh_payload = _decode_refresh_payload(get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME))
     if refresh_payload and refresh_payload.get("sid"):
         return str(refresh_payload["sid"])
+    log.warning("admin_session_fallback_no_refresh_cookie")
     return "access"
 
 

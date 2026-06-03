@@ -5278,7 +5278,11 @@ async def build_manuscript_workspace_tree(
 
     configured_structure = workspace.get("structure_tree")
     if isinstance(configured_structure, list) and configured_structure:
-        structure_tree = configured_structure
+        structure_tree = (
+            _filter_workspace_structure_tree_for_collaborator(configured_structure, collaborator)
+            if collaborator is not None
+            else configured_structure
+        )
     else:
         structure_tree = [{
             "id": f"book-{book.id}",
@@ -5325,6 +5329,36 @@ async def build_manuscript_workspace_tree(
     }
 
 
+def _filter_workspace_structure_tree_for_collaborator(
+    nodes: list[dict[str, Any]],
+    collaborator: BookCollaborator,
+) -> list[dict[str, Any]]:
+    filtered_nodes: list[dict[str, Any]] = []
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        node = dict(raw_node)
+        chapter_number = node.get("chapter_number")
+        if isinstance(chapter_number, int) and chapter_number > 0 and not collaboration_allows_chapter(collaborator, chapter_number):
+            continue
+        children = node.get("children")
+        if isinstance(children, list):
+            node["children"] = _filter_workspace_structure_tree_for_collaborator(children, collaborator)
+        filtered_nodes.append(node)
+    return filtered_nodes
+
+
+def _compile_workspace_search_pattern(search_query: str, *, flags: int) -> re.Pattern[str]:
+    if len(search_query) > settings.WORKSPACE_REGEX_MAX_PATTERN_LENGTH:
+        raise HTTPException(400, "Search pattern is too long.")
+    if re.search(r"\([^)]*[+*][^)]*\)[+*{]", search_query):
+        raise HTTPException(400, "Search pattern contains unsafe nested repetition.")
+    try:
+        return re.compile(search_query, flags)
+    except re.error as exc:
+        raise HTTPException(400, f"Invalid search pattern: {exc}") from exc
+
+
 def _workspace_excerpt(text: str, query: str, *, radius: int = 90) -> str:
     normalized_text = " ".join((text or "").split()).strip()
     if not normalized_text:
@@ -5355,6 +5389,7 @@ async def search_author_workspace(
     whole_word: bool = False,
     regex: bool = False,
     filters: dict[str, Any] | None = None,
+    collaborator: BookCollaborator | None = None,
 ) -> list[dict[str, Any]]:
     search_query = " ".join((query or "").split()).strip()
     normalized_scopes = {scope for scope in scopes if scope in {"manuscript", "scenes", "notes"}} or {"manuscript", "scenes", "notes"}
@@ -5372,10 +5407,7 @@ async def search_author_workspace(
     flags = 0 if case_sensitive else re.IGNORECASE
     pattern: re.Pattern[str] | None = None
     if regex and search_query:
-        try:
-            pattern = re.compile(search_query, flags)
-        except re.error as exc:
-            raise HTTPException(400, f"Invalid search pattern: {exc}") from exc
+        pattern = _compile_workspace_search_pattern(search_query, flags=flags)
     elif search_query and whole_word:
         pattern = re.compile(rf"\b{re.escape(search_query)}\b", flags)
 
@@ -5395,6 +5427,7 @@ async def search_author_workspace(
         scene_rows = await list_novel_scenes(
             db,
             book=book,
+            collaborator=collaborator,
             chapter_number=int(chapter_filter) if isinstance(chapter_filter, int) and chapter_filter > 0 else None,
             query=None,
         )
@@ -5427,7 +5460,7 @@ async def search_author_workspace(
                 "rank": 3,
             })
 
-    if "notes" in normalized_scopes:
+    if "notes" in normalized_scopes and collaborator is None:
         notes = await list_obsidian_notes(
             db,
             book=book,
@@ -5456,6 +5489,8 @@ async def search_author_workspace(
             chapter_stmt = chapter_stmt.where(Chapter.number == int(chapter_filter))
         chapter_rows = list((await db.execute(chapter_stmt)).scalars().all())
         for chapter in chapter_rows:
+            if collaborator is not None and not collaboration_allows_chapter(collaborator, int(chapter.number)):
+                continue
             if not chapter.s3_key:
                 continue
             try:
@@ -6419,6 +6454,56 @@ def deserialize_manuscript_content(raw: str | bytes | memoryview | None) -> dict
     return {"format": "plain_text", "text": raw_text, "html": manuscript_text_to_html(raw_text)}
 
 
+async def persist_editor_chapter_content(
+    db: AsyncSession,
+    book: Book,
+    *,
+    chapter_number: int,
+    title: str | None,
+    text: str,
+    html: str | None,
+    description: str | None = None,
+    content_version: int = 1,
+) -> Chapter:
+    storage_key = f"chapters/{book.id}/{chapter_number}.txt"
+    payload = serialize_manuscript_content(text, html)
+    stored_key = await asyncio.to_thread(upload_text, storage_key, payload)
+    chapter = (
+        await db.execute(
+            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+        )
+    ).scalar_one_or_none()
+    word_count = len(str(text or "").split()) if str(text or "").strip() else 0
+    token_count = word_count
+    if chapter is None:
+        chapter = Chapter(
+            book_id=book.id,
+            number=chapter_number,
+            title=title,
+            description=description,
+            s3_key=stored_key,
+            token_count=token_count,
+            word_count=word_count,
+            content_version=content_version,
+            processed=False,
+            analysis_state={},
+        )
+        db.add(chapter)
+        await db.flush()
+        return chapter
+
+    chapter.title = title or chapter.title
+    chapter.description = description or chapter.description
+    chapter.s3_key = stored_key
+    chapter.token_count = token_count
+    chapter.word_count = word_count
+    chapter.content_version = content_version
+    chapter.processed = False
+    chapter.analysis_state = {}
+    await db.flush()
+    return chapter
+
+
 def report_sentence(text: str | None) -> str:
     cleaned = clean_markdown_asterisks_str((text or "").strip())
     if not cleaned:
@@ -6459,6 +6544,9 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
         from docx import Document
         doc = Document(BytesIO(raw))
         text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
+        if split_into_chapters:
+            from app.parsers.text_parser import parse_text_chapters
+            return parse_text_chapters(text, title=stem)
         return [{"title": stem, "text": text, "number": 1}]
     if lower.endswith(".doc"):
         # Legacy .doc format requires additional system dependencies (antiword/textract)
@@ -6481,7 +6569,15 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
         if lower.endswith(".md"):
             # Convert markdown to HTML for proper rendering
             html = markdown_to_html(text)
+            if split_into_chapters:
+                from app.parsers.text_parser import parse_text_chapters
+                chapters = parse_text_chapters(text, title=stem)
+                # Preserve HTML on chapters if possible
+                return chapters
             return [{"title": stem, "text": text, "html": html, "number": 1}]
+        if split_into_chapters:
+            from app.parsers.text_parser import parse_text_chapters
+            return parse_text_chapters(text, title=stem)
         return [{"title": stem, "text": text, "number": 1}]
     raise HTTPException(400, f"Unsupported manuscript import file: {filename}")
 
@@ -6589,6 +6685,7 @@ async def parse_book_upload_for_ingestion(
     raw: bytes,
     preserve_chapter_numbers: bool,
     preserve_source_chapters: bool,
+    language: str | None = None,
 ) -> dict[str, Any]:
     if work_type == "screenplay":
         screenplay_payload = await parse_screenplay_upload(upload_filename_for_format(format_name), raw)
@@ -6596,6 +6693,7 @@ async def parse_book_upload_for_ingestion(
             "chapters": screenplay_payload["chapters"],
             "screenplay_payload": screenplay_payload,
             "parser_diagnostics": None,
+            "detected_language": language or "en",
         }
 
     preserve_exact_structure = preserve_chapter_numbers or preserve_source_chapters
@@ -6607,8 +6705,14 @@ async def parse_book_upload_for_ingestion(
             parse_pdf_with_diagnostics,
             raw,
             split_large_chapters=not preserve_exact_structure,
+            language=language,
         )
-        return {"chapters": chapters, "screenplay_payload": None, "parser_diagnostics": parser_diagnostics}
+        return {
+            "chapters": chapters,
+            "screenplay_payload": None,
+            "parser_diagnostics": parser_diagnostics,
+            "detected_language": parser_diagnostics.get("detected_language", "en"),
+        }
 
     if format_name == "epub":
         from app.parsers.epub_parser import parse_epub
@@ -6618,10 +6722,10 @@ async def parse_book_upload_for_ingestion(
             raw,
             split_large_chapters=not preserve_exact_structure,
         )
-        return {"chapters": chapters, "screenplay_payload": None, "parser_diagnostics": None}
+        return {"chapters": chapters, "screenplay_payload": None, "parser_diagnostics": None, "detected_language": language or "en"}
 
     parsed = await parse_import_upload(upload_filename_for_format(format_name), raw, False)
-    return {"chapters": parsed, "screenplay_payload": None, "parser_diagnostics": None}
+    return {"chapters": parsed, "screenplay_payload": None, "parser_diagnostics": None, "detected_language": language or "en"}
 
 
 def normalize_imported_chapters(
@@ -6703,10 +6807,164 @@ def split_long_document(text: str, max_words: int = 3500) -> list[str]:
     return parts or [text]
 
 
+# ─── Import preview builder ──────────────────────────────────────────────
+
+def build_import_preview(
+    *,
+    format_name: str,
+    work_type: str,
+    raw: bytes,
+    language: str | None = None,
+    preserve_chapter_numbers: bool = False,
+    preserve_source_chapters: bool = False,
+) -> dict[str, Any]:
+    """Parse a manuscript file and return an ImportPreview dict for the frontend.
+
+    Performs parsing and structure detection only — no DB writes, no Celery dispatch.
+    This function is synchronous; callers should wrap in asyncio.to_thread() if needed.
+    """
+    from app.parsers.heading_patterns import classify_heading_type
+    from app.schemas.section import ImportPreview, SectionMeta
+
+    preview = ImportPreview()
+
+    if work_type == "screenplay":
+        # Screenplay parsing is async; caller must wrap this function in asyncio event loop
+        # For now, handle screenplay by extracting text and treating as single chapter
+        from app.parsers.screenplay_parser import parse_screenplay
+        source_text = raw.decode("utf-8", errors="ignore")
+        scenes = parse_screenplay(source_text)
+        sections: list[SectionMeta] = []
+        for i, scene in enumerate(scenes, start=1):
+            scene_title = getattr(scene, "text", f"Scene {i}")
+            sections.append(SectionMeta.from_heading(
+                title=str(scene_title).strip() or f"Scene {i}",
+                type_="chapter",
+                number=i,
+            ))
+        preview.sections = sections
+        preview.chapter_count = len(sections)
+        preview.compute_confidence()
+        return preview.model_dump()
+
+    # Build sample text for language detection when not provided
+    sample_text = ""
+    if format_name == "pdf":
+        import fitz
+        doc = fitz.open(stream=raw, filetype="pdf")
+        try:
+            pages = min(doc.page_count, 3)
+            for i in range(pages):
+                sample_text += doc.load_page(i).get_text()
+        finally:
+            doc.close()
+    elif format_name == "epub":
+        from ebooklib import epub as epub_lib
+        from io import BytesIO
+        book = epub_lib.read_epub(BytesIO(raw))
+        from bs4 import BeautifulSoup
+        for item in book.get_items_of_type(9):  # ITEM_DOCUMENT
+            content = item.get_content().decode("utf-8", errors="ignore")
+            soup = BeautifulSoup(content, "html.parser")
+            sample_text += soup.get_text()
+            if len(sample_text) > 5000:
+                break
+    elif format_name in ("docx", "doc"):
+        from io import BytesIO
+        from docx import Document
+        doc = Document(BytesIO(raw))
+        sample_text = "\n".join(
+            paragraph.text for paragraph in doc.paragraphs[:30] if paragraph.text.strip()
+        )
+    elif format_name in ("txt", "md", "fountain"):
+        sample_text = raw.decode("utf-8", errors="ignore")[:5000]
+
+    # Auto-detect language if not provided
+    if language is None and sample_text:
+        from app.utils.language_utils import detect_language
+        lang_result = detect_language(sample_text, max_chars=5000)
+        language = lang_result["detected"]
+        preview.language_confidence = lang_result["confidence"]
+    preview.detected_language = language or "en"
+
+    chapters: list[dict] = []
+    diagnostics: dict[str, Any] | None = None
+
+    preserve_exact = preserve_chapter_numbers or preserve_source_chapters
+
+    if format_name == "pdf":
+        from app.parsers.pdf_parser import parse_pdf_with_diagnostics
+        chapters, diagnostics = parse_pdf_with_diagnostics(
+            raw,
+            split_large_chapters=not preserve_exact,
+            language=language,
+        )
+    elif format_name == "epub":
+        from app.parsers.epub_parser import parse_epub
+        chapters = parse_epub(
+            raw,
+            split_large_chapters=not preserve_exact,
+        )
+    elif format_name in ("docx", "doc"):
+        from io import BytesIO
+        from docx import Document
+        from app.parsers.text_parser import parse_text_chapters
+        doc = Document(BytesIO(raw))
+        text = "\n".join(
+            paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()
+        )
+        chapters = parse_text_chapters(text, language=language)
+    elif format_name in ("txt", "md", "fountain"):
+        text = raw.decode("utf-8", errors="ignore")
+        from app.parsers.text_parser import parse_text_chapters
+        chapters = parse_text_chapters(text, language=language)
+    else:
+        raise ValueError(f"Unsupported format for preview: {format_name}")
+
+    sections = []
+    for ch in chapters:
+        title = ch.get("title", "")
+        stype = ch.get("section_type", "unknown")
+        num = ch.get("number") or ch.get("source_number")
+        confidence = 1.0 if classify_heading_type(title, language or "en")[0] != "unknown" else 0.5
+        sections.append(SectionMeta.from_heading(
+            title=title,
+            type_=stype,
+            number=num,
+            confidence=confidence,
+        ))
+
+    preview.sections = sections
+
+    if diagnostics:
+        preview.build_from_parser_diagnostics(diagnostics, sections=sections)
+    else:
+        section_counts: dict[str, int] = {}
+        for s in sections:
+            section_counts[s.type] = section_counts.get(s.type, 0) + 1
+        mini_diag = {
+            "detected_language": preview.detected_language,
+            "detected_language_confidence": preview.language_confidence,
+            "chapter_count": len(chapters),
+            "heading_count": len(sections),
+            "toc_detected": section_counts.get("toc", 0) > 0,
+            "front_matter_count": sum(
+                v for k, v in section_counts.items()
+                if k in ("preface", "foreword", "acknowledgements", "dedication")
+            ),
+            "anomalies": [],
+            "fallback_strategy": None,
+            "total_pages": 0,
+        }
+        preview.build_from_parser_diagnostics(mini_diag, sections=sections)
+
+    return preview.model_dump()
+
+
 # ─── Misc ─────────────────────────────────────────────────────────────────────
 
 def as_bool(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+    return (str(value) if value else "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _map_chapter_consistency_state_history(

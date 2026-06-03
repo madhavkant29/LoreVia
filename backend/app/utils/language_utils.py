@@ -1,0 +1,330 @@
+"""
+Lightweight language detection for manuscript import.
+
+Uses three signals, no external dependencies:
+  1. Stopword counting — most discriminative for Indo-European languages
+  2. Character trigram frequency — works well on short / noisy texts
+  3. Heading pattern matching — uses Phase 1 heading_patterns per language
+
+Returns a dict with detected language, confidence, and ranked candidates.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import Counter
+from typing import Any
+
+from app.parsers.heading_patterns import (
+    ALL_LANGUAGES,
+    build_heading_regex,
+    classify_heading_type,
+)
+
+# ── Per-language stopwords (top 60–80 function words) ──────────────────────
+# Words that appear frequently regardless of topic — good discriminators.
+
+STOPWORDS: dict[str, set[str]] = {
+    "en": {
+        "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
+        "i", "for", "not", "on", "with", "he", "as", "you", "do", "at",
+        "this", "but", "his", "by", "from", "they", "we", "her", "she",
+        "or", "an", "will", "my", "one", "all", "would", "there", "their",
+        "what", "so", "up", "out", "if", "about", "who", "get", "which",
+        "go", "me", "when", "make", "can", "like", "time", "no", "just",
+        "him", "know", "take", "people", "into", "year", "your", "good",
+        "some", "could", "them", "see", "other", "than", "then", "now",
+        "look", "only", "come", "its", "over", "think", "also", "back",
+        "after", "use", "two", "how", "our", "work", "first", "well",
+        "way", "even", "new", "want", "because", "any", "these", "give",
+        "day", "most", "us", "is", "was", "are", "been", "had", "has",
+        "were", "am", "did", "does", "got", "has", "may", "might",
+        "must", "shall", "should", "being", "own", "same", "too",
+        "very", "still", "while", "where", "here", "there",
+    },
+    "fr": {
+        "le", "la", "les", "de", "des", "un", "une", "du", "et", "a",
+        "en", "il", "elle", "je", "nous", "vous", "ils", "elles", "ce",
+        "se", "que", "qui", "pas", "ne", "dans", "sur", "par", "pour",
+        "avec", "sans", "plus", "tout", "tous", "toute", "toutes", "mais",
+        "ou", "comme", "dire", "faire", "son", "sa", "ses", "mon", "ma",
+        "mes", "ton", "ta", "tes", "notre", "nos", "votre", "vos", "leur",
+        "leurs", "cet", "cette", "ces", "y", "au", "aux", "etre", "avoir",
+        "on", "si", "ca", "meme", "aussi", "bien", "la", "tres", "encore",
+        "dont", "quand", "alors", "deux", "depuis", "entre", "sous", "est",
+        "sont", "ete", "avait", "cette", "apres", "cest", "peut", "peu",
+        "autre", "autres", "celui", "celle", "ceux", "celles", "donc",
+        "car", "ni", "chez", "avant", "apres", "pendant", "vers", "moi",
+        "toi", "lui", "soi", "ainsi", "trop", "apres", "peuvent",
+        "veut", "fait", "ans", "ceci", "cela", "chaque", "doit",
+        "ici", "leurs", "notamment", "parce", "trois",
+    },
+    "es": {
+        "el", "la", "los", "las", "de", "del", "un", "una", "unos",
+        "unas", "y", "a", "en", "es", "por", "para", "con", "sin",
+        "que", "se", "no", "su", "sus", "lo", "como", "mas", "pero",
+        "o", "muy", "este", "esta", "estos", "estas", "ese", "esa",
+        "esos", "esas", "mi", "mis", "tu", "tus", "nuestro",
+        "nuestra", "nuestros", "nuestras", "al", "le", "les", "me",
+        "te", "nos", "os", "hay", "era", "son", "ser", "estar", "ha",
+        "han", "he", "has", "habia", "todo", "todos", "toda", "todas",
+        "otro", "otra", "otros", "otras", "ya", "bien", "si",
+        "entre", "desde", "hasta", "porque", "cuando", "donde",
+        "cual", "cuales", "quien", "quienes", "esto", "eso",
+        "aquello", "aqui", "alli", "alla", "cada", "vez", "tan",
+        "poco", "mucho", "solo", "entonces", "ahora", "siempre",
+        "nunca", "tambien", "sobre", "hacia", "e", "fue", "ser",
+        "ellos", "ellas", "estaba", "estaban", "mismo", "dijo",
+        "hacer", "puede", "tiene", "dos", "gran", "dia",
+    },
+    "de": {
+        "der", "die", "das", "und", "in", "zu", "von", "mit", "auf",
+        "fur", "ist", "nicht", "ein", "eine", "einen", "sich", "als",
+        "auch", "es", "an", "dass", "so", "aus", "war", "wird", "nach",
+        "wie", "im", "um", "werden", "bei", "wir", "ich", "sie", "er",
+        "noch", "hat", "bis", "zum", "zur", "am", "hatte", "dem", "des",
+        "den", "durch", "gegen", "ohne", "unter", "uber", "jetzt",
+        "zwischen", "sehr", "mehr", "schon", "wenn", "aber", "oder",
+        "dann", "da", "mir", "mich", "dir", "dich", "ihm", "ihn", "ihr",
+        "ihnen", "seinem", "seiner", "ihren", "konnen", "mussen",
+        "wollen", "sollen", "durfen", "mogen", "machen", "sagen",
+        "geben", "kommen", "sehen", "lassen", "stehen", "finden",
+        "bleiben", "diese", "dieser", "dieses", "jene", "jener",
+        "jenes", "welche", "welcher", "welches", "kein", "keine",
+        "alle", "viele", "einige", "wenige", "ab", "wurde", "konnte",
+        "haben", "waren", "wieder", "immer", "dazu", "sein", "ihn",
+        "wobei",
+    },
+    "it": {
+        "il", "la", "i", "gli", "le", "un", "una", "di", "a", "da",
+        "in", "con", "su", "per", "tra", "fra", "e", "che", "non",
+        "si", "io", "tu", "lui", "lei", "noi", "voi", "loro",
+        "questo", "questa", "questi", "queste", "quello", "quella",
+        "quelli", "quelle", "mio", "mia", "miei", "mie", "tuo", "tua",
+        "tuoi", "tue", "suo", "sua", "suoi", "sue", "nostro",
+        "nostra", "nostri", "nostre", "vostro", "vostra", "vostri",
+        "vostre", "piu", "meno", "molto", "ma", "o", "come", "se",
+        "sono", "ho", "hai", "ha", "abbiamo", "avete", "hanno",
+        "stato", "essere", "avere", "fare", "dire", "vedere",
+        "andare", "venire", "sapere", "potere", "volere", "dovere",
+        "anche", "solo", "tutto", "tutti", "tutta", "tutte",
+        "quando", "dove", "come", "perche", "chi", "quale", "quali",
+        "del", "degli", "dei", "della", "delle", "al", "agli", "ai",
+        "alla", "alle", "dal", "dagli", "dai", "dalla", "dalle",
+        "nel", "negli", "nei", "nella", "nelle", "sul", "sugli",
+        "sui", "sulla", "sulle", "d", "fu", "era", "erano", "cosi",
+        "ad", "poi", "prima", "dopo", "mentre", "invece", "ancora",
+    },
+    "pt": {
+        "o", "a", "os", "as", "de", "do", "da", "dos", "das", "um",
+        "uma", "uns", "umas", "e", "que", "nao", "se", "em", "para",
+        "com", "por", "no", "na", "nos", "nas", "ao", "aos", "as",
+        "ele", "ela", "eles", "elas", "eu", "voce", "nos", "seu",
+        "sua", "seus", "suas", "este", "esta", "estes", "estas",
+        "esse", "essa", "esses", "essas", "aquele", "aquela",
+        "aqueles", "aquelas", "mais", "muito", "muita", "muitos",
+        "muitas", "mas", "ou", "como", "ja", "tambem", "quando",
+        "onde", "porque", "tem", "sao", "era", "foi", "ser", "ter",
+        "estar", "haver", "fazer", "dizer", "ir", "vir", "ver",
+        "dar", "poder", "querer", "saber", "meu", "minha", "meus",
+        "minhas", "teu", "tua", "teus", "tuas", "dele", "dela",
+        "deles", "delas", "disso", "disto", "daquilo", "nesse",
+        "nessa", "nesses", "nessas", "neste", "nesta", "nestes",
+        "nestas", "naquele", "naquela", "naqueles", "naquelas",
+        "sem", "entre", "sobre", "so", "ate", "apos", "desde",
+        "contra", "durante", "mesmo", "ainda", "assim", "pois",
+        "ha", "tinha", "faz", "vai", "vem", "tambem", "pela",
+        "pelo", "pelos", "pelas", "num", "numa", "numas", "nos",
+        "estao", "foram",
+    },
+}
+
+# ── Per-language character trigram profiles ────────────────────────────────
+# Top 40–50 most frequent character trigrams per language.
+# Sourced from well-known n-gram frequency distributions for European languages.
+
+TRIGRAM_PROFILES: dict[str, list[str]] = {
+    "en": [
+        " th", "the", "he ", "ed ", " an", "and", "nd ", "in ", "ing",
+        " to", "er ", "re ", "es ", "of ", "or ", "on ", "at ", "ve ",
+        "is ", " a ", "en ", " ou", "ha ", "it ", "al ", "st ", "ar ",
+        "ou ", "me ", "le ", "ot ", "om ", "ent", "her", "ere",
+        "tha", "for", "was", "you", "ith", "ver", "our", "all", "men",
+        "not", "one", "out", "pro",
+    ],
+    "fr": [
+        " de", "de ", "es ", " le", "le ", " la", "la ", "s d",
+        "nt ", "les", "ent", "ant", " pa", "et ", "ur ", "re ", "on ",
+        "er ", "tio", "ion", " un", "un ", "it ", "se ", "que", "ns ",
+        "ou ", "il ", "t d", "ce ", "e d", "ell", "men",
+        "son", "tre", "res", "par", "ien", "ans", "our", "tou", "con",
+        "pre", "est", "omm", "ais",
+    ],
+    "es": [
+        " de", "de ", "la ", "es ", "el ", "os ", "en ", "as ", "que",
+        " la", " el", " co", "con", " lo", " se", "se ", "del",
+        " un", "un ", "no ", "est", "ien", "nte", "cio", "ara", "ado",
+        " por", "por", "par", "era", "ent", "una", "res", "men", "com",
+        "des", "tra", "pre", "dad", "sta",
+    ],
+    "de": [
+        "en ", "er ", "sch", "der", "die", "und", "ein", "che",
+        "ich", "end", "gen", "ten", "cht", "ung", "das", "hen", "nde",
+        "lic", "ter", "ers", "auf", "te ", "rei", "ver", "den",
+        "mit", "ese", "ber", "wie", "aus", "men", "wor", "ste", "lle",
+        "ben", " die", " de", "be ", "ge ", " zu", "un ", "au ",
+    ],
+    "it": [
+        "che", "ell", "del", "ont", "ent", "are", "nel", "ere", "nte",
+        "ato", "ion", "one", "con", "all", "lla", "zio", "est", "per",
+        " la", "la ", " di", "di ", " il", "il ", " de", "de ",
+        " co", "non", "men", "nti", "tra", "ita", "eri",
+        "era", "ani", "ant", "gli", "tto", "sta", "ver", "pre", "nde",
+        "rie",
+    ],
+    "pt": [
+        " de", "de ", "os ", "as ", " es", "o d", "co ", "ao ",
+        "ent", "ara", "cao", "do ", "est", "par", "que", "com", "con",
+        "ada", "men", "res", "nte", "ado", "uma", "ida", "ra ", "des",
+        "pre", "dos", "ant", "enc", "tra", "por", "ess", "sta", "ont",
+        "ver", "iva", "ndo", "inh", "ito", "era", "ari", "sen", "oes",
+        "str", "mos", "ava",
+    ],
+}
+
+# Tokenizer: split on non-letter boundaries, keep tokens 1+ chars.
+_TOKEN_RE = re.compile(r"[^a-z\u00e0-\u00ff]", re.IGNORECASE)
+
+# Trigrams: keep letters and spaces for word-boundary signals.
+_TRIGRAM_CLEAN_RE = re.compile(r"[^a-z\u00e0-\u00ff ]", re.IGNORECASE)
+
+
+def _tokenize(text: str) -> list[str]:
+    lowered = text.lower()
+    return [token for token in _TOKEN_RE.split(lowered) if token]
+
+
+def _score_stopwords(tokens: list[str], language: str) -> float:
+    stopwords = STOPWORDS.get(language, set())
+    if not stopwords or not tokens:
+        return 0.0
+    matches = sum(1 for token in tokens if token in stopwords)
+    return matches / len(tokens)
+
+
+def _trigrams(text: str) -> Counter:
+    cleaned = _TRIGRAM_CLEAN_RE.sub("", text.lower())
+    # Normalize whitespace
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return Counter(cleaned[i : i + 3] for i in range(len(cleaned) - 2))
+
+
+def _score_trigrams(text: str, language: str) -> float:
+    profile = TRIGRAM_PROFILES.get(language, [])
+    if not profile or not text:
+        return 0.0
+    text_tris = _trigrams(text)
+    if not text_tris:
+        return 0.0
+    profile_set = frozenset(profile)
+    overlap = sum(count for tri, count in text_tris.items() if tri in profile_set)
+    total = sum(text_tris.values())
+    return overlap / total if total else 0.0
+
+
+def _score_headings(text: str, language: str) -> float:
+    """Score based on how many heading-like lines match language patterns."""
+    try:
+        lang_regex = build_heading_regex(languages=[language])
+    except Exception:
+        return 0.0
+    lines = text.splitlines()
+    heading_lines = [line.strip() for line in lines if line.strip()]
+    if not heading_lines:
+        return 0.0
+    matches = sum(1 for line in heading_lines if lang_regex.match(line))
+    return min(matches / max(len(heading_lines), 1), 1.0)
+
+
+# ── Main detection function ────────────────────────────────────────────────
+
+def detect_language(
+    text: str,
+    *,
+    languages: list[str] | None = None,
+    max_chars: int = 5000,
+) -> dict[str, Any]:
+    """Detect the language of a manuscript text.
+
+    Uses three signals weighted by reliability:
+      - Stopword ratio  (weight 0.50) — high precision, requires enough tokens
+      - Trigram overlap  (weight 0.35) — works on short/noisy texts
+      - Heading matches  (weight 0.15) — only fires when headings exist
+
+    Args:
+        text: The manuscript text to analyze.
+        languages: ISO 639-1 codes to consider (default: all 6 supported).
+        max_chars: Max characters to sample from text (default 5000).
+
+    Returns:
+        {
+            "detected": "fr",
+            "confidence": 0.87,
+            "candidates": [{"language": "fr", "score": 0.87}, ...],
+        }
+    """
+    candidates = languages or ALL_LANGUAGES
+    if not candidates:
+        return {
+            "detected": "en",
+            "confidence": 0.0,
+            "candidates": [],
+        }
+
+    sample = text[:max_chars].strip()
+    if not sample or len(sample) < 20:
+        return {
+            "detected": "en",
+            "confidence": 0.0,
+            "candidates": [
+                {"language": lang, "score": 0.0} for lang in candidates
+            ],
+        }
+
+    tokens = _tokenize(sample)
+
+    scored: list[dict[str, Any]] = []
+    for lang in candidates:
+        sw = _score_stopwords(tokens, lang)
+        tri = _score_trigrams(sample, lang)
+        hd = _score_headings(sample, lang)
+
+        score = (sw * 0.50) + (tri * 0.35) + (hd * 0.15)
+        scored.append({
+            "language": lang,
+            "score": round(score, 4),
+            "details": {
+                "stopword_ratio": round(sw, 4),
+                "trigram_overlap": round(tri, 4),
+                "heading_score": round(hd, 4),
+            },
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    best = scored[0]
+    total_score = sum(c["score"] for c in scored)
+
+    if total_score <= 0:
+        return {
+            "detected": "en",
+            "confidence": 0.0,
+            "candidates": scored,
+        }
+
+    confidence = best["score"] / total_score if total_score > 0 else 0.0
+
+    return {
+        "detected": best["language"],
+        "confidence": round(confidence, 4),
+        "candidates": scored,
+    }

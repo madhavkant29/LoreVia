@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 
@@ -14,6 +15,9 @@ class _Result:
     def __init__(self, *, scalar=None, all_rows=None):
         self._scalar = scalar
         self._all_rows = [] if all_rows is None else all_rows
+
+    def scalar_one(self):
+        return self._scalar
 
     def scalar_one_or_none(self):
         return self._scalar
@@ -180,6 +184,173 @@ def test_public_ranking_normalizers_accept_supported_values():
 
 def test_public_ranking_label_is_human_readable():
     assert public_utils.public_ranking_label(ranking_key="most_popular", time_window="weekly") == "Most popular this week"
+
+
+def test_validate_public_content_report_target_accepts_matching_public_slug():
+    app_host = (urlparse(public_utils.settings.APP_URL).hostname or "getlorevia.com").strip().lower()
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        is_public=True,
+        hidden_at=None,
+        archived_at=None,
+        public_status=public_utils.PUBLIC_STATUS_PUBLISHED,
+        moderation_status=public_utils.MODERATION_STATUS_CLEAN,
+        public_slug="sky-harbor",
+    )
+
+    assert public_utils.validate_public_content_report_target(
+        book,
+        f" https://{app_host}/public/books/sky-harbor ",
+    ) == f"https://{app_host}/public/books/sky-harbor"
+
+
+def test_validate_public_content_report_target_accepts_reported_book_until_hidden():
+    app_host = (urlparse(public_utils.settings.APP_URL).hostname or "getlorevia.com").strip().lower()
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        is_public=True,
+        hidden_at=None,
+        archived_at=None,
+        public_status=public_utils.PUBLIC_STATUS_PUBLISHED,
+        moderation_status=public_utils.MODERATION_STATUS_REPORTED,
+        public_slug="storm-chamber",
+    )
+
+    assert public_utils.can_view_public_book(book) is True
+    assert public_utils.public_visibility_notice(book) is None
+    assert public_utils.validate_public_content_report_target(
+        book,
+        f"https://{app_host}/public/books/storm-chamber",
+    ) == f"https://{app_host}/public/books/storm-chamber"
+
+
+def test_validate_public_content_report_target_uses_configured_app_host(monkeypatch):
+    monkeypatch.setattr(public_utils.settings, "APP_URL", "https://stories.lorevia.test", raising=False)
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        is_public=True,
+        hidden_at=None,
+        archived_at=None,
+        public_status=public_utils.PUBLIC_STATUS_PUBLISHED,
+        moderation_status=public_utils.MODERATION_STATUS_CLEAN,
+        public_slug="ember-run",
+    )
+
+    assert public_utils.validate_public_content_report_target(
+        book,
+        "https://stories.lorevia.test/public/books/ember-run",
+    ) == "https://stories.lorevia.test/public/books/ember-run"
+    assert public_utils.validate_public_content_report_target(
+        book,
+        "https://www.stories.lorevia.test/public/books/ember-run",
+    ) == "https://www.stories.lorevia.test/public/books/ember-run"
+
+
+@pytest.mark.parametrize(
+    ("book", "reported_content_url", "status_code"),
+    [
+        (
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                is_public=False,
+                hidden_at=None,
+                archived_at=None,
+                public_status=public_utils.PUBLIC_STATUS_DRAFT,
+                moderation_status=public_utils.MODERATION_STATUS_CLEAN,
+            ),
+            None,
+            404,
+        ),
+        (
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                is_public=True,
+                hidden_at=None,
+                archived_at=None,
+                public_status=public_utils.PUBLIC_STATUS_PUBLISHED,
+                moderation_status=public_utils.MODERATION_STATUS_CLEAN,
+                public_slug="sky-harbor",
+            ),
+            "https://example.com/public/books/sky-harbor",
+            400,
+        ),
+        (
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                is_public=True,
+                hidden_at=None,
+                archived_at=None,
+                public_status=public_utils.PUBLIC_STATUS_PUBLISHED,
+                moderation_status=public_utils.MODERATION_STATUS_CLEAN,
+                public_slug="sky-harbor",
+            ),
+            "https://getlorevia.com/public/books/other-book",
+            400,
+        ),
+    ],
+)
+def test_validate_public_content_report_target_rejects_invalid_targets(book, reported_content_url, status_code):
+    with pytest.raises(public_utils.HTTPException) as exc:
+        public_utils.validate_public_content_report_target(book, reported_content_url)
+
+    assert exc.value.status_code == status_code
+
+
+@pytest.mark.asyncio
+async def test_ensure_public_content_report_not_duplicate_rejects_recent_reporter_ip():
+    with pytest.raises(public_utils.HTTPException) as exc:
+        await public_utils.ensure_public_content_report_not_duplicate(
+            _FakeDB(execute_values=[_Result(scalar=uuid.uuid4())]),
+            book_id=uuid.uuid4(),
+            report_type=public_utils.REPORT_TYPE_COPYRIGHT,
+            reporter_ip_hash="same-reporter",
+        )
+
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_copyright_report_requires_temporary_hold_after_three_distinct_reporters():
+    assert await public_utils.copyright_report_requires_temporary_hold(
+        _FakeDB(execute_values=[_Result(scalar=3)]),
+        book_id=uuid.uuid4(),
+    )
+    assert not await public_utils.copyright_report_requires_temporary_hold(
+        _FakeDB(execute_values=[_Result(scalar=2)]),
+        book_id=uuid.uuid4(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_invalidate_public_book_caches_clears_detail_chapters_profile_and_forum(monkeypatch):
+    deleted_keys: list[str] = []
+    invalidated_profiles: list[str] = []
+    forum_versions: list[str] = []
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), total_chapters=2)
+
+    async def _cache_del(key):
+        deleted_keys.append(key)
+
+    async def _mark_profile_dirty(user_id):
+        invalidated_profiles.append(user_id)
+
+    async def _cache_set_version_marker(key):
+        forum_versions.append(key)
+
+    monkeypatch.setattr(public_utils, "cache_del", _cache_del)
+    monkeypatch.setattr(public_utils, "mark_public_profile_cache_dirty", _mark_profile_dirty)
+    monkeypatch.setattr(public_utils, "cache_set_version_marker", _cache_set_version_marker)
+
+    await public_utils.invalidate_public_book_caches(book)
+
+    assert deleted_keys == [
+        public_utils.key_public_books(),
+        public_utils.key_public_book_detail(str(book.id)),
+        public_utils.key_public_chapter(str(book.id), 1),
+        public_utils.key_public_chapter(str(book.id), 2),
+    ]
+    assert invalidated_profiles == [str(book.user_id)]
+    assert forum_versions == [public_utils.key_public_forum_cache_version()]
 
 
 def test_recently_updated_ranking_uses_public_content_timestamp_not_forum_activity():

@@ -39,7 +39,7 @@ export function FirstTimeTooltip({
     <div className="mx-auto w-full max-w-[1500px] px-4 pt-5 sm:px-6 lg:px-8">
       <div className="flex justify-end">
       <div
-        className={`w-full max-w-md rounded-2xl border p-6 shadow-2xl ${
+        className={`w-full max-w-md rounded-lg border p-6 ${
           isDark
             ? "border-white/10 bg-[#0b0f17] text-slate-100"
             : "border-stone-200 bg-white text-stone-900"

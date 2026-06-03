@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -288,20 +289,14 @@ export default function BetaFeedbackPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
-          <section className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Beta Reader Loop</p>
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h1 className={`text-3xl font-semibold tracking-normal ${isDark ? "text-white" : "text-slate-950"}`}>
-                  {book?.title ?? "Story"} beta feedback
-                </h1>
-                <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Share a read-only draft, ask direct plain-text questions, and capture structured reader signals before the final review is submitted.
-                </p>
-              </div>
-              {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
-            </div>
-          </section>
+          <WorkspaceFamilyHeader
+            active="beta-feedback"
+            bookId={bookId}
+            family="review-center"
+            title={`${book?.title ?? "Story"} beta feedback`}
+            description="Share a read-only draft, ask direct plain-text questions, and capture structured reader signals before the final review is submitted."
+          />
+          {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
 
           {loading ? (
             <section className={`rounded-md border p-6 text-sm ${isDark ? "border-white/[0.065] bg-[#0d141c] text-slate-400" : "border-slate-200/70 bg-white text-slate-500"}`}>

@@ -2,6 +2,9 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 
 const NONCE_HEADER = "x-nonce"
+const AUTHENTICATED_HOME_PATH = "/library"
+const LOGIN_PATH = "/login"
+const AUTH_COOKIE_NAMES = ["lorevia_access_token", "lorevia_refresh_token"]
 const SECURITY_HEADERS = {
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
@@ -10,6 +13,99 @@ const SECURITY_HEADERS = {
   "Permissions-Policy":
     "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
 }
+
+const AUTH_ENTRY_ROUTES = new Set([
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+])
+
+const PUBLIC_PAGE_ROUTES = new Set([
+  "/",
+  "/answers",
+  "/auth/callback",
+  "/blog",
+  "/checkout",
+  "/checkout/success",
+  "/compare",
+  "/compliance",
+  "/contact",
+  "/copyright",
+  "/demo",
+  "/eula",
+  "/pricing",
+  "/privacy",
+  "/public",
+  "/refund",
+  "/status",
+  "/terms",
+])
+
+const PUBLIC_PAGE_PREFIXES = [
+  "/answers/",
+  "/blog/",
+  "/compare/",
+  "/demo/",
+  "/public/",
+]
+
+const PRIVATE_PAGE_ROUTES = new Set([
+  "/admin",
+  "/beta-reads",
+  "/chats",
+  "/complete-username",
+  "/library",
+  "/notes",
+  "/notifications",
+  "/quotes",
+  "/series",
+  "/settings",
+  "/stats",
+  "/upgrade",
+])
+
+const PRIVATE_PAGE_PREFIXES = [
+  "/library/",
+  "/series/",
+]
+
+const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
+  "admin",
+  "answers",
+  "auth",
+  "beta-reads",
+  "blog",
+  "chats",
+  "checkout",
+  "compare",
+  "compliance",
+  "complete-username",
+  "contact",
+  "copyright",
+  "demo",
+  "eula",
+  "forgot-password",
+  "library",
+  "login",
+  "notes",
+  "notifications",
+  "pricing",
+  "privacy",
+  "public",
+  "quotes",
+  "refund",
+  "register",
+  "reset-password",
+  "series",
+  "settings",
+  "stats",
+  "status",
+  "terms",
+  "upgrade",
+  "verify-email",
+])
 
 function getOrigin(value: string | undefined) {
   if (!value) return null
@@ -133,18 +229,117 @@ function shouldSkipMiddleware(pathname: string) {
   return /\.(?:avif|bmp|css|gif|ico|jpeg|jpg|js|json|map|png|svg|txt|webmanifest|webp|woff|woff2)$/i.test(pathname)
 }
 
-export function middleware(request: NextRequest) {
-  if (process.env.NODE_ENV !== "production" || shouldSkipMiddleware(request.nextUrl.pathname)) {
-    return NextResponse.next()
+function normalizePathname(pathname: string) {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1)
+  }
+
+  return pathname
+}
+
+export function isAuthEntryRoute(pathname: string) {
+  return AUTH_ENTRY_ROUTES.has(normalizePathname(pathname))
+}
+
+export function isPublicPageRoute(pathname: string) {
+  const normalizedPathname = normalizePathname(pathname)
+  if (AUTH_ENTRY_ROUTES.has(normalizedPathname) || PUBLIC_PAGE_ROUTES.has(normalizedPathname)) {
+    return true
+  }
+
+  return PUBLIC_PAGE_PREFIXES.some((prefix) => normalizedPathname.startsWith(prefix))
+}
+
+export function isPrivatePageRoute(pathname: string) {
+  const normalizedPathname = normalizePathname(pathname)
+  if (PRIVATE_PAGE_ROUTES.has(normalizedPathname)) {
+    return true
+  }
+
+  if (PRIVATE_PAGE_PREFIXES.some((prefix) => normalizedPathname.startsWith(prefix))) {
+    return true
+  }
+
+  const [topLevelSegment] = normalizedPathname.split("/").filter(Boolean)
+  return Boolean(topLevelSegment && !NON_BOOK_TOP_LEVEL_SEGMENTS.has(topLevelSegment))
+}
+
+function hasAuthCookie(request: NextRequest) {
+  return AUTH_COOKIE_NAMES.some((cookieName) => Boolean(request.cookies.get(cookieName)?.value))
+}
+
+function buildLoginRedirect(request: NextRequest) {
+  const url = request.nextUrl.clone()
+  const nextPath = `${request.nextUrl.pathname}${request.nextUrl.search}`
+
+  url.pathname = LOGIN_PATH
+  url.search = ""
+  url.searchParams.set("next", nextPath)
+
+  return NextResponse.redirect(url)
+}
+
+function buildAuthenticatedRedirect(request: NextRequest) {
+  const url = request.nextUrl.clone()
+  url.pathname = AUTHENTICATED_HOME_PATH
+  url.search = ""
+
+  return NextResponse.redirect(url)
+}
+
+function buildSecurityHeaders(request: NextRequest) {
+  if (process.env.NODE_ENV !== "production") {
+    return null
   }
 
   const nonce = createNonce()
   const csp = isNetlifyPreviewHost(request.nextUrl.hostname)
     ? `${buildContentSecurityPolicy(nonce)}; frame-src 'self' https://app.netlify.com`
     : buildContentSecurityPolicy(nonce)
+
+  return { csp, nonce }
+}
+
+function applySecurityHeaders(
+  request: NextRequest,
+  response: NextResponse,
+  security = buildSecurityHeaders(request),
+) {
+  if (!security) {
+    return response
+  }
+
+  response.headers.set("Content-Security-Policy", security.csp)
+
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    response.headers.set(key, value)
+  }
+
+  return response
+}
+
+export function middleware(request: NextRequest) {
+  if (shouldSkipMiddleware(request.nextUrl.pathname)) {
+    return NextResponse.next()
+  }
+
+  const isAuthenticated = hasAuthCookie(request)
+  if (!isAuthenticated && isPrivatePageRoute(request.nextUrl.pathname)) {
+    return applySecurityHeaders(request, buildLoginRedirect(request))
+  }
+
+  if (isAuthenticated && isAuthEntryRoute(request.nextUrl.pathname)) {
+    return applySecurityHeaders(request, buildAuthenticatedRedirect(request))
+  }
+
+  const security = buildSecurityHeaders(request)
+  if (!security) {
+    return NextResponse.next()
+  }
+
   const requestHeaders = new Headers(request.headers)
-  requestHeaders.set(NONCE_HEADER, nonce)
-  requestHeaders.set("Content-Security-Policy", csp)
+  requestHeaders.set(NONCE_HEADER, security.nonce)
+  requestHeaders.set("Content-Security-Policy", security.csp)
 
   const response = NextResponse.next({
     request: {
@@ -152,13 +347,7 @@ export function middleware(request: NextRequest) {
     },
   })
 
-  response.headers.set("Content-Security-Policy", csp)
-
-  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
-    response.headers.set(key, value)
-  }
-
-  return response
+  return applySecurityHeaders(request, response, security)
 }
 
 export const config = {

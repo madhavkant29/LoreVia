@@ -63,7 +63,7 @@ export function PublicChapterPageClient({
 
   if (!hasValidChapterNumber || isError || !chapter) {
     return (
-      <div className={`min-h-screen ${isDark ? "bg-black text-white" : "bg-white text-slate-950"}`}>
+      <div className={`min-h-screen ${isDark ? "bg-[#0a0f14] text-white" : "bg-[#f8f7f3] text-slate-950"}`}>
         <div className="mx-auto max-w-4xl px-4 py-16 text-center">
           <p className={`text-sm uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Public sample</p>
           <h1 className="mt-4 font-serif text-3xl">This chapter is not available.</h1>
@@ -71,10 +71,10 @@ export function PublicChapterPageClient({
             The author may have unpublished this sample, the chapter may have moved, or public access may no longer be enabled for this manuscript.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Link href={`/public/${bookId}` as Route} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
+            <Link href={`/public/${bookId}` as Route} className={`rounded-md border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
               Back to public sample
             </Link>
-            <Link href="/public" className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
+            <Link href="/public" className={`rounded-md border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
               Showcase library
             </Link>
           </div>
@@ -84,7 +84,7 @@ export function PublicChapterPageClient({
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-black text-white" : "bg-white text-slate-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#0a0f14] text-white" : "bg-[#f8f7f3] text-slate-950"}`}>
       <div className="mx-auto max-w-4xl px-4 py-8">
         <div className="mb-8 flex flex-wrap items-center gap-3">
           <Link href={`/public/${bookId}` as Route} className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>
@@ -102,12 +102,12 @@ export function PublicChapterPageClient({
         />
         <div className={`mt-10 flex flex-wrap gap-2 border-t pt-6 ${isDark ? "border-white/10" : "border-slate-200"}`}>
           {chapter.chapter_number > 1 ? (
-            <Link href={`/public/${bookId}/chapter/${chapter.chapter_number - 1}` as Route} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
+            <Link href={`/public/${bookId}/chapter/${chapter.chapter_number - 1}` as Route} className={`rounded-md border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
               Previous chapter
             </Link>
           ) : null}
           {chapter.total_chapters === null || chapter.chapter_number < chapter.total_chapters ? (
-            <Link href={`/public/${bookId}/chapter/${chapter.chapter_number + 1}` as Route} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
+            <Link href={`/public/${bookId}/chapter/${chapter.chapter_number + 1}` as Route} className={`rounded-md border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
               Next chapter
             </Link>
           ) : null}

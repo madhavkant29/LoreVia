@@ -48,7 +48,7 @@ function CheckoutSuccessInner() {
 
   return (
     <section className="mx-auto flex min-h-[70vh] w-full max-w-4xl flex-col justify-center px-6 py-16">
-      <div className="rounded-lg border border-white/[0.08] bg-[#0B0F14] p-8 text-[#F2F4F7] shadow-[0_30px_120px_rgba(0,0,0,0.35)]">
+      <div className="rounded-lg border border-white/[0.08] bg-[#0B0F14] p-8 text-[#F2F4F7]">
         <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#C9A86A]">Payment confirmed</p>
         <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em]">
           Your LoreVia subscription checkout is complete.
@@ -57,13 +57,13 @@ function CheckoutSuccessInner() {
           Paddle handles payment, tax, and the invoice record. LoreVia updates your access as soon as the webhook lands.
         </p>
 
-        <div className="mt-6 rounded-2xl border border-[#C9A86A]/30 bg-[#111720] px-5 py-4 text-sm leading-6 text-[#E7D3A8]">
+        <div className="mt-6 rounded-md border border-[#C9A86A]/30 bg-[#111720] px-5 py-4 text-sm leading-6 text-[#E7D3A8]">
           {message}
         </div>
 
         {confirmation ? (
           <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/[0.08] bg-[#111720] p-5">
+            <div className="rounded-md border border-white/[0.08] bg-[#111720] p-5">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7F8994]">Plan</p>
               <p className="mt-3 text-2xl font-semibold text-[#F2F4F7]">
                 {confirmation.display_name} {confirmation.billing_interval === "annual" ? "Annual" : "Monthly"}
@@ -79,7 +79,7 @@ function CheckoutSuccessInner() {
               </p>
             </div>
 
-            <div className="rounded-2xl border border-white/[0.08] bg-[#111720] p-5">
+            <div className="rounded-md border border-white/[0.08] bg-[#111720] p-5">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7F8994]">Account</p>
               <p className="mt-3 text-sm leading-6 text-[#A8B0BA]">
                 Customer email: <span className="text-[#F2F4F7]">{confirmation.customer_email ?? "Unavailable"}</span>

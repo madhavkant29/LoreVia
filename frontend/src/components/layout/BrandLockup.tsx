@@ -5,8 +5,6 @@ import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
 type BrandLockupProps = {
   size?: "sm" | "md" | "lg" | "xl"
   className?: string
-  textClassName?: string
-  iconClassName?: string
   tone?: "auto" | "light" | "dark"
 }
 

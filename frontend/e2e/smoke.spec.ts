@@ -46,7 +46,7 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await page.goto("/public/forum")
 
   await expect(page.getByRole("heading", { name: /beta novel rankings worth opening/i })).toBeVisible()
-  await expect(page.getByRole("link", { name: /back to library/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /back to public library/i })).toBeVisible()
   await expect(page.getByText("Showing 1-12 of 12 threads")).toBeVisible()
   await page.locator("select").nth(0).selectOption("top_rated")
   await page.locator("select").nth(1).selectOption("weekly")
@@ -96,9 +96,9 @@ test("public library cross-links safe samples and writer trust", async ({ page }
   await installMockApi(page)
   await page.goto("/public")
 
-  await expect(page.getByRole("heading", { name: /explore public-domain demos and creator-published originals/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /published work for focused reading/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
-  await page.getByRole("link", { name: "Open discussion" }).click()
+  await page.getByRole("link", { name: "Discussion" }).click()
 
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/)
   await page.goto("/public")
@@ -127,6 +127,16 @@ test("login surfaces an invalid-credentials error", async ({ page }) => {
   await page.getByRole("button", { name: /^sign in$/i }).click()
 
   await expect(page.getByText("Invalid email or password.")).toBeVisible()
+})
+
+test("auth redirects protect private pages and skip login for active sessions", async ({ page }) => {
+  await page.goto("/library")
+  await expect(page).toHaveURL(/\/login\?next=%2Flibrary$/)
+
+  await installMockApi(page)
+  await page.goto("/login")
+  await expect(page).toHaveURL(/\/library$/)
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
 })
 
 test("admin route returns 404 when the request is not allowed", async ({ page }) => {
@@ -268,7 +278,7 @@ test("book overview keeps world-gap issue language constructive", async ({ page 
   await installMockApi(page)
   await page.goto(BOOK_ROUTE)
 
-  await expect(page.getByRole("button", { name: /World Gaps.*2 review targets queued/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /World Gaps.*2 issues detected/i })).toBeVisible()
 })
 
 test("notifications surface revision digest guidance", async ({ page }) => {
@@ -289,6 +299,30 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await expect(page.getByPlaceholder("Search chapters")).toBeVisible()
   await expect(page.getByRole("link", { name: /open workspace/i })).toBeVisible()
   await expect(page.getByText(/^Gate Crossing$/)).toBeVisible()
+})
+
+test("manuscript reprocess requires confirmation before consuming an upload", async ({ page }) => {
+  await installMockApi(page)
+  const reprocessRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/manuscript/reprocess") && request.method() === "POST") {
+      reprocessRequests.push(request.postData() ?? "")
+    }
+  })
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  await page.getByRole("button", { name: "Reprocess manuscript" }).click()
+  await expect(page.getByRole("heading", { name: "Reprocess manuscript?" })).toBeVisible()
+  await expect(page.getByText(/This will consume 1 book upload/)).toBeVisible()
+  await page.getByRole("button", { name: "Cancel" }).click()
+  await expect(page.getByRole("heading", { name: "Reprocess manuscript?" })).toHaveCount(0)
+  expect(reprocessRequests).toHaveLength(0)
+
+  await page.getByRole("button", { name: "Reprocess manuscript" }).click()
+  await page.getByRole("button", { name: "Reprocess and use 1 upload" }).click()
+  await expect(page.getByText("Reprocessing started for 3 chapters. This consumed 1 book upload.").first()).toBeVisible()
+  expect(reprocessRequests).toHaveLength(1)
+  expect(JSON.parse(reprocessRequests[0] ?? "{}")).toEqual({ confirm_upload_charge: true })
 })
 
 test("manuscript workspace switches into paged preview for chapter and full-book views", async ({ page }) => {
@@ -356,7 +390,7 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/collaboration`)
 
-  await expect(page.getByRole("heading", { name: "Sky of Ash sharing" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Sky of Ash collaborators" })).toBeVisible()
   await expect(page.getByRole("combobox")).toHaveValue("beta_reader")
   await expect(page.getByText("Feedback-focused role for reader response.")).toBeVisible()
   await expect(page.getByText("Can edit manuscript")).toBeVisible()
@@ -668,7 +702,7 @@ test("relationship graph inspector responds to node and edge selection", async (
     await dismissCookies.click()
   }
 
-  await expect(page.getByRole("heading", { name: "Relationship Graph", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Relationship graph", exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Read the map", exact: true })).toBeVisible()
 
   await page.waitForFunction(() => {

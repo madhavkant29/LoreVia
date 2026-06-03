@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import type { ObsidianVaultNote } from "@/types/book"
 import { sanitizeRichTextHtml } from "@/lib/utils/richText"
 
@@ -130,12 +131,14 @@ export function MarkdownPreview({
   currentPath?: string | null
   onOpenNote: (reference: string) => void
 }) {
-  const notesByPath = new Map((notes ?? []).map((note) => [note.path.toLowerCase(), note]))
-  const html = markdownToHtml(content, {
-    notesByPath,
-    seen: currentPath ? new Set([currentPath.toLowerCase()]) : new Set<string>(),
-    depth: 0,
-  })
+  const html = useMemo(() => {
+    const notesByPath = new Map((notes ?? []).map((note) => [note.path.toLowerCase(), note]))
+    return markdownToHtml(content, {
+      notesByPath,
+      seen: currentPath ? new Set([currentPath.toLowerCase()]) : new Set<string>(),
+      depth: 0,
+    })
+  }, [content, notes, currentPath])
 
   return (
     <div

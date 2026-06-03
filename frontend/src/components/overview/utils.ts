@@ -15,7 +15,7 @@ export function formatDate(value: string | null | undefined) {
 }
 
 export function panelClass(isDark: boolean, extra = "") {
-  return `rounded-md border shadow-[0_18px_42px_-32px_rgba(15,23,42,0.38)] ${
+  return `rounded-md border ${
     isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"
   } ${extra}`
 }

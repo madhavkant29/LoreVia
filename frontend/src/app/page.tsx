@@ -167,124 +167,9 @@ function SectionHeading({
   )
 }
 
-function HeroProductMockup() {
-  return (
-    <div className="overflow-hidden rounded-lg border border-white/10 bg-[linear-gradient(180deg,rgba(13,23,21,0.98),rgba(8,17,15,0.98))] shadow-[0_30px_90px_-52px_rgba(0,0,0,0.78)]">
-      <div className="grid min-h-[36rem] lg:grid-cols-[12rem_1.25fr_14.5rem]">
-        <aside className="border-b border-white/8 bg-[#0b1513] p-5 lg:border-b-0 lg:border-r">
-          <div className="rounded-xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-[#d9e0db]">
-            Bloodline of Dawn
-          </div>
-          <div className="mt-6">
-            <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Manuscript</p>
-            <div className="mt-3 space-y-2">
-              {["Chapters", "Scenes", "Manuscript", "Outline", "Notes", "Bookmarks"].map((item, index) => (
-                <div
-                  key={item}
-                  className={`rounded-xl px-3 py-2.5 text-sm ${
-                    index === 0 ? "bg-[#11312d] text-[#85e1ce]" : "text-[#9fb0a8]"
-                  }`}
-                >
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-        </aside>
-
-        <div className="border-b border-white/8 p-5 lg:border-b-0 lg:border-r lg:p-7">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <h3 className="font-display text-3xl text-white">Chapter 12</h3>
-                <span className="rounded-full border border-[#1e5a53] bg-[#102a27] px-3 py-1 text-xs font-semibold text-[#7fd7c5]">
-                  Saved just now
-                </span>
-              </div>
-              <div className="mt-4 flex gap-5 text-sm text-[#8fa19a]">
-                {["Write", "Preview", "Stats"].map((tab, index) => (
-                  <span key={tab} className={index === 0 ? "font-semibold text-white" : ""}>
-                    {tab}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="flex gap-2 text-xs text-[#8fa19a]">
-              {["Normal", "B", "I", "H2", "List"].map((tool) => (
-                <span key={tool} className="rounded-lg border border-white/8 bg-white/5 px-2.5 py-1.5">
-                  {tool}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-7 rounded-lg border border-white/8 bg-[#0c1413] p-6">
-            <h4 className="font-display text-3xl text-white">Chapter 12</h4>
-            <div className="mt-5 space-y-4 text-sm leading-8 text-[#d9e0db]">
-              <p>
-                The convoy moved through the valley in uneasy silence. Kael kept his eyes forward, though every instinct told him they were being watched.
-              </p>
-              <p>
-                Mira studied the ridgeline, tracking faint movements in the rock and shadow. The landscape always remembered what people tried to forget.
-              </p>
-              <p>
-                Behind them, someone asked a question no one wanted to answer.
-              </p>
-              <p>&quot;Are we still following the right trail?&quot;</p>
-            </div>
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-4 text-xs uppercase tracking-[0.18em] text-[#72827b]">
-              <span>6,432 words</span>
-              <span>Reading time: 34 min</span>
-            </div>
-          </div>
-        </div>
-
-        <aside className="bg-[#091310] p-5">
-          <div className="flex items-center gap-2 text-xs text-[#8fa19a]">
-            {["Context", "Advisor", "Notes"].map((tab, index) => (
-              <span
-                key={tab}
-                className={`rounded-full px-3 py-1.5 ${index === 0 ? "border border-[#225a53] bg-[#102b27] text-[#86decd]" : "border border-transparent bg-transparent"}`}
-              >
-                {tab}
-              </span>
-            ))}
-          </div>
-
-          <div className="mt-6 rounded-md border border-white/8 bg-[#0d1715] p-4">
-            <p className="text-3xs uppercase tracking-[0.24em] text-[#6fae9f]">Continuity findings</p>
-            <div className="mt-4 space-y-3">
-              {[
-                ["Character age", "Possible mismatch for Elira between ch. 7 and ch. 12"],
-                ["Timeline gap", "Travel time between ch. 9 and ch. 10 is unusually short"],
-                ["Unresolved thread", "The letter from Mara has not been addressed since ch. 7"],
-              ].map(([title, body]) => (
-                <div key={title} className="rounded-xl border border-white/8 bg-[#101a18] p-3">
-                  <p className="text-sm font-semibold text-white">{title}</p>
-                  <p className="mt-2 text-sm leading-6 text-[#9fb0a8]">{body}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-md border border-white/8 bg-[#0d1715] p-4">
-            <p className="text-3xs uppercase tracking-[0.24em] text-[#6fae9f]">Ask LoreVia</p>
-            <div className="mt-3 rounded-xl border border-white/8 bg-[#101a18] px-3 py-3 text-sm text-[#d9e0db]">
-              What are the stakes in this chapter?
-            </div>
-            <p className="mt-3 text-sm leading-6 text-[#9fb0a8]">
-              Kael risks losing the old order lead, exposing Mira's deception, and breaking the fragile trust they have left with Elias.
-            </p>
-          </div>
-        </aside>
-      </div>
-    </div>
-  )
-}
-
 function WorkflowPanel() {
   return (
-    <div className="rounded-lg border border-white/8 bg-[linear-gradient(180deg,rgba(12,22,20,0.98),rgba(8,17,15,0.98))] p-6 md:p-8">
+    <div className="rounded-lg border border-white/8 bg-[#0d1715] p-6 md:p-8">
       <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
         <div>
           <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Your writing workflow</p>
@@ -371,6 +256,33 @@ function WorkflowPanel() {
   )
 }
 
+function HeroWorkspaceSummary() {
+  return (
+    <aside className="rounded-lg border border-white/10 bg-[#0d1715] p-6 md:p-8">
+      <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#6fae9f]">Author workspace</p>
+      <h2 className="mt-4 font-display text-3xl leading-tight text-white md:text-4xl">
+        A serious revision system for long-form fiction.
+      </h2>
+      <p className="mt-4 text-sm leading-7 text-[#aeb9b3]">
+        LoreVia keeps manuscript work, story memory, review, collaboration, and export in one structured workspace. Product screenshots will appear here after the redesigned flows complete visual QA.
+      </p>
+      <div className="mt-7 grid gap-3 sm:grid-cols-2">
+        {[
+          ["Manuscript", "Draft chapters, scenes, and version history"],
+          ["Story Bible", "Track characters, relationships, timelines, and threads"],
+          ["Review Center", "Resolve continuity, voice, and reader feedback"],
+          ["Publish & Export", "Control collaborators, exports, and public visibility"],
+        ].map(([title, detail]) => (
+          <div key={title} className="rounded-md border border-white/8 bg-[#101a18] p-4">
+            <p className="text-sm font-semibold text-white">{title}</p>
+            <p className="mt-2 text-sm leading-6 text-[#9fb0a8]">{detail}</p>
+          </div>
+        ))}
+      </div>
+    </aside>
+  )
+}
+
 function HomepageComparisonSection() {
   return (
     <Section id="compare" className="pt-8">
@@ -411,7 +323,7 @@ function HomepageComparisonSection() {
           </Link>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0d1715] shadow-[0_24px_70px_-48px_rgba(0,0,0,0.72)]">
+        <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0d1715]">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
               <thead>
@@ -498,7 +410,6 @@ export default function HomePage() {
 
       <main className="min-h-screen bg-[#08110f] text-white">
         <div className="relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(38,94,87,0.22),transparent_36%),radial-gradient(circle_at_top_right,rgba(20,54,49,0.18),transparent_28%)]" />
           <MarketingHeader />
 
           <Section className="relative pb-14 pt-12 md:pt-14">
@@ -546,7 +457,7 @@ export default function HomePage() {
               </Reveal>
 
               <Reveal delay={90}>
-                <HeroProductMockup />
+                <HeroWorkspaceSummary />
               </Reveal>
             </div>
           </Section>
@@ -602,7 +513,7 @@ export default function HomePage() {
         </Section>
 
         <section className="mx-auto max-w-7xl px-5 pb-22 pt-6 md:px-8">
-          <div className="rounded-lg border border-[#1e5a53] bg-[linear-gradient(180deg,rgba(18,50,46,0.98),rgba(10,24,21,0.98))] px-6 py-8 shadow-[0_24px_60px_-40px_rgba(13,58,53,0.6)] md:px-10 md:py-10">
+          <div className="rounded-lg border border-[#1e5a53] bg-[#12322e] px-6 py-8 md:px-10 md:py-10">
             <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
                 <h2 className="font-display text-4xl font-semibold leading-tight text-white md:text-5xl">

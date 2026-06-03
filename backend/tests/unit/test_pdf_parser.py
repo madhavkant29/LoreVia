@@ -1,16 +1,20 @@
+from app.parsers.heading_patterns import build_heading_regex
 from app.parsers.pdf_parser import (
     _assemble_text_parts,
+    _blank_chapter,
     _blocks_to_paragraphs,
-    _extract_source_number_from_heading,
+    _build_chapters,
+    _build_parser_diagnostics,
     _drop_front_matter_text_parts,
     _extract_heading,
+    _extract_source_number_from_heading,
     _heading_remainder,
-    _build_parser_diagnostics,
     _is_page_margin_noise,
     _is_pagination_noise,
     _is_probable_front_matter,
     _is_repeated_noise,
     _needs_forced_large_chapter_split,
+    _normalize_chapters,
     _scrub_inline_page_artifacts,
     _should_merge_across_pages,
     _split_large_chapter_parts,
@@ -229,3 +233,171 @@ def test_extract_source_number_from_heading_supports_letter_labels():
 
 def test_extract_source_number_from_heading_supports_numeric_suffixes():
     assert _extract_source_number_from_heading("Chapter 14A") == 14
+
+
+# ── Phase 3: Multilingual heading + TOC + section_type ────────────────────
+
+
+def test_extract_heading_accepts_multilingual_regex():
+    fr_regex = build_heading_regex(languages=["fr"])
+    assert _extract_heading("Chapitre 1: SCYLLA", heading_regex=fr_regex) == "Chapitre 1: SCYLLA"
+    assert _extract_heading("Chapitre Premier", heading_regex=fr_regex) == "Chapitre Premier"
+
+
+def test_extract_heading_falls_back_to_legacy_regex_when_none_given():
+    assert _extract_heading("Chapter 1") == "Chapter 1"
+    assert _extract_heading("Prologue") == "Prologue"
+
+
+def test_extract_heading_requires_regex_for_multilingual():
+    heading = _extract_heading("Kapitel 3")
+    assert heading is None  # legacy CHAPTER_RE is English-only
+
+    de_regex = build_heading_regex(languages=["de"])
+    assert _extract_heading("Kapitel 3", heading_regex=de_regex) == "Kapitel 3"
+
+
+def test_blank_chapter_includes_section_type():
+    ch = _blank_chapter(1, "Chapter 1", "chapter")
+    assert ch["section_type"] == "chapter"
+    assert ch["number"] == 1
+
+
+def test_blank_chapter_defaults_section_type_to_unknown():
+    ch = _blank_chapter(1)
+    assert ch["section_type"] == "unknown"
+
+
+def test_build_chapters_assigns_section_type():
+    en_regex = build_heading_regex(languages=["en"])
+    stream = [
+        {"type": "text", "text": "Prologue"},
+        {"type": "text", "text": "Some body text here."},
+    ]
+    chapters = _build_chapters(stream, heading_regex=en_regex, language="en")
+    prologue_ch = next((ch for ch in chapters if ch.get("title") == "Prologue"), None)
+    assert prologue_ch is not None
+    assert prologue_ch["section_type"] == "prologue"
+
+
+def test_build_chapters_detects_and_skips_toc():
+    fr_regex = build_heading_regex(languages=["fr"])
+    stream = [
+        {"type": "text", "text": "Table des matieres"},
+        {"type": "text", "text": "Chapitre 1: SCYLLA.................. 1"},
+        {"type": "text", "text": "Chapitre 2: LE CHANGE-FORME......... 4"},
+        {"type": "text", "text": "Chapitre 3: LOUIS................... 7"},
+        {"type": "text", "text": ""},
+        {"type": "text", "text": "Chapitre 1: SCYLLA"},
+        {"type": "text", "text": "Cet Ulysse qui a accoste sur mon ile..."},
+        {"type": "text", "text": "Chapitre 2: LE CHANGE-FORME"},
+        {"type": "text", "text": "Le matin se leva sur une brume epaisse..."},
+    ]
+    chapters = _build_chapters(stream, heading_regex=fr_regex, language="fr")
+    titles = [ch.get("title") for ch in chapters]
+    assert "Chapitre 1: SCYLLA" in titles
+    assert "Chapitre 2: LE CHANGE-FORME" in titles
+    for ch in chapters:
+        assert "........." not in str(ch.get("title", ""))
+
+
+def test_normalize_chapters_skips_toc_sections():
+    chapters = [
+        {"title": "TOC", "text_parts": ["toc"], "images": [], "section_type": "toc"},
+        {"title": "Chapter 1", "text_parts": ["body"], "images": [], "section_type": "chapter"},
+    ]
+    normalized = _normalize_chapters(chapters, split_large_chapters=False, total_pages=10)
+    assert len(normalized) == 1
+    assert normalized[0]["section_type"] == "chapter"
+
+
+def test_normalize_chapters_passes_section_type_through():
+    chapters = [
+        {"title": "Prologue", "text_parts": ["content"], "images": [], "section_type": "prologue"},
+    ]
+    normalized = _normalize_chapters(chapters, split_large_chapters=False, total_pages=5)
+    assert normalized[0]["section_type"] == "prologue"
+
+
+def test_build_parser_diagnostics_includes_language_info():
+    chapters = [{"title": "Ch 1", "text_parts": ["c"], "images": [], "section_type": "chapter"}]
+    normalized = [{"number": 1, "title": "Ch 1", "text": "c"}]
+
+    diagnostics = _build_parser_diagnostics(
+        chapters,
+        normalized_chapters=normalized,
+        total_pages=10,
+        repeated_noise=set(),
+        fallback_strategy=None,
+        forced_large_chapter_split=False,
+        anomalies=[],
+        diagnostics_state={
+            "text_line_count": 50,
+            "noise_lines_removed": 0,
+            "noise_reason_counts": {},
+            "inline_artifacts_removed": 0,
+        },
+        detected_language="fr",
+        detected_language_confidence=0.92,
+    )
+
+    assert diagnostics["detected_language"] == "fr"
+    assert diagnostics["detected_language_confidence"] == 0.92
+    assert diagnostics["section_type_counts"] == {"chapter": 1}
+    assert diagnostics["toc_detected"] is False
+    assert diagnostics["front_matter_count"] == 0
+    assert diagnostics["parser_version"] == "pdf_linewise_v4"
+
+
+def test_build_parser_diagnostics_reports_toc_and_front_matter():
+    chapters = [
+        {"title": "Preface", "text_parts": ["p"], "images": [], "section_type": "preface"},
+        {"title": "TOC", "text_parts": ["t"], "images": [], "section_type": "toc"},
+        {"title": "Chapitre 1", "text_parts": ["1"], "images": [], "section_type": "chapter"},
+    ]
+    normalized = [{"number": 1, "title": "Chapitre 1", "text": "1"}]
+
+    diagnostics = _build_parser_diagnostics(
+        chapters,
+        normalized_chapters=normalized,
+        total_pages=20,
+        repeated_noise=set(),
+        fallback_strategy=None,
+        forced_large_chapter_split=False,
+        anomalies=[],
+        diagnostics_state={
+            "text_line_count": 100,
+            "noise_lines_removed": 0,
+            "noise_reason_counts": {},
+            "inline_artifacts_removed": 0,
+        },
+        detected_language="fr",
+    )
+
+    assert diagnostics["toc_detected"] is True
+    assert diagnostics["front_matter_count"] == 1
+    assert diagnostics["section_type_counts"]["toc"] == 1
+    assert diagnostics["section_type_counts"]["preface"] == 1
+
+
+def test_build_parser_diagnostics_backward_compat_without_language():
+    chapters = [{"title": "I", "text_parts": ["c"], "images": [], "section_type": "unknown"}]
+    normalized = [{"number": 1, "title": "I", "text": "c"}]
+
+    diagnostics = _build_parser_diagnostics(
+        chapters,
+        normalized_chapters=normalized,
+        total_pages=5,
+        repeated_noise=set(),
+        fallback_strategy=None,
+        forced_large_chapter_split=False,
+        anomalies=[],
+        diagnostics_state={
+            "text_line_count": 10,
+            "noise_lines_removed": 0,
+            "noise_reason_counts": {},
+            "inline_artifacts_removed": 0,
+        },
+    )
+
+    assert diagnostics["detected_language"] == "en"

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react"
 import { useRef } from "react"
 import dynamic from "next/dynamic"
-import { startTransition, Suspense, useEffect, useState } from "react"
+import { startTransition, Suspense, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { LibraryWorkspaceHeader } from "@/components/library/LibraryWorkspaceHeader"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -259,7 +260,17 @@ export function LibraryClient() {
 
   useEffect(() => {
     if (!pinsReady) return
-    window.localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedIds))
+    const id = window.requestIdleCallback
+      ? window.requestIdleCallback(() => {
+          window.localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedIds))
+        })
+      : window.setTimeout(() => {
+          window.localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedIds))
+        }, 0)
+    return () => {
+      if (typeof id === "number") window.clearTimeout(id)
+      else if (window.cancelIdleCallback) window.cancelIdleCallback(id as number)
+    }
   }, [pinnedIds, pinsReady])
 
   useEffect(() => {
@@ -295,24 +306,36 @@ export function LibraryClient() {
 
   const normalizedSearch = search.trim().toLowerCase()
   const visibleBooks = books.filter((book) => !book.hidden_at)
-  const filteredBooks = visibleBooks
-    .filter((book) => (showArchived ? true : !book.archived_at))
-    .filter((book) => (modeFilter === "all" ? true : book.mode === modeFilter))
-    .filter((book) => (statusFilter === "all" ? true : book.status === statusFilter))
-    .filter((book) => matchesSearch(book, normalizedSearch))
-    .sort((left, right) => compareBooks(left, right, sortBy))
 
-  const explicitPinned = filteredBooks.filter((book) => pinnedIds[book.id] && !book.archived_at)
-  const fallbackPinned = [...filteredBooks]
-    .filter((book) => !book.archived_at)
-    .sort((left, right) => {
-      const leftScore = (left.mode === "author" ? 3 : 0) + (left.status === "ready" ? 2 : left.status === "processing" ? 1 : 0) + clampProgress(left.progress_pct)
-      const rightScore = (right.mode === "author" ? 3 : 0) + (right.status === "ready" ? 2 : right.status === "processing" ? 1 : 0) + clampProgress(right.progress_pct)
-      return rightScore - leftScore
-    })
-  const pinnedBooks = explicitPinned.length > 0 ? explicitPinned.slice(0, 3) : fallbackPinned.slice(0, 3)
-  const pinnedBookIds = new Set(pinnedBooks.map((book) => book.id))
-  const allProjectBooks = filteredBooks.filter((book) => !pinnedBookIds.has(book.id))
+  const { filteredBooks, explicitPinned, fallbackPinned, pinnedBooks, pinnedBookIds, allProjectBooks } = useMemo(() => {
+    const filtered = visibleBooks
+      .filter((book) => (showArchived ? true : !book.archived_at))
+      .filter((book) => (modeFilter === "all" ? true : book.mode === modeFilter))
+      .filter((book) => (statusFilter === "all" ? true : book.status === statusFilter))
+      .filter((book) => matchesSearch(book, normalizedSearch))
+      .sort((left, right) => compareBooks(left, right, sortBy))
+
+    const explicit = filtered.filter((book) => pinnedIds[book.id] && !book.archived_at)
+    const fallback = [...filtered]
+      .filter((book) => !book.archived_at)
+      .sort((left, right) => {
+        const leftScore = (left.mode === "author" ? 3 : 0) + (left.status === "ready" ? 2 : left.status === "processing" ? 1 : 0) + clampProgress(left.progress_pct)
+        const rightScore = (right.mode === "author" ? 3 : 0) + (right.status === "ready" ? 2 : right.status === "processing" ? 1 : 0) + clampProgress(right.progress_pct)
+        return rightScore - leftScore
+      })
+    const pinned = explicit.length > 0 ? explicit.slice(0, 3) : fallback.slice(0, 3)
+    const pinnedIds_ = new Set(pinned.map((book) => book.id))
+    const all = filtered.filter((book) => !pinnedIds_.has(book.id))
+
+    return {
+      filteredBooks: filtered,
+      explicitPinned: explicit,
+      fallbackPinned: fallback,
+      pinnedBooks: pinned,
+      pinnedBookIds: pinnedIds_,
+      allProjectBooks: all,
+    }
+  }, [visibleBooks, showArchived, modeFilter, statusFilter, normalizedSearch, sortBy, pinnedIds])
   const filterSummary =
     modeFilter === "all" && statusFilter === "all" && !showArchived ? "Filter" : "Filtered"
 
@@ -417,40 +440,15 @@ export function LibraryClient() {
     <div className={`relative left-1/2 min-h-screen w-screen -translate-x-1/2 transition-colors duration-300 ${pageBackground}`}> 
       <div className="mx-auto w-full max-w-[1280px] px-4 pb-20 pt-10 sm:px-6 lg:px-10">
         <section className="space-y-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-4">
-              <h1 className={`font-display text-[3rem] leading-[0.94] tracking-[-0.04em] sm:text-[3.5rem] ${headingText}`}>Library</h1>
-              <p className={`max-w-2xl text-base leading-8 sm:text-[1.1rem] ${mutedText}`}>
-                Organize your writing projects. Stay focused, maintain continuity, and keep everything in one place.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row lg:pt-6">
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={() => router.push("/public/forum" as Route)}
-                className="min-h-11 rounded-xl"
-              >
-                <ForumIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
-                Beta Forum
-              </Button>
-
-              <Button
-                variant="primary"
-                size="md"
-                disabled={!interactiveReady}
-                onClick={() => {
-                  setUploadPreset({})
-                  setShowUpload(true)
-                }}
-                className="min-h-11 rounded-xl"
-              >
-                <PlusIcon />
-                New Project
-              </Button>
-            </div>
-          </div>
+          <LibraryWorkspaceHeader
+            createDisabled={!interactiveReady}
+            isDark={isDark}
+            onOpenForum={() => router.push("/public/forum" as Route)}
+            onCreate={() => {
+              setUploadPreset({})
+              setShowUpload(true)
+            }}
+          />
 
           <section className={`rounded-lg border p-4 sm:p-5 ${surfaceClass}`}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -485,7 +483,7 @@ export function LibraryClient() {
                   </Button>
 
                   {filterOpen ? (
-                    <div className={`absolute left-0 top-full z-30 mt-3 w-[18rem] rounded-md border p-4 shadow-dropdown ${surfaceClass}`}>
+                    <div className={`absolute left-0 top-full z-30 mt-3 w-[18rem] rounded-md border p-4 ${surfaceClass}`}>
                       <div className="space-y-4">
                         <div>
                           <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.24em] ${mutedText}`}>Project mode</p>
@@ -1014,7 +1012,7 @@ function ProjectCard({
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-4">
-            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border ${accentClass}`}>
+            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-md border ${accentClass}`}>
               <ProjectGlyph glyph={getProjectGlyph(book)} />
             </div>
 
@@ -1151,7 +1149,7 @@ function ProjectRow({
     >
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-4">
-          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border ${accentClass}`}>
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-md border ${accentClass}`}>
             <ProjectGlyph glyph={getProjectGlyph(book)} />
           </div>
 
@@ -1271,7 +1269,7 @@ function ProjectMenu({
   return (
     <div
       onClick={(event) => event.stopPropagation()}
-      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-md border py-2 shadow-dropdown ${isDark ? "border-white/[0.08] bg-[#1b2023]" : "border-stone-200 bg-white"}`}
+      className={`absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-md border py-2 ${isDark ? "border-white/[0.08] bg-[#1b2023]" : "border-stone-200 bg-white"}`}
     >
       <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} />
       {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} /> : null}
@@ -1343,7 +1341,7 @@ function CreateProjectCard({ isDark, onCreate }: { isDark: boolean; onCreate: ()
           : "border-stone-300 bg-[#fbfaf7] hover:border-[#9fc1be] hover:bg-white"
       }`}
     >
-      <div className={`flex h-16 w-16 items-center justify-center rounded-2xl border ${isDark ? "border-white/[0.08] bg-[#202528] text-[#d0c8bc]" : "border-stone-200 bg-white text-[#1f615d]"}`}>
+      <div className={`flex h-16 w-16 items-center justify-center rounded-md border ${isDark ? "border-white/[0.08] bg-[#202528] text-[#d0c8bc]" : "border-stone-200 bg-white text-[#1f615d]"}`}>
         <PlusLargeIcon />
       </div>
       <h3 className={`mt-6 text-xl font-semibold tracking-[-0.02em] ${isDark ? "text-[#f7f3ed]" : "text-stone-900"}`}>Create New Project</h3>
@@ -1386,15 +1384,6 @@ function FilterIcon({ className }: { className?: string }) {
   return (
     <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16l-6 7v5l-4 2v-7L4 6z" />
-    </svg>
-  )
-}
-
-function ForumIcon({ className }: { className?: string }) {
-  return (
-    <svg className={`h-5 w-5 ${className ?? ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 10h10M7 14h6" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2H9l-4 3v-3H5a2 2 0 01-2-2V7a2 2 0 012-2z" />
     </svg>
   )
 }

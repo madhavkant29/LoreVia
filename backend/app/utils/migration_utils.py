@@ -23,8 +23,12 @@ _DOWNGRADE_BLOCK_PATTERN = re.compile(
 _DESTRUCTIVE_UPGRADE_PATTERNS = (
     re.compile(r"\bop\.drop_table\s*\("),
     re.compile(r"\bop\.drop_column\s*\("),
+    re.compile(r"\bop\.drop_index\s*\("),
+    re.compile(r"\bop\.drop_constraint\s*\("),
     re.compile(r"\bBase\.metadata\.drop_all\s*\("),
     re.compile(r"(?i)\bop\.execute\(\s*[\"']\s*DROP\b"),
+    re.compile(r"(?i)\bop\.execute\(\s*[\"'][^\"']*\bTRUNCATE\b"),
+    re.compile(r"(?i)\bop\.execute\(\s*[\"'][^\"']*\bCASCADE\b"),
 )
 _DESTRUCTIVE_DOWNGRADE_PATTERNS = _DESTRUCTIVE_UPGRADE_PATTERNS
 

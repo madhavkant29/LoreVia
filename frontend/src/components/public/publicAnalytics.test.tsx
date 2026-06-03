@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PublicBookPageClient } from "./PublicBookPageClient"
+import { PublicUploadsAnalyticsPageClient } from "./PublicUploadsAnalyticsPageClient"
 import { PublicWriterProfilePageClient } from "./PublicWriterProfilePageClient"
 
 const trackViewMock = vi.fn()
@@ -98,6 +99,7 @@ describe("public analytics surfaces", () => {
     expect(container.textContent).toContain("12")
     expect(container.textContent).toContain("5")
     expect(container.textContent).toContain("18")
+    expect(container.querySelector('a[href="/public"]')?.textContent).toContain("Back to public library")
     expect(trackViewMock).toHaveBeenCalledWith("book-1", { eventType: "book_view" })
     unmount()
   })
@@ -156,6 +158,7 @@ describe("public analytics surfaces", () => {
     expect(container.textContent).toContain("1.2k words")
     expect(container.textContent).toContain("Published books")
     expect(container.textContent).toContain("Public Sample")
+    expect(container.querySelector('a[href="/public"]')?.textContent).toContain("Back to public library")
     unmount()
   })
 
@@ -175,6 +178,28 @@ describe("public analytics surfaces", () => {
     expect(container.textContent).toContain("No public posts are visible for this writer yet.")
     expect(container.textContent).toContain("This writer has not surfaced any visible creator-published public books yet.")
     expect(container.textContent).not.toContain("Could not load this writer profile.")
+    unmount()
+  })
+
+  it("renders useful empty states when public upload analytics are unavailable", () => {
+    const { container, unmount } = renderWithQuery(
+      <PublicUploadsAnalyticsPageClient
+        overview={{
+          total_public_books: 0,
+          total_authors: 0,
+          total_visible_chapters: 0,
+          total_visible_words: 0,
+          uploads_last_30_days: 0,
+          genre_breakdown: [],
+          work_type_breakdown: [],
+          recent_uploads: [],
+        }}
+      />,
+    )
+
+    expect(container.textContent).toContain("Genre metrics will appear")
+    expect(container.textContent).toContain("Work type metrics will appear")
+    expect(container.textContent).toContain("Recent creator uploads will appear")
     unmount()
   })
 })

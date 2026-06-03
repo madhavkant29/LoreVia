@@ -104,7 +104,7 @@ export function reorderWorkspaceSceneTree(
 
 export function parseStoredSceneFolders(raw: string | null | undefined) {
   try {
-    const parsed = raw ? JSON.parse(raw) : []
+    const parsed = raw && typeof raw === "string" ? JSON.parse(raw) : []
     if (!Array.isArray(parsed)) return []
 
     return parsed.map((value) => normalizeWorkspaceFolderPath(String(value))).filter(Boolean)

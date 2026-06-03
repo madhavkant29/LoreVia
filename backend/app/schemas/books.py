@@ -438,6 +438,12 @@ class ManuscriptReprocessOut(BaseModel):
     status: str
     chapters_queued: int = 0
     total_words: int = 0
+    upload_charge_consumed: bool = False
+    charge_kind: Literal["manual_reprocess"] | None = None
+
+
+class ManuscriptReprocessBody(BaseModel):
+    confirm_upload_charge: bool = False
 
 
 class PreWritingCharacterOut(BaseModel):

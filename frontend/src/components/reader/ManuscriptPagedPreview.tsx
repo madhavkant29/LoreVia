@@ -119,7 +119,7 @@ export function ManuscriptPagedPreview({
 
   return (
     <div
-      className={`rounded-lg border p-4 shadow-card ${
+      className={`rounded-lg border p-4 ${
         isDark ? "border-white/10 bg-[#0c1118]/92" : "border-[#d8d0c4] bg-[#f8f4ee]"
       }`}
     >
@@ -136,7 +136,7 @@ export function ManuscriptPagedPreview({
           <select
             aria-label="Preview fit"
             defaultValue="fit-page"
-            className={`rounded-xl border px-3 py-2 text-xs font-medium ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+            className={`rounded-md border px-3 py-2 text-xs font-medium ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
           >
             <option value="fit-page">Fit to page</option>
           </select>
@@ -145,7 +145,7 @@ export function ManuscriptPagedPreview({
             onClick={() => goToPage(currentPage - 1)}
             disabled={currentPage <= 1}
             aria-label="Previous preview page"
-            className={`rounded-xl border px-3 py-2 font-semibold disabled:opacity-40 ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+            className={`rounded-md border px-3 py-2 font-semibold disabled:opacity-40 ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
           >
             Prev
           </button>
@@ -154,7 +154,7 @@ export function ManuscriptPagedPreview({
             onClick={() => goToPage(currentPage + 1)}
             disabled={currentPage >= pageCount}
             aria-label="Next preview page"
-            className={`rounded-xl border px-3 py-2 font-semibold disabled:opacity-40 ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+            className={`rounded-md border px-3 py-2 font-semibold disabled:opacity-40 ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
           >
             Next
           </button>

@@ -18,6 +18,7 @@ from app.utils.billing_utils import (
     VALID_PAID_PLAN_CODES,
     append_billing_confirmation_token,
     billing_interval_for_plan,
+    consume_billing_confirmation_token_once,
     create_billing_confirmation_token,
     normalize_plan_code,
     paddle_plan_is_configured,
@@ -144,6 +145,11 @@ async def get_checkout_confirmation(
 
     plan = normalize_plan_code(summary.plan or subscription.plan)
     display_name = summary.display_name or plan.replace("_", " ").title()
+    if token_is_valid and not await consume_billing_confirmation_token_once(
+        resolved_confirmation_token,
+        normalized_transaction_id,
+    ):
+        raise HTTPException(401, "Confirmation token has already been used.")
 
     return BillingConfirmationOut(
         transaction_id=summary.transaction_id,

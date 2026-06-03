@@ -6,6 +6,11 @@ const MISSING_ACCOUNT_OR_METHOD_MESSAGE =
 const INVALID_CREDENTIALS_MESSAGE = "Invalid email or password."
 const TEMPORARY_SIGN_IN_MESSAGE = "Sign-in was temporarily unavailable. Please try again."
 
+function deviceAccountLimitMessage(accountCount: number): string {
+  const label = accountCount === 1 ? "account" : "accounts"
+  return `This device is already linked to ${accountCount} LoreVia ${label}. Sign in with one of those accounts or use a different device or browser profile.`
+}
+
 function isTemporaryOriginError(detail: string): boolean {
   const normalized = detail.toLowerCase()
   return (
@@ -39,7 +44,20 @@ export function normalizeLoginError(error: string | null | undefined, status?: n
     return INVALID_CREDENTIALS_MESSAGE
   }
 
+  const deviceAccountLimitMatch = detail.match(/^This device is already linked to the maximum of (\d+) accounts\.$/)
+  if (deviceAccountLimitMatch) {
+    return deviceAccountLimitMessage(Number(deviceAccountLimitMatch[1]))
+  }
+
+  if (detail === "This email is already linked to another Supabase identity.") {
+    return "This email is already associated with a different Google account. Contact support if you need to relink."
+  }
+
   if (detail === "User not found") {
+    return MISSING_ACCOUNT_OR_METHOD_MESSAGE
+  }
+
+  if (detail === "No account found for this Google login. Please create an account first via the Register page.") {
     return MISSING_ACCOUNT_OR_METHOD_MESSAGE
   }
 

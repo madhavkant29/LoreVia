@@ -11,7 +11,6 @@ export function WorkspacePage({
 }) {
   return (
     <div className={cn("app-shell", className)}>
-      <div className="app-shell__mesh" aria-hidden="true" />
       <div className="app-container">{children}</div>
     </div>
   )

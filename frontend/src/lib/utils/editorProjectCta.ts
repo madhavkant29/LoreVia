@@ -1,24 +1,26 @@
 import type { Book } from "@/types/book"
 
-export interface EditorProjectCta {
+export interface ReprocessCta {
   label: string
   disabled: boolean
   disabledReason: string | null
   saveLocked: boolean
   isProcessing: boolean
+  visible: boolean
 }
 
-export function deriveEditorProjectCta(
+export function deriveReprocessCta(
   book: Book | null | undefined,
   hasUnsavedDrafts: boolean,
-): EditorProjectCta {
-  if (!book || !book.is_editor_project) {
+): ReprocessCta {
+  if (!book || book.mode !== "author" || book.access_class !== "owner") {
     return {
       label: "",
       disabled: true,
       disabledReason: null,
       saveLocked: false,
       isProcessing: false,
+      visible: false,
     }
   }
 
@@ -42,6 +44,7 @@ export function deriveEditorProjectCta(
       disabledReason: "Reprocessing is already in progress",
       saveLocked: true,
       isProcessing: true,
+      visible: true,
     }
   }
 
@@ -55,6 +58,7 @@ export function deriveEditorProjectCta(
       disabledReason: "Save at least one chapter before reprocessing",
       saveLocked: false,
       isProcessing: false,
+      visible: true,
     }
   }
 
@@ -65,6 +69,7 @@ export function deriveEditorProjectCta(
       disabledReason: "Save your changes before reprocessing",
       saveLocked: false,
       isProcessing: false,
+      visible: true,
     }
   }
 
@@ -74,5 +79,6 @@ export function deriveEditorProjectCta(
     disabledReason: null,
     saveLocked: false,
     isProcessing: false,
+    visible: true,
   }
 }

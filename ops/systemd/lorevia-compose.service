@@ -8,8 +8,9 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/lorevia/current
-ExecStart=/bin/bash -lc 'set -a; source /opt/lorevia/current/backend/.env; set +a; /usr/bin/docker compose --env-file /opt/lorevia/current/backend/.env -f docker-compose.yml up -d'
-ExecStop=/bin/bash -lc 'set -a; source /opt/lorevia/current/backend/.env; set +a; /usr/bin/docker compose --env-file /opt/lorevia/current/backend/.env -f docker-compose.yml down'
+EnvironmentFile=./backend/.env
+ExecStart=/usr/bin/docker compose --env-file ./backend/.env -f docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose --env-file ./backend/.env -f docker-compose.yml down
 TimeoutStartSec=0
 Restart=no
 

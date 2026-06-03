@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -12,10 +13,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from fastapi import HTTPException
 import jwt
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.book import Book, SeriesBook
+from app.core.redis import consume_billing_confirmation_token
+from app.models.book import Book, BookUploadCharge, SeriesBook
 from app.models.intelligence import WorldBuildingDocument
 from app.models.user import SubscriptionEvent, User
 
@@ -196,6 +199,7 @@ def create_billing_confirmation_token(transaction_id: str) -> str:
     return jwt.encode(
         {
             "txn": normalized_transaction_id,
+            "jti": secrets.token_urlsafe(24),
             "exp": expire,
             "type": BILLING_CONFIRMATION_TOKEN_TYPE,
         },
@@ -204,17 +208,34 @@ def create_billing_confirmation_token(transaction_id: str) -> str:
     )
 
 
-def verify_billing_confirmation_token(token: str | None, transaction_id: str) -> bool:
+def _decode_billing_confirmation_token(token: str | None, transaction_id: str) -> dict[str, Any] | None:
     if not token:
-        return False
+        return None
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
     except jwt.PyJWTError:
-        return False
-    return (
+        return None
+    if (
         str(payload.get("type") or "") == BILLING_CONFIRMATION_TOKEN_TYPE
         and str(payload.get("txn") or "").strip() == transaction_id.strip()
-    )
+        and str(payload.get("jti") or "").strip()
+    ):
+        return payload
+    return None
+
+
+def verify_billing_confirmation_token(token: str | None, transaction_id: str) -> bool:
+    return _decode_billing_confirmation_token(token, transaction_id) is not None
+
+
+async def consume_billing_confirmation_token_once(token: str | None, transaction_id: str) -> bool:
+    payload = _decode_billing_confirmation_token(token, transaction_id)
+    if payload is None:
+        return False
+    ttl_seconds = int(payload.get("exp") or 0) - int(datetime.now(UTC).timestamp())
+    if ttl_seconds <= 0:
+        return False
+    return await consume_billing_confirmation_token(str(payload["jti"]), ttl_seconds)
 
 
 def append_billing_confirmation_token(checkout_url: str, confirmation_token: str) -> str:
@@ -233,13 +254,6 @@ def tier_from_plan_code(plan: str | None, price_id: str = "", plan_name: str = "
     if normalized_plan.startswith("reader_"):
         return FREE_TIER
 
-    fallback = f"{plan_name} {price_id}".lower()
-    if "architect" in fallback or "lore architect" in fallback or "power" in fallback:
-        return ARCHITECT_TIER
-    if "author" in fallback or "pro" in fallback:
-        return AUTHOR_TIER
-    if "reader" in fallback:
-        return FREE_TIER
     return FREE_TIER
 
 
@@ -381,9 +395,18 @@ async def worldbuilding_upload_cost_for_book(db: AsyncSession, book: Any) -> int
 
 async def calculate_upload_usage_summary(db: AsyncSession, user: Any) -> UploadUsageSummary:
     user_id = getattr(user, "id")
-    manuscript_uploads = int(
+    base_manuscript_uploads = int(
         (await db.execute(select(func.count(Book.id)).where(Book.user_id == user_id))).scalar() or 0
     )
+    extra_manuscript_uploads = int(
+        (
+            await db.execute(
+                select(func.coalesce(func.sum(BookUploadCharge.quantity), 0)).where(BookUploadCharge.user_id == user_id)
+            )
+        ).scalar()
+        or 0
+    )
+    manuscript_uploads = base_manuscript_uploads + extra_manuscript_uploads
     upload_limit = upload_limit_for_user(user)
 
     worldbuilding_rows = (
@@ -413,6 +436,63 @@ async def calculate_upload_usage_summary(db: AsyncSession, user: Any) -> UploadU
         uploads_remaining=uploads_remaining,
         upload_limit_unlimited=upload_limit_unlimited,
     )
+
+
+async def record_book_upload_charge(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    book_id: uuid.UUID,
+    charge_kind: str,
+    source_id: str,
+    quantity: int = 1,
+    metadata: dict[str, Any] | None = None,
+) -> BookUploadCharge:
+    normalized_kind = " ".join(str(charge_kind or "").split()).strip()
+    normalized_source_id = " ".join(str(source_id or "").split()).strip()
+    if not normalized_kind:
+        raise ValueError("charge_kind_required")
+    if not normalized_source_id:
+        raise ValueError("source_id_required")
+
+    existing = (
+        await db.execute(
+            select(BookUploadCharge).where(
+                BookUploadCharge.user_id == user_id,
+                BookUploadCharge.charge_kind == normalized_kind,
+                BookUploadCharge.source_id == normalized_source_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    charge = BookUploadCharge(
+        user_id=user_id,
+        book_id=book_id,
+        charge_kind=normalized_kind,
+        quantity=max(1, int(quantity or 1)),
+        source_id=normalized_source_id,
+        metadata_json=metadata or {},
+    )
+    try:
+        async with db.begin_nested():
+            db.add(charge)
+            await db.flush()
+        return charge
+    except IntegrityError:
+        existing_after_race = (
+            await db.execute(
+                select(BookUploadCharge).where(
+                    BookUploadCharge.user_id == user_id,
+                    BookUploadCharge.charge_kind == normalized_kind,
+                    BookUploadCharge.source_id == normalized_source_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_after_race is None:
+            raise
+        return existing_after_race
 
 
 async def ensure_upload_capacity(
@@ -748,9 +828,11 @@ async def build_subscription_metrics_summary(
 
 
 def paddle_plan_from_event_data(data: dict[str, Any]) -> str:
-    custom_data = data.get("custom_data") or {}
-    if isinstance(custom_data, dict) and custom_data.get("plan"):
-        return normalize_plan_code(str(custom_data["plan"]))
+    price_id = paddle_price_id_from_event_data(data).strip()
+    if price_id:
+        for plan_code, env_keys in PLAN_PRICE_ID_ENV_KEYS.items():
+            if any(str(getattr(settings, env_key, "") or "").strip() == price_id for env_key in env_keys):
+                return normalize_plan_code(plan_code)
 
     items = data.get("items") or []
     for item in items:

@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { ChapterStatusChip } from "@/components/reader/ChapterStatusChip"
 import type { ChapterListItem } from "@/types/reader"
 
@@ -35,7 +36,7 @@ function buildMetadata(chapter: ChapterListItem) {
   return items
 }
 
-export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onToggleRead }: ChapterRowProps) {
+export const ChapterRow = memo(function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onToggleRead }: ChapterRowProps) {
   const title = chapter.title || `${unitLabel} ${chapter.number}`
   const metadata = buildMetadata(chapter)
 
@@ -52,8 +53,8 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
         <div className="flex items-start gap-4">
           <div
             aria-hidden="true"
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${
-              isDark ? "border-white/10 bg-[linear-gradient(180deg,#131d28_0%,#101822_100%)] text-teal-200" : "border-stone-200 bg-stone-50 text-teal-700"
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md border ${
+              isDark ? "border-white/10 bg-[#101822] text-teal-200" : "border-stone-200 bg-stone-50 text-teal-700"
             }`}
           >
             <BookChapterIcon />
@@ -127,7 +128,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
       </div>
     </article>
   )
-}
+})
 
 function BookChapterIcon() {
   return (

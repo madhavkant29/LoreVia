@@ -169,14 +169,19 @@ async def refresh_session_active(user_id: str, session_id: str) -> bool:
     return bool(await r.exists(key_refresh_session(user_id, session_id)))
 
 
-async def revoke_refresh_session(user_id: str, session_id: str) -> None:
+async def consume_refresh_session(user_id: str, session_id: str) -> bool:
     r = await get_redis()
-    await r.delete(key_refresh_session(user_id, session_id))
+    return bool(await r.getdel(key_refresh_session(user_id, session_id)))
 
 
 async def remember_webhook_event(event_id: str, ttl_seconds: int = 7 * 24 * 3600) -> bool:
     r = await get_redis()
     return bool(await r.set(key_webhook_event(event_id), "1", ex=ttl_seconds, nx=True))
+
+
+async def consume_billing_confirmation_token(token_id: str, ttl_seconds: int) -> bool:
+    r = await get_redis()
+    return bool(await r.set(key_billing_confirmation_token(token_id), "1", ex=max(1, ttl_seconds), nx=True))
 
 
 async def store_password_reset_token(token: str, user_id: str, ttl_seconds: int) -> None:
@@ -194,13 +199,10 @@ async def store_password_reset_token(token: str, user_id: str, ttl_seconds: int)
 async def consume_password_reset_token(token: str) -> str | None:
     r = await get_redis()
     key = key_password_reset(_hash_ephemeral_token(token))
-    value = await r.get(key)
+    value = await r.getdel(key)
     if not value:
         return None
-    async with r.pipeline(transaction=True) as pipe:
-        pipe.delete(key)
-        pipe.delete(key_password_reset_user(value))
-        await pipe.execute()
+    await delete_key_if_value(key_password_reset_user(value), token)
     return value
 
 
@@ -223,13 +225,10 @@ async def store_email_verification_token(token: str, user_id: str, ttl_seconds: 
 async def consume_email_verification_token(token: str) -> str | None:
     r = await get_redis()
     key = key_email_verification(token)
-    value = await r.get(key)
+    value = await r.getdel(key)
     if not value:
         return None
-    async with r.pipeline(transaction=True) as pipe:
-        pipe.delete(key)
-        pipe.delete(key_email_verification_user(value))
-        await pipe.execute()
+    await delete_key_if_value(key_email_verification_user(value), token)
     return value
 
 
@@ -305,26 +304,27 @@ end
 """
 
 
+async def delete_key_if_value(key: str, expected_value: str) -> bool:
+    r = await get_redis()
+    eval_method = getattr(r, "eval", None)
+    if callable(eval_method):
+        result = await eval_method(_DELETE_IF_OWNER_SCRIPT, 1, key, expected_value)
+        return bool(result)
+
+    current_value = await r.get(key)
+    if isinstance(current_value, bytes):
+        current_value = current_value.decode()
+    if current_value != expected_value:
+        return False
+    return bool(await r.delete(key))
+
+
 async def cache_delete_if_owner(key: str, owner_token: str) -> bool:
     r = await get_redis()
     serialized = json.dumps(owner_token, default=str)
-    eval_method = getattr(r, "eval", None)
-    if callable(eval_method):
-        result = await eval_method(_DELETE_IF_OWNER_SCRIPT, 1, key, serialized)
-        return bool(result)
-
-    # Test fakes do not implement Lua eval; fall back to a simple ownership check.
-    current_owner = await r.get(key)
-    if isinstance(current_owner, bytes):
-        current_owner = current_owner.decode()
-    
-    # Compare the actual stored value with the serialized token
-    # Handle both JSON-serialized and raw string values for test compatibility
-    if current_owner == serialized or current_owner == owner_token:
-        deleted = await r.delete(key)
-        return bool(deleted)
-    
-    return False
+    if await delete_key_if_value(key, serialized):
+        return True
+    return await delete_key_if_value(key, owner_token)
 
 
 def key_cron_lock(task_name: str) -> str:
@@ -361,6 +361,10 @@ def key_admin_step_up(user_id: str, session_id: str) -> str:
 
 def key_webhook_event(event_id: str) -> str:
     return f"webhook:event:{event_id}"
+
+
+def key_billing_confirmation_token(token_id: str) -> str:
+    return f"billing_confirmation:consumed:{token_id}"
 
 
 def key_password_reset(token: str) -> str:
@@ -814,9 +818,10 @@ def key_public_forum_cache_version() -> str:
     return "public:forum:version"
 
 
-def key_public_forum_posts(version: int, q: str, page: int, page_size: int) -> str:
+def key_public_forum_posts(version: int, q: str, page: int, page_size: int, thread_type: str | None = None) -> str:
     query_hash = hashlib.md5(q.strip().lower().encode("utf-8")).hexdigest()[:10]
-    return f"public:forum:posts:v{version}:{query_hash}:{page}:{page_size}"
+    thread_type_key = (thread_type or "all").strip().lower()
+    return f"public:forum:posts:v{version}:{thread_type_key}:{query_hash}:{page}:{page_size}"
 
 
 def key_public_forum_post_detail(version: int, post_id: str) -> str:

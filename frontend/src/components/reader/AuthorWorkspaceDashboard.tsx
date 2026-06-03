@@ -248,7 +248,7 @@ export function AuthorWorkspaceDashboard({
                 : "Deep tools for planning, structure, and story intelligence."}
             </p>
           </div>
-          <div role="tablist" aria-label="Author workspace tabs" className={`grid gap-1 rounded-2xl border p-1 sm:grid-cols-3 xl:grid-cols-5 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
+          <div role="tablist" aria-label="Author workspace tabs" className={`grid gap-1 rounded-md border p-1 sm:grid-cols-3 xl:grid-cols-5 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
             {([
               ["overview", "Overview"],
               ["revision", "Revision Hub"],
@@ -485,7 +485,7 @@ function CurrentProjectCard({
               <button
                 type="button"
                 onClick={onOpenManuscript}
-                className={`inline-flex min-h-11 items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
               >
                 <Icon name="book" />
                 Open Manuscript Editor
@@ -553,7 +553,7 @@ function RecentChaptersCard({
             key={chapter.number}
             type="button"
             onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)}
-            className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-start justify-between gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
             <div className="min-w-0">
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
@@ -563,7 +563,7 @@ function RecentChaptersCard({
             <span className="text-xs font-semibold text-teal-600">{chapter.read ? "Read" : "Open"}</span>
           </button>
         )) : (
-          <p className={`rounded-2xl border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+          <p className={`rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
             {unitTitle} indexing is still syncing.
           </p>
         )}
@@ -628,7 +628,7 @@ function CurrentProjectHero({
             <button
               type="button"
               onClick={onOpenRelationships}
-              className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-md border px-4 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
             >
               <Icon name="users" />
               Open relationship map
@@ -659,7 +659,7 @@ function CurrentProjectHero({
                 <button
                   type="button"
                   onClick={onOpenManuscript}
-                  className={`inline-flex min-h-12 items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-800"}`}
+                  className={`inline-flex min-h-12 items-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-800"}`}
                 >
                   <Icon name="book" />
                   Open manuscript editor
@@ -668,7 +668,7 @@ function CurrentProjectHero({
               <button
                 type="button"
                 onClick={() => onNavigate(`/${bookId}/chapters`)}
-                className={`inline-flex min-h-12 items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
+                className={`inline-flex min-h-12 items-center gap-2 rounded-md border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
               >
                 <Icon name="file" />
                 Review chapters
@@ -676,7 +676,7 @@ function CurrentProjectHero({
               <button
                 type="button"
                 onClick={() => onNavigate(`/${bookId}/summaries`)}
-                className={`inline-flex min-h-12 items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
+                className={`inline-flex min-h-12 items-center gap-2 rounded-md border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
               >
                 <Icon name="search" />
                 Open summaries
@@ -731,7 +731,7 @@ function CurrentProjectHero({
                 key={chapter.number}
                 type="button"
                 onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)}
-                className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                className={`flex w-full items-start justify-between gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
               >
                 <div className="min-w-0">
                   <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
@@ -742,7 +742,7 @@ function CurrentProjectHero({
                 </span>
               </button>
             )) : (
-              <p className={`rounded-2xl border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+              <p className={`rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
                 {unitTitle} indexing is still syncing.
               </p>
             )}
@@ -813,7 +813,7 @@ function StoryPulseCard({
 
       <div className="mt-5 space-y-3">
         {topMetrics.map((metric) => (
-          <div key={metric.label} className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+          <div key={metric.label} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
             <div className="flex items-center justify-between gap-3">
               <span className={isDark ? "min-w-0 break-words text-sm text-slate-200" : "min-w-0 break-words text-sm text-slate-700"}>{metric.label}</span>
               <span className="text-sm font-semibold text-teal-700">{metric.score}%</span>
@@ -824,7 +824,7 @@ function StoryPulseCard({
 
       <Link
         href={`/${bookId}/analysis` as Route}
-        className={`mt-5 inline-flex w-full items-center justify-center rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+        className={`mt-5 inline-flex w-full items-center justify-center rounded-md border px-4 py-3 text-sm font-semibold transition ${
           isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
         }`}
       >
@@ -875,7 +875,7 @@ function ActiveIssuesCard({
         </p>
 
         {processingSummary ? (
-          <p className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+          <p className={`mt-4 rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
             {processingSummary}
           </p>
         ) : null}
@@ -883,7 +883,7 @@ function ActiveIssuesCard({
         <button
           type="button"
           onClick={() => onNavigate(`/${bookId}/reports`)}
-          className={`mt-4 inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+          className={`mt-4 inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
         >
           Create revision checklist
         </button>
@@ -894,7 +894,7 @@ function ActiveIssuesCard({
             key={issue.title}
             type="button"
             onClick={() => onNavigate(issue.href)}
-            className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
             <Icon name={issue.icon} className="h-5 w-5 text-teal-700" />
             <div className="min-w-0 flex-1">
@@ -927,7 +927,7 @@ function CompactQuickLinksCard({
             key={link.title}
             type="button"
             onClick={() => onNavigate(link.href)}
-            className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-start gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
             <Icon name={link.icon} className="mt-0.5 h-5 w-5 text-teal-700" />
             <div className="min-w-0">
@@ -1002,7 +1002,7 @@ function RecentSignalsCard({
             key={`${entry.title}-${entry.note}`}
             type="button"
             onClick={() => onNavigate(entry.href)}
-            className={`w-full rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`w-full rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
               <p className={`break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.title}</p>
               <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{entry.note}</p>
@@ -1172,7 +1172,7 @@ function RevisionHubTab({
               ["Worldbuilding gaps", revisionIntelligence.confusion_map.length, "medium"],
               ["Timeline / order", lowCount, "low"],
             ].map(([label, count, severity]) => (
-              <div key={label} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+              <div key={label} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <span className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{label}</span>
                   <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClass(String(severity)[0].toUpperCase() + String(severity).slice(1), isDark)}`}>{count}</span>
@@ -1190,7 +1190,7 @@ function RevisionHubTab({
           </div>
           <div className="mt-4 space-y-2">
             {chapterFindings.map(({ chapter, count }) => (
-                <div key={chapter.number} className={`flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+                <div key={chapter.number} className={`flex items-center justify-between gap-3 rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                   <div className="min-w-0">
                     <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>Chapter {chapter.number}</p>
                     <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{chapter.title || "Untitled"}</p>
@@ -1204,7 +1204,7 @@ function RevisionHubTab({
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recommended fixes</p>
           <div className="mt-4 space-y-3">
             {allItems.slice(0, 3).map((item) => (
-              <div key={item.id} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+              <div key={item.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                 <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
                 <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.recommendation || item.description}</p>
               </div>
@@ -1306,7 +1306,7 @@ function PlanningTab({
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Session goals</p>
             <div className="mt-4 space-y-3">
               {incompleteItems.slice(0, 3).map((item) => (
-                <div key={item.id} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+                <div key={item.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                   <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
                   <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Due {formatPlannerDate(item.due_date)}</p>
                 </div>
@@ -1429,14 +1429,14 @@ function StoryMapTab({
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+            <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Active characters</p>
               <div className="mt-3 space-y-3">
                 {(preWritingCheck?.active_characters ?? []).slice(0, 4).map((character) => (
                   <div key={character.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{character.name}</p>
                     <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {character.role || "Character"}{character.last_seen_chapter ? ` Ã¢â‚¬Â¢ last seen in Chapter ${character.last_seen_chapter}` : ""}
+                      {character.role || "Character"}{character.last_seen_chapter ? ` / last seen in Chapter ${character.last_seen_chapter}` : ""}
                     </p>
                   </div>
                 ))}
@@ -1444,14 +1444,14 @@ function StoryMapTab({
               </div>
             </div>
 
-            <div className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+            <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Unresolved threads</p>
               <div className="mt-3 space-y-3">
                 {(preWritingCheck?.unresolved_threads ?? []).slice(0, 4).map((thread) => (
                   <div key={thread.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{thread.title}</p>
                     <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {thread.status}{thread.introduced_at ? ` Ã¢â‚¬Â¢ introduced in Chapter ${thread.introduced_at}` : ""}
+                      {thread.status}{thread.introduced_at ? ` / introduced in Chapter ${thread.introduced_at}` : ""}
                     </p>
                   </div>
                 ))}
@@ -1474,7 +1474,7 @@ function StoryMapTab({
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Continuity findings</p>
           <div className="mt-4 space-y-3">
             {(preWritingCheck?.alerts ?? []).slice(0, 5).map((alert) => (
-              <div key={`${alert.title}-${alert.chapter_ref ?? "na"}`} className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+              <div key={`${alert.title}-${alert.chapter_ref ?? "na"}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{alert.title}</p>
                   {alert.chapter_ref ? <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Ch {alert.chapter_ref}</span> : null}
@@ -1527,7 +1527,7 @@ function ProjectOverviewCard({
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace stats</p>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
-          <div key={stat.label} className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+          <div key={stat.label} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
             <Icon name={stat.icon} className="h-5 w-5 text-teal-700" />
             <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
             <p className={`mt-2 break-words text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{stat.value}</p>
@@ -1590,7 +1590,7 @@ function DailyGoalCard({ isDark, dailyWords, dailyTarget, onUpdateGoal }: { isDa
 function CompactProgressRow({ isDark, label, value, percent, tone = "teal" }: { isDark: boolean; label: string; value: string; percent: number; tone?: "teal" | "amber" | "rose" }) {
   const color = tone === "amber" ? "bg-amber-400" : tone === "rose" ? "bg-rose-400" : "bg-teal-500"
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+    <div className={`rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
       <div className="flex items-center justify-between gap-3">
         <span className={`min-w-0 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{label}</span>
         <span className={`max-w-[58%] break-words text-right text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
@@ -1604,7 +1604,7 @@ function CompactProgressRow({ isDark, label, value, percent, tone = "teal" }: { 
 
 function InfoLine({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
   return (
-    <div className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+    <div className={`flex items-center justify-between gap-3 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
       <span className={isDark ? "min-w-0 text-slate-500" : "min-w-0 text-slate-400"}>{label}</span>
       <span className={`max-w-[56%] break-words text-right font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
     </div>
@@ -1632,7 +1632,7 @@ function ModeToggle({
     >
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 shadow-[0_10px_24px_-16px_rgba(13,148,136,0.8)] transition-transform duration-300 ease-out ${thumbClass}`}
+        className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 transition-transform duration-300 ease-out ${thumbClass}`}
       />
       {(["reader", "author"] as const).map((mode) => (
         <button
@@ -1660,7 +1660,7 @@ function ActionRow({ isDark, icon, title, body, onClick, tone = "default" }: { i
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+      className={`flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
     >
       <Icon name={icon} className={`h-5 w-5 ${iconClass}`} />
       <div className="min-w-0 flex-1">
@@ -1689,7 +1689,7 @@ function ScoreRing({ isDark, score, label }: { isDark: boolean; score: number; l
 
 function PlanningMetric({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
   return (
-    <div className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+    <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
       <p className={`mt-2 break-words text-lg font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
     </div>
@@ -1764,7 +1764,7 @@ function InsightsCard({ isDark, worldArticleCount, progress }: { isDark: boolean
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Insights</p>
       <div className="mt-4 space-y-3">
         {insights.map((insight, index) => (
-          <div key={insight} className={`rounded-2xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
+          <div key={insight} className={`rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
             <span className="mr-2 font-semibold text-teal-600">{index + 1}.</span>{insight}
           </div>
         ))}
@@ -1925,7 +1925,7 @@ function GoalCalendarCard({
                     key={day.value}
                     type="button"
                     onClick={() => setSelectedDate(day.value)}
-                    className={`min-h-[5.8rem] rounded-2xl border p-2 text-left transition ${
+                    className={`min-h-[5.8rem] rounded-md border p-2 text-left transition ${
                       selected
                         ? isDark ? "border-teal-800/25 bg-teal-800/10" : "border-teal-300 bg-teal-50"
                         : isDark ? "border-white/[0.05] bg-[#101720] hover:bg-[#16202b]" : "border-slate-200 bg-white hover:bg-slate-50"
@@ -1967,7 +1967,7 @@ function GoalCalendarCard({
 
             <div className="mt-4 space-y-3">
               {selectedItems.length > 0 ? selectedItems.map((item) => (
-                <div key={item.id} className={`rounded-2xl border p-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                <div key={item.id} className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                   <div className="flex items-start gap-3">
                     <input
                       type="checkbox"
@@ -1995,7 +1995,7 @@ function GoalCalendarCard({
                   </div>
                 </div>
               )) : (
-                <div className={`rounded-2xl border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+                <div className={`rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
                   Nothing is scheduled for this day yet.
                 </div>
               )}
@@ -2009,7 +2009,7 @@ function GoalCalendarCard({
                   onChange={(event) => setDraftTitle(event.target.value)}
                   disabled={!editable || saveState === "saving"}
                   placeholder={editable ? "Draft chapter, revise outline, finish scene..." : "Loading planner..."}
-                  className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                 />
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
                   <input
@@ -2020,13 +2020,13 @@ function GoalCalendarCard({
                     onChange={(event) => setDraftQuotaValue(event.target.value)}
                     disabled={!editable || saveState === "saving"}
                     placeholder="Quota"
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
                   />
                   <select
                     value={draftQuotaUnit}
                     onChange={(event) => setDraftQuotaUnit(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   >
                     {["words", "chapters", "scenes", "pages", "tasks"].map((unit) => (
                       <option key={unit} value={unit}>{unit}</option>
@@ -2039,13 +2039,13 @@ function GoalCalendarCard({
                     value={selectedDate}
                     onChange={(event) => setSelectedDate(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   />
                   <button
                     type="button"
                     onClick={() => void addCalendarItem()}
                     disabled={!editable || saveState === "saving" || !draftTitle.trim()}
-                    className={`inline-flex h-11 items-center justify-center rounded-2xl px-4 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700 disabled:bg-teal-800/35" : "bg-teal-800 text-white hover:bg-teal-800 disabled:bg-teal-300"}`}
+                    className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700 disabled:bg-teal-800/35" : "bg-teal-800 text-white hover:bg-teal-800 disabled:bg-teal-300"}`}
                   >
                     Add item
                   </button>
@@ -2087,7 +2087,7 @@ function HeroMetric({
       <p className={`mt-3 text-xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
       <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{note}</p>
       <div className={`mt-4 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-100"}`}>
-        <div className="h-full rounded-full bg-[linear-gradient(90deg,#7c3aed,#a855f7)]" style={{ width: `${clamp(progress, 0, 100)}%` }} />
+        <div className="h-full rounded-full bg-teal-700" style={{ width: `${clamp(progress, 0, 100)}%` }} />
       </div>
     </div>
   )
@@ -2131,19 +2131,19 @@ function EmptyTabState({ isDark, title, body }: { isDark: boolean; title: string
 }
 
 function panelClass(isDark: boolean, extra = "") {
-  return `min-w-0 rounded-lg border shadow-card ${
+  return `min-w-0 rounded-lg border ${
     isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"
   } ${extra}`
 }
 
 function secondaryButtonClass(isDark: boolean) {
-  return `inline-flex min-h-11 items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold transition ${
+  return `inline-flex min-h-11 items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-semibold transition ${
     isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
   }`
 }
 
 function footerLinkClass(isDark: boolean) {
-  return `mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+  return `mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border px-4 py-3 text-sm font-semibold transition ${
     isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
   }`
 }

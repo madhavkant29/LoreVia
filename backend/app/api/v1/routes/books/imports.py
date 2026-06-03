@@ -3,7 +3,7 @@ import logging
 import uuid
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,12 +22,13 @@ from app.schemas.books import (
     EmptyProjectBody,
     EmptyProjectOut,
     ManuscriptImportResult,
+    ManuscriptReprocessBody,
     ManuscriptReprocessOut,
     ReadabilityMetricsOut,
     ReadabilityRequestBody,
 )
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
-from app.utils.billing_utils import require_author_access
+from app.utils.billing_utils import record_book_upload_charge, require_author_access
 from app.utils.book_utils import (
     _append_recent_revision_edit,
     as_bool,
@@ -43,6 +44,7 @@ from app.utils.book_utils import (
     normalize_imported_chapters,
     parse_book_upload_for_ingestion,
     parse_screenplay_upload,
+    persist_editor_chapter_content,
     refresh_screenplay_scene_rows,
     replace_chapter_novel_scenes,
     resolve_owned_series_ids,
@@ -80,6 +82,7 @@ async def upload_book_endpoint(
     auto_extract_cover: str = Form("true"),
     preserve_chapter_numbers: str = Form("false"),
     preserve_source_chapters: str = Form("false"),
+    force_single_manuscript: str = Form("false"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     __=Depends(rate_limit_upload),
@@ -149,6 +152,7 @@ async def upload_book_endpoint(
         source_kind="single_upload",
         preserve_chapter_numbers=as_bool(preserve_chapter_numbers),
         preserve_source_chapters=as_bool(preserve_source_chapters),
+        force_single_manuscript=as_bool(force_single_manuscript),
     )
     db.add(book)
     await db.flush()
@@ -170,6 +174,42 @@ async def upload_book_endpoint(
     process_book_task.apply_async(args=[str(book.id)], queue=queue_for_user(current_user, "extraction"))
     return {"book_id": str(book.id), "status": "processing",
             "copyright_warning": False, "visibility": visibility, "mode": mode}
+
+
+@router.post("/upload/preview")
+async def preview_upload_endpoint(
+    file: UploadFile = File(...),
+    work_type: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+    __=Depends(rate_limit_upload),
+):
+    """Parse a manuscript file and return a structure preview without creating any DB records."""
+    _ = current_user  # auth check
+    if not file.filename:
+        raise HTTPException(400, "No file")
+
+    raw = await _read_upload_bounded(file, settings.MANUSCRIPT_UPLOAD_MAX_BYTES, "Manuscript preview")
+    fmt, resolved_work_type = resolve_upload_format_and_work_type(
+        file.filename,
+        normalize_book_work_type(work_type, default="novel"),
+    )
+    validate_document_upload_bytes(file.filename, raw, fmt)
+    log.info(
+        "preview_request",
+        extra={"format": fmt, "work_type": resolved_work_type, "user_id": str(current_user.id)},
+    )
+
+    from app.utils.book_utils import build_import_preview
+    preview = await asyncio.to_thread(
+        lambda: build_import_preview(
+            format_name=fmt,
+            work_type=resolved_work_type,
+            raw=raw,
+            language=None,
+        )
+    )
+    return preview
 
 
 @router.post("/empty-project", response_model=EmptyProjectOut)
@@ -300,13 +340,19 @@ async def import_manuscript_content(
                 )
             )
 
-    for upload in files or []:
+    manuscript_files = [upload for upload in (files or []) if upload.filename]
+    if len(manuscript_files) > settings.MANUSCRIPT_IMPORT_MAX_FILES:
+        raise HTTPException(413, f"Manuscript import accepts at most {settings.MANUSCRIPT_IMPORT_MAX_FILES} files at once.")
+
+    for upload in manuscript_files:
         if not upload.filename:
             continue
         raw = await _read_upload_bounded(upload, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript file")
         if not raw:
             continue
         total_file_size += len(raw)
+        if total_file_size > settings.MANUSCRIPT_IMPORT_MAX_TOTAL_BYTES:
+            raise HTTPException(413, "Manuscript import exceeds the maximum aggregate upload size.")
         fmt, upload_work_type = resolve_upload_format_and_work_type(
             upload.filename,
             work_type if work_type is not None else book.work_type,
@@ -420,19 +466,31 @@ async def import_manuscript_content(
         )
         if writing_activity is not None:
             db.add(writing_activity)
-        await _process_chapter(
-            db,
-            book,
-            {
-                "number": job_number,
-                "title": job.get("title"),
-                "text": next_text,
-                "html": job.get("html"),
-                "description": job.get("description"),
-                "images": list(job.get("images") or []),
-                "content_version": int(job.get("content_version") or 1),
-            },
-        )
+        if getattr(book, "is_editor_project", False):
+            await persist_editor_chapter_content(
+                db,
+                book,
+                chapter_number=job_number,
+                title=str(job.get("title") or "") or None,
+                text=next_text,
+                html=job.get("html") if isinstance(job.get("html"), str) else None,
+                description=str(job.get("description") or "") or None,
+                content_version=int(job.get("content_version") or 1),
+            )
+        else:
+            await _process_chapter(
+                db,
+                book,
+                {
+                    "number": job_number,
+                    "title": job.get("title"),
+                    "text": next_text,
+                    "html": job.get("html"),
+                    "description": job.get("description"),
+                    "images": list(job.get("images") or []),
+                    "content_version": int(job.get("content_version") or 1),
+                },
+            )
         if resolved_book_work_type != "screenplay":
             extracted_scenes = extract_novel_scene_candidates(
                 text=next_text,
@@ -532,10 +590,18 @@ async def import_manuscript_content(
             progress.chapters_read = chapters_read
         await db.commit()
 
+    auto_reprocess_dispatched = False
+    if getattr(book, "is_editor_project", False):
+        from app.services.editor_project_service import maybe_auto_reprocess_editor_project
+
+        auto_reprocess_dispatched, _auto_chapters_queued, _auto_total_words = await maybe_auto_reprocess_editor_project(db, book)
+        if auto_reprocess_dispatched:
+            await db.refresh(book)
+
     chapter_reports: list[ChapterConsistencyReport] = []
     chapters_for_analysis: list[tuple[int, str]] = []
     analysis_tasks: list[dict[str, object]] = []
-    for number in imported_numbers:
+    for number in ([] if getattr(book, "is_editor_project", False) else imported_numbers):
         chapter = (
             await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == number))
         ).scalar()
@@ -605,22 +671,24 @@ async def manuscript_readability(
 @router.post("/{book_id}/manuscript/reprocess", response_model=ManuscriptReprocessOut)
 async def reprocess_manuscript(
     book_id: uuid.UUID,
+    body: ManuscriptReprocessBody = Body(default_factory=ManuscriptReprocessBody),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
 
-    if not getattr(book, "is_editor_project", False):
-        raise HTTPException(400, "Only editor projects can be reprocessed")
+    if not body.confirm_upload_charge:
+        raise HTTPException(400, "Confirm that reprocessing will consume 1 book upload before continuing.")
 
     from app.services.editor_project_service import (
-        is_editor_project_processing,
+        fail_rebuild_if_active,
+        get_rebuild_run_id,
         prepare_rebuild,
         dispatch_rebuild,
     )
 
-    if is_editor_project_processing(book):
+    if get_rebuild_run_id(book) is not None:
         raise HTTPException(409, "A rebuild is already in progress for this project")
 
     chapters = (
@@ -633,12 +701,62 @@ async def reprocess_manuscript(
     if not chapters:
         raise HTTPException(400, "Save at least one chapter before reprocessing")
 
-    await prepare_rebuild(db, book)
+    await check_upload_limit(
+        db,
+        current_user,
+        requested_uploads=1,
+        context="Manual manuscript reprocessing consumes 1 additional book upload.",
+    )
+
+    rebuild_run_id = await prepare_rebuild(db, book, reason="manual_reprocess")
     chapters_queued, total_words = await dispatch_rebuild(db, book)
+    try:
+        await record_book_upload_charge(
+            db,
+            user_id=current_user.id,
+            book_id=book.id,
+            charge_kind="manual_reprocess",
+            source_id=rebuild_run_id,
+            quantity=1,
+            metadata={
+                "chapters_queued": chapters_queued,
+                "total_words": total_words,
+            },
+        )
+        await db.commit()
+    except Exception as exc:
+        log.exception(
+            "manual_reprocess_charge_failed book_id=%s rebuild_run_id=%s",
+            book.id,
+            rebuild_run_id,
+        )
+        await db.rollback()
+        try:
+            await db.refresh(book)
+            await fail_rebuild_if_active(
+                db,
+                book,
+                expected_rebuild_run_id=rebuild_run_id,
+                error="Unable to record the manual reprocess upload charge.",
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            log.exception(
+                "manual_reprocess_charge_cleanup_failed book_id=%s rebuild_run_id=%s",
+                book.id,
+                rebuild_run_id,
+            )
+        raise HTTPException(
+            503,
+            "Unable to record the reprocess upload charge. No rebuild was started.",
+        ) from exc
 
     return ManuscriptReprocessOut(
         book_id=str(book.id),
         status="processing",
         chapters_queued=chapters_queued,
         total_words=total_words,
+        upload_charge_consumed=True,
+        charge_kind="manual_reprocess",
     )

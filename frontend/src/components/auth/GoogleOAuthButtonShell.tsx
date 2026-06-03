@@ -12,7 +12,7 @@ export function GoogleOAuthButtonShell({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center justify-center gap-2.5 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-800 shadow-sm transition hover:-translate-y-[1px] hover:border-stone-300 hover:bg-stone-50 active:translate-y-0 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:shadow-none dark:hover:bg-white/[0.09] ${className}`.trim()}
+      className={`flex w-full items-center justify-center gap-2.5 rounded-md border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-800 transition hover:border-stone-300 hover:bg-stone-50 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.09] ${className}`.trim()}
     >
       <GoogleIcon />
       Continue with Google

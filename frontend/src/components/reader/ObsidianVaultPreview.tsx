@@ -202,7 +202,7 @@ export function ObsidianVaultPreview({
   }
 
   return (
-    <div className={`rounded-lg border p-4 shadow-modal ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(10,10,12,0.95),rgba(17,24,39,0.9))]" : "border-stone-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,252,0.9))]"}`}>
+    <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#071211]" : "border-stone-200 bg-white"}`}>
       <div className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
             <p className={`text-3xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-600"}`}>Vault export</p>
@@ -265,7 +265,7 @@ export function ObsidianVaultPreview({
                   className={`group w-full rounded-md border px-4 py-3 text-left transition ${
                     active
                       ? isDark
-                        ? "border-sky-400/35 bg-sky-500/10 shadow-[0_10px_30px_-18px_rgba(56,189,248,0.8)]"
+                        ? "border-sky-400/35 bg-sky-500/10"
                         : "border-sky-300 bg-sky-50 shadow-sm"
                       : isDark
                         ? "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
@@ -326,7 +326,7 @@ export function ObsidianVaultPreview({
                         <button
                           type="button"
                           onClick={handleSaveCurrent}
-                          className="rounded-full bg-[linear-gradient(135deg,#334155,#0f766e)] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_12px_30px_-16px_rgba(15,118,110,0.8)] transition hover:translate-y-[-1px]"
+                          className="rounded-md bg-[#1f615d] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
                         >
                           Save note
                         </button>
@@ -340,7 +340,7 @@ export function ObsidianVaultPreview({
                         <button
                           type="button"
                           onClick={handleDownloadEditedVault}
-                          className="rounded-full bg-[linear-gradient(135deg,#0f766e,#2563eb)] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_12px_30px_-16px_rgba(37,99,235,0.8)] transition hover:translate-y-[-1px]"
+                          className="rounded-md bg-[#1f615d] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
                         >
                           Download edited Vault ZIP
                         </button>

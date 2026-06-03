@@ -20,8 +20,12 @@ from app.utils.public_utils import (
     REPORT_STATUS_OPEN,
     REPORT_TYPE_COPYRIGHT,
     add_moderation_action,
+    copyright_report_requires_temporary_hold,
+    ensure_public_content_report_not_duplicate,
     ensure_report_type_supported,
     hash_text,
+    invalidate_public_book_caches,
+    validate_public_content_report_target,
 )
 
 router = APIRouter()
@@ -42,15 +46,21 @@ async def create_content_report(
 ):
     report_type = ensure_report_type_supported(body.report_type)
     book = await db.get(Book, body.book_id)
-    if book is None:
-        raise HTTPException(404, "Book not found")
+    reported_content_url = validate_public_content_report_target(book, body.reported_content_url)
     if report_type == REPORT_TYPE_COPYRIGHT and not body.reporter_email:
         raise HTTPException(400, "Copyright reports must include a reporter email.")
+    reporter_ip_hash = hash_text(request.client.host if request.client else None)
+    await ensure_public_content_report_not_duplicate(
+        db,
+        book_id=book.id,
+        report_type=report_type,
+        reporter_ip_hash=reporter_ip_hash,
+    )
 
     report = ContentReport(
         reporter_user_id=current_user.id if current_user is not None else None,
         reporter_email=body.reporter_email,
-        reporter_ip_hash=hash_text(request.client.host if request.client else None),
+        reporter_ip_hash=reporter_ip_hash,
         reported_book_id=book.id,
         reported_author_user_id=book.user_id,
         report_type=report_type,
@@ -60,7 +70,7 @@ async def create_content_report(
         copyright_owner_name=(body.copyright_owner_name or "").strip() or None,
         copyright_work_description=(body.copyright_work_description or "").strip() or None,
         copyright_original_url=(body.copyright_original_url or "").strip() or None,
-        reported_content_url=(body.reported_content_url or "").strip() or None,
+        reported_content_url=reported_content_url,
     )
     db.add(report)
     await db.flush()
@@ -77,7 +87,7 @@ async def create_content_report(
         metadata={"report_type": report_type},
     )
 
-    should_hide = report_type == REPORT_TYPE_COPYRIGHT
+    should_hide = report_type == REPORT_TYPE_COPYRIGHT and await copyright_report_requires_temporary_hold(db, book_id=book.id)
     if should_hide:
         book.moderation_status = MODERATION_STATUS_HIDDEN
         book.public_status = PUBLIC_STATUS_HIDDEN
@@ -93,7 +103,7 @@ async def create_content_report(
             report_id=report.id,
             previous_status=MODERATION_STATUS_REPORTED,
             new_status=MODERATION_STATUS_HIDDEN,
-            reason="Book auto-hidden after a copyright report.",
+            reason="Book temporarily hidden after three distinct copyright reporters within 24 hours.",
         )
     else:
         book.moderation_status = MODERATION_STATUS_REPORTED
@@ -118,6 +128,8 @@ async def create_content_report(
         )
 
     await db.commit()
+    if should_hide:
+        await invalidate_public_book_caches(book)
     return ContentReportOut(
         id=str(report.id),
         status=report.status,

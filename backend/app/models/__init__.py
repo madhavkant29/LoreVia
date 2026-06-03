@@ -2,6 +2,7 @@ from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaR
 from app.models.book import (
     Book,
     BookCollaborator,
+    BookUploadCharge,
     PublicBookAnalyticsEvent,
     PublicBookRanking,
     BookForumComment,

@@ -443,8 +443,8 @@ export default function SeriesPage() {
         const modalCollectionPlural = collectionUnitName(modalHasScreenplayEpisodes, true)
         const modalCollectionSingular = collectionUnitName(modalHasScreenplayEpisodes, false)
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-            <div className={`w-full max-w-2xl rounded-lg border-2 shadow-dropdown ${surfaceClass}`}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className={`w-full max-w-2xl rounded-lg border-2 ${surfaceClass}`}>
 
               {/* Modal header */}
               <div className={`flex items-center justify-between border-b px-6 py-4 ${isDark ? "border-slate-700/70" : "border-stone-200"}`}>
@@ -475,7 +475,7 @@ export default function SeriesPage() {
 
               <div className="max-h-[65vh] overflow-y-auto p-6 space-y-4">
 
-                {/* â”€â”€ Ask tab â”€â”€ */}
+                {/* Ask tab */}
                 {seriesModalTab === "ask" && (
                   <>
                     <p className={`text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -499,7 +499,7 @@ export default function SeriesPage() {
                             )}
                           </div>
                         ))}
-                        {askLoading && <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Analyzing seriesâ€¦</p>}
+                        {askLoading && <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Analyzing series...</p>}
                       </div>
                     )}
 
@@ -511,7 +511,7 @@ export default function SeriesPage() {
                       <input
                         value={askQuery}
                         onChange={e => setAskQuery(e.target.value)}
-                        placeholder="Ask about continuity, characters, or plot across all booksâ€¦"
+                        placeholder="Ask about continuity, characters, or plot across all books..."
                         className={`flex-1 rounded-md border-2 px-4 py-2.5 text-sm outline-none ${controlClass}`}
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSeriesAsk(askSeriesId) } }}
                       />
@@ -520,13 +520,13 @@ export default function SeriesPage() {
                         disabled={askLoading || !askQuery.trim()}
                         className={`rounded-md px-5 py-2.5 text-sm font-semibold disabled:opacity-50 ${primaryButtonClass}`}
                       >
-                        {askLoading ? "â€¦" : "Ask"}
+                        {askLoading ? "..." : "Ask"}
                       </button>
                     </div>
                   </>
                 )}
 
-                {/* â”€â”€ Series Continuity Check tab â”€â”€ */}
+                {/* Series continuity check tab */}
                 {seriesModalTab === "continuity" && (
                   <>
                     <p className={`text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -541,7 +541,7 @@ export default function SeriesPage() {
                           onChange={e => setContinuityBookId(e.target.value)}
                           className={`w-full rounded-md border-2 px-3 py-2 text-sm outline-none ${controlClass}`}
                         >
-                          <option value="">Select bookâ€¦</option>
+                          <option value="">Select book...</option>
                           {seriesBooks.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
                         </select>
                       </div>
@@ -561,7 +561,7 @@ export default function SeriesPage() {
                       rows={6}
                       value={continuityText}
                       onChange={e => setContinuityText(e.target.value)}
-                      placeholder="Paste the passage you want to cross-check against earlier booksâ€¦"
+                      placeholder="Paste the passage you want to cross-check against earlier books..."
                       className={`w-full resize-none rounded-md border-2 px-4 py-3 text-sm leading-7 outline-none ${controlClass}`}
                     />
 
@@ -570,7 +570,7 @@ export default function SeriesPage() {
                       disabled={continuityLoading || !continuityText.trim() || !continuityBookId}
                       className={`w-full rounded-md px-5 py-3 text-sm font-semibold disabled:opacity-50 ${primaryButtonClass}`}
                     >
-                      {continuityLoading ? "Checking across seriesâ€¦" : "Run series continuity check"}
+                      {continuityLoading ? "Checking across series..." : "Run series continuity check"}
                     </button>
 
                     {continuityLoading && continuityStatus ? (
@@ -617,7 +617,7 @@ export default function SeriesPage() {
                               }`}>
                                 <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{issue.title}</p>
                                 <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{issue.description}</p>
-                                {issue.suggestion && <p className={`mt-1.5 text-xs font-medium ${isDark ? "text-indigo-300" : "text-violet-700"}`}>â†’ {issue.suggestion}</p>}
+                                {issue.suggestion && <p className={`mt-1.5 text-xs font-medium ${isDark ? "text-indigo-300" : "text-violet-700"}`}>Suggestion: {issue.suggestion}</p>}
                               </div>
                             ))}
                           </div>
@@ -736,7 +736,7 @@ function SeriesBookCard({
   const isScreenplay = book.work_type === 'screenplay'
   const isComplete = progress >= 100
   const progressColor = isComplete
-    ? (isDark ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]")
+    ? "bg-emerald-500"
     : "bg-[#1f615d]"
 
   return (

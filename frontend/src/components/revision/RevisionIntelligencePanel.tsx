@@ -4,7 +4,14 @@ import { useMemo, useState } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { applyRevisionBoardState, buildRevisionTask, patchRevisionIntelligenceItem } from "@/lib/utils/revisionIntelligence"
-import type { GoalCalendarItem, RevisionActionItem, RevisionIntelligence, WriterWorkspace } from "@/types/book"
+import type {
+  CharacterKnowledgeFact,
+  CharacterKnowledgeTimelineFact,
+  GoalCalendarItem,
+  RevisionActionItem,
+  RevisionIntelligence,
+  WriterWorkspace,
+} from "@/types/book"
 
 type Props = {
   bookId: string
@@ -30,7 +37,7 @@ function severityBadgeClass(severity: string, isDark: boolean) {
 }
 
 function panelClass(isDark: boolean) {
-  return `rounded-md border shadow-[0_18px_42px_-32px_rgba(15,23,42,0.38)] ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`
+  return `rounded-md border ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`
 }
 
 function todayDateValue() {
@@ -126,6 +133,131 @@ function RevisionItemCard({
   )
 }
 
+function RevisionItemSummary({ item, isDark }: { item: RevisionActionItem; isDark: boolean }) {
+  return (
+    <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${severityBadgeClass(item.severity, isDark)}`}>{item.severity}</span>
+        {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{`Chapter ${item.chapter_ref}`}</span> : null}
+      </div>
+      <p className={`mt-2 text-sm font-semibold leading-6 ${isDark ? "text-white" : "text-slate-900"}`}>{item.title}</p>
+      {item.recommendation ? (
+        <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{item.recommendation}</p>
+      ) : null}
+    </div>
+  )
+}
+
+function TimelineMatrix({ fact, isDark }: { fact: CharacterKnowledgeTimelineFact; isDark: boolean }) {
+  return (
+    <div className={`overflow-x-auto rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-slate-50"}`}>
+      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact} timeline</p>
+      <table className="mt-3 min-w-full border-separate border-spacing-2 text-xs">
+        <thead>
+          <tr>
+            <th className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Character</th>
+            {fact.rows[0]?.cells.map((cell) => (
+              <th key={`${fact.fact}-chapter-${cell.chapter_number}`} className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Ch {cell.chapter_number}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {fact.rows.map((row) => (
+            <tr key={`${fact.fact}-${row.character_name}`}>
+              <td className={`pr-4 font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>{row.character_name}</td>
+              {row.cells.map((cell) => (
+                <td key={`${fact.fact}-${row.character_name}-${cell.chapter_number}`}>
+                  <span
+                    className={`inline-flex rounded-full px-2 py-1 font-semibold ${
+                      cell.state === "learned"
+                        ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
+                        : cell.state === "known"
+                          ? isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"
+                          : isDark ? "bg-white/8 text-slate-400" : "bg-white text-slate-500 border border-slate-200"
+                    }`}
+                  >
+                    {cell.state}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
+    </div>
+  )
+}
+
+function KnowledgeStatePanel({
+  facts,
+  timelines,
+  isDark,
+  showTimelineDetails,
+  onToggleTimelineDetails,
+}: {
+  facts: CharacterKnowledgeFact[]
+  timelines: CharacterKnowledgeTimelineFact[]
+  isDark: boolean
+  showTimelineDetails: boolean
+  onToggleTimelineDetails: () => void
+}) {
+  if (facts.length === 0) {
+    return <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Knowledge-state checks will appear after the next intelligence pass.</p>
+  }
+
+  const visibleFacts = showTimelineDetails ? facts : facts.slice(0, 4)
+  const hiddenFactCount = Math.max(0, facts.length - visibleFacts.length)
+
+  return (
+    <div className="space-y-4">
+      {visibleFacts.map((fact) => {
+        const missingCharacters = fact.entries.filter((entry) => !entry.chapter_learned).map((entry) => entry.character_name)
+        const knownEntries = fact.entries.filter((entry) => entry.chapter_learned)
+        return (
+          <div key={fact.fact} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
+            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {knownEntries.map((entry) => (
+                <span key={`${fact.fact}-${entry.character_name}`} className={`rounded-full px-3 py-1 text-xs font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"}`}>
+                  {entry.character_name}: Ch {entry.chapter_learned}
+                </span>
+              ))}
+              {missingCharacters.length > 0 ? (
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isDark ? "bg-amber-500/15 text-amber-200" : "bg-amber-50 text-amber-700"}`}>
+                  Needs evidence: {missingCharacters.join(", ")}
+                </span>
+              ) : null}
+            </div>
+            {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
+          </div>
+        )
+      })}
+      {hiddenFactCount > 0 ? (
+        <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{hiddenFactCount} more knowledge thread{hiddenFactCount === 1 ? "" : "s"} hidden until timeline details are opened.</p>
+      ) : null}
+      {timelines.length > 0 ? (
+        <div>
+          <button
+            type="button"
+            onClick={onToggleTimelineDetails}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+          >
+            {showTimelineDetails ? "Hide timeline matrices" : `Show timeline matrices (${timelines.length})`}
+          </button>
+          {showTimelineDetails ? (
+            <div className="mt-4 space-y-4">
+              {timelines.map((fact) => (
+                <TimelineMatrix key={`timeline-${fact.fact}`} fact={fact} isDark={isDark} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function RevisionIntelligencePanel({
   bookId,
   revision,
@@ -137,6 +269,7 @@ export function RevisionIntelligencePanel({
 }: Props) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
+  const [showKnowledgeDetails, setShowKnowledgeDetails] = useState(false)
 
   const board = writerWorkspace?.revision_board ?? { items: [], last_generated_at: null }
   const today = useMemo(() => todayDateValue(), [])
@@ -252,13 +385,15 @@ export function RevisionIntelligencePanel({
     }
   }
 
-  const renderActionList = (items: RevisionActionItem[], emptyText: string) => {
+  const renderActionList = (items: RevisionActionItem[], emptyText: string, limit?: number) => {
     if (items.length === 0) {
       return <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>{emptyText}</p>
     }
+    const visibleItems = typeof limit === "number" ? items.slice(0, limit) : items
+    const hiddenCount = items.length - visibleItems.length
     return (
       <div className="space-y-3">
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <RevisionItemCard
             key={item.id}
             item={item}
@@ -270,6 +405,27 @@ export function RevisionIntelligencePanel({
             onAssignVersion={() => void assignItemToLatestVersion(item)}
           />
         ))}
+        {hiddenCount > 0 ? (
+          <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{hiddenCount} more item{hiddenCount === 1 ? "" : "s"} kept off this view. Use the checklist to pull the next set into focus.</p>
+        ) : null}
+      </div>
+    )
+  }
+
+  const renderActionSummaryList = (items: RevisionActionItem[], emptyText: string, limit = 3) => {
+    if (items.length === 0) {
+      return <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>{emptyText}</p>
+    }
+    const visibleItems = items.slice(0, limit)
+    const hiddenCount = items.length - visibleItems.length
+    return (
+      <div className="space-y-3">
+        {visibleItems.map((item) => (
+          <RevisionItemSummary key={item.id} item={item} isDark={isDark} />
+        ))}
+        {hiddenCount > 0 ? (
+          <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{hiddenCount} more item{hiddenCount === 1 ? "" : "s"} available in the revision board.</p>
+        ) : null}
       </div>
     )
   }
@@ -310,22 +466,12 @@ export function RevisionIntelligencePanel({
 
           {statusMessage ? <p className={`mt-4 text-sm ${isDark ? "text-violet-300" : "text-violet-700"}`}>{statusMessage}</p> : null}
 
-          <div className="mt-5 space-y-3">
-            {(revision.change_impacts.length > 0 ? revision.change_impacts : revision.scene_advice).slice(0, 2).map((item) => (
-              <RevisionItemCard
-                key={item.id}
-                item={item}
-                isDark={isDark}
-                busy={busyItemId === item.id}
-                onMarkFixed={() => void updateItemState(item, { status: "fixed" }, undefined, `Marked "${item.title}" as fixed.`)}
-                onIgnore={() => void updateItemState(item, { status: "ignored" }, undefined, `Ignored "${item.title}".`)}
-                onConvertToTask={() => void convertItemToTask(item)}
-                onAssignVersion={() => void assignItemToLatestVersion(item)}
-              />
-            ))}
-            {revision.change_impacts.length === 0 && revision.scene_advice.length === 0 ? (
-              <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No active revision warnings are surfaced right now.</p>
-            ) : null}
+          <div className="mt-5">
+            {renderActionSummaryList(
+              revision.change_impacts.length > 0 ? revision.change_impacts : revision.scene_advice,
+              "No active revision warnings are surfaced right now.",
+              2
+            )}
           </div>
         </div>
       </section>
@@ -344,76 +490,37 @@ export function RevisionIntelligencePanel({
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <SectionFrame
               title="Knowledge state"
-              body="What key story facts characters appear to know, including a chapter-by-chapter matrix across the current manuscript."
+              body="Key story facts with missing handoffs. Chapter-by-chapter matrices stay collapsed until you need them."
               isDark={isDark}
             >
-              <div className="space-y-4">
-                {revision.knowledge_matrix.map((fact) => (
-                  <div key={fact.fact} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
-                    <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact}</p>
-                    <div className="mt-3 space-y-2">
-                      {fact.entries.map((entry) => (
-                        <div key={`${fact.fact}-${entry.character_name}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                          <div>
-                            <p className={isDark ? "text-slate-200" : "text-slate-800"}>{entry.character_name}</p>
-                            <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{entry.source}</p>
-                          </div>
-                          <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>
-                            {entry.chapter_learned ? `Chapter ${entry.chapter_learned}` : "Unknown"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
-                  </div>
-                ))}
-              </div>
+              <KnowledgeStatePanel
+                facts={revision.knowledge_matrix}
+                timelines={revision.knowledge_timeline}
+                isDark={isDark}
+                showTimelineDetails={showKnowledgeDetails}
+                onToggleTimelineDetails={() => setShowKnowledgeDetails((current) => !current)}
+              />
             </SectionFrame>
 
             <SectionFrame
               title="Timeline clarity"
-              body="A chapter-by-chapter view of when knowledge changes and where it may drift."
+              body="Timeline matrices are available on demand from Knowledge state so this view stays scannable."
               isDark={isDark}
             >
-              <div className="space-y-4">
-                {revision.knowledge_timeline.map((fact) => (
-                  <div key={`timeline-${fact.fact}`} className={`overflow-x-auto rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-slate-50"}`}>
-                    <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact} timeline</p>
-                    <table className="mt-3 min-w-full border-separate border-spacing-2 text-xs">
-                      <thead>
-                        <tr>
-                          <th className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Character</th>
-                          {fact.rows[0]?.cells.map((cell) => (
-                            <th key={`${fact.fact}-chapter-${cell.chapter_number}`} className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Ch {cell.chapter_number}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fact.rows.map((row) => (
-                          <tr key={`${fact.fact}-${row.character_name}`}>
-                            <td className={`pr-4 font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>{row.character_name}</td>
-                            {row.cells.map((cell) => (
-                              <td key={`${fact.fact}-${row.character_name}-${cell.chapter_number}`}>
-                                <span
-                                  className={`inline-flex rounded-full px-2 py-1 font-semibold ${
-                                    cell.state === "learned"
-                                      ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
-                                      : cell.state === "known"
-                                        ? isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"
-                                        : isDark ? "bg-white/8 text-slate-400" : "bg-white text-slate-500 border border-slate-200"
-                                  }`}
-                                >
-                                  {cell.state}
-                                </span>
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
-                  </div>
-                ))}
+              <div className="space-y-3">
+                {revision.knowledge_timeline.slice(0, 4).map((fact) => {
+                  const learnedCount = fact.rows.filter((row) => row.chapter_learned).length
+                  const unknownCount = Math.max(0, fact.rows.length - learnedCount)
+                  return (
+                    <div key={`timeline-summary-${fact.fact}`} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
+                      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact}</p>
+                      <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{learnedCount} known handoff{learnedCount === 1 ? "" : "s"} / {unknownCount} unknown</p>
+                    </div>
+                  )
+                })}
+                {revision.knowledge_timeline.length > 4 ? (
+                  <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{revision.knowledge_timeline.length - 4} more timeline thread{revision.knowledge_timeline.length - 4 === 1 ? "" : "s"} hidden.</p>
+                ) : null}
               </div>
             </SectionFrame>
           </div>
@@ -424,21 +531,21 @@ export function RevisionIntelligencePanel({
               body="Downstream logic LoreVia thinks is most exposed right now."
               isDark={isDark}
             >
-              {renderActionList(revision.change_impacts, "No active downstream impact warnings are surfaced right now.")}
+              {renderActionList(revision.change_impacts, "No active downstream impact warnings are surfaced right now.", 3)}
             </SectionFrame>
             <SectionFrame
               title="Reader confusion map"
               body="Chapters where entity density, terminology, or anchoring may overwhelm the reader."
               isDark={isDark}
             >
-              {renderActionList(revision.confusion_map, "Reader confusion risk is currently low across the sampled chapters.")}
+              {renderActionList(revision.confusion_map, "Reader confusion risk is currently low across the sampled chapters.", 3)}
             </SectionFrame>
             <SectionFrame
               title="Voice consistency checker"
               body="Dialogue or setting-language drift that may be carrying too much exposition or tonal mismatch."
               isDark={isDark}
             >
-              {renderActionList(revision.voice_alerts, "No major voice drift is surfaced in the sampled chapters.")}
+              {renderActionList(revision.voice_alerts, "No major voice drift is surfaced in the sampled chapters.", 3)}
             </SectionFrame>
           </div>
         </div>
@@ -490,7 +597,7 @@ export function RevisionIntelligencePanel({
             body="Downstream story logic LoreVia thinks is most exposed right now."
             isDark={isDark}
           >
-            {renderActionList(revision.change_impacts, "No active downstream impact warnings are surfaced right now.")}
+            {renderActionList(revision.change_impacts, "No active downstream impact warnings are surfaced right now.", 3)}
           </SectionFrame>
 
           <SectionFrame
@@ -542,68 +649,16 @@ export function RevisionIntelligencePanel({
 
           <SectionFrame
             title="Knowledge state"
-            body="What key story facts characters appear to know, including a chapter-by-chapter matrix across the current manuscript."
+            body="Key story facts with missing handoffs. Chapter-by-chapter matrices stay collapsed until you need them."
             isDark={isDark}
           >
-            <div className="space-y-4">
-              {revision.knowledge_matrix.map((fact) => (
-                <div key={fact.fact} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
-                  <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact}</p>
-                  <div className="mt-3 space-y-2">
-                    {fact.entries.map((entry) => (
-                      <div key={`${fact.fact}-${entry.character_name}`} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                        <div>
-                          <p className={isDark ? "text-slate-200" : "text-slate-800"}>{entry.character_name}</p>
-                          <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{entry.source}</p>
-                        </div>
-                        <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>
-                          {entry.chapter_learned ? `Chapter ${entry.chapter_learned}` : "Unknown"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
-                </div>
-              ))}
-              {revision.knowledge_timeline.map((fact) => (
-                <div key={`timeline-${fact.fact}`} className={`overflow-x-auto rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-slate-50"}`}>
-                  <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact} timeline</p>
-                  <table className="mt-3 min-w-full border-separate border-spacing-2 text-xs">
-                    <thead>
-                      <tr>
-                        <th className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Character</th>
-                        {fact.rows[0]?.cells.map((cell) => (
-                          <th key={`${fact.fact}-chapter-${cell.chapter_number}`} className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Ch {cell.chapter_number}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fact.rows.map((row) => (
-                        <tr key={`${fact.fact}-${row.character_name}`}>
-                          <td className={`pr-4 font-medium ${isDark ? "text-slate-200" : "text-slate-700"}`}>{row.character_name}</td>
-                          {row.cells.map((cell) => (
-                            <td key={`${fact.fact}-${row.character_name}-${cell.chapter_number}`}>
-                              <span
-                                className={`inline-flex rounded-full px-2 py-1 font-semibold ${
-                                  cell.state === "learned"
-                                    ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
-                                    : cell.state === "known"
-                                      ? isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"
-                                      : isDark ? "bg-white/8 text-slate-400" : "bg-white text-slate-500 border border-slate-200"
-                                }`}
-                              >
-                                {cell.state}
-                              </span>
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {fact.warning ? <p className={`mt-3 text-xs leading-5 ${isDark ? "text-amber-300" : "text-amber-700"}`}>{fact.warning}</p> : null}
-                </div>
-              ))}
-            </div>
+            <KnowledgeStatePanel
+              facts={revision.knowledge_matrix}
+              timelines={revision.knowledge_timeline}
+              isDark={isDark}
+              showTimelineDetails={showKnowledgeDetails}
+              onToggleTimelineDetails={() => setShowKnowledgeDetails((current) => !current)}
+            />
           </SectionFrame>
         </div>
 
@@ -613,21 +668,21 @@ export function RevisionIntelligencePanel({
             body="Places where the manuscript may be doing duplicate work or carrying a low-impact scene."
             isDark={isDark}
           >
-            {renderActionList(revision.scene_advice, "No obvious scene cuts or merge opportunities are surfaced right now.")}
+            {renderActionList(revision.scene_advice, "No obvious scene cuts or merge opportunities are surfaced right now.", 3)}
           </SectionFrame>
           <SectionFrame
             title="Reader confusion map"
             body="Chapters where entity density, terminology, or anchoring may overwhelm the reader."
             isDark={isDark}
           >
-            {renderActionList(revision.confusion_map, "Reader confusion risk is currently low across the sampled chapters.")}
+            {renderActionList(revision.confusion_map, "Reader confusion risk is currently low across the sampled chapters.", 3)}
           </SectionFrame>
           <SectionFrame
             title="Voice consistency checker"
             body="Dialogue or setting-language drift that may be carrying too much exposition or tonal mismatch."
             isDark={isDark}
           >
-            {renderActionList(revision.voice_alerts, "No major voice drift is surfaced in the sampled chapters.")}
+            {renderActionList(revision.voice_alerts, "No major voice drift is surfaced in the sampled chapters.", 3)}
           </SectionFrame>
         </div>
       </div>

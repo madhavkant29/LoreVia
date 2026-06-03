@@ -1,5 +1,6 @@
 import { apiClient } from "./client"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 
 import type {
   BetaReadAssignment,
@@ -11,6 +12,10 @@ import type {
 function invalidateBetaReadCache() {
   void invalidateQueryKeys("reader:beta-reads:")
   void invalidateQueryKeys("books:list:")
+}
+
+function bookBetaReadsPath(bookId: string, suffix = "") {
+  return `/books/${normalizeBookRouteId(bookId)}/beta-reads${suffix}`
 }
 
 export const betaReadsApi = {
@@ -31,7 +36,7 @@ export const betaReadsApi = {
       authorQuestions?: string[]
     }
   ) =>
-    apiClient.post<BetaReadAssignment>(`/books/${bookId}/beta-reads`, {
+    apiClient.post<BetaReadAssignment>(bookBetaReadsPath(bookId), {
       reader_email: payload.readerEmail,
       task_label: payload.taskLabel,
       scope_kind: payload.scopeKind ?? "full_book",
@@ -49,18 +54,18 @@ export const betaReadsApi = {
       return response.data
     }),
   listBookAssignments: (bookId: string) =>
-    apiClient.get<BetaReadAssignmentListResponse>(`/books/${bookId}/beta-reads`).then((response) => response.data.items),
+    apiClient.get<BetaReadAssignmentListResponse>(bookBetaReadsPath(bookId)).then((response) => response.data.items),
   getBookAssignmentDetail: (bookId: string, assignmentId: string) =>
-    apiClient.get<BetaReadAssignmentDetail>(`/books/${bookId}/beta-reads/${assignmentId}`).then((response) => response.data),
+    apiClient.get<BetaReadAssignmentDetail>(bookBetaReadsPath(bookId, `/${assignmentId}`)).then((response) => response.data),
   appendQuestions: (bookId: string, assignmentId: string, questions: string[]) =>
-    apiClient.post<BetaReadQuestion[]>(`/books/${bookId}/beta-reads/${assignmentId}/questions`, {
+    apiClient.post<BetaReadQuestion[]>(bookBetaReadsPath(bookId, `/${assignmentId}/questions`), {
       questions,
     }).then((response) => {
       invalidateBetaReadCache()
       return response.data
     }),
   revokeAssignment: (bookId: string, assignmentId: string) =>
-    apiClient.post<BetaReadAssignment>(`/books/${bookId}/beta-reads/${assignmentId}/revoke`).then((response) => {
+    apiClient.post<BetaReadAssignment>(bookBetaReadsPath(bookId, `/${assignmentId}/revoke`)).then((response) => {
       invalidateBetaReadCache()
       return response.data
     }),
@@ -113,7 +118,7 @@ export const betaReadsApi = {
       authorTaskId?: string | null
     }
   ) =>
-    apiClient.put<BetaReadAssignmentDetail>(`/books/${bookId}/beta-reads/${assignmentId}/feedback-items/${feedbackItemId}`, {
+    apiClient.put<BetaReadAssignmentDetail>(bookBetaReadsPath(bookId, `/${assignmentId}/feedback-items/${feedbackItemId}`), {
       author_status: payload.authorStatus,
       author_task_id: payload.authorTaskId ?? null,
     }).then((response) => {

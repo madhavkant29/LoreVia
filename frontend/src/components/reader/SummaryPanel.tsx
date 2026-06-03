@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { readerApi } from "@/lib/api/reader"
@@ -15,7 +15,7 @@ interface Props {
   theme: "light" | "dark"
 }
 
-export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
+export const SummaryPanel = memo(function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
   const [mode, setMode] = useState<SummaryMode>("short")
   const summaryQuery = useQuery({
     queryKey: asQueryKey(readerCacheKey(bookId, `summary:${chapterNum}:${mode}`)),
@@ -35,7 +35,7 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
-      <div className={`flex max-h-[86dvh] w-full flex-col rounded-t-3xl sm:max-h-[80vh] sm:max-w-lg sm:rounded-2xl transition-colors ${shellClass}`}>
+      <div className={`flex max-h-[86dvh] w-full flex-col rounded-t-lg transition-colors sm:max-h-[80vh] sm:max-w-lg ${shellClass}`}>
         <div className={theme === "dark" ? "flex items-center justify-between border-b border-white/10 px-5 py-4" : "flex items-center justify-between border-b border-gray-100 px-5 py-4"}>
           <h2 className="font-semibold">Chapter {chapterNum} Summary</h2>
           <button onClick={onClose} className={theme === "dark" ? "text-xl text-gray-500 hover:text-white" : "text-xl text-gray-400 hover:text-gray-600"}>x</button>
@@ -110,7 +110,7 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
       </div>
     </div>
   )
-}
+})
 
 function normalizeSummary(summary: ChapterSummary): ChapterSummary {
   const trimmed = summary.content.trim()

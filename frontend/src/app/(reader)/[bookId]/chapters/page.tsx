@@ -77,7 +77,7 @@ export default function ChapterListPage() {
     : `Showing the full ${unitLabel.toLowerCase()} list with your current read status.`
 
   return (
-    <div className={`min-h-screen transition-colors ${isDark ? "bg-[radial-gradient(circle_at_top,#0d1a22_0%,#081019_28%,#05080f_62%,#030508_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen transition-colors ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-[100rem] px-4 pb-14 pt-5 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav

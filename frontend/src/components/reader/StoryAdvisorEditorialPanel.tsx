@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import type { EditorialReview, EditorialReviewPassage } from "@/types/intelligence"
@@ -12,7 +12,7 @@ type StoryAdvisorEditorialPanelProps = {
   onSaveNote: (payload: { chapterNumber: number | null; title: string | null; body: string }) => void
 }
 
-export function StoryAdvisorEditorialPanel({
+export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPanel({
   bookId,
   isDark,
   canUseAuthorMode,
@@ -131,7 +131,7 @@ export function StoryAdvisorEditorialPanel({
                 }
               }}
               disabled={importLoading || (!editText.trim() && importFiles.length === 0)}
-              className="rounded-sm bg-[linear-gradient(135deg,#0f766e,#115e59)] px-5 py-2.5 text-sm font-semibold text-white transition disabled:opacity-40"
+              className="rounded-md bg-[#1f615d] px-5 py-2.5 text-sm font-semibold text-white transition-colors disabled:opacity-40"
             >
               {importLoading ? "Importing..." : replaceExisting ? "Update current upload" : "Add to current upload"}
             </button>
@@ -181,7 +181,7 @@ export function StoryAdvisorEditorialPanel({
               }
             }}
             disabled={!editText.trim() || editLoading}
-            className="shrink-0 self-end rounded-sm bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-12px_rgba(79,70,229,0.7)] transition disabled:opacity-40 hover:-translate-y-[1px]"
+            className="shrink-0 self-end rounded-md bg-violet-700 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-600 disabled:opacity-40"
           >
             {editLoading ? "Reviewing..." : "Run Editorial Review"}
           </button>
@@ -362,7 +362,7 @@ export function StoryAdvisorEditorialPanel({
               <div className={`space-y-2 rounded-md border px-5 py-4 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`}>
                 {editResult.formatting_notes.map((note, index) => (
                   <div key={index} className="flex items-start gap-2.5">
-                    <span className={`mt-0.5 shrink-0 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>·</span>
+                    <span className={`mt-0.5 shrink-0 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>-</span>
                     <div className="flex-1">
                       <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{note}</p>
                       <button
@@ -412,4 +412,4 @@ export function StoryAdvisorEditorialPanel({
       ) : null}
     </div>
   )
-}
+})

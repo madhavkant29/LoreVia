@@ -138,7 +138,7 @@ export function WhatsTheWordPanel({
                   type="button"
                   onClick={() => void requestWord(false)}
                   disabled={!canSubmit || loading}
-                  className="rounded-full bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  className="rounded-md bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-600 disabled:opacity-50"
                 >
                   {loading ? "Finding..." : "Find word"}
                 </button>

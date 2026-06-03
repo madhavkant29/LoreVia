@@ -205,6 +205,15 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:chapter-versions:7:")
   })
 
+  it("confirms upload charge when reprocessing manuscript", async () => {
+    await booksApi.reprocessManuscript("book-1")
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/manuscript/reprocess", {
+      confirm_upload_charge: true,
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+  })
+
   it("restores chapter versions and invalidates book and reader caches", async () => {
     await booksApi.restoreChapterVersion("book-1", "version-9")
 

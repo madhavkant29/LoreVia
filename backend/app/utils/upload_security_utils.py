@@ -5,6 +5,7 @@ import zipfile
 
 from fastapi import HTTPException, UploadFile
 
+from app.core.config import settings
 
 _COVER_MAGIC: dict[bytes, tuple[str, str]] = {
     b"\xff\xd8\xff": ("jpg", "image/jpeg"),
@@ -56,6 +57,13 @@ def validate_document_upload_bytes(filename: str, raw: bytes, format_name: str) 
         _validate_pdf_bytes(filename, raw)
         return
     if format_name == "epub":
+        validate_zip_archive_safety(
+            raw,
+            max_entries=settings.UPLOAD_ARCHIVE_MAX_ENTRIES,
+            max_total_uncompressed_bytes=settings.UPLOAD_ARCHIVE_MAX_UNCOMPRESSED_BYTES,
+            max_compression_ratio=settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO,
+            label=filename,
+        )
         _validate_zip_container(
             filename,
             raw,
@@ -64,6 +72,13 @@ def validate_document_upload_bytes(filename: str, raw: bytes, format_name: str) 
         )
         return
     if format_name == "docx":
+        validate_zip_archive_safety(
+            raw,
+            max_entries=settings.UPLOAD_ARCHIVE_MAX_ENTRIES,
+            max_total_uncompressed_bytes=settings.UPLOAD_ARCHIVE_MAX_UNCOMPRESSED_BYTES,
+            max_compression_ratio=settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO,
+            label=filename,
+        )
         _validate_zip_container(filename, raw, required_names={"word/document.xml"})
         return
     if format_name == "doc":

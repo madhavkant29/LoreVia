@@ -14,7 +14,6 @@ export default function PublicContentLayout({ children }: { children: React.Reac
   return (
     <QueryProvider>
       <div className="app-shell min-h-screen">
-        <div className="app-shell__mesh" />
         <Navbar />
         {children}
       </div>

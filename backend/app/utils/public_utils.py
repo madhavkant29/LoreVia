@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast as type_cast
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -411,7 +412,7 @@ def can_view_public_book(book: Book | None) -> bool:
     moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
     if public_status or moderation_status:
         return public_status == PUBLIC_STATUS_PUBLISHED and (
-            not moderation_status or moderation_status == MODERATION_STATUS_CLEAN
+            not moderation_status or moderation_status in {MODERATION_STATUS_CLEAN, MODERATION_STATUS_REPORTED}
         )
 
     # Backward-compatible fallback for older public records created before the
@@ -438,12 +439,26 @@ def public_visibility_notice(book: Book | None) -> str | None:
         MODERATION_STATUS_HIDDEN,
         MODERATION_STATUS_REMOVED,
         MODERATION_STATUS_UNDER_REVIEW,
-        MODERATION_STATUS_REPORTED,
     }:
         return "This book is currently hidden from public view due to a policy or copyright report."
     if public_status == PUBLIC_STATUS_PENDING_REVIEW:
         return "This book is waiting for review before it can appear publicly."
     return None
+
+
+def _allowed_public_report_hosts() -> set[str]:
+    try:
+        configured_host = (urlparse(settings.APP_URL).hostname or "").strip().lower().rstrip(".")
+    except Exception:
+        configured_host = ""
+    if not configured_host:
+        return set()
+    allowed_hosts = {configured_host}
+    if configured_host.startswith("www."):
+        allowed_hosts.add(configured_host[4:])
+    else:
+        allowed_hosts.add(f"www.{configured_host}")
+    return {host for host in allowed_hosts if host}
 
 
 async def active_serious_strike_count(db: AsyncSession, *, user_id: uuid.UUID) -> int:
@@ -514,6 +529,74 @@ def ensure_report_type_supported(report_type: str) -> str:
     if normalized not in VALID_REPORT_TYPES:
         raise HTTPException(400, "Invalid report type.")
     return normalized
+
+
+def validate_public_content_report_target(book: Book | None, reported_content_url: str | None) -> str | None:
+    if not can_view_public_book(book):
+        raise HTTPException(404, "Book not found")
+    normalized_url = " ".join(str(reported_content_url or "").split()).strip()
+    if not normalized_url:
+        return None
+    parsed = urlparse(normalized_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(400, "Reported content URL must be a LoreVia public book URL.")
+    parsed_host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if parsed_host not in _allowed_public_report_hosts():
+        raise HTTPException(400, "Reported content URL must be a LoreVia public book URL.")
+    expected_identifiers = {str(book.id)}
+    public_slug = str(getattr(book, "public_slug", "") or "").strip().lower()
+    if public_slug:
+        expected_identifiers.add(public_slug)
+    path_parts = {part.strip().lower() for part in parsed.path.split("/") if part.strip()}
+    if not any(identifier.lower() in path_parts for identifier in expected_identifiers):
+        raise HTTPException(400, "Reported content URL does not match the selected public book.")
+    return normalized_url
+
+
+async def ensure_public_content_report_not_duplicate(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    report_type: str,
+    reporter_ip_hash: str | None,
+) -> None:
+    if not reporter_ip_hash:
+        return
+    existing = (
+        await db.execute(
+            select(ContentReport.id).where(
+                ContentReport.reported_book_id == book_id,
+                ContentReport.report_type == report_type,
+                ContentReport.reporter_ip_hash == reporter_ip_hash,
+                ContentReport.created_at >= datetime.now(UTC) - timedelta(hours=24),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(409, "A report for this public book has already been submitted recently.")
+
+
+async def copyright_report_requires_temporary_hold(db: AsyncSession, *, book_id: uuid.UUID) -> bool:
+    distinct_reporters = (
+        await db.execute(
+            select(func.count(func.distinct(ContentReport.reporter_ip_hash))).where(
+                ContentReport.reported_book_id == book_id,
+                ContentReport.report_type == REPORT_TYPE_COPYRIGHT,
+                ContentReport.reporter_ip_hash.is_not(None),
+                ContentReport.created_at >= datetime.now(UTC) - timedelta(hours=24),
+            )
+        )
+    ).scalar_one()
+    return int(distinct_reporters or 0) >= 3
+
+
+async def invalidate_public_book_caches(book: Book) -> None:
+    await cache_del(key_public_books())
+    await cache_del(key_public_book_detail(str(book.id)))
+    for chapter_number in range(1, int(getattr(book, "total_chapters", 0) or 0) + 1):
+        await cache_del(key_public_chapter(str(book.id), chapter_number))
+    await mark_public_profile_cache_dirty(str(book.user_id))
+    await cache_set_version_marker(key_public_forum_cache_version())
 
 
 async def add_moderation_action(
@@ -1641,21 +1724,30 @@ def _book_is_forum_eligible(book: Book | None) -> bool:
         return False
     if getattr(book, "hidden_at", None) is not None or getattr(book, "archived_at", None) is not None:
         return False
+    public_status = str(getattr(book, "public_status", "") or "").strip().lower()
+    moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
+    if public_status in {PUBLIC_STATUS_HIDDEN, PUBLIC_STATUS_REMOVED}:
+        return False
+    if moderation_status in {MODERATION_STATUS_HIDDEN, MODERATION_STATUS_REMOVED, MODERATION_STATUS_UNDER_REVIEW}:
+        return False
     if not bool(getattr(book, "is_public", False)):
         return True
-    return is_approved_user_public_share_book(book)
+    return can_view_public_book(book) and is_approved_user_public_share_book(book)
 
 
 def _book_is_forum_eligible_expression():
     return or_(
-        Book.is_public.is_(False),
+        and_(
+            Book.is_public.is_(False),
+            Book.public_status.not_in([PUBLIC_STATUS_HIDDEN, PUBLIC_STATUS_REMOVED]),
+            Book.moderation_status.not_in([MODERATION_STATUS_HIDDEN, MODERATION_STATUS_REMOVED, MODERATION_STATUS_UNDER_REVIEW]),
+        ),
         and_(
             Book.is_public.is_(True),
             Book.source_kind == USER_PUBLIC_SHARE_SOURCE_KIND,
-            or_(
-                Book.public_share_status == PUBLIC_SHARE_STATUS_APPROVED,
-                Book.public_share_status.is_(None),
-            ),
+            Book.public_share_status == PUBLIC_SHARE_STATUS_APPROVED,
+            Book.public_status == PUBLIC_STATUS_PUBLISHED,
+            Book.moderation_status == MODERATION_STATUS_CLEAN,
         ),
     )
 

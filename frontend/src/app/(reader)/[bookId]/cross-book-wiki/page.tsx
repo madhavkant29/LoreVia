@@ -7,6 +7,8 @@ import { useParams } from "next/navigation"
 
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { booksApi } from "@/lib/api/books"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { WorkspacePage } from "@/components/ui/Workspace"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book } from "@/types/book"
@@ -71,21 +73,23 @@ export default function CrossBookWikiPage() {
   }, [intelligenceData, mode, query, threshold, books])
 
   return (
-    <div className={`min-h-screen px-4 py-10 ${isDark ? "bg-[radial-gradient(circle_at_top,#111827,#05070d_65%)] text-stone-100" : "bg-[linear-gradient(180deg,#fcfdff,#eef3f9)] text-slate-950"}`}>
-      <div className="mx-auto max-w-6xl space-y-8">
-        <div className="flex flex-wrap gap-3">
-          <Link href={`/${bookId}`} className={pillClass(isDark)}>Back to book</Link>
-          <Link href="/series" className={pillClass(isDark)}>Series</Link>
-          <Link href="/library" className={pillClass(isDark)}>Library</Link>
-        </div>
+    <WorkspacePage className={isDark ? "text-stone-100" : "text-slate-950"}>
+      <div className="mx-auto max-w-6xl space-y-6 px-0 pb-16 pt-6 sm:px-2 lg:px-4">
+        <WorkspaceFamilyHeader
+          active="cross-book-wiki"
+          bookId={bookId}
+          family="story-bible"
+          title="Series wiki connections"
+          description="Compare similar characters and wiki entries across books in the same series to spot recurring identities, themes, and continuity points."
+          actions={(
+            <>
+              <Link href="/series" className="app-button-secondary">Series</Link>
+              <Link href="/library" className="app-button-secondary">Library</Link>
+            </>
+          )}
+        />
 
-        <section className={`rounded-lg border p-6 shadow-modal ${isDark ? "border-white/10 bg-[linear-gradient(145deg,#0f172a,#0a1020_55%,#13243a)]" : "border-white/70 bg-[linear-gradient(145deg,#ffffff,#f8fbff_55%,#edf4ff)]"}`}>
-          <p className={`text-xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-sky-200" : "text-sky-700"}`}>Cross-book wiki</p>
-          <h1 className={`mt-3 font-serif text-5xl leading-tight ${isDark ? "text-white" : "text-slate-950"}`}>Find connections across your series</h1>
-          <p className={`mt-4 max-w-3xl text-sm leading-7 ${isDark ? "text-stone-300" : "text-slate-600"}`}>
-            This tool identifies similar characters and wiki entries across different books in your series. It helps you spot recurring themes, character archetypes, and continuity points.
-          </p>
-
+        <section className="app-panel p-5 sm:p-6">
           <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
             <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-slate-200 bg-white/85"}`}>
               <label className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-stone-400" : "text-slate-500"}`}>Search matches</label>
@@ -93,16 +97,16 @@ export default function CrossBookWikiPage() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search by name, book title, or type..."
-                className={`mt-3 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/5 text-white placeholder:text-stone-500 focus:border-sky-300/40" : "border-slate-200 bg-white text-slate-950 placeholder:text-slate-400 focus:border-slate-400"}`}
+                className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/5 text-white placeholder:text-stone-500 focus:border-teal-300/40" : "border-slate-200 bg-white text-slate-950 placeholder:text-slate-400 focus:border-teal-700"}`}
               />
               <div className={`mt-4 flex flex-wrap gap-2`}>
                 {(["all", "characters", "wiki"] as MatchMode[]).map((value) => (
                   <button
                     key={value}
                     onClick={() => setMode(value)}
-                    className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    className={`rounded-md px-4 py-2 text-sm font-medium transition ${
                       mode === value
-                        ? (isDark ? "bg-amber-300 text-slate-950" : "bg-slate-950 text-white")
+                        ? "bg-[#1f615d] text-white"
                         : (isDark ? "border border-white/10 bg-white/5 text-stone-300 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50")
                     }`}
                   >
@@ -135,15 +139,15 @@ export default function CrossBookWikiPage() {
             </div>
 
             <div className={`grid grid-cols-1 gap-3 text-sm ${isDark ? "text-stone-300" : "text-slate-600"} lg:w-[18rem]`}>
-              <div className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-xs uppercase tracking-[0.2em] opacity-70">Series</p>
                 <p className="mt-2 font-semibold">{intelligenceData?.series_name ?? "Unassigned"}</p>
               </div>
-              <div className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-xs uppercase tracking-[0.2em] opacity-70">Matches found</p>
                 <p className="mt-2 font-semibold">{matches.length}</p>
               </div>
-              <div className={`rounded-2xl border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-xs uppercase tracking-[0.2em] opacity-70">Books compared</p>
                 <p className="mt-2 font-semibold">{intelligenceData?.comparison_book_ids.length ?? 0}</p>
               </div>
@@ -238,12 +242,6 @@ export default function CrossBookWikiPage() {
           </section>
         )}
       </div>
-    </div>
+    </WorkspacePage>
   )
-}
-
-function pillClass(isDark: boolean) {
-  return isDark
-    ? "rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-stone-300 hover:bg-white/10 hover:text-white"
-    : "rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-950"
 }

@@ -20,6 +20,9 @@ type MockOptions = {
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
 const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
+const ACCESS_TOKEN_COOKIE = "lorevia_access_token"
+const REFRESH_TOKEN_COOKIE = "lorevia_refresh_token"
+const E2E_APP_ORIGIN = "http://localhost:3001"
 
 function normalizeMockApiPath(pathname: string) {
   return pathname
@@ -60,6 +63,8 @@ const book = {
   work_type: "novel",
   status: "ready",
   mode: "author",
+  workspace_shell: "author",
+  access_class: "owner",
   source_kind: "upload",
   preserve_chapter_numbers: true,
   cover_url: "/api/v1/books/book-1/cover?token=mock-cover",
@@ -1690,7 +1695,22 @@ const preWritingCheck = {
       summary: "Nora enters the city and hears the bells.",
     },
   ],
-  alerts: [],
+  alerts: [
+    {
+      type: "world_gap",
+      severity: "medium",
+      title: "Northreach canon note is still thin",
+      description: "The current world corpus still needs stronger canon detail for Northreach before later continuity checks.",
+      chapter_number: 2,
+    },
+    {
+      type: "world_gap",
+      severity: "medium",
+      title: "Glass Road needs one more anchor",
+      description: "Readers only get a light setup for Glass Road before later references depend on it.",
+      chapter_number: 2,
+    },
+  ],
 }
 
 const emotionalArc = {
@@ -2147,15 +2167,34 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const characterBibleMode = options.characterBible ?? "default"
   const adminCookieMode = admin === "none" ? "guest" : admin
-  await page.context().addCookies([
+  const cookies = [
     {
       name: ADMIN_TEST_SESSION_COOKIE,
       value: `${adminCookieMode}:${ADMIN_TEST_SESSION_SECRET}`,
-      url: "http://localhost:3000",
+      url: E2E_APP_ORIGIN,
       httpOnly: true,
-      sameSite: "Lax",
+      sameSite: "Lax" as const,
     },
-  ])
+  ]
+  if (session === "authenticated") {
+    cookies.push(
+      {
+        name: ACCESS_TOKEN_COOKIE,
+        value: "mock-access-token",
+        url: E2E_APP_ORIGIN,
+        httpOnly: true,
+        sameSite: "Lax" as const,
+      },
+      {
+        name: REFRESH_TOKEN_COOKIE,
+        value: "mock-refresh-token",
+        url: E2E_APP_ORIGIN,
+        httpOnly: true,
+        sameSite: "Lax" as const,
+      },
+    )
+  }
+  await page.context().addCookies(cookies)
   user.username = defaultUsername
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
@@ -2426,6 +2465,17 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, book)
     }
 
+    if (path === "/api/v1/books/book-1/manuscript/reprocess" && method === "POST") {
+      return json(route, {
+        book_id: "book-1",
+        status: "processing",
+        chapters_queued: 3,
+        total_words: 31500,
+        upload_charge_consumed: true,
+        charge_kind: "manual_reprocess",
+      })
+    }
+
     if (path === "/api/v1/books/book-1/forum-metadata" && method === "PUT") {
       const payload = route.request().postDataJSON() as {
         title?: string
@@ -2493,6 +2543,37 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/collaborators" && method === "GET") {
       return json(route, collaborators)
+    }
+
+    const collaboratorActivityMatch = path.match(/^\/api\/v1\/books\/book-1\/collaborators\/([^/]+)\/activity$/)
+    if (collaboratorActivityMatch && method === "GET") {
+      const collaboratorId = collaboratorActivityMatch[1]
+      const collaborator = collaborators.find((item: typeof collaborators[number]) => item.id === collaboratorId)
+      if (!collaborator) {
+        return notFound(route)
+      }
+
+      return json(route, {
+        collaborator,
+        assignments: mockBetaReads.filter((item: typeof mockBetaReads[number]) => item.collaborator_id === collaboratorId),
+        items: [
+          {
+            id: `${collaboratorId}-activity-1`,
+            kind: "chapter_comment",
+            title: "Left chapter feedback",
+            body: "Ari flagged the gate explanation as slightly repetitive.",
+            chapter_number: 2,
+            chapter_title: "The Ember Gate",
+            assignment_id: "beta-1",
+            feedback_item_id: "beta-1-feedback-1",
+            annotation_id: null,
+            created_at: "2026-05-14T18:00:00Z",
+          },
+        ],
+        chapter_comment_count: 1,
+        annotation_count: 0,
+        latest_activity_at: "2026-05-14T18:00:00Z",
+      })
     }
 
     if (path === "/api/v1/books/book-1/collaborators" && method === "POST") {

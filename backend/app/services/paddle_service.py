@@ -309,11 +309,17 @@ def verify_webhook_signature(raw_body: bytes, paddle_signature: str | None) -> b
     except ValueError:
         return False
 
-    tolerance_seconds = max(settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS, 0)
-    if tolerance_seconds and abs(int(time.time()) - timestamp_value) > tolerance_seconds:
+    tolerance_seconds = settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS
+    if tolerance_seconds <= 0:
+        return False
+    if abs(int(time.time()) - timestamp_value) > tolerance_seconds:
         return False
 
-    signed_payload = f"{timestamp}:{raw_body.decode('utf-8')}"
+    try:
+        decoded_body = raw_body.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    signed_payload = f"{timestamp}:{decoded_body}"
     computed = hmac.new(
         secret.encode("utf-8"),
         signed_payload.encode("utf-8"),

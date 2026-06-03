@@ -10,8 +10,14 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
 import { Skeleton } from "@/components/ui/Skeleton"
+import { ManuscriptExportMenu } from "@/components/reader/ManuscriptExportMenu"
+import { ManuscriptModeSwitch } from "@/components/reader/ManuscriptModeSwitch"
+import { ManuscriptSceneOrderStatus, type SceneOrderSaveState } from "@/components/reader/ManuscriptSceneOrderStatus"
+import { ManuscriptVersionHistory } from "@/components/reader/ManuscriptVersionHistory"
+import { ManuscriptWorkspaceSidebarHeader } from "@/components/reader/ManuscriptWorkspaceSidebarHeader"
+import type { ManuscriptDraftFontFamily } from "@/components/reader/ManuscriptNonWriteWorkspace"
 import { booksApi } from "@/lib/api/books"
-import { deriveEditorProjectCta } from "@/lib/utils/editorProjectCta"
+import { deriveReprocessCta } from "@/lib/utils/editorProjectCta"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
@@ -100,7 +106,6 @@ type DraftSurfaceMode = "edit" | "paged"
 type BookDraftMap = Record<number, { title: string; text: string; html: string }>
 type WorkspaceTab = "write" | "plan" | "analyze" | "characters"
 type RightPane = "context" | "advisor" | "notes" | "arcs" | "insights" | "character"
-type SceneOrderSaveState = "idle" | "saving" | "saved" | "failed"
 type DraggedSceneState = { chapterNumber: number; sceneId: string }
 type SceneDropTarget = { chapterNumber: number; index: number }
 const EMPTY_CHARACTERS: Character[] = []
@@ -110,25 +115,14 @@ const EMPTY_CHAPTER_VERSIONS: ChapterVersion[] = []
 const SCENE_DRAG_SCENE_ID_MIME = "application/x-lorevia-scene-id"
 const SCENE_DRAG_CHAPTER_MIME = "application/x-lorevia-chapter-number"
 
-function getSceneOrderStatusLabel(state: SceneOrderSaveState, isDraggingWithinChapter: boolean) {
-  if (state === "saving") return "Saving order..."
-  if (state === "saved") return "Order saved"
-  if (state === "failed") return "Could not save order"
-  if (isDraggingWithinChapter) return "Drop between scenes to place it"
-  return "Drag the handle to reorder scenes"
-}
-
-function getSceneOrderStatusTone(state: SceneOrderSaveState, isDark: boolean) {
-  if (state === "failed") {
-    return isDark ? "border-rose-400/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+function resolveManuscriptDraftFontStack(fontFamily: ManuscriptDraftFontFamily): string {
+  if (fontFamily === "georgia") return 'Georgia, "Times New Roman", serif'
+  if (fontFamily === "sans") return '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif'
+  if (fontFamily === "italian-old-style") {
+    return '"Monotype Italian Old Style Pro Regular", "Monotype Italian Old Style Pro", "Italian Old Style", "Iowan Old Style", Georgia, serif'
   }
-  if (state === "saved") {
-    return isDark ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-  }
-  if (state === "saving") {
-    return isDark ? "border-sky-400/20 bg-sky-500/10 text-sky-200" : "border-sky-200 bg-sky-50 text-sky-700"
-  }
-  return isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"
+  if (fontFamily === "eb-garamond") return '"EB Garamond", Garamond, "Times New Roman", Georgia, serif'
+  return '"Times New Roman", Georgia, serif'
 }
 
 function getSceneDropSlotLabel(index: number, totalScenes: number) {
@@ -219,7 +213,7 @@ function ManuscriptPageInner() {
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("write")
   const [fontSize, setFontSize] = useState(12)
   const [fontSizeLocked, setFontSizeLocked] = useState(false)
-  const [fontFamily, setFontFamily] = useState<"times" | "georgia" | "sans">("times")
+  const [fontFamily, setFontFamily] = useState<ManuscriptDraftFontFamily>("times")
   const [lineHeight, setLineHeight] = useState(1.8)
   const [showPageGuides, setShowPageGuides] = useState(true)
   const [chapterPreviewPageCount, setChapterPreviewPageCount] = useState(1)
@@ -241,6 +235,7 @@ function ManuscriptPageInner() {
   }>({ arcSummary: "", description: "", personalityTags: "", motivations: "", fears: "" })
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showCompileDialog, setShowCompileDialog] = useState(false)
+  const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
   const [compileFormat, setCompileFormat] = useState<"pdf" | "docx" | "epub" | "obsidian">("docx")
   const [includeSceneMetadataOnImport, setIncludeSceneMetadataOnImport] = useState(true)
   const [includeSceneMetadataOnExport, setIncludeSceneMetadataOnExport] = useState(true)
@@ -394,15 +389,15 @@ function ManuscriptPageInner() {
     )
   }, [editingScene, sceneBodyDraft, sceneChapterDraft, sceneDescriptionDraft, sceneEditorOpen, sceneTitleDraft, selectedChapter])
   const hasPendingEdits = dirtyDrafts.length > 0 || sceneDraftDirty
-  const editorProjectCta = useMemo(
-    () => deriveEditorProjectCta(book, hasPendingEdits),
+  const reprocessCta = useMemo(
+    () => deriveReprocessCta(book, hasPendingEdits),
     [book, hasPendingEdits],
   )
 
   const sheetStyle = {
     fontSize: `${fontSize}pt`,
     lineHeight: String(lineHeight),
-    fontFamily: fontFamily === "times" ? '"Times New Roman", Georgia, serif' : fontFamily === "georgia" ? 'Georgia, "Times New Roman", serif' : '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif',
+    fontFamily: resolveManuscriptDraftFontStack(fontFamily),
   } as const
 
   const chapterWordCount = useMemo(() => countWords(text), [text])
@@ -591,12 +586,6 @@ function ManuscriptPageInner() {
     }
     return next
   }, [workspaceTree])
-  const filteredNotePaths = useMemo(() => {
-    const paths = workspaceTree?.note_paths ?? []
-    const query = deferredSceneSearch.trim().toLowerCase()
-    if (!query) return paths
-    return paths.filter((path) => path.toLowerCase().includes(query))
-  }, [deferredSceneSearch, workspaceTree])
   const manuscriptFrontMatter = writerWorkspace?.manuscript_front_matter
   const openRightPane = (pane: RightPane) => {
     setActiveRightPane(pane)
@@ -832,9 +821,7 @@ function ManuscriptPageInner() {
       }
       await loadWorkspaceTree()
       const chaptersToRefresh = [...new Set([previousChapterNumber, sceneChapterDraft].filter((value): value is number => typeof value === "number" && value > 0))]
-      for (const chapterNumber of chaptersToRefresh) {
-        await syncLocalChapterFromServer(chapterNumber)
-      }
+      await Promise.all(chaptersToRefresh.map(syncLocalChapterFromServer))
       closeSceneEditor()
       setStatusMessage(editingScene ? "Scene updated." : "Scene saved.")
     } finally {
@@ -952,9 +939,7 @@ function ManuscriptPageInner() {
       setSceneVersionDetail(null)
       await loadWorkspaceTree()
       const chaptersToRefresh = [...new Set([previousChapterNumber, restored.scene.chapter_number].filter((value): value is number => typeof value === "number" && value > 0))]
-      for (const chapterNumber of chaptersToRefresh) {
-        await syncLocalChapterFromServer(chapterNumber)
-      }
+      await Promise.all(chaptersToRefresh.map(syncLocalChapterFromServer))
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(buildSceneDraftStorageKey(bookId, restored.scene, restored.scene.chapter_number ?? previousChapterNumber))
       }
@@ -1798,6 +1783,22 @@ function ManuscriptPageInner() {
     }
   }
 
+  const confirmReprocessManuscript = async () => {
+    if (!book || reprocessing) return
+    setReprocessing(true)
+    setStatusMessage(null)
+    try {
+      const result = await booksApi.reprocessManuscript(book.id)
+      setShowReprocessConfirm(false)
+      await loadBase()
+      setStatusMessage(`Reprocessing started for ${result.chapters_queued} chapter${result.chapters_queued === 1 ? "" : "s"}. This consumed 1 book upload.`)
+    } catch {
+      setStatusMessage("Reprocess failed. Check your upload quota and try again.")
+    } finally {
+      setReprocessing(false)
+    }
+  }
+
   const handleChapterHeadingBlur = async (rawValue: string, fallbackNumber: number, fallbackTitle: string) => {
     const parsed = parseChapterHeading(rawValue, fallbackNumber, fallbackTitle)
     const currentDraft = bookDrafts[fallbackNumber] ?? { title: fallbackTitle, text, html }
@@ -1840,6 +1841,8 @@ function ManuscriptPageInner() {
     setSaving(true)
     setStatusMessage(null)
     try {
+      // Sequential saves are intentional: each saveChapterDraft calls setSelectedChapter,
+      // loadWorkspaceTree, and runAutomaticChecks which must not overlap.
       for (const [chapterNumber, draft] of draftEntries) {
         await saveChapterDraft(chapterNumber, draft)
       }
@@ -2160,12 +2163,15 @@ function ManuscriptPageInner() {
     return `Local autosave at ${new Date(chapterAutosave.updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
   }
 
+  const activeSaveLabel = saving ? "Saving..." : dirtyDrafts.includes(activeChapterNumber) ? "Unsaved" : "Saved"
+  const activeSaveMeta = statusMessage ?? "Just now"
+
   if (loading) {
     return <div className={`min-h-screen px-6 py-20 ${isDark ? "bg-black text-slate-400" : "bg-stone-50 text-stone-500"}`}>Loading manuscript workspace...</div>
   }
 
   return (
-    <div className={`min-h-screen overflow-x-hidden ${isDark ? "bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_32rem),linear-gradient(180deg,#07090d_0%,#050609_100%)] text-slate-100" : "bg-[#f3eee6] text-stone-950"}`}>
+    <div className={`min-h-screen overflow-x-hidden ${isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
       <style jsx global>{`
         ::highlight(lorevia-annotation-open) {
           background: ${isDark ? "rgba(251, 191, 36, 0.18)" : "rgba(245, 158, 11, 0.22)"};
@@ -2185,13 +2191,13 @@ function ManuscriptPageInner() {
           className="pointer-events-none fixed z-50 hidden -translate-x-1/2 xl:block"
           style={{ top: selectionMenu.top, left: selectionMenu.left }}
         >
-          <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 shadow-dropdown ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+          <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
             <button
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => void tightenSelectedText()}
               disabled={tighteningSelection}
-              className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="rounded-md bg-[#1f615d] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
             >
               {tighteningSelection ? "Tightening..." : "Tighten"}
             </button>
@@ -2221,7 +2227,7 @@ function ManuscriptPageInner() {
         </div>
       ) : null}
       <div className="mx-auto max-w-[1620px] px-3 pb-10 pt-3 sm:px-5 lg:px-6">
-        <div className={`rounded-lg border px-4 py-4 shadow-card sm:px-5 ${isDark ? "border-white/10 bg-[#0b0f15]/90" : "border-white/80 bg-white/92"}`}>
+        <div className={`rounded-lg border px-4 py-4 sm:px-5 ${isDark ? "border-white/10 bg-[#0b0f15]/90" : "border-white/80 bg-white/92"}`}>
           <div className="flex flex-col gap-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
@@ -2232,74 +2238,53 @@ function ManuscriptPageInner() {
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
                   <div>
-                    <p className={`text-sm font-semibold ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>{saving ? "Saving..." : dirtyDrafts.includes(activeChapterNumber) ? "Unsaved" : "Saved"}</p>
-                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{statusMessage ? statusMessage : "Just now"}</p>
+                    <p className={`text-sm font-semibold ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>{activeSaveLabel}</p>
+                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{activeSaveMeta}</p>
                   </div>
                 </div>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowExportMenu((value) => !value)}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
-                  >
-                    Export
-                  </button>
-                  {showExportMenu ? (
-                    <div className={`absolute right-0 top-full z-20 mt-2 w-64 rounded-2xl border p-1.5 shadow-dropdown ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
-                      <div className="px-3 py-2">
-                        <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Publishing preset</p>
-                        <select
-                          value={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
-                          onChange={(event) => {
-                            const nextPreset = event.target.value as WriterWorkspace["publishing"]["active_preset"]
-                            void saveWorkspace({
-                              publishing: {
-                                ...(writerWorkspace?.publishing ?? { trim_size: "6x9", include_title_page: true, mirror_margins: true }),
-                                active_preset: nextPreset,
-                              },
-                            }, { silent: true })
-                          }}
-                          className={`mt-2 w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                        >
-                          <option value="standard_manuscript">Standard manuscript</option>
-                          <option value="trade_paperback">Trade paperback</option>
-                          <option value="kdp_paperback">Amazon KDP paperback</option>
-                        </select>
-                      </div>
-                      <button onClick={() => { setShowExportMenu(false); printManuscript() }} className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>Print</button>
-                      <button onClick={() => { setCompileFormat("docx"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Compile Word / DOCX"}</button>
-                      <button onClick={() => { setCompileFormat("pdf"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Compile submission PDF"}</button>
-                      <button onClick={() => { setCompileFormat("epub"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "epub" ? "Exporting EPUB..." : "Compile EPUB"}</button>
-                      <button onClick={() => { setCompileFormat("obsidian"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "obsidian" ? "Exporting vault..." : "Export Obsidian vault"}</button>
-                    </div>
-                  ) : null}
-                </div>
+                <ManuscriptExportMenu
+                  isDark={isDark}
+                  open={showExportMenu}
+                  activePreset={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
+                  exporting={exporting}
+                  onToggle={() => setShowExportMenu((value) => !value)}
+                  onPresetChange={(nextPreset) => {
+                    void saveWorkspace({
+                      publishing: {
+                        ...(writerWorkspace?.publishing ?? { trim_size: "6x9", include_title_page: true, mirror_margins: true }),
+                        active_preset: nextPreset,
+                      },
+                    }, { silent: true })
+                  }}
+                  onPrint={() => {
+                    setShowExportMenu(false)
+                    printManuscript()
+                  }}
+                  onCompile={(format) => {
+                    setCompileFormat(format)
+                    setShowExportMenu(false)
+                    setShowCompileDialog(true)
+                  }}
+                />
                 <button onClick={() => setFocusMode((value) => !value)} className={`rounded-full border px-4 py-2 text-sm font-medium ${focusMode ? isDark ? "border-emerald-300/40 bg-emerald-400/15 text-white" : "border-emerald-300 bg-emerald-50 text-stone-900" : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                   {focusMode ? "Exit focus" : "Focus mode"}
                 </button>
-                {book?.is_editor_project ? (
+                {reprocessCta.visible ? (
                   <button
                     type="button"
-                    disabled={editorProjectCta.disabled || reprocessing}
-                    title={editorProjectCta.disabledReason ?? undefined}
-                    onClick={async () => {
-                      if (reprocessing) return
-                      setReprocessing(true)
-                      try {
-                        await booksApi.reprocessManuscript(book.id)
-                      } catch {
-                        // error shown by global handler
-                      } finally {
-                        setReprocessing(false)
-                      }
+                    disabled={reprocessCta.disabled || reprocessing}
+                    title={reprocessCta.disabledReason ?? undefined}
+                    onClick={() => {
+                      if (reprocessing || !book) return
+                      setShowReprocessConfirm(true)
                     }}
                     className={`rounded-full border px-4 py-2 text-sm font-medium disabled:opacity-40 ${
-                      editorProjectCta.isProcessing
+                      reprocessCta.isProcessing
                         ? isDark ? "border-sky-400/30 bg-sky-500/15 text-sky-200" : "border-sky-300 bg-sky-50 text-sky-700"
                         : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"
                     }`}
                   >
-                    {editorProjectCta.label}
+                    {reprocessCta.label}
                   </button>
                 ) : null}
                 <button
@@ -2328,32 +2313,20 @@ function ManuscriptPageInner() {
                 ))}
               </div>
               <div className="ml-auto flex flex-wrap items-center gap-2">
-                <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-100/80"}`}>
-                  {(["edit", "paged"] as const).map((mode) => (
-                    <button
-                      key={`header-surface-${mode}`}
-                      type="button"
-                      aria-pressed={draftSurfaceMode === mode}
-                      onClick={() => setDraftSurfaceMode(mode)}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${draftSurfaceMode === mode ? isDark ? "bg-sky-300 text-slate-950" : "bg-sky-700 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                    >
-                      {mode === "edit" ? "Draft" : "Paged preview"}
-                    </button>
-                  ))}
-                </div>
-                <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-100/80"}`}>
-                  {(["chapter", "book"] as const).map((mode) => (
-                    <button
-                      key={`header-mode-${mode}`}
-                      type="button"
-                      aria-pressed={editorMode === mode}
-                      onClick={() => setEditorMode(mode)}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                    >
-                      {mode === "chapter" ? "Chapter" : "Full book"}
-                    </button>
-                  ))}
-                </div>
+                <ManuscriptModeSwitch
+                  isDark={isDark}
+                  options={["edit", "paged"] as const}
+                  selected={draftSurfaceMode}
+                  onSelect={setDraftSurfaceMode}
+                  renderLabel={(mode) => mode === "edit" ? "Draft" : "Paged preview"}
+                />
+                <ManuscriptModeSwitch
+                  isDark={isDark}
+                  options={["chapter", "book"] as const}
+                  selected={editorMode}
+                  onSelect={setEditorMode}
+                  renderLabel={(mode) => mode === "chapter" ? "Chapter" : "Full book"}
+                />
               </div>
             </div>
           </div>
@@ -2396,41 +2369,23 @@ function ManuscriptPageInner() {
         <div className={`mt-4 grid min-w-0 gap-4 ${desktopLayoutClass}`}>
           {leftRailVisible ? (
           <aside className={`min-w-0 rounded-lg border p-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Workspace</p>
-                <p className={`mt-1 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{book?.title || "Current project"}</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setSelectedChapter(null)
-                    setDraftChapterNumber(nextChapterNumber)
-                    setReplaceExisting(false)
-                    setChapterTitle(`Chapter ${nextChapterNumber}`)
-                    setText("")
-                    setHtml(textToHtml(""))
-                    setReview(null)
-                    setReviewPassages([])
-                  }}
-                  className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
-                >
-                  New
-                </button>
-                <button
-                  onClick={() => openSceneEditor(null)}
-                  className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}
-                >
-                  Scene
-                </button>
-              </div>
-            </div>
-            <div className={`mt-4 rounded-md border p-4 shadow-[0_18px_50px_-45px_rgba(14,165,233,0.45)] ${isDark ? "border-white/10 bg-[linear-gradient(145deg,rgba(14,165,233,0.09),rgba(255,255,255,0.025))]" : "border-stone-200 bg-white"}`}>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Manuscript</p>
-              <h2 className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title}</h2>
-              <p className={`mt-2 text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>Story manuscript</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{fullBookWordCount.toLocaleString()} words across the working draft · {fullBookReadingTime}</p>
-            </div>
+            <ManuscriptWorkspaceSidebarHeader
+              bookTitle={book?.title}
+              fullBookReadingTime={fullBookReadingTime}
+              fullBookWordCount={fullBookWordCount}
+              isDark={isDark}
+              onCreateChapter={() => {
+                setSelectedChapter(null)
+                setDraftChapterNumber(nextChapterNumber)
+                setReplaceExisting(false)
+                setChapterTitle(`Chapter ${nextChapterNumber}`)
+                setText("")
+                setHtml(textToHtml(""))
+                setReview(null)
+                setReviewPassages([])
+              }}
+              onCreateScene={() => openSceneEditor(null)}
+            />
             <input
               type="text"
               value={chapterSearch}
@@ -2455,7 +2410,7 @@ function ManuscriptPageInner() {
                       setDraftChapterNumber(null)
                       setReplaceExisting(true)
                     }}
-                    className={`w-full rounded-md border px-3 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${active ? isDark ? "border-sky-400/60 bg-sky-400/15 text-white shadow-[inset_3px_0_0_rgba(56,189,248,0.75)]" : "border-sky-300 bg-sky-50 text-stone-900 shadow-[inset_3px_0_0_rgba(14,165,233,0.75)]" : isDark ? "border-white/10 bg-white/[0.035] text-slate-300 hover:border-white/15 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
+                    className={`w-full rounded-md border px-3 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${active ? isDark ? "border-sky-400/60 bg-sky-400/15 text-white" : "border-sky-300 bg-sky-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.035] text-slate-300 hover:border-white/15 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-semibold">Chapter {chapter.number}</p>
@@ -2515,9 +2470,7 @@ function ManuscriptPageInner() {
                           <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
                             Reorder scenes
                           </span>
-                          <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${getSceneOrderStatusTone(chapterOrderState, isDark)}`}>
-                            {getSceneOrderStatusLabel(chapterOrderState, isDraggingWithinChapter)}
-                          </span>
+                          <ManuscriptSceneOrderStatus isDark={isDark} isDragging={isDraggingWithinChapter} state={chapterOrderState} />
                         </div>
                       ) : null}
                       {!collapsed ? (
@@ -2657,93 +2610,32 @@ function ManuscriptPageInner() {
                 {filteredSceneGroups.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No scenes match this search yet.</p> : null}
               </div>
             </div>
-            <div className="mt-4 hidden">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>notes/</p>
-              <div className={`mt-2 rounded-md border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
-                <div className="space-y-2">
-                  {filteredNotePaths.slice(0, 12).map((path) => (
-                    <p key={path} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-700"}`}>{path}</p>
-                  ))}
-                  {filteredNotePaths.length === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No note files match this search.</p> : null}
-                </div>
-              </div>
-            </div>
             <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
               <div className="flex items-center justify-between gap-3">
                 <p className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Manuscript progress</p>
                 <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{bookGoalProgress ?? 0}%</span>
               </div>
               <div className={`mt-3 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-100"}`}>
-                <div className="h-full rounded-full bg-[linear-gradient(135deg,#0ea5e9,#2563eb)]" style={{ width: `${Math.max(12, bookGoalProgress ?? 18)}%` }} />
+                <div className="h-full rounded-full bg-[#1f615d]" style={{ width: `${Math.max(12, bookGoalProgress ?? 18)}%` }} />
               </div>
               <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
                 {fullBookWordCount.toLocaleString()} / {(writerWorkspace?.word_count_goals.book_target ?? fullBookWordCount).toLocaleString()} words
               </p>
             </div>
             {selectedChapter !== null ? (
-              <div className="mt-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Version history</p>
-                  <button onClick={() => void createSnapshot()} className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Save named version</button>
-                </div>
-                <input
-                  type="text"
-                  value={chapterVersionNameDraft}
-                  onChange={(event) => setChapterVersionNameDraft(event.target.value)}
-                  placeholder={`Example: Before rewrite of chapter ${selectedChapter}`}
-                  className={`mt-2 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                />
-                <div className="mt-2 space-y-2">
-                  {chapterVersions.map((version) => (
-                    <div key={version.id} className={`rounded-sm px-3 py-3 ${isDark ? "bg-white/[0.03]" : "bg-stone-50"}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{version.note || "Previous draft"}</p>
-                          <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                        {new Date(version.created_at).toLocaleString()} {version.word_count ? `· ${version.word_count} words` : ""}
-                      </p>
-                          <p className={`mt-1 text-3xs uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
-                        </div>
-                        <button
-                          onClick={() => void restoreSnapshot(version.id)}
-                          disabled={restoringVersionId === version.id}
-                          className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
-                        >
-                          {restoringVersionId === version.id ? "Restoring..." : "Restore"}
-                        </button>
-                        <button
-                          onClick={() => void previewSnapshot(version.id)}
-                          className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
-                        >
-                          Compare
-                        </button>
-                      </div>
-                      {chapterVersionDetail?.id === version.id ? (
-                        <div className="mt-3 grid gap-3">
-                          <p className={`text-3xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                            {chapterVersionDetail.text === text ? "Matches the current draft." : "Compared with the current draft below."}
-                          </p>
-                          <div className="grid gap-3 xl:grid-cols-2">
-                            <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
-                              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
-                              <div className={`mt-2 max-h-44 overflow-y-auto text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
-                                {chapterVersionDetail.text || "No text stored in this snapshot."}
-                              </div>
-                            </div>
-                            <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
-                              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
-                              <div className={`mt-2 max-h-44 overflow-y-auto text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
-                                {text || "No draft text yet."}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                  {chapterVersions.length === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No snapshots saved for this chapter yet.</p> : null}
-                </div>
-              </div>
+              <ManuscriptVersionHistory
+                chapterNumber={selectedChapter}
+                chapterVersionDetail={chapterVersionDetail}
+                chapterVersionNameDraft={chapterVersionNameDraft}
+                chapterVersions={chapterVersions}
+                currentText={text}
+                isDark={isDark}
+                restoringVersionId={restoringVersionId}
+                onCreateSnapshot={() => void createSnapshot()}
+                onPreviewSnapshot={(versionId) => void previewSnapshot(versionId)}
+                onRestoreSnapshot={(versionId) => void restoreSnapshot(versionId)}
+                onVersionNameChange={setChapterVersionNameDraft}
+              />
             ) : null}
           </aside>
           ) : null}
@@ -2818,7 +2710,7 @@ function ManuscriptPageInner() {
                 />
               ) : (
               <div className="space-y-4">
-                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border shadow-card ${isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
@@ -2878,7 +2770,7 @@ function ManuscriptPageInner() {
                     ) : null}
                     {autosaveMetaLabel(activeChapterNumber) ? <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{autosaveMetaLabel(activeChapterNumber)}</p> : null}
                   </div>
-                  <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                  <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                     <EditorToolbar editorKey={`chapter-${activeChapterNumber}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                   </div>
                   <RichTextEditor
@@ -2942,7 +2834,7 @@ function ManuscriptPageInner() {
                         chapterRefs.current[chapter.number] = node
                       }}
                       style={{ contentVisibility: "auto", containIntrinsicSize: "820px" }}
-                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border shadow-card ${jumpTarget === chapter.number ? isDark ? "border-teal-400/50 bg-[#0e1218]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border ${jumpTarget === chapter.number ? isDark ? "border-teal-400/50 bg-[#0e1218]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
@@ -3001,7 +2893,7 @@ function ManuscriptPageInner() {
                           </div>
                         </div>
                       </div>
-                      <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                      <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                         <EditorToolbar editorKey={`book-${chapter.number}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                       </div>
                       <RichTextEditor
@@ -3122,7 +3014,7 @@ function ManuscriptPageInner() {
                             <button
                               onClick={saveCharCard}
                               disabled={charCardSaving}
-                              className="rounded-full bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                              className="rounded-md bg-violet-700 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                             >
                               {charCardSaving ? "Saving…" : "Save"}
                             </button>
@@ -3621,7 +3513,7 @@ function ManuscriptPageInner() {
                       <button
                         onClick={saveNote}
                         disabled={savingNote || !noteBodyText.trim()}
-                        className="rounded-md bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
+                        className="rounded-md bg-amber-700 px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
                       >
                         {savingNote ? "Saving..." : `Save ${noteScope === "chapter" ? "chapter" : "book"} note`}
                       </button>
@@ -3701,7 +3593,7 @@ function ManuscriptPageInner() {
                         <button
                           onClick={() => void saveAnnotation()}
                           disabled={annotationActionId === "new" || !annotationDraft.trim()}
-                          className="rounded-md bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                          className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
                         >
                           {annotationActionId === "new" ? "Saving..." : "Save annotation"}
                         </button>
@@ -3901,6 +3793,35 @@ function ManuscriptPageInner() {
           </aside>
           ) : null}
         </div>
+        ) : null}
+
+        {showReprocessConfirm ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className={`w-full max-w-md rounded-lg border p-5 ${isDark ? "border-white/10 bg-[#0f1117] text-slate-100" : "border-stone-200 bg-white text-stone-950"}`}>
+              <h2 className="text-lg font-semibold">Reprocess manuscript?</h2>
+              <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                Reprocessing rebuilds the Character Bible, relationships, plot threads, summaries, world/lore data, and continuity signals from the saved manuscript. This will consume 1 book upload. Continue?
+              </p>
+              <div className="mt-5 flex flex-wrap justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowReprocessConfirm(false)}
+                  disabled={reprocessing}
+                  className={`rounded-md border px-4 py-2 text-sm font-medium disabled:opacity-50 ${isDark ? "border-white/10 text-slate-200" : "border-stone-200 text-stone-700"}`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmReprocessManuscript()}
+                  disabled={reprocessing}
+                  className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {reprocessing ? "Starting..." : "Reprocess and use 1 upload"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         <ManuscriptOverlayDialogs

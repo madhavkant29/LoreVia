@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type KeyboardEvent, type MouseEvent } from "react"
+import { memo, useState, type KeyboardEvent, type MouseEvent } from "react"
 import { booksApi } from "@/lib/api/books"
 import { isPaidTier } from "@/lib/billing/plans"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
@@ -58,7 +58,7 @@ function stringToList(value: string) {
     .filter(Boolean)
 }
 
-export function CharacterCard({ character, bookId, compact = false, editable = false, onUpdated, onDeleted, theme = "light" }: Props) {
+export const CharacterCard = memo(function CharacterCard({ character, bookId, compact = false, editable = false, onUpdated, onDeleted, theme = "light" }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -209,12 +209,12 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
 
       {expanded && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 sm:p-6"
           onClick={() => setExpanded(false)}
         >
           <div 
-            className={`relative z-50 w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl p-6 md:p-8 ${
-              isDark ? "bg-slate-900 text-white shadow-xl shadow-black/50 border border-slate-800" : "bg-white text-slate-900 shadow-2xl border border-slate-200"
+            className={`relative z-50 max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg p-6 md:p-8 ${
+              isDark ? "border border-slate-800 bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-900"
             }`}
             onClick={(e) => e.stopPropagation()}
           >
@@ -514,4 +514,4 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
       )}
     </>
   )
-}
+})

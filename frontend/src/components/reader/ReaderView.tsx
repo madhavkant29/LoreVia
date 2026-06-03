@@ -3,7 +3,7 @@ import dynamic from "next/dynamic"
 import { useState, useEffect, useRef, useMemo } from "react"
 
 import { useReader } from "@/lib/hooks/useReader"
-import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
+import { isReaderFontFamily, type ReaderFontFamily } from "@/lib/utils/readerTypography"
 import { ReaderToolbar } from "./ReaderToolbar"
 import { ChapterText } from "./ChapterText"
 import { ReaderQuickRail } from "./ReaderQuickRail"
@@ -84,7 +84,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
     if (storedSize) setFontSize(parseInt(storedSize))
 
     const storedFont = window.localStorage.getItem("reader-font-family")
-    if (storedFont === "serif" || storedFont === "sans" || storedFont === "mono") setFontFamily(storedFont)
+    if (isReaderFontFamily(storedFont)) setFontFamily(storedFont)
 
     const storedDisplayStyle = window.localStorage.getItem("reader-display-style")
     if (storedDisplayStyle === "relaxed" || storedDisplayStyle === "published") setDisplayStyle(storedDisplayStyle)
@@ -208,7 +208,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   if (loading) {
     return (
       <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
-        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(45,212,191,0.35)]">
+        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-teal-300/40 border-t-teal-200" />
           <p className="mt-5 text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
           <p className="mt-3 text-lg text-slate-100">Loading chapter...</p>
@@ -220,7 +220,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   if (error || !data) {
     return (
       <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
-        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-[0_24px_80px_-56px_rgba(79,70,229,0.4)]">
+        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center">
           <p className="text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
           <p className="mt-3 text-lg text-slate-100">{error ?? "Chapter not found"}</p>
         </div>
@@ -231,7 +231,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   return (
     <div className={`reader-display-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden transition-colors ${theme === "dark"
         ? "bg-[#070c16] text-stone-100"
-        : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f7f2eb_45%,#f3efe9_100%)] text-slate-950"
+        : "bg-stone-50 text-slate-950"
       }`}>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ReaderToolbar
@@ -257,7 +257,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
         />
         <div
           ref={scrollRef}
-          className={`reader-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain ${theme === "dark" ? "bg-[radial-gradient(circle_at_top,rgba(29,78,216,0.075),transparent_16%),linear-gradient(180deg,#070c16_0%,#0a1120_100%)]" : ""}`}
+          className={`reader-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-y-contain ${theme === "dark" ? "bg-[#071211]" : ""}`}
         >
           <div className="mx-auto w-full max-w-[1620px] px-4 pb-12 pt-4 sm:px-6 lg:px-8 xl:px-10">
             <div className="grid gap-6 xl:grid-cols-[64px_minmax(0,1fr)_88px] xl:items-start">
@@ -311,7 +311,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
           type="button"
           aria-label="Close reading context"
           onClick={clearPanel}
-          className="fixed inset-0 z-30 bg-[rgba(2,6,23,0.44)] backdrop-blur-[2px] md:hidden"
+          className="fixed inset-0 z-30 bg-[rgba(2,6,23,0.52)] md:hidden"
         />
       ) : null}
 

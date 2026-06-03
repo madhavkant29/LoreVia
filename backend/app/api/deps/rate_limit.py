@@ -182,7 +182,8 @@ def _client_identifier(request: Request) -> str:
         #   3. X-Forwarded-For  — least reliable: proxies *append* to it, so a client
         #      can prepend fake IPs. Checked last as a fallback.
         cf_ip = request.headers.get("cf-connecting-ip")
-        if cf_ip and cf_ip.strip():
+        edge_verified = request.headers.get("x-lorevia-edge-verified") == "1"
+        if edge_verified and cf_ip and cf_ip.strip():
             return cf_ip.strip()
 
         real_ip = request.headers.get("x-real-ip")
@@ -359,7 +360,6 @@ async def rate_limit_internal_job(
         identifier = hashlib.sha256(x_internal_job_secret.encode()).hexdigest()
     else:
         identifier = _client_identifier(request)
-
     ok = await _window(key_ratelimit(f"internal_job:{identifier}", "job"), 10, 60)
     if not ok:
         raise HTTPException(429, "Internal job rate limit exceeded. Please wait and try again.")

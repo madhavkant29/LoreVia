@@ -3,6 +3,7 @@ import logging
 import httpx
 
 from app.core.database import AsyncSessionLocal
+from app.models.book import Chapter
 from app.workers.celery_app import celery_app
 from app.workers.consumers.analysis_consumer import analyse_chapter
 from app.utils.ingestion_utils import extract_queue_wait_ms, load_analysis_chapter_payload
@@ -51,6 +52,7 @@ def analyse_chapter_task(
     chapter_text_or_book_id: str | None = None,
     chapter_title: str = "",
     is_reprocessing: bool | None = None,
+    rebuild_run_id: str | None = None,
 ):
     try:
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
@@ -69,6 +71,7 @@ def analyse_chapter_task(
                     str(payload["text"]),
                     str(payload.get("title") or ""),
                     queue_wait_ms=queue_wait_ms,
+                    rebuild_run_id=rebuild_run_id,
                 )
 
             return run_worker_coro(analyse_stored_chapter())
@@ -78,10 +81,32 @@ def analyse_chapter_task(
                 chapter_text_or_book_id or "",
                 chapter_title,
                 queue_wait_ms=queue_wait_ms,
+                rebuild_run_id=rebuild_run_id,
             )
         )
     except Exception as exc:
-        if not _is_retryable_analysis_error(exc):
+        retryable = _is_retryable_analysis_error(exc)
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
+        if rebuild_run_id is not None and (not retryable or retries >= max_retries):
+            async def _fail_terminal_rebuild() -> None:
+                import uuid
+
+                from app.services.editor_project_service import fail_rebuild_run
+
+                async with AsyncSessionLocal() as db:
+                    chapter = await db.get(Chapter, uuid.UUID(chapter_id))
+                    if chapter is not None:
+                        await fail_rebuild_run(
+                            db,
+                            chapter.book_id,
+                            expected_rebuild_run_id=rebuild_run_id,
+                            error=str(exc),
+                        )
+                        await db.commit()
+
+            run_worker_coro(_fail_terminal_rebuild())
+        if not retryable or retries >= max_retries:
             log.error(
                 "analysis_task_non_retryable chapter_id=%s error=%s",
                 chapter_id,

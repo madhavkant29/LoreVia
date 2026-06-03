@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { htmlToPlainText, renderMarkdownHtml, renderRichTextHtml, sanitizeRichTextHtml } from "./richText"
 
 describe("richText utilities", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it("sanitizes unsafe links and images while preserving safe formatting", () => {
     const html = [
       '<div style="text-align:center" onclick="alert(1)">',
@@ -23,6 +27,33 @@ describe("richText utilities", () => {
     expect(sanitized).not.toContain("Bad link</a>")
     expect(sanitized).toContain('<img src="/covers/chapter.png" alt="Cover" loading="lazy">')
     expect(sanitized).toContain("Text")
+  })
+
+  it("rejects protocol-relative links and svg data images", () => {
+    const html = [
+      '<a href="//evil.example/path">Protocol relative</a>',
+      '<a href="/safe/path">Safe relative</a>',
+      '<img src="data:image/svg+xml;base64,PHN2Zy8+" alt="svg">',
+      '<img src="data:image/png;base64,iVBORw0KGgo=" alt="png">',
+    ].join("")
+
+    const sanitized = sanitizeRichTextHtml(html)
+
+    expect(sanitized).not.toContain("//evil.example")
+    expect(sanitized).toContain('<a href="/safe/path" target="_blank" rel="noreferrer noopener">Safe relative</a>')
+    expect(sanitized).not.toContain("data:image/svg+xml")
+    expect(sanitized).toContain('src="data:image/png;base64,iVBORw0KGgo="')
+  })
+
+  it("does not return raw html when sanitized during server rendering", () => {
+    vi.stubGlobal("window", undefined)
+
+    const sanitized = sanitizeRichTextHtml('<img src=x onerror="alert(1)"><script>alert(2)</script><p>Safe</p>')
+
+    expect(sanitized).not.toContain("<script")
+    expect(sanitized).not.toContain("onerror")
+    expect(sanitized).toContain("<p>")
+    expect(sanitized).toContain("Safe")
   })
 
   it("renders plain text input as escaped paragraphs", () => {

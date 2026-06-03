@@ -357,7 +357,7 @@ async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadySta
     chapter_count = int(
         (
             await db.execute(
-                select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id)
+                select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id, Chapter.word_count > 0)
             )
         ).scalar_one()
     )
@@ -369,6 +369,7 @@ async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadySta
                 .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
                 .where(
                     Chapter.book_id == book.id,
+                    Chapter.word_count > 0,
                     ChapterSummary.mode == "detailed",
                 )
             )
@@ -403,8 +404,8 @@ async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadySta
     if chapter_count > 0 and analyzed_chapter_count >= chapter_count:
         chapter_rows = (
             await db.execute(
-                select(Chapter.number)
-                .where(Chapter.book_id == book.id)
+              select(Chapter.number)
+              .where(Chapter.book_id == book.id, Chapter.word_count > 0)
                 .order_by(Chapter.number)
             )
         ).all()

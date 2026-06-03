@@ -15,8 +15,6 @@ export function PublicContentShell({
 }) {
   return (
     <main className={cn("app-shell overflow-hidden content-library-shell", className)}>
-      <div className="app-shell__mesh" />
-      <div className="content-library-shell__glow" aria-hidden="true" />
       <PublicContentHeader activeSection={activeSection} />
       {children}
     </main>

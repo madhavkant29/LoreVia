@@ -9,6 +9,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
 from app.core.config import settings
+from app.core.security import decode_token
 from app.utils.cookie_utils import (
     auth_cookie_path,
     auth_cookie_secure,
@@ -67,12 +68,23 @@ def cookie_authenticated_request_requires_csrf(request: Request) -> bool:
     if request.method.upper() not in UNSAFE_HTTP_METHODS:
         return False
     authorization = request.headers.get("authorization", "")
-    return not authorization.lower().startswith("bearer ")
+    return not _has_valid_bearer_access_token(authorization)
 
 
 def enforce_cookie_csrf(request: Request) -> None:
     if cookie_authenticated_request_requires_csrf(request):
         validate_auth_csrf_token(request)
+
+
+def _has_valid_bearer_access_token(authorization: str) -> bool:
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return False
+    try:
+        payload = decode_token(token.strip())
+    except Exception:
+        return False
+    return bool(payload and payload.get("type") == "access" and payload.get("sub"))
 
 
 def _validate_same_origin_request(request: Request) -> None:

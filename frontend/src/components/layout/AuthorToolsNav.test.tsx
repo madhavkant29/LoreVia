@@ -150,6 +150,16 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')?.textContent).toContain("Author Lens")
   })
 
+  it("groups story bible and review center tools in the shared author rail", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+
+    expect(view.querySelector('[data-testid="author-nav-item-timeline"]')?.textContent).toContain("Timeline")
+    expect(view.querySelector('[data-testid="author-nav-item-cross-book-wiki"]')?.textContent).toContain("Series Wiki")
+    expect(view.querySelector('[data-testid="author-nav-item-reports"]')?.textContent).toContain("Chapter Reports")
+  })
+
   it("keeps reader-shell collaborators on reader navigation only", () => {
     mockBaseState({
       collaborationRole: "beta_reader",

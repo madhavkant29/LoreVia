@@ -87,6 +87,8 @@ class Book(Base):
     copyright_warning: Mapped[bool] = mapped_column(Boolean, default=False)
     is_editor_project: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     writer_workspace: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    import_structure: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    force_single_manuscript: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -133,6 +135,23 @@ class Book(Base):
     writing_activities = relationship("UserWritingActivity", back_populates="book")
     public_analytics_events = relationship("PublicBookAnalyticsEvent", back_populates="book", cascade="all, delete-orphan")
     public_rankings = relationship("PublicBookRanking", back_populates="book", cascade="all, delete-orphan")
+
+
+class BookUploadCharge(Base):
+    __tablename__ = "book_upload_charges"
+    __table_args__ = (
+        UniqueConstraint("user_id", "charge_kind", "source_id", name="uq_book_upload_charges_source"),
+        Index("ix_book_upload_charges_user_kind_created", "user_id", "charge_kind", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    charge_kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    source_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
 class PublicBookAnalyticsEvent(Base):

@@ -12,6 +12,7 @@ import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { getApiErrorDetail } from "@/lib/utils/apiErrors"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import {
   buildVoiceIssueNote,
   buildVoiceReviewNote,
@@ -237,7 +238,7 @@ export default function VoiceConsistencyPage() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#05030a_0%,#0a0f18_55%,#111827_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f9f1ea_0%,#f5f2fb_45%,#eef5fb_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-[108rem] px-4 pb-20 pt-6 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav
@@ -252,28 +253,28 @@ export default function VoiceConsistencyPage() {
           />
 
           <div className="space-y-6">
-            <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-white/70 bg-white/88"}`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div className="max-w-3xl">
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-rose-300" : "text-rose-700"}`}>Voice workspace</p>
-                  <h1 className={`mt-2 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title || "Book"} voice consistency</h1>
-                  <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    Review one chapter or passage at a time, save issues into your vault notes, and push snapshots into the scenes tree so the rest of the workspace can reuse them.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <Link href={`/${bookId}/notes`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
+            <WorkspaceFamilyHeader
+              active="voice"
+              bookId={bookId}
+              family="review-center"
+              title={`${book?.title || "Book"} voice consistency`}
+              description="Review one chapter or passage at a time, save issues into your vault notes, and push snapshots into the scenes tree so the rest of the workspace can reuse them."
+              actions={
+                <>
+                  <Link href={`/${bookId}/notes`} className="app-button app-button--secondary">
                     Open notes
                   </Link>
-                  <Link href={`/${bookId}/scenes`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-800"}`}>
+                  <Link href={`/${bookId}/scenes`} className="app-button app-button--secondary">
                     Open scenes
                   </Link>
-                  <Link href={`/${bookId}/manuscript`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-rose-500 text-white" : "bg-stone-900 text-white"}`}>
+                  <Link href={`/${bookId}/manuscript`} className="app-button app-button--primary">
                     Open manuscript
                   </Link>
-                </div>
-              </div>
+                </>
+              }
+            />
 
+            <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-white/70 bg-white/88"}`}>
               <div className="mt-6 grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
                 <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50/80"}`}>
                   <label className="block text-sm">
@@ -348,7 +349,7 @@ export default function VoiceConsistencyPage() {
                       type="button"
                       onClick={() => void runReview()}
                       disabled={reviewLoading || !text.trim()}
-                      className="rounded-full bg-[linear-gradient(135deg,#f43f5e,#e11d48)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      className="rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:opacity-50"
                     >
                       {reviewLoading ? "Running..." : "Run voice review"}
                     </button>
@@ -382,10 +383,10 @@ export default function VoiceConsistencyPage() {
                   </div>
                   {review ? (
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => void saveReviewNote()} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-100 text-stone-800"}`}>
+                      <button type="button" onClick={() => void saveReviewNote()} className="app-button app-button--secondary">
                         Save review note
                       </button>
-                      <button type="button" onClick={() => void saveReviewScene()} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-rose-500 text-white" : "bg-rose-600 text-white"}`}>
+                      <button type="button" onClick={() => void saveReviewScene()} className="app-button app-button--primary">
                         Save as scene
                       </button>
                     </div>

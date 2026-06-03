@@ -8,6 +8,8 @@ import type { Character } from "@/types/character"
 import type { InlineContinuityResponse } from "@/types/intelligence"
 import type { SearchResult } from "@/types/reader"
 
+export type ManuscriptDraftFontFamily = "times" | "georgia" | "sans" | "italian-old-style" | "eb-garamond"
+
 type ManuscriptNonWriteWorkspaceProps = {
   isDark: boolean
   bookId: string
@@ -28,8 +30,8 @@ type ManuscriptNonWriteWorkspaceProps = {
   onTogglePageSetup: () => void
   showSearchTools: boolean
   onToggleSearchTools: () => void
-  fontFamily: "times" | "georgia" | "sans"
-  onFontFamilyChange: (value: "times" | "georgia" | "sans") => void
+  fontFamily: ManuscriptDraftFontFamily
+  onFontFamilyChange: (value: ManuscriptDraftFontFamily) => void
   fontSize: number
   onFontSizeChange: (value: number) => void
   lineHeight: number
@@ -179,13 +181,15 @@ export function ManuscriptNonWriteWorkspace({
               Font
               <select
                 value={fontFamily}
-                onChange={(event) => onFontFamilyChange(event.target.value as "times" | "georgia" | "sans")}
+                onChange={(event) => onFontFamilyChange(event.target.value as ManuscriptDraftFontFamily)}
                 disabled={draftSurfaceMode === "paged"}
                 className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 disabled:opacity-50" : "border-stone-200 bg-white text-stone-900 disabled:opacity-50"}`}
               >
                 <option value="times">Times</option>
                 <option value="georgia">Georgia</option>
                 <option value="sans">Sans</option>
+                <option value="italian-old-style">Italian Old Style</option>
+                <option value="eb-garamond">EB Garamond</option>
               </select>
             </label>
             <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>

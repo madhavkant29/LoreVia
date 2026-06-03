@@ -8,8 +8,10 @@ import axios from "axios"
 import { GoogleOAuthButtonShell } from "@/components/auth/GoogleOAuthButtonShell"
 import { authApi } from "@/lib/api/auth"
 import { normalizeLoginError, shouldShowCreateAccountCta } from "@/lib/auth/loginMessages"
+import { resolveSafeAuthNextPath } from "@/lib/routes"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { getOrCreateDeviceId } from "@/lib/utils/device"
 
 export default function LoginPage() {
   return (
@@ -57,13 +59,13 @@ function LoginInner() {
     setLoading(true)
     setError(null)
     try {
-      const user = await authApi.login(email, password)
+      const user = await authApi.login(email, password, getOrCreateDeviceId())
       if (!user) {
         setError("Could not load your account. Please try again.")
         return
       }
       setUser(user)
-      router.push("/library")
+      router.push(resolveSafeAuthNextPath(searchParams.get("next")))
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const detail = error.response?.data?.detail
@@ -87,7 +89,7 @@ function LoginInner() {
   }
 
   const inputCls = [
-    "w-full rounded-xl border px-4 py-3 text-sm transition-colors",
+    "w-full rounded-md border px-4 py-3 text-sm transition-colors",
     "focus:outline-none focus:ring-2 focus:ring-offset-0",
     isDark
       ? "border-white/[0.08] bg-white/[0.04] text-slate-100 placeholder:text-slate-600 focus:border-white/20 focus:ring-white/10"
@@ -96,7 +98,7 @@ function LoginInner() {
 
   return (
     <main>
-      <div className={`rounded-lg border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] ${
+      <div className={`rounded-lg border p-8 ${
         isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
       }`}>
         <div className="mb-8 text-center">
@@ -153,7 +155,7 @@ function LoginInner() {
           </div>
 
           {error && (
-            <div className={`rounded-xl border px-4 py-3 text-sm ${
+            <div className={`rounded-md border px-4 py-3 text-sm ${
               isDark
                 ? "border-rose-500/25 bg-rose-500/[0.08] text-rose-300"
                 : "border-rose-200 bg-rose-50 text-rose-600"
@@ -185,7 +187,7 @@ function LoginInner() {
           <button
             type="submit"
             disabled={loading}
-            className={`mt-1 rounded-xl py-3 text-sm font-semibold transition hover:-translate-y-[1px] active:translate-y-0 disabled:pointer-events-none disabled:opacity-40 ${
+            className={`mt-1 rounded-md py-3 text-sm font-semibold transition disabled:pointer-events-none disabled:opacity-40 ${
               isDark
                 ? "bg-white text-black hover:bg-stone-100"
                 : "bg-stone-950 text-white hover:bg-stone-800"

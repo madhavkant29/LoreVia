@@ -11,8 +11,6 @@ from app.core.database import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        Index("ix_users_beta_read_penalty_required_at", "beta_read_penalty_required_at"),
-        Index("ix_users_username", "username", unique=True),
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),
         UniqueConstraint("supabase_auth_id", name="uq_users_supabase_auth_id"),
@@ -267,6 +265,9 @@ class UserRateLimitOverride(Base):
 
 class DeviceTrial(Base):
     __tablename__ = "device_trials"
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_id_hash", name="uq_device_trials_user_device"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), __import__("sqlalchemy").ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

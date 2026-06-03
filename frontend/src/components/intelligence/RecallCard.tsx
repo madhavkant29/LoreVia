@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 
 interface Props {
@@ -9,7 +10,7 @@ interface Props {
   onContinue: () => void
 }
 
-export function RecallCard({ recall, lastChapter, onDismiss, onContinue }: Props) {
+export const RecallCard = memo(function RecallCard({ recall, lastChapter, onDismiss, onContinue }: Props) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
@@ -17,13 +18,12 @@ export function RecallCard({ recall, lastChapter, onDismiss, onContinue }: Props
 
   return (
     <section
-      className={`relative overflow-hidden rounded-lg border p-6 shadow-[0_26px_100px_-55px_rgba(15,23,42,0.45)] ${
+      className={`relative overflow-hidden rounded-lg border p-6 ${
         isDark
-          ? "border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(79,70,229,0.18),transparent_24%),radial-gradient(circle_at_88%_12%,rgba(96,165,250,0.16),transparent_28%),linear-gradient(145deg,rgba(10,20,38,0.98),rgba(9,18,34,0.96)_55%,rgba(11,35,68,0.92))] text-white"
-          : "border-indigo-100 bg-[linear-gradient(145deg,#eef2ff,#ffffff_55%,#ecfeff)] text-stone-900"
+          ? "border-white/10 bg-[#0b1422] text-white"
+          : "border-indigo-100 bg-white text-stone-900"
       }`}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.12),transparent_24%)]" />
       <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex-1">
           <div className="flex items-start justify-between gap-4 lg:hidden">
@@ -61,7 +61,7 @@ export function RecallCard({ recall, lastChapter, onDismiss, onContinue }: Props
           <button
             onClick={onContinue}
             className={`rounded-full px-5 py-3 text-sm font-semibold transition ${
-              isDark ? "bg-amber-300 text-stone-950 hover:bg-amber-200" : "bg-stone-950 text-white hover:bg-stone-800"
+              "bg-[#1f615d] text-white hover:bg-teal-700"
             }`}
           >
             Continue Reading
@@ -81,4 +81,4 @@ export function RecallCard({ recall, lastChapter, onDismiss, onContinue }: Props
       </div>
     </section>
   )
-}
+})

@@ -1,11 +1,12 @@
 "use client"
 
-import Link from "next/link"
 import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { WorkspaceEmptyState, WorkspacePage, WorkspacePanel } from "@/components/ui/Workspace"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
@@ -26,29 +27,33 @@ export default function ChapterReportsPage() {
   })
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
-      <div className="mx-auto max-w-5xl px-4 pb-16 pt-6 sm:px-6 lg:px-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className={`font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>Chapter Analysis</h1>
-            <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-              Track characters, relationships, plot threads, and continuity across each chapter.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Link href={`/${bookId}/plot-threads`} className="rounded-full bg-[linear-gradient(135deg,#115e59,#0f766e)] px-4 py-2 text-sm font-semibold text-white">Plot threads</Link>
-          </div>
-        </div>
+    <WorkspacePage className={isDark ? "text-slate-100" : "text-stone-950"}>
+      <div className="mx-auto max-w-5xl px-0 pb-16 pt-6 sm:px-2 lg:px-4">
+        <WorkspaceFamilyHeader
+          active="reports"
+          bookId={bookId}
+          family="review-center"
+          title="Chapter reports"
+          description="Review chapter-level evidence for new characters, relationship changes, plot movement, and continuity warnings."
+        />
 
         {loading ? (
-          <div className={`mt-8 rounded-lg border p-5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-stone-200 bg-white/70 text-stone-600"}`}>
+          <WorkspacePanel tone="subtle" className="mt-6 p-5 text-sm text-[rgb(var(--muted-foreground))]">
             Loading reports...
-          </div>
+          </WorkspacePanel>
         ) : null}
 
-        <div className="mt-8 space-y-4">
+        {!loading && reports.length === 0 ? (
+          <WorkspaceEmptyState
+            className="mt-6"
+            title="No chapter reports yet"
+            body="Reports will appear here after LoreVia finishes analyzing chapters in this manuscript."
+          />
+        ) : null}
+
+        <div className="mt-6 space-y-4">
           {reports.map((report) => (
-            <div key={`${report.chapter_number}-${report.chapter_title ?? "untitled"}`} className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-black/60" : "border-stone-200 bg-white/90"}`}>
+            <WorkspacePanel key={`${report.chapter_number}-${report.chapter_title ?? "untitled"}`} className="p-5">
               <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>
                 Chapter {report.chapter_number}{report.chapter_title ? ` - ${report.chapter_title}` : ""}
               </p>
@@ -69,11 +74,11 @@ export default function ChapterReportsPage() {
                   </div>
                 </div>
               ) : null}
-            </div>
+            </WorkspacePanel>
           ))}
         </div>
       </div>
-    </div>
+    </WorkspacePage>
   )
 }
 

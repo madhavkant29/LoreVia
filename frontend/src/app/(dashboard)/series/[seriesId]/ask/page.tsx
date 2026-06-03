@@ -98,7 +98,7 @@ export default function SeriesAskPage() {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col ${isDark ? "bg-[radial-gradient(circle_at_top,#111827_0%,#05070d_100%)]" : "bg-[linear-gradient(180deg,#fcfdff_0%,#eef3f9_100%)]"}`}>
+    <div className={`flex min-h-screen flex-col ${isDark ? "bg-[#071211]" : "bg-stone-50"}`}>
       {/* Header */}
       <header className={`border-b px-4 py-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/50"}`}>
         <div className="mx-auto max-w-3xl flex items-center justify-between">
@@ -156,7 +156,7 @@ export default function SeriesAskPage() {
                     {msg.role === "user" ? "You" : "AI"}
                   </div>
                   <div className={`flex-1 ${msg.role === "user" ? "text-right" : ""}`}>
-                    <div className={`inline-block text-left rounded-2xl px-5 py-3 text-sm leading-7 ${msg.role === "user" ? (isDark ? "bg-slate-700/50 text-slate-200" : "bg-stone-200 text-stone-800") : (isDark ? "text-white" : "text-stone-900")}`}>
+                    <div className={`inline-block rounded-md px-5 py-3 text-left text-sm leading-7 ${msg.role === "user" ? (isDark ? "bg-slate-700/50 text-slate-200" : "bg-stone-200 text-stone-800") : (isDark ? "text-white" : "text-stone-900")}`}>
                       {msg.role === "assistant" ? (
                         <div dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(msg.content) }} />
                       ) : msg.content}
@@ -170,9 +170,9 @@ export default function SeriesAskPage() {
                     AI
                   </div>
                   <div className="flex items-center gap-2 text-sm">
-                    <span className={`animate-bounce ${isDark ? "text-slate-400" : "text-stone-400"}`}>●</span>
-                    <span className={`animate-bounce delay-100 ${isDark ? "text-slate-400" : "text-stone-400"}`}>●</span>
-                    <span className={`animate-bounce delay-200 ${isDark ? "text-slate-400" : "text-stone-400"}`}>●</span>
+                    <span className={`animate-bounce ${isDark ? "text-slate-400" : "text-stone-400"}`}>.</span>
+                    <span className={`animate-bounce delay-100 ${isDark ? "text-slate-400" : "text-stone-400"}`}>.</span>
+                    <span className={`animate-bounce delay-200 ${isDark ? "text-slate-400" : "text-stone-400"}`}>.</span>
                   </div>
                 </div>
               )}
@@ -189,7 +189,7 @@ export default function SeriesAskPage() {
                   <button
                     key={i}
                     onClick={() => handleSeriesAsk(item.question)}
-                    className={`text-left rounded-xl border p-4 transition group ${isDark ? "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10" : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"}`}
+                    className={`group rounded-md border p-4 text-left transition-colors ${isDark ? "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10" : "border-stone-200 bg-white hover:border-stone-300"}`}
                   >
                     <div>
                       <p className={`text-xs font-medium uppercase tracking-wide mb-1 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{item.category}</p>
@@ -203,10 +203,7 @@ export default function SeriesAskPage() {
 
           {/* Input Bar - Docked at bottom when chat started, centered when empty */}
           <div className={`${hasStarted ? "sticky bottom-6" : ""}`}>
-            <div className={`relative rounded-2xl border shadow-lg ${isDark ? "border-white/10 bg-[#0f172a] shadow-black/50" : "border-stone-200 bg-white shadow-stone-200/50"}`}>
-              {/* AI Glow Effect */}
-              <div className={`absolute -inset-[1px] rounded-2xl opacity-0 transition-opacity duration-300 ${askLoading ? "opacity-100" : ""} ${isDark ? "bg-gradient-to-r from-amber-500/20 via-purple-500/20 to-amber-500/20" : "bg-gradient-to-r from-amber-400/30 via-purple-400/30 to-amber-400/30"}`} style={{ filter: "blur(8px)" }} />
-              
+            <div className={`relative rounded-md border ${isDark ? "border-white/10 bg-[#0f172a]" : "border-stone-200 bg-white"}`}>
               <div className="relative flex items-end gap-2 p-2">
                 <input
                   value={askQuery}
@@ -218,7 +215,7 @@ export default function SeriesAskPage() {
                 <button
                   onClick={() => handleSeriesAsk()}
                   disabled={askLoading || !askQuery.trim()}
-                  className={`flex-shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-40 ${isDark ? "bg-amber-300 text-stone-950 hover:bg-amber-200" : "bg-stone-900 text-white hover:bg-stone-800"}`}
+                  className="flex-shrink-0 rounded-md bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-600 disabled:opacity-40"
                 >
                   {askLoading ? (
                     <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">

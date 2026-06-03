@@ -12,6 +12,7 @@ import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, ObsidianPreview, ObsidianVaultNote } from "@/types/book"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 
 const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
@@ -206,7 +207,7 @@ export default function ExportStudioPage() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#030711_0%,#07111c_52%,#0b1521_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f8f4eb_0%,#eef5ef_52%,#edf2f8_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
       <div className="mx-auto max-w-[96rem] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav
@@ -221,25 +222,23 @@ export default function ExportStudioPage() {
           />
 
           <main className="space-y-6">
-            <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(8,12,24,0.96),rgba(12,20,34,0.9))]" : "border-white/70 bg-white/88"}`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Import & Export</p>
-                  <h1 className={`mt-3 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>{book.title}</h1>
-                  <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    Keep imports and exports separate, keep the vault structure visible, and ship the exact files you want instead of bouncing through modal dialogs.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Link href={`/${bookId}/notes`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}>
+            <WorkspaceFamilyHeader
+              active="export"
+              bookId={bookId}
+              family="publish-export"
+              title={book.title}
+              description="Keep imports and exports separate, keep the vault structure visible, and ship the exact files you intend to use."
+              actions={(
+                <>
+                  <Link href={`/${bookId}/notes`} className={`rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}>
                     Open notes workspace
                   </Link>
-                  <Link href={`/${bookId}/manuscript`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/5 text-slate-200" : "bg-white text-stone-700"}`}>
+                  <Link href={`/${bookId}/manuscript`} className={`rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/5 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>
                     Open manuscript
                   </Link>
-                </div>
-              </div>
-            </section>
+                </>
+              )}
+            />
 
             <div className="grid gap-6 2xl:grid-cols-2">
               <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
@@ -337,7 +336,7 @@ export default function ExportStudioPage() {
                         type="button"
                         onClick={() => void exportCharacterBible()}
                         disabled={exporting !== null}
-                        className="rounded-md bg-[linear-gradient(135deg,#6d28d9,#4f46e5)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                        className="rounded-md bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600 disabled:opacity-60"
                       >
                         {exporting === "character-bible" ? "Preparing..." : "Export character bible"}
                       </button>
@@ -355,7 +354,7 @@ export default function ExportStudioPage() {
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Saved bible note overrides</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {bibleNotes.slice(0, 8).map((note) => (
-                            <span key={note.id} className={`rounded-full px-2.5 py-1 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                            <span key={note.id} className={`rounded-md px-2.5 py-1 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
                               {note.path}
                             </span>
                           ))}
@@ -372,7 +371,7 @@ export default function ExportStudioPage() {
                           key={format}
                           type="button"
                           onClick={() => setManuscriptFormat(format)}
-                          className={`rounded-full border px-4 py-2 text-sm transition ${
+                          className={`rounded-md border px-4 py-2 text-sm transition ${
                             manuscriptFormat === format
                               ? isDark
                                 ? "border-amber-400/35 bg-amber-500/10 text-amber-100"
@@ -404,7 +403,7 @@ export default function ExportStudioPage() {
                       type="button"
                       onClick={() => void exportManuscript()}
                       disabled={exporting !== null}
-                      className="mt-4 rounded-md bg-[linear-gradient(135deg,#f59e0b,#d97706)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      className="mt-4 rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#25756f] disabled:opacity-60"
                     >
                       {exporting === "manuscript" ? "Preparing..." : "Export manuscript"}
                     </button>
@@ -419,7 +418,7 @@ export default function ExportStudioPage() {
                       type="button"
                       onClick={() => void exportNotesZip()}
                       disabled={exporting !== null}
-                      className="mt-4 rounded-md bg-[linear-gradient(135deg,#0f766e,#2563eb)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      className="mt-4 rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#25756f] disabled:opacity-60"
                     >
                       {exporting === "notes" ? "Preparing..." : "Export notes ZIP"}
                     </button>
@@ -474,7 +473,7 @@ function ImportCard({
         <button type="button" onClick={onChoose} className={`rounded-md border px-4 py-2.5 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
           Choose files
         </button>
-        <button type="button" onClick={onRun} disabled={disabled} className="rounded-md bg-[linear-gradient(135deg,#059669,#0f766e)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+        <button type="button" onClick={onRun} disabled={disabled} className="rounded-md bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#25756f] disabled:opacity-60">
           {buttonLabel}
         </button>
       </div>

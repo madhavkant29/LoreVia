@@ -30,6 +30,8 @@ htmlcov/
 # Node.js
 node_modules/
 .next/
+.next-e2e/
+.next-e2e-verify/
 out/
 build/
 *.tsbuildinfo

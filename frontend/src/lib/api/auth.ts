@@ -1,6 +1,7 @@
 import { apiClient } from "./client"
 import type { User } from "@/types/user"
 import axios from "axios"
+import { supabase } from "@/lib/supabase"
 
 export interface RegisterResponse {
   id: string
@@ -43,8 +44,8 @@ export interface TierLimits {
 export const authApi = {
   register: (email: string, username: string, password: string, accepted_terms: boolean, device_id: string) =>
     apiClient.post<RegisterResponse>("/auth/register", { email, username, password, accepted_terms, device_id }).then(r => r.data),
-  login: (email: string, password: string) =>
-    apiClient.post<User>("/auth/login", { email, password }).then(r => r.data),
+  login: (email: string, password: string, device_id: string) =>
+    apiClient.post<User>("/auth/login", { email, password, device_id }).then(r => r.data),
   loginWithSupabaseToken: (token: string, device_id: string, accepted_terms = false) =>
     apiClient.post<User>("/auth/oauth/supabase", { token, accepted_terms, device_id }).then(r => r.data),
   verifyEmail: (token: string) =>
@@ -57,7 +58,13 @@ export const authApi = {
     apiClient.post("/auth/reset-password", { token, password }).then(r => r.data),
   refresh: () =>
     apiClient.post<User>("/auth/refresh").then(r => r.data),
-  logout: () => apiClient.post("/auth/logout").then(r => r.data),
+  logout: async () => {
+    try {
+      return await apiClient.post("/auth/logout").then(r => r.data)
+    } finally {
+      await supabase?.auth.signOut({ scope: "local" })
+    }
+  },
   me: async () => {
     try {
       return await apiClient.get<User>("/auth/me").then(r => r.data)

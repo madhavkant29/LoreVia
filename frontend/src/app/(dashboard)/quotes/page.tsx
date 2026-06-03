@@ -141,7 +141,7 @@ export default function QuotesPage() {
                   </div>
                 </div>
 
-                <blockquote className="mt-5 rounded-lg border border-[rgba(var(--border),0.78)] bg-[rgba(255,255,255,0.46)] px-5 py-4 text-base leading-8 text-[rgb(var(--foreground))] shadow-[0_18px_42px_-36px_rgba(15,23,42,0.4)] dark:bg-[rgba(255,255,255,0.03)]">
+                <blockquote className="mt-5 rounded-lg border border-[rgba(var(--border),0.78)] bg-[rgba(255,255,255,0.46)] px-5 py-4 text-base leading-8 text-[rgb(var(--foreground))] dark:bg-[rgba(255,255,255,0.03)]">
                   "{quote.quote_text}"
                 </blockquote>
 

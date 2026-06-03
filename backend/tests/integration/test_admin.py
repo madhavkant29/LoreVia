@@ -34,8 +34,17 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
     return {"Authorization": f"Bearer {token}"}, uuid.UUID(me.json()["id"])
 
 
-async def _grant_admin(db, user_id: uuid.UUID, *, scopes: list[str] | None = None, is_owner: bool = True) -> None:
-    from app.core.redis import get_redis, key_admin_step_up
+async def _grant_admin(
+    client,
+    db,
+    user_id: uuid.UUID,
+    headers: dict[str, str],
+    *,
+    scopes: list[str] | None = None,
+    is_owner: bool = True,
+) -> None:
+    from app.core.redis import store_refresh_session
+    from app.core.security import create_refresh_token
 
     db.add(
         AdminPrincipal(
@@ -47,8 +56,16 @@ async def _grant_admin(db, user_id: uuid.UUID, *, scopes: list[str] | None = Non
         )
     )
     await db.commit()
-    r = await get_redis()
-    await r.setex(key_admin_step_up(str(user_id), "access"), 600, "1")
+    session_id = str(uuid.uuid4())
+    await store_refresh_session(str(user_id), session_id, 600)
+    refresh_token = create_refresh_token(str(user_id), session_id=session_id)
+    headers["Cookie"] = f"lorevia_refresh_token={refresh_token}"
+    response = await client.post(
+        "/api/v1/admin/step-up",
+        json={"password": "StrongPass123!@#"},
+        headers=headers,
+    )
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -56,7 +73,7 @@ async def test_admin_queue_depth_reports_redis_lengths(client, db, monkeypatch):
     headers, user_id = await _register_user(client, f"admin-queue-depth-{uuid.uuid4().hex[:8]}@lorevia.app")
     user = await db.get(User, user_id)
     assert user is not None
-    await _grant_admin(db, user_id)
+    await _grant_admin(client, db, user_id, headers)
 
     class FakeRedis:
         async def get(self, key: str):
@@ -103,7 +120,7 @@ async def test_admin_subscription_metrics_reports_trial_conversion_and_post_canc
     headers, user_id = await _register_user(client, f"admin-subscription-metrics-{uuid.uuid4().hex[:8]}@lorevia.app")
     admin_user = await db.get(User, user_id)
     assert admin_user is not None
-    await _grant_admin(db, user_id)
+    await _grant_admin(client, db, user_id, headers)
 
     cohort_start = datetime(2010, 5, 1, 9, 0, tzinfo=UTC)
     converted_user = User(
@@ -196,7 +213,7 @@ async def test_admin_public_demo_routes_require_moderation_scope_and_old_public_
     headers, user_id = await _register_user(client, f"admin-public-demo-scope-{uuid.uuid4().hex[:8]}@lorevia.app")
     user = await db.get(User, user_id)
     assert user is not None
-    await _grant_admin(db, user_id, scopes=["billing_admin"], is_owner=False)
+    await _grant_admin(client, db, user_id, headers, scopes=["billing_admin"], is_owner=False)
 
     admin_response = await client.post(
         "/api/v1/admin/public-books/manual",
@@ -228,7 +245,7 @@ async def test_admin_can_create_and_append_public_demo_books_only_through_admin_
     headers, user_id = await _register_user(client, f"admin-public-demo-{uuid.uuid4().hex[:8]}@lorevia.app")
     user = await db.get(User, user_id)
     assert user is not None
-    await _grant_admin(db, user_id, scopes=["moderation_admin"], is_owner=False)
+    await _grant_admin(client, db, user_id, headers, scopes=["moderation_admin"], is_owner=False)
 
     create_response = await client.post(
         "/api/v1/admin/public-books/manual",
@@ -309,7 +326,7 @@ async def test_admin_refund_review_create_auto_submits_eligible_monthly_refund(c
     admin_headers, admin_user_id = await _register_user(client, f"refund-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
-    await _grant_admin(db, admin_user_id)
+    await _grant_admin(client, db, admin_user_id, admin_headers)
 
     target_user = User(
         email=f"refund-target-{uuid.uuid4().hex[:8]}@lorevia.app",
@@ -388,7 +405,7 @@ async def test_admin_refund_review_create_stores_manual_review_when_usage_exists
     admin_headers, admin_user_id = await _register_user(client, f"refund-manual-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
-    await _grant_admin(db, admin_user_id)
+    await _grant_admin(client, db, admin_user_id, admin_headers)
 
     target_user = User(
         email=f"refund-manual-{uuid.uuid4().hex[:8]}@lorevia.app",
@@ -466,7 +483,7 @@ async def test_admin_refund_review_manual_approve_and_deny_paths(client, db, mon
     admin_headers, admin_user_id = await _register_user(client, f"refund-decision-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
-    await _grant_admin(db, admin_user_id)
+    await _grant_admin(client, db, admin_user_id, admin_headers)
 
     target_user = User(
         email=f"refund-decision-{uuid.uuid4().hex[:8]}@lorevia.app",
@@ -559,7 +576,7 @@ async def test_admin_refund_review_surfaces_partial_provider_failure_for_follow_
     admin_headers, admin_user_id = await _register_user(client, f"refund-followup-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
-    await _grant_admin(db, admin_user_id)
+    await _grant_admin(client, db, admin_user_id, admin_headers)
 
     target_user = User(
         email=f"refund-followup-{uuid.uuid4().hex[:8]}@lorevia.app",
@@ -637,7 +654,7 @@ async def test_admin_refund_review_deny_rejects_reviews_already_submitted_to_pro
     admin_headers, admin_user_id = await _register_user(client, f"refund-deny-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
-    await _grant_admin(db, admin_user_id)
+    await _grant_admin(client, db, admin_user_id, admin_headers)
 
     target_user = User(
         email=f"refund-deny-target-{uuid.uuid4().hex[:8]}@lorevia.app",
@@ -709,3 +726,69 @@ async def test_admin_refund_review_deny_rejects_reviews_already_submitted_to_pro
     assert "submitted to the provider" in pending_response.json()["detail"]
     assert followup_response.status_code == 409
     assert "provider refund in flight" in followup_response.json()["detail"]
+
+
+# ── Admin CSRF bearer validation tests ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_admin_csrf_allows_valid_bearer_access_token(client, db):
+    headers, user_id = await _register_user(client, f"admin-csrf-bearer-valid-{uuid.uuid4().hex[:8]}@lorevia.app")
+    await _grant_admin(client, db, user_id, headers)
+
+    response = await client.get("/api/v1/admin/session", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["is_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_csrf_falls_back_to_cookie_when_bearer_is_invalid(client, db):
+    from app.utils.admin_security import ADMIN_CSRF_COOKIE_NAME, ADMIN_CSRF_HEADER_NAME
+
+    headers, user_id = await _register_user(client, f"admin-csrf-cookie-fallback-{uuid.uuid4().hex[:8]}@lorevia.app")
+    await _grant_admin(client, db, user_id, headers)
+
+    session_response = await client.get("/api/v1/admin/session", headers=headers)
+    csrf_token: str | None = None
+    for raw in session_response.headers.get_list("set-cookie"):
+        if ADMIN_CSRF_COOKIE_NAME in raw:
+            csrf_token = raw.split(";")[0].split("=", 1)[1] if "=" in raw else None
+    assert csrf_token is not None
+
+    existing_cookie = headers.get("Cookie", "")
+    invalid_bearer = "Bearer invalid-token-not-a-jwt"
+    headers["Authorization"] = invalid_bearer
+    headers["Cookie"] = f"{existing_cookie}; {ADMIN_CSRF_COOKIE_NAME}={csrf_token}"
+    headers[ADMIN_CSRF_HEADER_NAME] = csrf_token
+    headers["Origin"] = "https://getlorevia.com"
+
+    response = await client.post(
+        "/api/v1/admin/step-up",
+        json={"password": "WrongPassword123!@#"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid admin verification."
+
+
+@pytest.mark.asyncio
+async def test_admin_csrf_rejects_missing_bearer_and_csrf_header(client, db):
+    headers, user_id = await _register_user(client, f"admin-csrf-reject-{uuid.uuid4().hex[:8]}@lorevia.app")
+    await _grant_admin(client, db, user_id, headers)
+
+    del headers["Authorization"]
+
+    if "Cookie" in headers:
+        del headers["Cookie"]
+
+    headers["Origin"] = "https://getlorevia.com"
+
+    response = await client.post(
+        "/api/v1/admin/step-up",
+        json={"password": "StrongPass123!@#"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert "Invalid admin CSRF token" in response.json()["detail"]

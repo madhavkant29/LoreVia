@@ -151,17 +151,33 @@ async def upload_world_documents(
     _=Depends(rate_limit_world_building_upload),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
-    raw_files: list[tuple[str, bytes]] = []
-    for upload in files or []:
-        if not upload.filename:
-            continue
-        raw = await read_upload_bounded(upload, settings.WORLD_BUILDING_UPLOAD_MAX_BYTES, "World-building file")
-        if raw:
-            raw_files.append((upload.filename, raw))
-    prepared = await prepare_world_building_uploads(files=raw_files, text=text, html=html, title=title)
+    upload_files = [upload for upload in (files or []) if upload.filename]
+    if len(upload_files) > settings.WORLD_BUILDING_UPLOAD_MAX_FILES:
+        raise HTTPException(413, f"World-building upload accepts at most {settings.WORLD_BUILDING_UPLOAD_MAX_FILES} files at once.")
+
     worldbuilding_upload_cost = await worldbuilding_upload_cost_for_book(db, book)
     current_documents = await list_world_building_documents(db, book)
-    released_uploads = len(current_documents) * worldbuilding_upload_cost if (replace_existing or "").strip().lower() in {"1", "true", "yes", "on"} else 0
+    replace_flag = (replace_existing or "").strip().lower() in {"1", "true", "yes", "on"}
+    released_uploads = len(current_documents) * worldbuilding_upload_cost if replace_flag else 0
+    estimated_document_count = len(upload_files) + (1 if (text or html) else 0)
+    await check_upload_limit(
+        db,
+        current_user,
+        requested_uploads=estimated_document_count * worldbuilding_upload_cost,
+        released_uploads=released_uploads,
+        context="World-building upload quota is checked before document parsing.",
+    )
+
+    raw_files: list[tuple[str, bytes]] = []
+    total_file_size = 0
+    for upload in upload_files:
+        raw = await read_upload_bounded(upload, settings.WORLD_BUILDING_UPLOAD_MAX_BYTES, "World-building file")
+        if raw:
+            total_file_size += len(raw)
+            if total_file_size > settings.WORLD_BUILDING_UPLOAD_MAX_TOTAL_BYTES:
+                raise HTTPException(413, "World-building upload exceeds the maximum aggregate upload size.")
+            raw_files.append((upload.filename, raw))
+    prepared = await prepare_world_building_uploads(files=raw_files, text=text, html=html, title=title)
     requested_uploads = len(prepared) * worldbuilding_upload_cost
     await check_upload_limit(
         db,
@@ -178,7 +194,7 @@ async def upload_world_documents(
         book=book,
         user_id=current_user.id,
         documents=prepared,
-        replace_existing=(replace_existing or "").strip().lower() in {"1", "true", "yes", "on"},
+        replace_existing=replace_flag,
     )
     await db.commit()
     for document in documents:

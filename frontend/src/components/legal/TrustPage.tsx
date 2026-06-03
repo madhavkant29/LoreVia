@@ -47,13 +47,13 @@ const primaryLinks = primaryLinkOrder
   .filter((link): link is (typeof TRUST_RESOURCE_LINKS)[number] => Boolean(link))
 
 const surfaceClassName =
-  "border border-white/10 bg-[linear-gradient(180deg,rgba(11,22,36,0.72),rgba(6,14,25,0.74))] shadow-[0_24px_70px_-54px_rgba(20,83,145,0.85)] backdrop-blur"
+  "border border-white/10 bg-[#0b1624]"
 
 const iconClassName =
-  "flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#4787d8]/35 bg-[#071522] text-[#7fb0ff]"
+  "flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-[#4787d8]/35 bg-[#071522] text-[#7fb0ff]"
 
 function BrandMark() {
-  return <BrandLockup size="sm" iconClassName="h-8 w-8 rounded-lg" />
+  return <BrandLockup size="sm" />
 }
 
 function ArrowIcon({ className = "h-4 w-4" }: IconProps) {
@@ -335,7 +335,7 @@ function ResourceCard({ relatedLinks }: { relatedLinks: ReturnType<typeof TRUST_
 
 function SecurityCallout() {
   return (
-    <section className="mt-4 rounded-lg border border-[#2f7fd1]/55 bg-[linear-gradient(180deg,rgba(9,23,39,0.8),rgba(7,16,28,0.78))] px-5 py-5 shadow-[0_24px_70px_-54px_rgba(20,83,145,0.9)] backdrop-blur sm:px-6">
+    <section className="mt-4 rounded-lg border border-[#2f7fd1]/55 bg-[#0b1624] px-5 py-5 sm:px-6">
       <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
         <div className="flex gap-5">
           <div className={`${iconClassName} border-[#3f89e4]/60 text-[#8fb7ff]`}>
@@ -381,7 +381,7 @@ export function TrustPage({
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_50%_8%,rgba(50,99,164,0.22),transparent_29%),radial-gradient(circle_at_50%_40%,rgba(17,42,74,0.28),transparent_36%),linear-gradient(180deg,#020711_0%,#06111d_34%,#06101c_100%)] text-white">
+    <main className="min-h-screen overflow-hidden bg-[#06111d] text-white">
       <Header currentPath={currentPath} />
 
       <section className="px-5 py-16 sm:px-8 sm:py-20 lg:px-12">

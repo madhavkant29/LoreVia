@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function CompliancePage() {
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,#020202_0%,#0a0a0a_45%,#111111_100%)] px-6 py-16 text-white">
+    <main className="min-h-screen bg-[#071211] px-6 py-16 text-white">
       <div className="mx-auto max-w-4xl">
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">LoreVia</p>
         <h1 className="mt-3 text-4xl font-semibold text-white">Compliance Notice</h1>

@@ -1,7 +1,9 @@
+import hashlib
 import uuid
 from datetime import UTC, datetime
 
 import pytest
+import sqlalchemy as sa
 
 from app.core.redis import (
     consume_password_reset_token,
@@ -12,7 +14,7 @@ from app.core.redis import (
 )
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.book import Book
-from app.models.user import User
+from app.models.user import DeviceTrial, User, UserLoginActivity
 from app.utils.auth_csrf import AUTH_CSRF_COOKIE_NAME, AUTH_CSRF_HEADER_NAME, create_auth_csrf_token
 
 
@@ -45,7 +47,14 @@ async def test_register_requires_email_verification_before_login(client):
     assert body["email_verification_required"] is True
     assert body["verification_email_sent"] is True
 
-    r2 = await client.post("/api/v1/auth/login", json={"email": "new@lorevia.app", "password": "TestPass123!@#"})
+    r2 = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "new@lorevia.app",
+            "password": "TestPass123!@#",
+            "device_id": "new-device-trial-0001",
+        },
+    )
     assert r2.status_code == 403
     assert r2.json()["detail"] == "Please verify your email before signing in."
     access_token = create_access_token(str(r.json()["id"]))
@@ -84,7 +93,14 @@ async def test_verify_email_completes_signup_and_allows_login(client, db):
     assert user is not None
     assert user.email_verified_at is not None
 
-    login = await client.post("/api/v1/auth/login", json={"email": email, "password": "TestPass123!@#"})
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": email,
+            "password": "TestPass123!@#",
+            "device_id": "verify-device-trial01",
+        },
+    )
     assert login.status_code == 200
     assert login.json()["email_verified"] is True
 
@@ -118,13 +134,13 @@ async def test_resend_verification_rotates_token(client):
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_requires_terms_for_new_users(client, monkeypatch):
+async def test_supabase_oauth_rejects_new_users_without_account(client, monkeypatch):
     class FakeResponse:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"id": str(uuid.uuid4()), "email": "oauth-new@lorevia.app"}
+            return {"id": str(uuid.uuid4()), "email": "oauth-new@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -148,8 +164,8 @@ async def test_supabase_oauth_requires_terms_for_new_users(client, monkeypatch):
         json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-terms-device01"},
     )
 
-    assert response.status_code == 400
-    assert "accept the Terms" in response.json()["detail"]
+    assert response.status_code == 401
+    assert "Register page" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -161,7 +177,7 @@ async def test_supabase_oauth_allows_existing_user_without_terms(client, db, mon
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-existing@lorevia.app"}
+            return {"id": str(supabase_auth_id), "email": "oauth-existing@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -203,7 +219,7 @@ async def test_supabase_oauth_allows_existing_user_without_terms(client, db, mon
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_creates_new_user_and_allows_missing_username(client, monkeypatch):
+async def test_supabase_oauth_rejects_new_user_even_with_accepted_terms(client, monkeypatch):
     supabase_auth_id = uuid.uuid4()
 
     class FakeResponse:
@@ -211,7 +227,7 @@ async def test_supabase_oauth_creates_new_user_and_allows_missing_username(clien
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-created@lorevia.app"}
+            return {"id": str(supabase_auth_id), "email": "oauth-created@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -235,21 +251,18 @@ async def test_supabase_oauth_creates_new_user_and_allows_missing_username(clien
         json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-create-device0001"},
     )
 
-    assert response.status_code == 200
-    assert response.json()["email"] == "oauth-created@lorevia.app"
-    assert response.json()["username"] is None
-    assert response.json()["email_verified"] is True
-    assert response.json()["id"] == str(supabase_auth_id)
+    assert response.status_code == 401
+    assert "Register page" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_recovers_local_debug_user_without_terms_or_device_trial(client, monkeypatch):
+async def test_supabase_oauth_debug_mode_still_rejects_new_users(client, monkeypatch):
     class FakeResponse:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"id": str(uuid.uuid4()), "email": "oauth-local-recovery@lorevia.app"}
+            return {"id": str(uuid.uuid4()), "email": "oauth-local-recovery@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -274,10 +287,8 @@ async def test_supabase_oauth_recovers_local_debug_user_without_terms_or_device_
         json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-recovery-device01"},
     )
 
-    assert response.status_code == 200
-    assert response.json()["email"] == "oauth-local-recovery@lorevia.app"
-    assert response.json()["username"] is None
-    assert response.json()["email_verified"] is True
+    assert response.status_code == 401
+    assert "Register page" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -301,11 +312,11 @@ async def test_refresh_and_logout_use_cookies(client):
     refresh_token = create_refresh_token(user_id, session_id="test-session")
     access_token = create_access_token(user_id)
 
-    async def fake_session_active(*args, **kwargs):
+    async def fake_consume_refresh_session(*args, **kwargs):
         return True
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("app.api.v1.routes.auth.refresh_session_active", fake_session_active)
+        mp.setattr("app.api.v1.routes.auth.consume_refresh_session", fake_consume_refresh_session)
         refreshed = await client.post(
             "/api/v1/auth/refresh",
             headers=cookie_auth_headers(f"lorevia_refresh_token={refresh_token}"),
@@ -564,17 +575,293 @@ async def test_register_blocks_third_trial_from_same_device(client):
     )
 
     assert third.status_code == 403
-    assert "maximum of 2 trial accounts" in third.json()["detail"]
+    assert "maximum of 2 accounts" in third.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_blocks_new_user_when_device_trial_limit_is_reached(client, monkeypatch):
+async def test_login_allows_unlinked_account_even_when_device_at_capacity(client, db):
+    shared_device_id = "shared-login-device01"
+
+    for email, username in (
+        ("login-first@lorevia.app", "loginfirst"),
+        ("login-second@lorevia.app", "loginsecond"),
+    ):
+        register = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": email,
+                "username": username,
+                "password": "SafePass123!@#",
+                "accepted_terms": True,
+                "device_id": shared_device_id,
+            },
+        )
+        assert register.status_code == 201
+        user_id = str(register.json()["id"])
+        token = await (await get_redis()).get(key_email_verification_user(user_id))
+        assert token
+        verify = await client.post("/api/v1/auth/verify-email", json={"token": token})
+        assert verify.status_code == 200
+
+    third_user = User(
+        email="login-third@lorevia.app",
+        username="loginthird",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(third_user)
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "login-third@lorevia.app",
+            "password": "SafePass123!@#",
+            "device_id": shared_device_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "login-third@lorevia.app"
+
+
+@pytest.mark.asyncio
+async def test_login_allows_prelinked_account_even_when_device_has_more_than_limit(client, db):
+    shared_device_id = "grandfathered-login001"
+    shared_device_hash = hashlib.sha256(shared_device_id.encode("utf-8")).hexdigest()
+
+    users = []
+    for email, username in (
+        ("grandfather-first@lorevia.app", "grandfatherfirst"),
+        ("grandfather-second@lorevia.app", "grandfathersecond"),
+        ("grandfather-third@lorevia.app", "grandfatherthird"),
+    ):
+        user = User(
+            email=email,
+            username=username,
+            password_hash=hash_password("SafePass123!@#"),
+            legal_accepted_at=datetime.now(UTC),
+            legal_version="2026-04",
+            email_verified_at=datetime.now(UTC),
+        )
+        db.add(user)
+        users.append(user)
+    await db.flush()
+    for user in users:
+        db.add(DeviceTrial(user_id=user.id, device_id_hash=shared_device_hash))
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "grandfather-third@lorevia.app",
+            "password": "SafePass123!@#",
+            "device_id": shared_device_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "grandfather-third@lorevia.app"
+
+
+@pytest.mark.asyncio
+async def test_login_allows_unlinked_account_when_device_has_grandfathered_links(client, db):
+    shared_device_id = "grandfathered-block001"
+    shared_device_hash = hashlib.sha256(shared_device_id.encode("utf-8")).hexdigest()
+
+    for email, username in (
+        ("grandfather-block-one@lorevia.app", "grandfatherblockone"),
+        ("grandfather-block-two@lorevia.app", "grandfatherblocktwo"),
+        ("grandfather-block-three@lorevia.app", "grandfatherblockthree"),
+    ):
+        user = User(
+            email=email,
+            username=username,
+            password_hash=hash_password("SafePass123!@#"),
+            legal_accepted_at=datetime.now(UTC),
+            legal_version="2026-04",
+            email_verified_at=datetime.now(UTC),
+        )
+        db.add(user)
+        await db.flush()
+        db.add(DeviceTrial(user_id=user.id, device_id_hash=shared_device_hash))
+    unlinked_user = User(
+        email="grandfather-block-four@lorevia.app",
+        username="grandfatherblockfour",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(unlinked_user)
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "grandfather-block-four@lorevia.app",
+            "password": "SafePass123!@#",
+            "device_id": shared_device_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "grandfather-block-four@lorevia.app"
+
+
+@pytest.mark.asyncio
+async def test_login_prefers_device_cookie_and_allows_existing_user(client, db):
+    cookie_device_id = "cookie-priority-dev01"
+    cookie_device_hash = hashlib.sha256(cookie_device_id.encode("utf-8")).hexdigest()
+    request_device_id = "request-priority-dev2"
+    request_device_hash = hashlib.sha256(request_device_id.encode("utf-8")).hexdigest()
+
+    linked_one = User(
+        email="cookie-priority-one@lorevia.app",
+        username="cookiepriorityone",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    linked_two = User(
+        email="cookie-priority-two@lorevia.app",
+        username="cookieprioritytwo",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    existing_user = User(
+        email="cookie-priority-three@lorevia.app",
+        username="cookieprioritythree",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add_all([linked_one, linked_two, existing_user])
+    await db.flush()
+    db.add_all(
+        [
+            DeviceTrial(user_id=linked_one.id, device_id_hash=cookie_device_hash),
+            DeviceTrial(user_id=linked_two.id, device_id_hash=cookie_device_hash),
+        ]
+    )
+    db.add(DeviceTrial(user_id=existing_user.id, device_id_hash=request_device_hash))
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "cookie-priority-three@lorevia.app",
+            "password": "SafePass123!@#",
+            "device_id": request_device_id,
+        },
+        headers={"Cookie": f"lorevia_device_id={cookie_device_id}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "cookie-priority-three@lorevia.app"
+
+
+@pytest.mark.asyncio
+async def test_login_allows_missing_device_id_when_no_cookie(client, db):
+    user = User(
+        email="missing-device@lorevia.app",
+        username="missingdevice",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "missing-device@lorevia.app",
+            "password": "SafePass123!@#",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "missing-device@lorevia.app"
+
+
+@pytest.mark.asyncio
+async def test_login_uses_device_cookie_when_request_body_omits_device_id(client, db):
+    cookie_device_id = "cookie-only-device01"
+    user = User(
+        email="cookie-only-login@lorevia.app",
+        username="cookieonlylogin",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "cookie-only-login@lorevia.app",
+            "password": "SafePass123!@#",
+        },
+        headers={"Cookie": f"lorevia_device_id={cookie_device_id}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "cookie-only-login@lorevia.app"
+
+
+@pytest.mark.asyncio
+async def test_login_sets_device_cookie_and_records_device_id(client, db):
+    user = User(
+        email="records-device@lorevia.app",
+        username="recordsdevice",
+        password_hash=hash_password("SafePass123!@#"),
+        legal_accepted_at=datetime.now(UTC),
+        legal_version="2026-04",
+        email_verified_at=datetime.now(UTC),
+    )
+    db.add(user)
+    await db.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "records-device@lorevia.app",
+            "password": "SafePass123!@#",
+            "device_id": "records-device-id01",
+        },
+    )
+
+    assert response.status_code == 200
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    assert any("lorevia_device_id=records-device-id01" in header for header in set_cookie_headers)
+
+    result = await db.execute(sa.select(DeviceTrial).where(DeviceTrial.user_id == user.id))
+    trial_links = list(result.scalars().all())
+    assert len(trial_links) == 1
+
+    activity = await db.execute(sa.select(UserLoginActivity).where(UserLoginActivity.user_id == user.id))
+    login_rows = list(activity.scalars().all())
+    assert login_rows[-1].device_id == "records-device-id01"
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_rejects_new_user_before_device_trial_check(client, monkeypatch):
     class FakeResponse:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"id": str(uuid.uuid4()), "email": "oauth-blocked@lorevia.app"}
+            return {"id": str(uuid.uuid4()), "email": "oauth-blocked@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -622,8 +909,8 @@ async def test_supabase_oauth_blocks_new_user_when_device_trial_limit_is_reached
         json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-used-device0001"},
     )
 
-    assert response.status_code == 403
-    assert "maximum of 2 trial accounts" in response.json()["detail"]
+    assert response.status_code == 401
+    assert "Register page" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -635,7 +922,7 @@ async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(clie
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-legacy@lorevia.app"}
+            return {"id": str(supabase_auth_id), "email": "oauth-legacy@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
 
     class FakeAsyncClient:
         def __init__(self, timeout):

@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
+import { memo, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import cytoscape from "cytoscape"
 
@@ -307,7 +307,7 @@ function clearGraphTestHandle(cy: cytoscape.Core) {
   }
 }
 
-export function RelationshipGraph({
+export const RelationshipGraph = memo(function RelationshipGraph({
   bookId,
   upToChapter,
   authorMode = false,
@@ -425,6 +425,85 @@ export function RelationshipGraph({
     }
   }, [nodeLookup, selectedEdge])
 
+  const relationshipStylesheet = useMemo<any>(
+    () => [
+      {
+        selector: "node",
+        style: {
+          label: "data(label)",
+          width: (ele: cytoscape.NodeSingular) => {
+            const label = String(ele.data("label") || "")
+            return Math.max(98, Math.min(156, 76 + label.length * 3.6))
+          },
+          height: (ele: cytoscape.NodeSingular) => {
+            const label = String(ele.data("label") || "")
+            const lines = Math.max(1, Math.ceil(label.length / 14))
+            return Math.max(52, Math.min(80, 38 + lines * 14))
+          },
+          shape: "round-rectangle",
+          "background-color": theme === "dark" ? "#0b1020" : "#fffdf9",
+          "background-opacity": 0.98,
+          "border-width": 1.4,
+          "border-color": (ele: cytoscape.NodeSingular) => {
+            if (ele.data("graph_visibility_override") === "include") return "#14b8a6"
+            if (ele.data("is_manual")) return "#f59e0b"
+            return theme === "dark" ? "#6d5bd0" : "#c4b5fd"
+          },
+          color: theme === "dark" ? "#f8fafc" : "#111827",
+          "font-size": 11,
+          "font-weight": 600,
+          "text-wrap": "wrap",
+          "text-max-width": "100px",
+          "text-valign": "center",
+          "text-halign": "center",
+          padding: "8px",
+          "overlay-padding": 8,
+          "overlay-opacity": 0,
+        },
+      },
+      {
+        selector: "node:selected",
+        style: {
+          "border-color": "#8b5cf6",
+          "border-width": 2.6,
+          "background-color": theme === "dark" ? "#11172a" : "#eef4ff",
+        },
+      },
+      {
+        selector: "edge",
+        style: {
+          width: "1.6px",
+          "curve-style": "bezier",
+          "line-color": (ele: cytoscape.EdgeSingular) => RELATIONSHIP_COLORS[ele.data("type")] || "#64748b",
+          "target-arrow-color": (ele: cytoscape.EdgeSingular) => RELATIONSHIP_COLORS[ele.data("type")] || "#64748b",
+          "target-arrow-shape": "triangle",
+          "target-arrow-fill": "filled",
+          opacity: 0.5,
+          label: "data(label)",
+          "font-size": 9,
+          "font-weight": 600,
+          color: theme === "dark" ? "#94a3b8" : "#6b7280",
+          "text-background-color": theme === "dark" ? "#04050b" : "#ffffff",
+          "text-background-opacity": 0.94,
+          "text-background-padding": "3px",
+          "text-background-shape": "roundrectangle",
+          "text-rotation": "autorotate",
+          "arrow-scale": 0.8,
+          "source-endpoint": "outside-to-node",
+          "target-endpoint": "outside-to-node",
+        },
+      },
+      {
+        selector: "edge:selected",
+        style: {
+          width: "3.2px",
+          opacity: 0.96,
+        },
+      },
+    ],
+    [theme],
+  )
+
   useEffect(() => {
     if (!containerRef.current || !filteredGraph || filteredGraph.nodes.length === 0) return
 
@@ -475,81 +554,7 @@ export function RelationshipGraph({
       autoungrabify: interactionMode === "inspect",
       wheelSensitivity: 0.18,
       layout: shouldUsePreset ? { name: "preset", fit: true, padding: 96 } : BASE_LAYOUT,
-      style: [
-        {
-          selector: "node",
-          style: {
-            label: "data(label)",
-            width: (ele: cytoscape.NodeSingular) => {
-              const label = String(ele.data("label") || "")
-              return Math.max(98, Math.min(156, 76 + label.length * 3.6))
-            },
-            height: (ele: cytoscape.NodeSingular) => {
-              const label = String(ele.data("label") || "")
-              const lines = Math.max(1, Math.ceil(label.length / 14))
-              return Math.max(52, Math.min(80, 38 + lines * 14))
-            },
-            shape: "round-rectangle",
-            "background-color": theme === "dark" ? "#0b1020" : "#fffdf9",
-            "background-opacity": 0.98,
-            "border-width": 1.4,
-            "border-color": (ele: cytoscape.NodeSingular) => {
-              if (ele.data("graph_visibility_override") === "include") return "#14b8a6"
-              if (ele.data("is_manual")) return "#f59e0b"
-              return theme === "dark" ? "#6d5bd0" : "#c4b5fd"
-            },
-            color: theme === "dark" ? "#f8fafc" : "#111827",
-            "font-size": 11,
-            "font-weight": 600,
-            "text-wrap": "wrap",
-            "text-max-width": "100px",
-            "text-valign": "center",
-            "text-halign": "center",
-            padding: "8px",
-            "overlay-padding": 8,
-            "overlay-opacity": 0,
-          },
-        },
-        {
-          selector: "node:selected",
-          style: {
-            "border-color": "#8b5cf6",
-            "border-width": 2.6,
-            "background-color": theme === "dark" ? "#11172a" : "#eef4ff",
-          },
-        },
-        {
-          selector: "edge",
-          style: {
-            width: "1.6px",
-            "curve-style": "bezier",
-            "line-color": (ele: cytoscape.EdgeSingular) => RELATIONSHIP_COLORS[ele.data("type")] || "#64748b",
-            "target-arrow-color": (ele: cytoscape.EdgeSingular) => RELATIONSHIP_COLORS[ele.data("type")] || "#64748b",
-            "target-arrow-shape": "triangle",
-            "target-arrow-fill": "filled",
-            opacity: 0.5,
-            label: "data(label)",
-            "font-size": 9,
-            "font-weight": 600,
-            color: theme === "dark" ? "#94a3b8" : "#6b7280",
-            "text-background-color": theme === "dark" ? "#04050b" : "#ffffff",
-            "text-background-opacity": 0.94,
-            "text-background-padding": "3px",
-            "text-background-shape": "roundrectangle",
-            "text-rotation": "autorotate",
-            "arrow-scale": 0.8,
-            "source-endpoint": "outside-to-node",
-            "target-endpoint": "outside-to-node",
-          },
-        },
-        {
-          selector: "edge:selected",
-          style: {
-            width: "3.2px",
-            opacity: 0.96,
-          },
-        },
-      ],
+      style: relationshipStylesheet,
     })
 
     cy.userPanningEnabled(true)
@@ -1301,7 +1306,7 @@ export function RelationshipGraph({
       </aside>
     </div>
   )
-}
+})
 
 function ArrangeIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (

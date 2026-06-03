@@ -17,6 +17,12 @@ import TaskItem from "@tiptap/extension-task-item"
 import type { Character } from "@/types/character"
 
 type EditorLookup = Map<string, ReturnType<typeof useEditor>>
+type ActiveEditor = NonNullable<ReturnType<typeof useEditor>>
+type RichTextCommandChain = ReturnType<ActiveEditor["chain"]> & {
+  setLineHeight: (lineHeight: string | null) => RichTextCommandChain
+  setParagraphSpacing: (marginBottom: string | null) => RichTextCommandChain
+  setFirstLineIndent: (textIndent: string | null) => RichTextCommandChain
+}
 
 const editorRegistry: EditorLookup = new Map()
 
@@ -24,6 +30,11 @@ const FONT_OPTIONS = [
   { value: "Times New Roman", label: "Times" },
   { value: "Georgia", label: "Georgia" },
   { value: "Space Grotesk", label: "Space Grotesk" },
+  {
+    value: '"Monotype Italian Old Style Pro Regular", "Monotype Italian Old Style Pro", "Italian Old Style", "Iowan Old Style", Georgia, serif',
+    label: "Italian Old Style",
+  },
+  { value: '"EB Garamond", Garamond, "Times New Roman", Georgia, serif', label: "EB Garamond" },
 ]
 
 const FONT_SIZE_OPTIONS = ["11", "12", "14", "16", "18"]
@@ -188,6 +199,10 @@ function currentEditor(editorKey?: string | null) {
   return editorRegistry.get(editorKey) ?? null
 }
 
+function focusedRichTextChain(editor: ActiveEditor): RichTextCommandChain {
+  return editor.chain().focus() as RichTextCommandChain
+}
+
 function colorValue(value: string) {
   return value.trim() || "#0f172a"
 }
@@ -212,7 +227,7 @@ export function EditorToolbar({
   const editor = currentEditor(editorKey)
 
   const shellClass = compact
-    ? `rounded-md border px-2 py-2 ${isDark ? "border-white/10 bg-black/25 backdrop-blur" : "border-stone-200 bg-white/80 backdrop-blur"}`
+    ? `rounded-md border px-2 py-2 ${isDark ? "border-white/10 bg-black/50" : "border-stone-200 bg-white"}`
     : ""
   const groupClass = "flex flex-wrap items-center gap-1"
   const buttonClass = `rounded-lg px-2.5 py-2 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`
@@ -274,7 +289,7 @@ export function EditorToolbar({
         <div className="relative">
           <button type="button" title="Mention character" onClick={() => setShowMentionPicker((current) => !current)} className={buttonClass}>@</button>
           {showMentionPicker && mentionableCharacters.length > 0 ? (
-            <div className={`absolute left-0 top-full z-20 mt-2 w-52 rounded-xl border p-1 shadow-dropdown ${isDark ? "border-white/10 bg-[#0f172a]" : "border-stone-200 bg-white"}`}>
+            <div className={`absolute left-0 top-full z-20 mt-2 w-52 rounded-md border p-1 ${isDark ? "border-white/10 bg-[#0f172a]" : "border-stone-200 bg-white"}`}>
               {mentionableCharacters.map((character) => (
                 <button
                   key={character.id}
@@ -298,7 +313,7 @@ export function EditorToolbar({
         <button type="button" title="Redo" onClick={() => run((instance) => instance.chain().focus().redo().run())} className={buttonClass}>Redo</button>
         <details className="relative">
           <summary className={`${buttonClass} list-none cursor-pointer`}>More</summary>
-          <div className={`absolute right-0 top-full z-30 mt-2 grid w-64 gap-2 rounded-2xl border p-3 shadow-dropdown ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white"}`}>
+          <div className={`absolute right-0 top-full z-30 mt-2 grid w-64 gap-2 rounded-md border p-3 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white"}`}>
             <div className="grid grid-cols-2 gap-2">
               <select aria-label="Text color" className={selectClass} defaultValue={COLOR_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().setColor(colorValue(event.target.value)).run())}>
                 {COLOR_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
@@ -306,10 +321,10 @@ export function EditorToolbar({
               <select aria-label="Highlight color" className={selectClass} defaultValue={HIGHLIGHT_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().toggleHighlight({ color: colorValue(event.target.value) }).run())}>
                 {HIGHLIGHT_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
               </select>
-              <select aria-label="Line height" className={selectClass} defaultValue="1.8" onChange={(event) => run((instance) => (instance.chain() as any).focus().setLineHeight(event.target.value).run())}>
+              <select aria-label="Line height" className={selectClass} defaultValue="1.8" onChange={(event) => run((instance) => focusedRichTextChain(instance).setLineHeight(event.target.value).run())}>
                 {LINE_HEIGHT_OPTIONS.map((value) => <option key={value} value={value}>{value} lh</option>)}
               </select>
-              <select aria-label="Paragraph spacing" className={selectClass} defaultValue="0.8rem" onChange={(event) => run((instance) => (instance.chain() as any).focus().setParagraphSpacing(event.target.value).run())}>
+              <select aria-label="Paragraph spacing" className={selectClass} defaultValue="0.8rem" onChange={(event) => run((instance) => focusedRichTextChain(instance).setParagraphSpacing(event.target.value).run())}>
                 {PARAGRAPH_SPACING_OPTIONS.map((value) => <option key={value} value={value}>{value} gap</option>)}
               </select>
             </div>
@@ -321,7 +336,7 @@ export function EditorToolbar({
               <button type="button" title="Divider" onClick={() => run((instance) => instance.chain().focus().setHorizontalRule().run())} className={buttonClass}>Rule</button>
               <button type="button" title="Scene break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "sceneBreak" }).run())} className={buttonClass}>***</button>
               <button type="button" title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</button>
-              <button type="button" title="First-line indent" onClick={() => run((instance) => (instance.chain() as any).focus().setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</button>
+              <button type="button" title="First-line indent" onClick={() => run((instance) => focusedRichTextChain(instance).setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</button>
             </div>
           </div>
         </details>

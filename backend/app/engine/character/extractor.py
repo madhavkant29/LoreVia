@@ -135,6 +135,7 @@ async def extract_characters_and_relationships(
     book_id: uuid.UUID | None = None,
     known_characters: list[dict] | None = None,
     usage_db=None,
+    language: str | None = None,
 ) -> dict:
     candidate_names = _candidate_names(chunk_text)
     candidate_hint = (
@@ -156,6 +157,7 @@ async def extract_characters_and_relationships(
         usage_user_id=user_id,
         usage_book_id=book_id,
         usage_db=usage_db,
+        language=language,
     )
     try:
         parsed = json.loads(raw)
@@ -180,6 +182,7 @@ async def extract_characters_and_relationships(
             user_id=user_id,
             book_id=book_id,
             usage_db=usage_db,
+            language=language,
         )
         characters = _apply_anti_merge_hints(chunk_text, characters)
         return {
@@ -202,6 +205,7 @@ async def extract_characters_and_relationships(
             user_id=user_id,
             book_id=book_id,
             usage_db=usage_db,
+            language=language,
         )
         return {
             "characters": _apply_anti_merge_hints(chunk_text, characters),
@@ -216,6 +220,7 @@ async def fallback_character_mentions(
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
     usage_db=None,
+    language: str | None = None,
 ) -> dict:
     candidate_names = _candidate_names(chunk_text, allow_review_singletons=True)
     rejected_characters: list[dict] = []
@@ -233,6 +238,7 @@ async def fallback_character_mentions(
         user_id=user_id,
         book_id=book_id,
         usage_db=usage_db,
+        language=language,
     )
     fallback_verified: list[dict] = []
     for character in filtered:
@@ -663,6 +669,7 @@ async def verify_character_candidate_personhood(
         ],
         user_id=user_id,
         book_id=book_id,
+        language=None,
     )
     llm_result = payload.get("candidate-0", {})
     final_band = "review"
@@ -695,6 +702,7 @@ async def _verify_review_candidates_with_llm(
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
     usage_db=None,
+    language: str | None = None,
 ) -> dict[str, dict]:
     if not candidates:
         return {}
@@ -729,6 +737,7 @@ async def _verify_review_candidates_with_llm(
         usage_user_id=user_id,
         usage_book_id=book_id,
         usage_db=usage_db,
+        language=language,
     )
     try:
         parsed = json.loads(raw)
@@ -767,6 +776,7 @@ async def _apply_contextual_mention_verification(
     user_id: uuid.UUID | None = None,
     book_id: uuid.UUID | None = None,
     usage_db=None,
+    language: str | None = None,
 ) -> list[dict]:
     if not characters:
         return []
@@ -832,6 +842,7 @@ async def _apply_contextual_mention_verification(
         user_id=user_id,
         book_id=book_id,
         usage_db=usage_db,
+        language=language,
     )
     for character in verified:
         evidence = dict(character.get("evidence") if isinstance(character.get("evidence"), dict) else {})

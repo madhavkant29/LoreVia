@@ -86,14 +86,14 @@ function VerifyEmailInner() {
 
   return (
     <main>
-      <div className={`rounded-lg border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] ${
+      <div className={`rounded-lg border p-8 ${
         isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
       }`}>
         <div className="mb-6 text-center">
           <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Verify your email</h1>
           <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
             {token
-              ? "We’re confirming your email now."
+              ? "We're confirming your email now."
               : email
                 ? `We sent a verification link to ${email}.`
                 : "Check your inbox for the verification link we sent after signup."}
@@ -101,19 +101,19 @@ function VerifyEmailInner() {
         </div>
 
         {verifying ? (
-          <p className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
+          <p className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
             Verifying your email...
           </p>
         ) : null}
 
         {message ? (
-          <p className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+          <p className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
             {message}
           </p>
         ) : null}
 
         {error ? (
-          <p className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-rose-500/25 bg-rose-500/[0.08] text-rose-300" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
+          <p className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-rose-500/25 bg-rose-500/[0.08] text-rose-300" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
             {error}
           </p>
         ) : null}
@@ -123,7 +123,7 @@ function VerifyEmailInner() {
             type="button"
             onClick={resend}
             disabled={resending || verifying}
-            className={`rounded-xl py-3 text-sm font-semibold transition disabled:pointer-events-none disabled:opacity-40 ${
+            className={`rounded-md py-3 text-sm font-semibold transition disabled:pointer-events-none disabled:opacity-40 ${
               isDark ? "bg-white text-black hover:bg-stone-100" : "bg-stone-950 text-white hover:bg-stone-800"
             }`}
           >

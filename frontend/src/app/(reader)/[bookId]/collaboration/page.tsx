@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -354,20 +355,14 @@ export default function CollaborationPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
-          <section className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Collaboration</p>
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h1 className={`text-3xl font-semibold tracking-normal ${isDark ? "text-white" : "text-slate-950"}`}>
-                  {book?.title ?? "Story"} sharing
-                </h1>
-                <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Share exact chapters, story-bible surfaces, and editing powers with beta readers, editors, and coauthors without opening the entire draft.
-                </p>
-              </div>
-              {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
-            </div>
-          </section>
+          <WorkspaceFamilyHeader
+            active="collaboration"
+            bookId={bookId}
+            family="publish-export"
+            title={`${book?.title ?? "Story"} collaborators`}
+            description="Share exact chapters, story-bible surfaces, and editing powers with beta readers, editors, and coauthors without opening the entire draft."
+          />
+          {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
 
           <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>

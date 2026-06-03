@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import Link from "next/link"
+import type { Route } from "next"
 import { useParams } from "next/navigation"
 
 import { booksApi } from "@/lib/api/books"
@@ -14,6 +15,7 @@ import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import type { Book } from "@/types/book"
 import type { EditorialReview, EditorialReviewPassage } from "@/types/intelligence"
 
@@ -147,8 +149,8 @@ export default function EditorialReviewPage() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#050914] text-slate-100" : "bg-[linear-gradient(180deg,#faf3ea_0%,#f2f1fb_45%,#eef5fb_100%)] text-stone-950"}`}>
-      <div className={`min-h-screen ${isDark ? "bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.08),transparent_28%),radial-gradient(circle_at_top_right,rgba(139,92,246,0.1),transparent_24%),linear-gradient(180deg,#050914_0%,#09101b_55%,#0d1420_100%)]" : ""}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
+      <div className="min-h-screen">
       <div className="mx-auto max-w-[110rem] px-4 pb-16 pt-5 sm:px-6 lg:px-7">
         <div className="grid gap-5 xl:grid-cols-[16.75rem_minmax(0,1fr)]">
           <AuthorToolsNav
@@ -163,31 +165,26 @@ export default function EditorialReviewPage() {
           />
 
           <main className="min-w-0 space-y-5">
-            <section className={shellCardClass(isDark, "px-5 py-6 sm:px-7 sm:py-6")}>
-              <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
-                <div className="max-w-4xl">
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Editorial workspace</p>
-                  <h1 className={`mt-3 font-serif text-4xl tracking-[-0.035em] sm:text-[3.15rem] ${isDark ? "text-white" : "text-stone-950"}`}>
-                    {book?.title || "Book"} editorial review
-                  </h1>
-                  <p className={`mt-4 max-w-3xl text-sm leading-7 sm:text-base ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    Paste a scene, passage, or full chapter to cross-check continuity, tighten presentation, and save review notes back into the shared workspace.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-3 xl:max-w-[25rem] xl:justify-end">
-                  <HeaderActionLink href={`/${bookId}/advisor`} isDark={isDark}>
+            <WorkspaceFamilyHeader
+              active="editorial-review"
+              bookId={bookId}
+              family="review-center"
+              title={`${book?.title || "Book"} editorial review`}
+              description="Paste a scene, passage, or chapter to cross-check continuity, tighten presentation, and save review notes back into the shared workspace."
+              actions={(
+                <>
+                  <HeaderActionLink href={`/${bookId}/advisor` as Route} isDark={isDark}>
                     Open story advisor
                   </HeaderActionLink>
-                  <HeaderActionLink href={`/${bookId}/notes`} isDark={isDark}>
+                  <HeaderActionLink href={`/${bookId}/notes` as Route} isDark={isDark}>
                     Open notes
                   </HeaderActionLink>
-                  <HeaderActionLink href={`/${bookId}/manuscript`} isDark={isDark} primary>
+                  <HeaderActionLink href={`/${bookId}/manuscript` as Route} isDark={isDark} primary>
                     Open manuscript
                   </HeaderActionLink>
-                </div>
-              </div>
-            </section>
+                </>
+              )}
+            />
 
             <section className={surfaceCardClass(isDark, "px-5 py-6 sm:px-6")}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -321,7 +318,7 @@ export default function EditorialReviewPage() {
                       disabled={!canReview}
                       className={`inline-flex min-h-[3rem] items-center justify-center rounded-md px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
                         isDark
-                          ? "bg-[linear-gradient(135deg,rgba(109,40,217,0.92),rgba(79,70,229,0.92))] text-white shadow-[0_18px_38px_-24px_rgba(109,40,217,0.55)] hover:translate-y-[-1px]"
+                          ? "bg-violet-600 text-white hover:bg-violet-500"
                           : "bg-violet-700 text-white hover:bg-violet-800"
                       }`}
                     >
@@ -393,18 +390,18 @@ function HeaderActionLink({
   primary = false,
 }: {
   children: ReactNode
-  href: string
+  href: Route
   isDark: boolean
   primary?: boolean
 }) {
   return (
     <Link
-      href={href as any}
+      href={href}
       className={`inline-flex min-h-[2.9rem] items-center justify-center rounded-md border px-4 py-2.5 text-sm font-semibold transition ${
         primary
           ? isDark
-            ? "border-violet-400/30 bg-[linear-gradient(135deg,rgba(109,40,217,0.95),rgba(79,70,229,0.95))] text-white shadow-[0_18px_38px_-24px_rgba(109,40,217,0.55)] hover:translate-y-[-1px]"
-            : "border-violet-700 bg-violet-700 text-white hover:bg-violet-800"
+            ? "border-teal-300 bg-teal-300 text-slate-950 hover:bg-teal-200"
+            : "border-[#1f615d] bg-[#1f615d] text-white hover:bg-[#174c49]"
           : isDark
             ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]"
             : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
@@ -478,10 +475,6 @@ function inferStatusTone(message: string): "error" | "success" | "info" {
   return "info"
 }
 
-function shellCardClass(isDark: boolean, extra = "") {
-  return `rounded-lg border ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.82)]" : "border-white/70 bg-white/88"} ${extra}`
-}
-
 function surfaceCardClass(isDark: boolean, extra = "") {
-  return `rounded-lg border ${isDark ? "border-white/10 bg-[rgba(8,14,22,0.9)] shadow-modal" : "border-stone-200 bg-white/92"} ${extra}`
+  return `rounded-lg border ${isDark ? "border-white/10 bg-[rgba(8,14,22,0.9)]" : "border-stone-200 bg-white/92"} ${extra}`
 }

@@ -163,13 +163,13 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           </div>
 
           <div className="flex flex-col items-start gap-3 lg:items-end">
-            <div className={`inline-flex w-fit items-center rounded-full border p-1.5 ${toggleShellClass}`}>
+            <div className={`inline-flex w-fit items-center rounded-md border p-1 ${toggleShellClass}`}>
               {(["monthly", "annual"] as const).map((cycle) => (
                 <button
                   key={cycle}
                   type="button"
                   onClick={() => setBillingCycle(cycle)}
-                  className={`rounded-full px-6 py-2.5 text-sm font-semibold transition ${
+                  className={`rounded-sm px-6 py-2.5 text-sm font-semibold transition ${
                     billingCycle === cycle
                       ? isDark
                         ? "bg-[#1f615d] text-white"
@@ -223,14 +223,14 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
             const cardClass = isDark ? "border-white/[0.12] bg-[#131920]" : "border-[#d9e1e6] bg-white"
             const highlightClass = tier.highlight
               ? isDark
-                ? "border-[#4ba391] shadow-[0_0_0_1px_rgba(75,163,145,0.28)]"
-                : "border-[#2b7a73] shadow-[0_0_0_1px_rgba(43,122,115,0.18)]"
+                ? "border-[#4ba391]"
+                : "border-[#2b7a73]"
               : ""
             const priceCopyClass = isDark ? "text-white" : "text-stone-950"
             const textCopyClass = isDark ? "text-slate-300" : "text-stone-700"
             const subCopyClass = isDark ? "text-slate-400" : "text-stone-500"
             const buttonClass = tier.highlight
-              ? "border-transparent bg-[linear-gradient(90deg,#5cb89d,#78d6be)] text-slate-950 hover:opacity-95"
+              ? "border-transparent bg-[#1f615d] text-white hover:bg-[#174c49]"
               : isDark
                 ? "border-white/[0.18] bg-transparent text-white hover:bg-white/[0.05]"
                 : "border-[#2b7a73] bg-white text-[#1f615d] hover:bg-[#f5fbfa]"

@@ -588,7 +588,7 @@ export default function BookOverviewPage() {
         <CreateFab bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} />
       ) : null}
 
-      <nav className={`fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden border-slate-200 dark:border-white/10 bg-card/95 dark:bg-background/95`}>
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-card px-4 py-3 dark:border-white/10 dark:bg-background lg:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-6 gap-2 text-center text-3xs font-medium text-muted-foreground">
           <Link href={`/${bookId}`} className="rounded-xl px-2 py-2 text-teal-800">Overview</Link>
           <button onClick={continueReading} className="rounded-xl px-2 py-2">Read</button>
@@ -654,7 +654,7 @@ function WorkspacePanelLoadingState() {
 
 function NavPanelLoadingState() {
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-card/60 p-4">
+    <div className="space-y-3 rounded-md border border-border bg-card/60 p-4">
       <Skeleton variant="circle" className="mx-auto h-8 w-8" />
       <Skeleton variant="text" className="h-3 w-full" />
       <Skeleton variant="text" className="h-3 w-3/4" />

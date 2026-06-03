@@ -48,6 +48,27 @@ type EditorMode = "edit" | "preview" | "split"
 type FolderNode = WorkspaceFolderNode
 type NotesDragItem = { kind: "note"; path: string }
 
+const TOOLBAR_BUTTON_DEFS = [
+  { key: "bold", label: "B", title: "Bold", kind: "wrap" as const, open: "**", close: "**", placeholder: "bold text" },
+  { key: "italic", label: "I", title: "Italic", className: "italic", kind: "wrap" as const, open: "*", close: "*", placeholder: "italic text" },
+  { key: "strike", label: "S", title: "Strikethrough", className: "line-through", kind: "wrap" as const, open: "~~", close: "~~", placeholder: "crossed text" },
+  { key: "underline", label: "U", title: "Underline helper", className: "underline", kind: "wrap" as const, open: "<u>", close: "</u>", placeholder: "underlined text" },
+  { key: "h1", label: "H1", title: "Heading 1", kind: "prefix" as const, prefix: "# ", placeholder: "Heading" },
+  { key: "h2", label: "H2", title: "Heading 2", kind: "prefix" as const, prefix: "## ", placeholder: "Section heading" },
+  { key: "h3", label: "H3", title: "Heading 3", kind: "prefix" as const, prefix: "### ", placeholder: "Subsection" },
+  { key: "bullets", label: "-", title: "Bullet list", kind: "prefix" as const, prefix: "- ", placeholder: "List item" },
+  { key: "numbers", label: "1.", title: "Numbered list", kind: "prefix" as const, prefix: "1. ", placeholder: "Numbered item" },
+  { key: "check", label: "[ ]", title: "Checklist", kind: "prefix" as const, prefix: "- [ ] ", placeholder: "Checklist item" },
+  { key: "quote", label: '"', title: "Blockquote", kind: "prefix" as const, prefix: "> ", placeholder: "Quoted note" },
+  { key: "code", label: "</>", title: "Code", kind: "wrap" as const, open: "`", close: "`", placeholder: "code" },
+  { key: "link", label: "[[]]", title: "Wiki link", kind: "wrap" as const, open: "[[", close: "]]", placeholder: "Linked note" },
+  { key: "divider", label: "---", title: "Divider", kind: "snippet" as const, snippet: "\n---\n" },
+  { key: "scene-break", label: "***", title: "Scene break", kind: "snippet" as const, snippet: "\n***\n" },
+  { key: "bookmark", label: "#", title: "Bookmark / anchor", kind: "snippet" as const, snippet: "\n^anchor-name\n" },
+  { key: "template", label: "Tpl", title: "Scene note template", kind: "snippet" as const, snippet: "\n## Scene note\n- POV:\n- Location:\n- Timeline:\n- Tags:\n- Continuity risk:\n\n" },
+  { key: "table", label: "tbl", title: "Table", kind: "snippet" as const, snippet: "\n| Column | Detail |\n| --- | --- |\n| Item | Note |\n" },
+] as const
+
 function noteTitle(path: string) {
   return workspaceFileTitle(path)
 }
@@ -266,15 +287,38 @@ export function ObsidianNotesEditor({
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites))
+    const id = window.requestIdleCallback
+      ? window.requestIdleCallback(() => {
+          window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites))
+        })
+      : window.setTimeout(() => {
+          window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites))
+        }, 0)
+    return () => {
+      if (typeof id === "number") window.clearTimeout(id)
+      else if (window.cancelIdleCallback) window.cancelIdleCallback(id as number)
+    }
   }, [favorites])
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    window.localStorage.setItem(
-      `${FOLDERS_STORAGE_KEY_PREFIX}${bookId}`,
-      JSON.stringify([...new Set(customFolders.map((folder) => normalizeWorkspaceFolderPath(folder)).filter(Boolean))].sort())
-    )
+    const id = window.requestIdleCallback
+      ? window.requestIdleCallback(() => {
+          window.localStorage.setItem(
+            `${FOLDERS_STORAGE_KEY_PREFIX}${bookId}`,
+            JSON.stringify([...new Set(customFolders.map((folder) => normalizeWorkspaceFolderPath(folder)).filter(Boolean))].sort())
+          )
+        })
+      : window.setTimeout(() => {
+          window.localStorage.setItem(
+            `${FOLDERS_STORAGE_KEY_PREFIX}${bookId}`,
+            JSON.stringify([...new Set(customFolders.map((folder) => normalizeWorkspaceFolderPath(folder)).filter(Boolean))].sort())
+          )
+        }, 0)
+    return () => {
+      if (typeof id === "number") window.clearTimeout(id)
+      else if (window.cancelIdleCallback) window.cancelIdleCallback(id as number)
+    }
   }, [bookId, customFolders])
 
   useEffect(() => {
@@ -749,32 +793,31 @@ export function ObsidianNotesEditor({
     })
   }
 
-  const toolbarButtons = [
-    { key: "bold", label: "B", title: "Bold", action: () => replaceSelectedText("**", "**", "bold text") },
-    { key: "italic", label: "I", title: "Italic", className: "italic", action: () => replaceSelectedText("*", "*", "italic text") },
-    { key: "strike", label: "S", title: "Strikethrough", className: "line-through", action: () => replaceSelectedText("~~", "~~", "crossed text") },
-    { key: "underline", label: "U", title: "Underline helper", className: "underline", action: () => replaceSelectedText("<u>", "</u>", "underlined text") },
-    { key: "h1", label: "H1", title: "Heading 1", action: () => prefixSelectedLines("# ", "Heading") },
-    { key: "h2", label: "H2", title: "Heading 2", action: () => prefixSelectedLines("## ", "Section heading") },
-    { key: "h3", label: "H3", title: "Heading 3", action: () => prefixSelectedLines("### ", "Subsection") },
-    { key: "bullets", label: "-", title: "Bullet list", action: () => prefixSelectedLines("- ", "List item") },
-    { key: "numbers", label: "1.", title: "Numbered list", action: () => prefixSelectedLines("1. ", "Numbered item") },
-    { key: "check", label: "[ ]", title: "Checklist", action: () => prefixSelectedLines("- [ ] ", "Checklist item") },
-    { key: "quote", label: '"', title: "Blockquote", action: () => prefixSelectedLines("> ", "Quoted note") },
-    { key: "code", label: "</>", title: "Code", action: () => replaceSelectedText("`", "`", "code") },
-    { key: "link", label: "[[]]", title: "Wiki link", action: () => replaceSelectedText("[[", "]]", "Linked note") },
-    { key: "divider", label: "---", title: "Divider", action: () => insertSnippet("\n---\n") },
-    { key: "scene-break", label: "***", title: "Scene break", action: () => insertSnippet("\n***\n") },
-    { key: "bookmark", label: "#", title: "Bookmark / anchor", action: () => insertSnippet("\n^anchor-name\n") },
-    { key: "template", label: "Tpl", title: "Scene note template", action: () => insertSnippet("\n## Scene note\n- POV:\n- Location:\n- Timeline:\n- Tags:\n- Continuity risk:\n\n") },
-    { key: "table", label: "tbl", title: "Table", action: () => insertSnippet("\n| Column | Detail |\n| --- | --- |\n| Item | Note |\n") },
-  ]
+  const toolbarButtons = useMemo(
+    () =>
+      TOOLBAR_BUTTON_DEFS.map((def) => ({
+        key: def.key,
+        label: def.label,
+        title: def.title,
+        className: "className" in def ? def.className : undefined,
+        action: () => {
+          if (def.kind === "wrap") replaceSelectedText(def.open, def.close, def.placeholder)
+          else if (def.kind === "prefix") prefixSelectedLines(def.prefix, def.placeholder)
+          else insertSnippet(def.snippet)
+        },
+      })),
+    [replaceSelectedText, prefixSelectedLines, insertSnippet],
+  )
 
   const isFavorite = selectedNote ? Boolean(favorites[selectedNote.path]) : false
   const sceneChapters = workspaceTree?.chapters ?? []
-  const recentMentions = [...(relations?.backlinks ?? [])]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 3)
+  const recentMentions = useMemo(
+    () =>
+      [...(relations?.backlinks ?? [])]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 3),
+    [relations?.backlinks],
+  )
   const previewNodes = useMemo(() => {
     const unique = new Map<string, { id: string; label: string }>()
     for (const link of selectedOutgoingLinks.slice(0, 2)) {
@@ -816,10 +859,10 @@ export function ObsidianNotesEditor({
 
   return (
     <div
-      className={`rounded-lg border p-4 shadow-[0_36px_110px_-56px_rgba(2,6,23,0.95)] sm:p-5 ${
+      className={`rounded-lg border p-4 sm:p-5 ${
         isDark
-          ? "border-white/8 bg-[radial-gradient(circle_at_top,_rgba(20,184,166,0.08),transparent_18%),linear-gradient(180deg,#060b16_0%,#091120_48%,#0b1424_100%)]"
-          : "border-stone-200 bg-[linear-gradient(180deg,#fdfdfd_0%,#f6f8fb_100%)]"
+          ? "border-white/8 bg-[#071211]"
+          : "border-stone-200 bg-white"
       }`}
     >
       <div className="flex flex-col gap-4 border-b border-white/8 pb-4 lg:flex-row lg:items-center lg:justify-between">
@@ -829,19 +872,19 @@ export function ObsidianNotesEditor({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void createNote()} disabled={busy} className="inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#14b8a6,#0f766e)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_42px_-26px_rgba(20,184,166,0.9)] disabled:opacity-60">
+          <button type="button" onClick={() => void createNote()} disabled={busy} className="inline-flex items-center gap-2 rounded-md bg-[#1f615d] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
             <IconPlus />
             New note
           </button>
-          <button type="button" onClick={() => importInputRef.current?.click()} disabled={busy} className={`inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+          <button type="button" onClick={() => importInputRef.current?.click()} disabled={busy} className={`inline-flex items-center gap-2 rounded-md border px-4 py-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
             <IconUpload />
             Import ZIP
           </button>
-          <button type="button" onClick={exportNotes} disabled={busy} className="inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#2563eb,#3b82f6)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_42px_-26px_rgba(37,99,235,0.92)]">
+          <button type="button" onClick={exportNotes} disabled={busy} className="inline-flex items-center gap-2 rounded-md bg-[#1f615d] px-4 py-3 text-sm font-semibold text-white">
             <IconUpload className="rotate-180" />
             Export ZIP
           </button>
-          <button type="button" onClick={() => void duplicateCurrent()} disabled={!selectedNote || busy} className={`inline-flex h-[3rem] w-[3rem] items-center justify-center rounded-2xl border ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`} title="Duplicate note">
+          <button type="button" onClick={() => void duplicateCurrent()} disabled={!selectedNote || busy} className={`inline-flex h-[3rem] w-[3rem] items-center justify-center rounded-md border ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`} title="Duplicate note">
             <IconMore />
           </button>
           <input
@@ -862,7 +905,7 @@ export function ObsidianNotesEditor({
         <aside className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#07101d]/90" : "border-stone-200 bg-white/90"}`}>
           <div className={`border-b px-5 py-5 ${isDark ? "border-white/8" : "border-stone-200"}`}>
             <div className="flex items-center gap-3">
-              <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>
+              <div className={`flex h-12 w-12 items-center justify-center rounded-md ${isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>
                 <IconDocument />
               </div>
               <div className="min-w-0">
@@ -874,7 +917,7 @@ export function ObsidianNotesEditor({
 
           <div className="p-4">
             <div className="flex gap-2">
-              <label className={`flex min-w-0 flex-1 items-center gap-2 rounded-2xl border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
+              <label className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
                 <IconSearch />
                 <input
                   value={query}
@@ -883,7 +926,7 @@ export function ObsidianNotesEditor({
                   className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-inherit"
                 />
               </label>
-              <button type="button" onClick={() => setSelectedFolder(null)} className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Show all folders">
+              <button type="button" onClick={() => setSelectedFolder(null)} className={`flex h-12 w-12 items-center justify-center rounded-md border ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Show all folders">
                 <IconSliders />
               </button>
             </div>
@@ -951,7 +994,7 @@ export function ObsidianNotesEditor({
 
               <div className="mt-3 max-h-[18rem] space-y-1 overflow-auto pr-1">
                 {displayedNotes.length === 0 ? (
-                  <div className={`rounded-2xl border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/8 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+                  <div className={`rounded-md border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/8 text-slate-500" : "border-stone-300 text-stone-500"}`}>
                     {notesView === "favorites" ? "Star a note to keep it here." : "No notes match that search."}
                   </div>
                 ) : (
@@ -968,10 +1011,10 @@ export function ObsidianNotesEditor({
                           event.dataTransfer.effectAllowed = "move"
                           event.dataTransfer.setData("application/lorevia-note-item", JSON.stringify(payload))
                         }}
-                        className={`flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-3 text-left transition ${
+                        className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-3 text-left transition ${
                           active
                             ? isDark
-                              ? "bg-white/[0.06] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
+                              ? "bg-white/[0.06] text-white"
                               : "bg-stone-100 text-stone-950"
                             : isDark
                               ? "text-slate-300 hover:bg-white/[0.04]"
@@ -997,7 +1040,7 @@ export function ObsidianNotesEditor({
           </div>
 
           <div className={`border-t px-4 py-4 ${isDark ? "border-white/8" : "border-stone-200"}`}>
-            <button type="button" onClick={() => void createNote()} disabled={busy} className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium ${isDark ? "text-sky-200 hover:bg-white/[0.04]" : "text-sky-700 hover:bg-stone-100"}`}>
+            <button type="button" onClick={() => void createNote()} disabled={busy} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${isDark ? "text-sky-200 hover:bg-white/[0.04]" : "text-sky-700 hover:bg-stone-100"}`}>
               <IconPlus />
               New note
             </button>
@@ -1043,9 +1086,9 @@ export function ObsidianNotesEditor({
                         key={value}
                         type="button"
                         onClick={() => setMode(value)}
-                        className={`rounded-2xl px-4 py-2 text-sm font-medium capitalize transition ${
+                        className={`rounded-md px-4 py-2 text-sm font-medium capitalize transition ${
                           mode === value
-                            ? "bg-emerald-500/16 text-emerald-200 shadow-[inset_0_0_0_1px_rgba(45,212,191,0.14)]"
+                            ? "bg-emerald-500/16 text-emerald-200"
                             : isDark
                               ? "bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]"
                               : "bg-stone-100 text-stone-700 hover:bg-stone-200"
@@ -1059,13 +1102,13 @@ export function ObsidianNotesEditor({
 
                 <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                   <span className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{status || `Saved ${formatRelativeTime(selectedNote.updated_at)}`}</span>
-                  <button type="button" onClick={() => void saveNote(selectedNote.path, selectedContent)} className={`rounded-2xl border px-3 py-2 text-sm font-medium ${isDark ? "border-white/8 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                  <button type="button" onClick={() => void saveNote(selectedNote.path, selectedContent)} className={`rounded-md border px-3 py-2 text-sm font-medium ${isDark ? "border-white/8 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
                     <span className="inline-flex items-center gap-2"><IconCheck />Save now</span>
                   </button>
-                  <button type="button" onClick={() => void copyCurrentReference()} className={`rounded-2xl border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Copy note reference">
+                  <button type="button" onClick={() => void copyCurrentReference()} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Copy note reference">
                     <IconCopy />
                   </button>
-                  <button type="button" onClick={() => setGraphExpanded(true)} className={`rounded-2xl border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Open full graph">
+                  <button type="button" onClick={() => setGraphExpanded(true)} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Open full graph">
                     <IconExpand />
                   </button>
                 </div>
@@ -1181,7 +1224,7 @@ export function ObsidianNotesEditor({
                   value={editedFolder}
                   onChange={(event) => setEditedFolder(event.target.value)}
                   placeholder="Characters"
-                  className={`w-full rounded-2xl border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
               <label className="space-y-2">
@@ -1190,24 +1233,24 @@ export function ObsidianNotesEditor({
                   value={editedTitle}
                   onChange={(event) => setEditedTitle(event.target.value)}
                   placeholder="Note title"
-                  className={`w-full rounded-2xl border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
               <div className="flex gap-2">
-                <button type="button" onClick={() => void moveCurrent()} disabled={busy || !selectedNote} className="min-w-0 flex-1 rounded-2xl bg-[linear-gradient(135deg,#0f766e,#14b8a6)] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                <button type="button" onClick={() => void moveCurrent()} disabled={busy || !selectedNote} className="min-w-0 flex-1 rounded-md bg-[#1f615d] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                   Update path
                 </button>
-                <button type="button" onClick={() => void deleteCurrent()} disabled={busy || !selectedNote} className={`shrink-0 rounded-2xl px-3 py-2.5 text-sm font-medium ${isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
+                <button type="button" onClick={() => void deleteCurrent()} disabled={busy || !selectedNote} className={`shrink-0 rounded-md px-3 py-2.5 text-sm font-medium ${isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
                   Delete
                 </button>
               </div>
-              <div className={`overflow-hidden rounded-2xl border p-3 ${isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+              <div className={`overflow-hidden rounded-md border p-3 ${isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                 <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Send to scenes</p>
                 <div className="mt-3 flex gap-2">
                   <select
                     value={sceneChapterNumber ?? ""}
                     onChange={(event) => setSceneChapterNumber(event.target.value ? Number(event.target.value) : null)}
-                    className={`min-w-0 flex-1 rounded-2xl border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-[#09111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                    className={`min-w-0 flex-1 rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-[#09111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                   >
                     <option value="">Scenes inbox</option>
                     {sceneChapters.map((chapter) => (
@@ -1220,7 +1263,7 @@ export function ObsidianNotesEditor({
                     type="button"
                     onClick={() => void sendToScene()}
                     disabled={!selectedNote || sceneSending}
-                    className="shrink-0 rounded-2xl bg-[linear-gradient(135deg,#2563eb,#1d4ed8)] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    className="shrink-0 rounded-md bg-[#1f615d] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                   >
                     {sceneSending ? "Sending..." : "Send"}
                   </button>
@@ -1311,8 +1354,8 @@ export function ObsidianNotesEditor({
       </div>
 
       {graphExpanded ? (
-        <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-5">
-          <div className={`flex h-full w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border shadow-[0_40px_140px_-50px_rgba(2,6,23,0.95)] ${isDark ? "border-white/10 bg-[#08111d]" : "border-stone-200 bg-[#f4f7fb]"}`}>
+        <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/70 p-3 sm:p-5">
+          <div className={`flex h-full w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-[#08111d]" : "border-stone-200 bg-[#f4f7fb]"}`}>
             <div className={`flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/70"}`}>
               <div>
                 <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Obsidian graph</p>
@@ -1585,7 +1628,7 @@ function RelationStack({
           key={item.id}
           type="button"
           onClick={() => onOpen(item.reference)}
-          className={`flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left text-sm transition ${isDark ? "bg-white/[0.03] text-slate-100 hover:bg-white/[0.06]" : "bg-stone-50 text-stone-800 hover:bg-stone-100"}`}
+          className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left text-sm transition ${isDark ? "bg-white/[0.03] text-slate-100 hover:bg-white/[0.06]" : "bg-stone-50 text-stone-800 hover:bg-stone-100"}`}
         >
           <span className="truncate">{item.label}</span>
           {item.secondary ? <span className={`shrink-0 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>{item.secondary}</span> : null}
@@ -1639,7 +1682,7 @@ function MiniGraphPreview({
       </svg>
 
       <div className="absolute left-1/2 top-[54%] z-10 -translate-x-1/2 -translate-y-1/2">
-        <div className={`flex h-[5.3rem] w-[5.3rem] items-center justify-center rounded-full border text-center shadow-[0_0_38px_rgba(20,184,166,0.2)] ${isDark ? "border-emerald-400/55 bg-emerald-500/18 text-white" : "border-emerald-300 bg-emerald-50 text-emerald-900"}`}>
+        <div className={`flex h-[5.3rem] w-[5.3rem] items-center justify-center rounded-full border text-center ${isDark ? "border-emerald-400/55 bg-emerald-500/18 text-white" : "border-emerald-300 bg-emerald-50 text-emerald-900"}`}>
           <span className="max-w-[4rem] text-xs font-medium leading-4">{currentLabel}</span>
         </div>
       </div>

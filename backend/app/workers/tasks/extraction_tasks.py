@@ -24,7 +24,13 @@ def process_book_task(self, book_id: str):
 
 @celery_app.task(bind=True, name="extraction_tasks.process_chapter",
                  queue="extraction", max_retries=3, ignore_result=True)
-def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_id: str | None = None):
+def process_chapter_task(
+    self,
+    book_id: str,
+    chapter_num: int,
+    chapter_version_id: str | None = None,
+    rebuild_run_id: str | None = None,
+):
     async def _run():
         import uuid
         from datetime import UTC, datetime
@@ -62,6 +68,11 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
                             version.restore_completed_at = datetime.now(UTC)
                             await db.commit()
                     return
+                if rebuild_run_id is not None:
+                    from app.services.editor_project_service import get_rebuild_run_id
+
+                    if get_rebuild_run_id(book) != rebuild_run_id:
+                        return
 
                 chapter_row = (
                     await db.execute(
@@ -93,6 +104,7 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
                     book,
                     chapter_payload,
                     queue_wait_ms=queue_wait_ms,
+                    rebuild_run_id=rebuild_run_id,
                 )
                 if version_uuid is not None and book.work_type != "screenplay":
                     from app.utils.book_utils import (
@@ -139,7 +151,26 @@ def process_chapter_task(self, book_id: str, chapter_num: int, chapter_version_i
     try:
         run_worker_coro(_run())
     except Exception as exc:
-        if not is_retryable_processing_error(exc):
+        retryable = is_retryable_processing_error(exc)
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
+        if rebuild_run_id is not None and (not retryable or retries >= max_retries):
+            async def _fail_terminal_rebuild() -> None:
+                import uuid
+
+                from app.core.database import AsyncSessionLocal
+                from app.services.editor_project_service import fail_rebuild_run
+
+                async with AsyncSessionLocal() as db:
+                    await fail_rebuild_run(
+                        db,
+                        uuid.UUID(book_id),
+                        expected_rebuild_run_id=rebuild_run_id,
+                        error=str(exc),
+                    )
+                    await db.commit()
+
+            run_worker_coro(_fail_terminal_rebuild())
             raise
         raise self.retry(exc=exc)
 

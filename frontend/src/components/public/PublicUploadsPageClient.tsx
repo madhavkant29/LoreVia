@@ -45,7 +45,7 @@ function formatNumber(value: number) {
 
 function MetricCard({ label, value, note, isDark }: { label: string; value: string; note: string; isDark: boolean }) {
   return (
-    <article className={`rounded-2xl border p-5 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+    <article className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white"}`}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
       <p className="mt-3 text-3xl font-semibold">{value}</p>
       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
@@ -72,7 +72,7 @@ function RankingSelect({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={`mt-3 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white" : "border-stone-200 bg-white text-stone-950"}`}
+        className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white" : "border-stone-200 bg-white text-stone-950"}`}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -86,10 +86,10 @@ function RankingSelect({
 
 function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }) {
   return (
-    <article className={`rounded-2xl border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
+    <article className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white"}`}>
       {book.ranking?.label ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full px-3 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-cyan-300/10 text-cyan-200" : "bg-cyan-50 text-cyan-800"}`}>
+          <span className={`rounded-full px-3 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-teal-300/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>
             #{book.ranking.position ?? "?"} {book.ranking.label}
           </span>
         </div>
@@ -100,7 +100,7 @@ function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }
       </p>
       <h2 className="mt-3 text-2xl font-semibold">{book.title}</h2>
       {book.author_username ? (
-        <Link href={`/public/writers/${book.author_username}` as Route} className={`mt-2 inline-flex text-sm font-semibold ${isDark ? "text-cyan-200 hover:text-white" : "text-cyan-700 hover:text-cyan-900"}`}>
+        <Link href={`/public/writers/${book.author_username}` as Route} className={`mt-2 inline-flex text-sm font-semibold ${isDark ? "text-teal-200 hover:text-white" : "text-teal-700 hover:text-teal-900"}`}>
           @{book.author_username}
         </Link>
       ) : book.author ? (
@@ -120,14 +120,14 @@ function CreatorBookCard({ book, isDark }: { book: PublicBook; isDark: boolean }
       <div className="mt-6 flex flex-wrap gap-3">
         <Link
           href={`/public/${book.public_slug || book.id}` as Route}
-          className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white text-stone-950 hover:bg-slate-200" : "bg-stone-950 text-white hover:bg-stone-800"}`}
+          className={`inline-flex rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
         >
           Open book
         </Link>
         {book.active_forum_post_id ? (
           <Link
             href={`/public/forum/${book.active_forum_post_id}` as Route}
-            className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/10 bg-white/5 text-white hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
+            className={`inline-flex rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/10 bg-white/5 text-white hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
           >
             Open discussion
           </Link>
@@ -189,21 +189,21 @@ export function PublicUploadsPageClient({
   })
 
   return (
-    <main className={`min-h-screen ${isDark ? "bg-black text-white" : "bg-stone-50 text-stone-950"}`}>
+    <main className={`min-h-screen ${isDark ? "bg-[#071211] text-white" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-6xl px-4 py-10">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div className="max-w-3xl">
-            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Public uploads</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Public uploads</p>
             <h1 className="mt-4 text-4xl font-semibold tracking-tight">Browse creator-published books from LoreVia authors.</h1>
             <p className={`mt-4 text-base leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
               This catalog only shows books published by authors through LoreVia. Public-domain demos stay in the broader public library.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href="/public" className={`rounded-full border px-4 py-2 text-sm font-semibold ${isDark ? "border-white/10 bg-white/[0.04] text-white hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}>
+            <Link href="/public" className={`rounded-md border px-4 py-2 text-sm font-semibold ${isDark ? "border-white/10 bg-white/[0.04] text-white hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}>
               Open mixed public library
             </Link>
-            <Link href="/public/analytics" className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white text-stone-950 hover:bg-slate-200" : "bg-stone-950 text-white hover:bg-stone-800"}`}>
+            <Link href="/public/analytics" className={`rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}>
               View public upload analytics
             </Link>
           </div>
@@ -225,7 +225,7 @@ export function PublicUploadsPageClient({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search by title, author, genre, or description"
-              className={`mt-3 w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-950 placeholder:text-stone-400"}`}
+              className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-950 placeholder:text-stone-400"}`}
             />
           </label>
           <RankingSelect label="Rank by" value={ranking} options={rankingOptions} onChange={setRanking} isDark={isDark} />
@@ -233,18 +233,18 @@ export function PublicUploadsPageClient({
         </section>
 
         {rankingData?.items?.[0]?.ranking?.label ? (
-          <div className={`mt-6 rounded-2xl border px-5 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+          <div className={`mt-6 rounded-md border px-5 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
             <span className="font-semibold">{rankingData.items[0].ranking.label}</span>
-            {rankingData.items[0].ranking.supporting_note ? ` · ${rankingData.items[0].ranking.supporting_note}` : ""}
+            {rankingData.items[0].ranking.supporting_note ? ` / ${rankingData.items[0].ranking.supporting_note}` : ""}
           </div>
         ) : null}
 
         {booksLoading ? (
-          <div className={`mt-12 rounded-2xl border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+          <div className={`mt-12 rounded-md border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
             Loading creator uploads...
           </div>
         ) : books.length === 0 ? (
-          <div className={`mt-12 rounded-2xl border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+          <div className={`mt-12 rounded-md border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
             No creator-published public books matched that ranking yet.
           </div>
         ) : (
@@ -265,7 +265,7 @@ export function PublicUploadsPageClient({
                     type="button"
                     onClick={() => setPage((current) => Math.max(1, current - 1))}
                     disabled={rankingData.page <= 1}
-                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
+                    className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
                   >
                     Previous
                   </button>
@@ -274,7 +274,7 @@ export function PublicUploadsPageClient({
                     type="button"
                     onClick={() => setPage((current) => current + 1)}
                     disabled={!rankingData.has_more}
-                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
+                    className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-stone-200 bg-white text-stone-900 hover:bg-stone-50"}`}
                   >
                     Next
                   </button>

@@ -354,7 +354,7 @@ export default function ScenesPage() {
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#020712_0%,#06101c_50%,#0a1320_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f7f0df_0%,#edf6ee_48%,#eef5f9_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-[108rem] px-4 pb-12 pt-4 sm:px-6 lg:px-8">
         <div className="grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <div className="xl:sticky xl:top-6 xl:self-start">
@@ -387,7 +387,7 @@ export default function ScenesPage() {
               onToggleInspector={() => setShowInspectorOnMobile((current) => !current)}
             />
 
-            <section className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#09121f]/92 shadow-modal" : "border-white/70 bg-white/90 shadow-card"}`}>
+            <section className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#09121f]/92" : "border-white/70 bg-white/90"}`}>
               {treeLoading && !tree ? (
                 <WorkspaceStateCard
                   isDark={isDark}
@@ -1220,7 +1220,7 @@ function ActionButton({
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { isDark: boolean; variant?: "primary" | "secondary" | "ghost" | "danger" }) {
   const styles = {
     primary: isDark
-      ? "border-teal-400/25 bg-[linear-gradient(135deg,#0f766e,#115e59)] text-white shadow-[0_18px_40px_-26px_rgba(15,118,110,0.65)]"
+      ? "border-teal-400/25 bg-[#1f615d] text-white"
       : "border-teal-500 bg-teal-700 text-white",
     secondary: isDark
       ? "border-white/10 bg-white/[0.05] text-slate-100 hover:bg-white/[0.08]"

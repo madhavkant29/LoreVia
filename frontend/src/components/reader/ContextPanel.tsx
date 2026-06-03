@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState, useEffect } from "react"
+import { memo, useMemo, useRef, useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 
@@ -20,7 +20,7 @@ interface Props {
   characters: ChapterCharacter[]
 }
 
-export function ContextPanel({
+export const ContextPanel = memo(function ContextPanel({
   result,
   loading,
   onClose,
@@ -205,14 +205,14 @@ export function ContextPanel({
   return (
     <aside
       ref={panelRef}
-      className={`fixed inset-x-0 bottom-0 z-40 flex h-[78dvh] flex-col overflow-hidden rounded-t-[1.9rem] border shadow-[0_-24px_60px_-30px_rgba(15,23,42,0.28)] md:static md:inset-auto md:h-auto md:max-h-none md:w-[23rem] md:rounded-none md:border-l md:border-t-0 md:shadow-[-24px_0_64px_-48px_rgba(79,70,229,0.3)] xl:w-[25rem] ${shell.container}`}
+      className={`fixed inset-x-0 bottom-0 z-40 flex h-[78dvh] flex-col overflow-hidden rounded-t-lg border md:static md:inset-auto md:h-auto md:max-h-none md:w-[23rem] md:rounded-none md:border-l md:border-t-0 xl:w-[25rem] ${shell.container}`}
       style={{
         transform: mobileSheet ? `translateY(${dragOffset}px)` : undefined,
         transition: dragStartRef.current === null ? "transform 180ms ease-out" : undefined,
       }}
     >
       <div
-        className={`shrink-0 border-b backdrop-blur ${shell.sticky}`}
+        className={`shrink-0 border-b ${shell.sticky}`}
         onTouchStart={(event) => startDrag(event.touches[0]?.clientY ?? 0)}
         onTouchMove={(event) => moveDrag(event.touches[0]?.clientY ?? 0)}
         onTouchEnd={endDrag}
@@ -233,7 +233,7 @@ export function ContextPanel({
               aria-label="Close context panel"
               className={`rounded-lg px-2 py-1.5 text-xs transition ${shell.tab}`}
             >
-              ✕
+              x
             </button>
           </div>
         </div>
@@ -279,8 +279,8 @@ export function ContextPanel({
         {!loading && activeCharacter ? (
           <div className={`rounded-xl border p-5 ${shell.card}`}>
             {editing ? (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                <div className={`relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6 md:p-8 ${
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                <div className={`relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg p-6 md:p-8 ${
                   isDark ? "bg-[#000000] text-white border border-white/10" : "bg-white text-stone-900 border border-stone-200"
                 }`}>
                   <div className="absolute top-4 right-4">
@@ -288,7 +288,7 @@ export function ContextPanel({
                       onClick={() => setEditing(false)}
                       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${shell.tab}`}
                     >
-                      ✕
+                      x
                     </button>
                   </div>
                   
@@ -425,7 +425,7 @@ export function ContextPanel({
                   <div className="mt-6">
                     <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Motivations</p>
                     <p className={`mt-2 text-sm leading-6 ${shell.body}`}>
-                      {activeCharacter.motivations.join(" • ")}
+                      {activeCharacter.motivations.join(" - ")}
                     </p>
                   </div>
                 ) : null}
@@ -434,7 +434,7 @@ export function ContextPanel({
                   <div className="mt-6">
                     <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Fears</p>
                     <p className={`mt-2 text-sm leading-6 ${shell.body}`}>
-                      {activeCharacter.fears.join(" • ")}
+                      {activeCharacter.fears.join(" - ")}
                     </p>
                   </div>
                 ) : null}
@@ -527,4 +527,4 @@ export function ContextPanel({
       </div>
     </aside>
   )
-}
+})

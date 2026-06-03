@@ -65,9 +65,9 @@ export function DailyCapPrompt() {
   }
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 py-6">
       <div
-        className={`w-full max-w-xl rounded-lg border p-6 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.45)] ${
+        className={`w-full max-w-xl rounded-lg border p-6 ${
           isDark ? "border-white/10 bg-[#0b0f14] text-slate-100" : "border-stone-200 bg-[#fffaf2] text-stone-900"
         }`}
       >
@@ -100,7 +100,7 @@ export function DailyCapPrompt() {
                 close()
                 router.push("/upgrade")
               }}
-              className="rounded-full bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-4 py-2 text-sm font-semibold text-white"
+              className="rounded-md bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-600"
             >
               View pricing
             </button>

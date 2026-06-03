@@ -51,6 +51,7 @@ from app.schemas.public import (
     PublicUploadsOverviewOut,
     PublicUserProfileOut,
 )
+from app.services.public_publish_service import submit_public_share
 from app.utils.book_utils import deserialize_manuscript_content
 from app.utils.compliance.copyright_check import evaluate_document_copyright
 from app.utils.public_utils import (
@@ -135,9 +136,10 @@ async def list_public_beta_forum_posts(
 ):
     ensure_public_forum_read_enabled()
     normalized_query = " ".join((q or "").split()).strip()
+    normalized_thread_type = thread_type if isinstance(thread_type, str) else None
     if current_user is None:
         version = await cache_get_int(key_public_forum_cache_version(), default=1)
-        cache_key = key_public_forum_posts(version, normalized_query, page, page_size)
+        cache_key = key_public_forum_posts(version, normalized_query, page, page_size, normalized_thread_type)
         cached = await cache_get(cache_key)
         if cached:
             return PublicForumPostListOut(**cached)
@@ -147,7 +149,7 @@ async def list_public_beta_forum_posts(
         q=normalized_query,
         page=page,
         page_size=page_size,
-        thread_type=thread_type,
+        thread_type=normalized_thread_type,
         current_user=current_user,
     )
     if current_user is None:
@@ -628,50 +630,26 @@ async def get_user_shared_chapter(book_id: uuid.UUID, chapter_num: int, db: Asyn
 async def publish_user_shared_book(
     book_id: uuid.UUID,
     body: PublicBookShareBody,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     ensure_public_mode_enabled()
     ensure_public_authoring_access(current_user, action_label="Submitting a public sample")
-    if not (body.rights_confirmation or body.confirm_public_share):
-        raise HTTPException(400, "Public sharing requires explicit confirmation.")
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id or book.hidden_at is not None or book.archived_at is not None:
         raise HTTPException(404, "Book not found")
     if book.is_public and not is_user_public_share_book(book):
         raise HTTPException(409, "Public demo books cannot be republished through the user-sharing route.")
 
-    if getattr(book, "s3_key", None) and getattr(book, "format", None) != "manual":
-        copyright_info = await evaluate_document_copyright(
-            format_name=getattr(book, "format", None),
-            raw=await asyncio.to_thread(download_book, book.s3_key),
-            existing_isbn=getattr(book, "isbn", None),
-        )
-        if copyright_info.get("isbn"):
-            book.isbn = str(copyright_info["isbn"])
-        book.copyright_warning = bool(copyright_info.get("copyright_warning", False))
-
-    book.source_kind = USER_PUBLIC_SHARE_SOURCE_KIND
-    if body.description is not None:
-        book.public_description = body.description.strip() or None
-    book.is_public = False
-    book.public_share_status = PUBLIC_SHARE_STATUS_PENDING
-    book.public_share_requested_at = datetime.now(UTC)
-    book.public_share_approved_at = None
-    book.public_share_approved_by_user_id = None
-    await db.commit()
-    await cache_del(key_public_books())
-    await cache_del(key_public_book_detail(str(book.id)))
-    await mark_public_profile_cache_dirty(str(book.user_id))
-    approval_status = get_public_share_status(book)
-    return {
-        "book_id": str(book.id),
-        "status": book.status,
-        "visibility": "private",
-        "public_kind": USER_PUBLIC_SHARE_SOURCE_KIND,
-        "approval_status": approval_status,
-        "message": "Public sample request submitted for manual approval.",
-    }
+    return await submit_public_share(
+        db,
+        book=book,
+        user=current_user,
+        body=body,
+        request_ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
 
 
 @router.post("/shared-books/{book_id}/unpublish", response_model=PublicBookCreateOut)
