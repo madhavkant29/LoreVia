@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { Suspense, useEffect, useState } from "react"
+import type { Route } from "next"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import axios from "axios"
@@ -65,7 +66,7 @@ function LoginInner() {
         return
       }
       setUser(user)
-      router.push(resolveSafeAuthNextPath(searchParams.get("next")))
+      router.push(resolveSafeAuthNextPath(searchParams.get("next")) as Route)
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const detail = error.response?.data?.detail
