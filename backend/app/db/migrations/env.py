@@ -93,6 +93,41 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
                 indexes = _index_names(inspector, "beta_read_assignments")
                 return "awarded_at" in columns or "ix_beta_read_assignments_awarded_at" in indexes
 
+            if path.name == "20260516_normalize_unique_constraints.py":
+                if "rewarded_ad_sessions" not in tables:
+                    return False
+                indexes = _index_names(inspector, "rewarded_ad_sessions")
+                if "ix_rewarded_ad_sessions_claim_token" not in indexes:
+                    return False
+                # Only impactful if the index exists and is not owned by a constraint
+                result = connection.execute(
+                    sa.text(
+                        "SELECT 1 FROM pg_constraint con "
+                        "JOIN pg_class idx ON idx.oid = con.conindid "
+                        "JOIN pg_namespace nsp ON nsp.oid = idx.relnamespace "
+                        "WHERE nsp.nspname = 'public' "
+                        "AND idx.relname = 'ix_rewarded_ad_sessions_claim_token' "
+                        "LIMIT 1"
+                    )
+                )
+                return result.scalar() is None
+
+            if path.name == "20260517_allow_multiple_public_forum_posts_per_book.py":
+                if "book_forum_posts" not in tables:
+                    return False
+                unique_constraints = {
+                    name
+                    for constraint in inspector.get_unique_constraints("book_forum_posts")
+                    if isinstance(name := constraint.get("name"), str)
+                }
+                return "uq_book_forum_posts_book" in unique_constraints
+
+            if path.name == "20260517_drop_redundant_subscription_event_index.py":
+                if "subscription_events" not in tables:
+                    return False
+                indexes = _index_names(inspector, "subscription_events")
+                return "ix_subscription_events_source_event_id" in indexes
+
             if path.name == "20260529_drop_users_login_activity_dates.py":
                 if "users" not in tables:
                     return False

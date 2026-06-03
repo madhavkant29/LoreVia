@@ -939,11 +939,12 @@ export interface MajorEvent {
 export interface CharacterEvent {
   character_id: string
   character_name: string
-  event_id: string
-  ordinal: number | null
-  impact_score?: number
+  chapter_number: number
+  event_title: string
+  description: string
+  impact_score: number
   role?: string | null
-  accomplishments?: string[]
+  accomplishments: string[]
   growth_direction?: string
   growth_magnitude?: number
   is_major?: boolean
