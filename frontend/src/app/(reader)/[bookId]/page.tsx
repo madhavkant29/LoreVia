@@ -1,6 +1,6 @@
 "use client"
 
-import { startTransition, useEffect, useRef, useState } from "react"
+import { startTransition, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import type { Route } from "next"
@@ -9,6 +9,7 @@ import { useParams, useRouter } from "next/navigation"
 
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ErrorCard } from "@/components/ui/ErrorCard"
+import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
 import { capture } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
@@ -19,6 +20,7 @@ import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { ReadingProgress } from "@/types/reader"
+import type { RecentActivityItem } from "@/types/ux"
 
 const AuthorWorkspaceDashboard = dynamic(
   () => import("@/components/reader/AuthorWorkspaceDashboard").then((module) => module.AuthorWorkspaceDashboard),
@@ -362,6 +364,42 @@ export default function BookOverviewPage() {
   const worldGapCount = preWritingCheck?.alerts.length ?? 0
   const timelineIssueCount = Math.max(0, chaptersLeft > 0 ? Math.min(3, Math.ceil(chaptersLeft / 8)) : 0)
   const greetingName = authHydrated ? user?.username?.trim() || "there" : "there"
+  const overviewActivityItems = useMemo<RecentActivityItem[]>(() => {
+    const items: RecentActivityItem[] = []
+    if (processingSummary) {
+      items.push({
+        id: "processing",
+        label: "Processing status updated",
+        detail: processingSummary,
+        tone: book?.status === "failed" ? "danger" : book?.status === "processing" ? "warning" : "default",
+      })
+    }
+    items.push({
+      id: "progress",
+      label: `${percentComplete}% complete`,
+      detail: `${chaptersLeft} ${storyUnitName(book?.work_type, true)} left from the current reading progress.`,
+      href: `/${bookId}/chapter/${continueChapter}` as Route,
+    })
+    if (revisionIntelligence?.summary?.recent_edit_label) {
+      items.push({
+        id: "revision",
+        label: "Revision digest",
+        detail: revisionIntelligence.summary.recent_edit_label,
+        href: "/notifications" as Route,
+        tone: "warning",
+      })
+    }
+    if (continuityIssueCount > 0) {
+      items.push({
+        id: "continuity",
+        label: `${continuityIssueCount} continuity flags`,
+        detail: "Open Story Advisor to triage the current draft.",
+        href: `/${bookId}/advisor` as Route,
+        tone: "warning",
+      })
+    }
+    return items
+  }, [book?.status, book?.work_type, bookId, chaptersLeft, continuityIssueCount, continueChapter, percentComplete, processingSummary, revisionIntelligence])
 
   const navigateWithMemory = (href: string) => {
     if (typeof window !== "undefined") {
@@ -513,6 +551,12 @@ export default function BookOverviewPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
+          <RecentActivityList
+            title="Project signals"
+            items={overviewActivityItems}
+            emptyLabel="No project signals yet. Start writing or reading to see your activity trail here."
+          />
+
           {activeBookMode === "reader" ? (
             <ReaderOverview
               bookId={bookId}

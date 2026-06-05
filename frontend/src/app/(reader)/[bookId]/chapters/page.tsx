@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation"
 
 import { ChapterList } from "@/components/reader/ChapterList"
 import { ChaptersPageHeader } from "@/components/reader/ChaptersPageHeader"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
@@ -30,6 +31,7 @@ function storyUnitLabel(workType?: Book["work_type"]) {
 export default function ChapterListPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
+  const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
@@ -72,9 +74,12 @@ export default function ChapterListPage() {
   }
 
   async function removeChapter(chapterNumber: number) {
-    const confirmed = window.confirm(
-      `Remove ${unitLabel} ${chapterNumber}? This deletes its manuscript text, scenes, notes, comments, and chapter intelligence. This cannot be undone.`
-    )
+    const confirmed = await confirm({
+      title: `Remove ${unitLabel} ${chapterNumber}?`,
+      body: `Remove ${unitLabel} ${chapterNumber}? This deletes its manuscript text, scenes, notes, comments, and chapter intelligence. This cannot be undone.`,
+      confirmLabel: `Remove ${unitLabel.toLowerCase()}`,
+      tone: "danger",
+    })
     if (!confirmed) return
 
     setDeleteBusy(`chapter:${chapterNumber}`)

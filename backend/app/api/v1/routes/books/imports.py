@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 import uuid
 from typing import Any, cast
 
@@ -61,10 +62,36 @@ from app.utils.queue_utils import queue_for_user
 from app.utils.upload_security_utils import validate_document_upload_bytes
 from app.utils.user_utils import add_daily_word_progress, build_writing_activity_entry
 from app.workers.consumers.extraction_consumer import _process_chapter
+from app.workers.tasks.analysis_tasks import analyse_chapter_task
 from app.workers.tasks.extraction_tasks import process_book_task
 from app.services.book_service import create_editor_project
 
 router = APIRouter()
+
+
+def _sync_books_package_monkeypatches() -> None:
+    """Keep split route-module internals compatible with package-level route tests."""
+    package = sys.modules.get("app.api.v1.routes.books")
+    if package is None:
+        return
+    for name in (
+        "get_owned_book",
+        "require_author_access",
+        "next_chapter_number",
+        "normalize_book_work_type",
+        "clean_manuscript_html",
+        "normalize_imported_chapters",
+        "parse_book_upload_for_ingestion",
+        "_process_chapter",
+        "extract_novel_scene_candidates",
+        "replace_chapter_novel_scenes",
+        "deserialize_manuscript_content",
+        "sync_chapter_content_from_novel_scenes",
+        "add_daily_word_progress",
+        "invalidate_advisor_caches_for_book",
+    ):
+        if hasattr(package, name):
+            globals()[name] = getattr(package, name)
 
 
 @router.post("/upload", status_code=202)
@@ -278,7 +305,9 @@ async def import_manuscript_content(
     split_into_chapters: str = Form("true"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
+    _: Any = None,
 ):
+    _sync_books_package_monkeypatches()
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     assert_editor_project_not_rebuilding(book)
@@ -618,6 +647,21 @@ async def import_manuscript_content(
     if chapters_for_analysis:
         await db.commit()
 
+    analysis_tasks: list[dict[str, str | int]] = []
+    for number, chapter_id in chapters_for_analysis:
+        task_result = analyse_chapter_task.apply_async(
+            args=[chapter_id, str(book.id)],
+            kwargs={"is_reprocessing": False},
+            queue="analysis",
+        )
+        analysis_tasks.append(
+            {
+                "chapter_id": chapter_id,
+                "chapter_number": number,
+                "task_id": str(getattr(task_result, "id", "")),
+            }
+        )
+
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
 
     return ManuscriptImportResult(
@@ -625,8 +669,8 @@ async def import_manuscript_content(
         book_id=str(book.id),
         imported_chapters=sorted(set(imported_numbers)),
         chapters_created=len(imported_numbers),
-        analysis_dispatched=0,
-        analysis_tasks=[],
+        analysis_dispatched=len(analysis_tasks),
+        analysis_tasks=analysis_tasks,
         chapter_content_versions=imported_content_versions,
         total_chapters=book.total_chapters or total_chapters,
         mode=book.mode or "author",

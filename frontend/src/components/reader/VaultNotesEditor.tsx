@@ -18,6 +18,7 @@ import {
 import type { ManuscriptWorkspaceTree, VaultGraph, VaultNoteRelations, VaultNote } from "@/types/book"
 import type { Character } from "@/types/character"
 import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { Tooltip } from "@/components/ui/Tooltip"
 import { migrateVaultStorage } from "@/lib/utils/vaultStorageMigration"
@@ -240,6 +241,7 @@ export function VaultNotesEditor({
   const latestDraftRef = useRef<Record<string, string>>({})
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const confirm = useConfirmDialog()
 
   useEffect(() => {
     setNotes(initialNotes)
@@ -605,7 +607,12 @@ export function VaultNotesEditor({
 
   const deleteCurrent = async () => {
     if (!selectedNote) return
-    const proceed = window.confirm(`Delete ${selectedNote.path}?`)
+    const proceed = await confirm({
+      title: "Delete note?",
+      body: `Delete ${selectedNote.path}?`,
+      confirmLabel: "Delete note",
+      tone: "danger",
+    })
     if (!proceed) return
     setBusy(true)
     try {

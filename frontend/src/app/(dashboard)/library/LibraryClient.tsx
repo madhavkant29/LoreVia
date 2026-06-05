@@ -3,13 +3,17 @@
 import type { ReactNode } from "react"
 import { useRef } from "react"
 import dynamic from "next/dynamic"
+import Link from "next/link"
 import { startTransition, Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/Button"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { ErrorCard } from "@/components/ui/ErrorCard"
+import { MobileActionBar } from "@/components/ui/MobileActionBar"
+import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { Tooltip } from "@/components/ui/Tooltip"
 import { LibraryWorkspaceHeader } from "@/components/library/LibraryWorkspaceHeader"
@@ -18,6 +22,7 @@ import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
+import type { NextBestAction, RecentActivityItem } from "@/types/ux"
 
 const UpcomingBetaReadsCard = dynamic(
   () => import("@/components/library/UpcomingBetaReadsCard").then((module) => module.UpcomingBetaReadsCard),
@@ -237,6 +242,7 @@ function formatNumber(value: number) {
 
 export function LibraryClient() {
   const router = useRouter()
+  const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
@@ -331,7 +337,9 @@ export function LibraryClient() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+      const target = event.target
+      const typingTarget = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
+      if (!typingTarget && event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault()
         searchInputRef.current?.focus()
       }
@@ -381,6 +389,62 @@ export function LibraryClient() {
     }),
     [visibleBooks],
   )
+  const hasAnyProjects = visibleBooks.length > 0
+  const recentActivityItems = useMemo<RecentActivityItem[]>(
+    () =>
+      [...visibleBooks]
+        .filter((book) => !book.archived_at && !book.hidden_at)
+        .sort((left, right) => new Date(getBookUpdatedAt(right)).getTime() - new Date(getBookUpdatedAt(left)).getTime())
+        .slice(0, 5)
+        .map((book) => ({
+          id: `library-activity:${book.id}`,
+          label: book.status === "processing" ? `${book.title} is still processing` : `${book.title} was updated`,
+          detail: `${getProgressLine(book)} / ${formatRelativeTime(getBookUpdatedAt(book))}`,
+          href: getBookHref(book) as Route,
+          timestamp: getBookUpdatedAt(book),
+          tone: book.status === "failed" ? "danger" : book.status === "processing" ? "warning" : "default",
+        })),
+    [visibleBooks],
+  )
+  const nextBestActions = useMemo<NextBestAction[]>(() => {
+    const processingBook = visibleBooks.find((book) => !book.archived_at && book.status === "processing")
+    const readyBook = visibleBooks.find((book) => !book.archived_at && book.status === "ready")
+    if (!hasAnyProjects) {
+      return [
+        {
+          id: "new-project",
+          label: "New Project",
+          description: "Create or import your first manuscript.",
+          onSelect: () => {
+            setUploadPreset({})
+            setShowUpload(true)
+          },
+        },
+      ]
+    }
+    if (processingBook) {
+      return [
+        {
+          id: `processing:${processingBook.id}`,
+          label: "Check processing",
+          description: `${processingBook.title} is refreshing extraction and story memory.`,
+          href: getBookHref(processingBook) as Route,
+          tone: "secondary",
+        },
+      ]
+    }
+    if (readyBook) {
+      return [
+        {
+          id: `continue:${readyBook.id}`,
+          label: "Continue project",
+          description: getProgressLine(readyBook),
+          href: getBookHref(readyBook) as Route,
+        },
+      ]
+    }
+    return []
+  }, [hasAnyProjects, visibleBooks])
   const filterSummary =
     modeFilter === "all" && statusFilter === "all" && !showArchived ? "Filter" : "Filtered"
 
@@ -400,7 +464,12 @@ export function LibraryClient() {
   }
 
   async function handleRemove(bookId: string) {
-    const confirmed = window.confirm("Remove this project from your library view? It will stay counted for usage.")
+    const confirmed = await confirm({
+      title: "Remove project from library view?",
+      body: "Remove this project from your library view? It will stay counted for usage.",
+      confirmLabel: "Remove project",
+      tone: "danger",
+    })
     if (!confirmed) return
 
     setBusyBookId(bookId)
@@ -462,7 +531,6 @@ export function LibraryClient() {
   const mutedText = isDark ? "text-[#a6a39b]" : "text-stone-600"
   const headingText = isDark ? "text-[#f5f0e8]" : "text-stone-950"
   const controlClass = isDark ? "border-white/[0.08] bg-[#0c1720] text-[#ebe7df]" : "border-stone-200 bg-white text-stone-800"
-  const hasAnyProjects = visibleBooks.length > 0
   const [interactiveReady, setInteractiveReady] = useState(false)
 
   useEffect(() => {
@@ -684,6 +752,14 @@ export function LibraryClient() {
             )}
           </Suspense>
 
+          <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+            <RecentActivityList
+              items={recentActivityItems}
+              emptyLabel="Start writing or importing to build a project activity trail."
+            />
+            <NextActionPanel isDark={isDark} actions={nextBestActions} />
+          </section>
+
           <section className="space-y-4">
             <SectionHeading
               icon={<PinIcon className={isDark ? "text-[#d7d0c6]" : "text-stone-700"} />}
@@ -868,6 +944,8 @@ export function LibraryClient() {
         </section>
       </div>
 
+      <MobileActionBar actions={nextBestActions} />
+
       {showUpload ? (
         <UploadModal
           initialMode={uploadPreset.mode}
@@ -925,6 +1003,41 @@ export function LibraryClient() {
         </div>
       ) : null}
     </div>
+  )
+}
+
+function NextActionPanel({
+  isDark,
+  actions,
+}: {
+  isDark: boolean
+  actions: NextBestAction[]
+}) {
+  const primary = actions[0]
+
+  return (
+    <section className={`rounded-sm border p-5 ${isDark ? "border-white/[0.08] bg-[#101b24]" : "border-stone-200 bg-white"}`}>
+      <p className="app-eyebrow">Next best action</p>
+      {primary ? (
+        <>
+          <p className={`mt-3 text-xl font-semibold ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>{primary.label}</p>
+          {primary.description ? <p className={`mt-2 text-sm leading-7 ${isDark ? "text-[#a6a39b]" : "text-stone-600"}`}>{primary.description}</p> : null}
+          {primary.href ? (
+            <Link href={primary.href} className="app-button-secondary mt-5">
+              Open
+            </Link>
+          ) : (
+            <Button type="button" variant="secondary" onClick={primary.onSelect} className="mt-5 rounded-sm">
+              {primary.label}
+            </Button>
+          )}
+        </>
+      ) : (
+        <p className={`mt-3 text-sm leading-7 ${isDark ? "text-[#a6a39b]" : "text-stone-600"}`}>
+          Your workspace is current. Use search, filters, or the command palette to jump into a project.
+        </p>
+      )}
+    </section>
   )
 }
 

@@ -10,6 +10,15 @@ import sqlalchemy as sa
 
 LOCAL_DATABASE_HOSTS = {"localhost", "127.0.0.1", "::1", "postgres", "db"}
 CORE_APPLICATION_TABLES = frozenset({"users", "books", "chapters"})
+LEGACY_METADATA_BOOTSTRAP_EXCLUDED_TABLES = frozenset(
+    {
+        "book_vault_notes",
+        "book_vault_note_links",
+        "book_vault_note_backlinks",
+        "book_vault_note_tags",
+        "book_vault_note_series_links",
+    }
+)
 SUPABASE_DATA_API_RW_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE")
 SUPABASE_DATA_API_SEQUENCE_PRIVILEGES = ("USAGE", "SELECT")
 SUPABASE_POLICY_COMMANDS = frozenset({"ALL", "SELECT", "INSERT", "UPDATE", "DELETE"})
@@ -137,6 +146,15 @@ def destructive_downgrade_revisions(versions_dir: Path) -> list[Path]:
 
 def should_reset_local_alembic_state(existing_tables: set[str]) -> bool:
     return "alembic_version" in existing_tables and not CORE_APPLICATION_TABLES.issubset(existing_tables)
+
+
+def legacy_bootstrap_metadata_tables(metadata: sa.MetaData) -> list[sa.Table]:
+    return [
+        table
+        for table in metadata.sorted_tables
+        if table.schema in (None, "public")
+        and table.name not in LEGACY_METADATA_BOOTSTRAP_EXCLUDED_TABLES
+    ]
 
 
 def drop_orphan_table_rowtype_if_present_sql(table_name: str, *, schema: str = "public") -> str:

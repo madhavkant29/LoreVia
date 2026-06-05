@@ -17,7 +17,7 @@ type ManuscriptOverlayDialogsProps = {
   isDark: boolean
   sceneEditorOpen: boolean
   editingScene: NovelScene | null
-  onCloseSceneEditor: () => void
+  onCloseSceneEditor: () => void | Promise<void>
   sceneTitleDraft: string
   onSceneTitleDraftChange: (value: string) => void
   sceneChapterDraft: number | null

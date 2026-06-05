@@ -1,6 +1,7 @@
 "use client"
 
 import { memo, useState, type KeyboardEvent, type MouseEvent } from "react"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { booksApi } from "@/lib/api/books"
 import { isPaidTier } from "@/lib/billing/plans"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
@@ -76,6 +77,7 @@ export const CharacterCard = memo(function CharacterCard({ character, bookId, co
     motivations: listToString(character.motivations),
     fears: listToString(character.fears),
   })
+  const confirm = useConfirmDialog()
 
   const user = useAuthStore((state) => state.user)
   const traits = character.trait_state ?? {}
@@ -151,7 +153,12 @@ export const CharacterCard = memo(function CharacterCard({ character, bookId, co
 
   async function handleDelete() {
     if (!bookId) return
-    const confirmed = window.confirm(`Delete ${character.name} from this book? This is best for false positives and cannot be undone.`)
+    const confirmed = await confirm({
+      title: `Delete ${character.name}?`,
+      body: `Delete ${character.name} from this book? This is best for false positives and cannot be undone.`,
+      confirmLabel: "Delete character",
+      tone: "danger",
+    })
     if (!confirmed) return
     setDeleting(true)
     setError(null)

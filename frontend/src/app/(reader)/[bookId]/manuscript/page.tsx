@@ -9,6 +9,7 @@ import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { ManuscriptExportMenu } from "@/components/reader/ManuscriptExportMenu"
 import { ManuscriptModeSwitch } from "@/components/reader/ManuscriptModeSwitch"
@@ -174,6 +175,7 @@ function ManuscriptPageInner() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
@@ -806,9 +808,15 @@ function ManuscriptPageInner() {
     }
   }
 
-  const closeSceneEditor = () => {
-    if (sceneDraftDirty && typeof window !== "undefined" && !window.confirm("You have unsaved scene changes. Close the editor anyway?")) {
-      return
+  const closeSceneEditor = async () => {
+    if (sceneDraftDirty) {
+      const confirmed = await confirm({
+        title: "Close scene editor?",
+        body: "You have unsaved scene changes. Close the editor anyway?",
+        confirmLabel: "Close editor",
+        tone: "danger",
+      })
+      if (!confirmed) return
     }
     setSceneEditorOpen(false)
     setEditingScene(null)
@@ -853,7 +861,7 @@ function ManuscriptPageInner() {
       await loadWorkspaceTree()
       const chaptersToRefresh = [...new Set([previousChapterNumber, sceneChapterDraft].filter((value): value is number => typeof value === "number" && value > 0))]
       await Promise.all(chaptersToRefresh.map(syncLocalChapterFromServer))
-      closeSceneEditor()
+      await closeSceneEditor()
       setStatusMessage(editingScene ? "Scene updated." : "Scene saved.")
     } finally {
       setSceneSaving(false)
@@ -870,12 +878,13 @@ function ManuscriptPageInner() {
   }
 
   const removeChapter = async (chapterNumber: number) => {
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm(
-        `Remove Chapter ${chapterNumber}? This deletes its manuscript text, scenes, notes, comments, and chapter intelligence. This cannot be undone.`
-      )
-      if (!confirmed) return
-    }
+    const confirmed = await confirm({
+      title: `Remove Chapter ${chapterNumber}?`,
+      body: `Remove Chapter ${chapterNumber}? This deletes its manuscript text, scenes, notes, comments, and chapter intelligence. This cannot be undone.`,
+      confirmLabel: "Remove chapter",
+      tone: "danger",
+    })
+    if (!confirmed) return
 
     setDeletingChapterNumber(chapterNumber)
     try {

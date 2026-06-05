@@ -163,6 +163,12 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
   await page.goto("/library")
 
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
+  await page.keyboard.press("Control+K")
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible()
+  await page.getByLabel("Search commands").fill("open manuscript")
+  await expect(page.getByRole("button", { name: /open manuscript: sky of ash/i })).toBeVisible()
+  await page.keyboard.press("Escape")
+
   await expect(page.getByText("Upcoming Beta Reads")).toBeVisible()
   await expect(page.getByText("Complete reviews before the deadline")).toBeVisible()
   await expect(page.getByText("Chapter 12 feedback - Seraphina Vale")).toBeVisible()
@@ -352,11 +358,10 @@ test("manuscript workspace removes a chapter from the editor rail", async ({ pag
   const removeChapterButton = page.getByRole("button", { name: "Remove Chapter 2" })
   await expect(removeChapterButton).toBeVisible()
 
-  page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("Remove Chapter 2?")
-    await dialog.accept()
-  })
   await removeChapterButton.click()
+  const editorConfirmDialog = page.getByRole("dialog", { name: "Remove Chapter 2?" })
+  await expect(editorConfirmDialog).toBeVisible()
+  await editorConfirmDialog.getByRole("button", { name: "Remove chapter", exact: true }).click()
 
   await expect(page.getByRole("button", { name: "Remove Chapter 2" })).toHaveCount(0)
   await expect(page.getByText(/^Gate Crossing$/)).toHaveCount(0)
@@ -378,19 +383,17 @@ test("chapter navigator removes a chapter after confirmation", async ({ page }) 
   await expect(chapterRow).toContainText("The Ember Gate")
   await chapterRow.scrollIntoViewIfNeeded()
 
-  page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("Remove Chapter 2?")
-    await dialog.dismiss()
-  })
   await chapterRow.getByRole("button", { name: "Remove" }).click()
+  const cancelDialog = page.getByRole("dialog", { name: "Remove Chapter 2?" })
+  await expect(cancelDialog).toBeVisible()
+  await cancelDialog.getByRole("button", { name: "Cancel" }).click()
   await expect(chapterRow).toContainText("The Ember Gate")
   expect(deleteRequests).toHaveLength(0)
 
-  page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("Remove Chapter 2?")
-    await dialog.accept()
-  })
   await chapterRow.getByRole("button", { name: "Remove" }).click()
+  const confirmDialog = page.getByRole("dialog", { name: "Remove Chapter 2?" })
+  await expect(confirmDialog).toBeVisible()
+  await confirmDialog.getByRole("button", { name: "Remove chapter", exact: true }).click()
   await expect(page.getByRole("status")).toContainText("Chapter 2 removed.")
   await expect(chapterRow).toHaveCount(0)
   await expect(page.locator("article").filter({ hasText: "River of Glass" })).toContainText("River of Glass")

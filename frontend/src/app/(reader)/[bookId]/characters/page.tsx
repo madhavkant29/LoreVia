@@ -18,6 +18,7 @@ import { CharacterProfileTabs, type CharacterProfileTab } from "@/components/rea
 import { CharacterWorkspaceHeader } from "@/components/reader/CharacterWorkspaceHeader"
 import { CharacterWorkspaceSidebarHeader } from "@/components/reader/CharacterWorkspaceSidebarHeader"
 import { FirstTimeTooltip } from "@/components/tooltips/FirstTimeTooltip"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 import type { Book } from "@/types/book"
 import type {
@@ -872,6 +873,7 @@ function QuickActionTile({
 export default function CharactersPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
+  const confirm = useConfirmDialog()
 
   const { data: bookData = null, isLoading: bookLoading } = useBookDetail(bookId)
   const { data: progressData = null } = useQuery<ReadingProgress | null>({
@@ -1670,7 +1672,12 @@ export default function CharactersPage() {
 
   async function handleDeleteCharacter() {
     if (!selectedCharacter) return
-    const confirmed = window.confirm(`Delete ${selectedCharacter.name} from this book? This is best for false positives and cannot be undone.`)
+    const confirmed = await confirm({
+      title: `Delete ${selectedCharacter.name}?`,
+      body: `Delete ${selectedCharacter.name} from this book? This is best for false positives and cannot be undone.`,
+      confirmLabel: "Delete character",
+      tone: "danger",
+    })
     if (!confirmed) return
 
     setDeleting(true)

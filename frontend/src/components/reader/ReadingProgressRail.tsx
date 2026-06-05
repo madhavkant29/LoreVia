@@ -52,6 +52,14 @@ export const ReadingProgressRail = memo(function ReadingProgressRail({
               of {totalWords.toLocaleString()} words
             </p>
           </div>
+          <div className={`mt-5 w-full rounded-md border px-2 py-2 text-center ${theme === "dark" ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/70"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${theme === "dark" ? "text-teal-200" : "text-teal-700"}`}>
+              Mini map
+            </p>
+            <p className={`mt-1 text-xs leading-5 ${theme === "dark" ? "text-slate-400" : "text-stone-500"}`}>
+              Resume marker stays synced to this chapter.
+            </p>
+          </div>
         </div>
       </div>
     </aside>

@@ -1,6 +1,7 @@
 "use client"
 import dynamic from "next/dynamic"
 import { useState, useEffect, useRef, useMemo } from "react"
+import type { Route } from "next"
 
 import { useReader } from "@/lib/hooks/useReader"
 import { isReaderFontFamily, type ReaderFontFamily } from "@/lib/utils/readerTypography"
@@ -8,6 +9,7 @@ import { ReaderToolbar } from "./ReaderToolbar"
 import { ChapterText } from "./ChapterText"
 import { ReaderQuickRail } from "./ReaderQuickRail"
 import { ReadingProgressRail } from "./ReadingProgressRail"
+import { MobileActionBar } from "@/components/ui/MobileActionBar"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { ReaderDisplayStyle } from "@/types/reader"
 import { Skeleton } from "@/components/ui/Skeleton"
@@ -325,6 +327,12 @@ export function ReaderView({ bookId, chapterNum }: Props) {
       {showSummary && (
         <SummaryPanel bookId={bookId} chapterNum={chapterNum} onClose={() => setShowSummary(false)} theme={theme} />
       )}
+      <MobileActionBar
+        actions={[
+          { id: "reader-summary", label: "Summary", onSelect: () => setShowSummary(true), tone: "secondary" },
+          { id: "reader-ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route },
+        ]}
+      />
     </div>
   )
 }

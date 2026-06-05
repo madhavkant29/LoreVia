@@ -17,6 +17,7 @@ import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, ImportPr
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
 import { ImportStructureEditor } from "@/components/modals/ImportStructureEditor"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { Tooltip } from "@/components/ui/Tooltip"
 
@@ -90,6 +91,7 @@ export const UploadModal = memo(function UploadModal({
   const inputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const existingBookMenuRef = useRef<HTMLDivElement>(null)
+  const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const user = useAuthStore((state) => state.user)
   const canUploadAuthorMode = canUseAuthorFeatures(user?.tier)
@@ -541,6 +543,12 @@ export const UploadModal = memo(function UploadModal({
             x
           </button>
         </div>
+
+        <UploadWizardSteps
+          isDark={isDark}
+          activeStep={uploadStage === "processing" ? 4 : importPreview && !dismissPreview ? 2 : files.length > 0 || startEmpty || isManagingExisting ? 1 : 0}
+          isManagingExisting={isManagingExisting}
+        />
 
         {uploadStage === "processing" && processingBook ? (
           <div className={`mb-4 rounded-xl border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
@@ -1604,6 +1612,10 @@ export const UploadModal = memo(function UploadModal({
             </div>
           ) : null}
 
+          {(chapterReports.length > 0 || postImportReview) ? (
+            <PostImportChecklist isDark={isDark} hasReview={Boolean(postImportReview)} hasReports={chapterReports.length > 0} />
+          ) : null}
+
           {postImportReview ? (
             <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-stone-50"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1738,7 +1750,13 @@ export const UploadModal = memo(function UploadModal({
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!confirm("Delete this project and all its data? This cannot be undone.")) return
+                      const confirmed = await confirm({
+                        title: "Delete and reimport project?",
+                        body: "Delete this project and all its data? This cannot be undone.",
+                        confirmLabel: "Delete and reimport",
+                        tone: "danger",
+                      })
+                      if (!confirmed) return
                       try {
                         await booksApi.delete(existingBookId)
                         void refetchBooks()
@@ -1792,6 +1810,76 @@ function normalizeTag(rawTag: string): string {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ")
+}
+
+function UploadWizardSteps({
+  isDark,
+  activeStep,
+  isManagingExisting,
+}: {
+  isDark: boolean
+  activeStep: number
+  isManagingExisting: boolean
+}) {
+  const steps = isManagingExisting
+    ? ["Choose source", "Add content", "Process", "Review"]
+    : ["Choose source", "Structure", "Details", "Process", "Review"]
+
+  return (
+    <div className={`border-b px-6 py-3 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-slate-200/80 bg-slate-50/70"}`}>
+      <ol className="flex flex-wrap gap-2">
+        {steps.map((step, index) => {
+          const active = index <= activeStep
+          return (
+            <li
+              key={step}
+              className={`rounded-full border px-3 py-1.5 text-3xs font-semibold uppercase tracking-[0.18em] ${
+                active
+                  ? isDark
+                    ? "border-teal-300/20 bg-teal-500/10 text-teal-200"
+                    : "border-teal-200 bg-teal-50 text-teal-700"
+                  : isDark
+                    ? "border-white/10 bg-white/[0.03] text-slate-500"
+                    : "border-slate-200 bg-white text-slate-500"
+              }`}
+            >
+              {index + 1}. {step}
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+function PostImportChecklist({
+  isDark,
+  hasReview,
+  hasReports,
+}: {
+  isDark: boolean
+  hasReview: boolean
+  hasReports: boolean
+}) {
+  const items = [
+    { label: "Review imported structure", done: hasReports },
+    { label: "Scan continuity notes", done: hasReview },
+    { label: "Open the manuscript editor when processing finishes", done: false },
+  ]
+
+  return (
+    <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-teal-300/15 bg-teal-500/10" : "border-teal-100 bg-teal-50"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-teal-200" : "text-teal-700"}`}>Post-import checklist</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {items.map((item) => (
+          <div key={item.label} className={`rounded-lg border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/10 text-slate-200" : "border-white bg-white text-stone-700"}`}>
+            <span className={item.done ? "font-semibold" : ""}>{item.done ? "Done: " : "Next: "}</span>
+            {item.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function normalizeKeywords(input: string) {

@@ -175,6 +175,7 @@ export const AskLoreViaWorkspace = memo(function AskLoreViaWorkspace({
               <AskResultCard
                 key={`${entry.question}-${index}`}
                 entry={entry}
+                bookId={bookId}
                 answerLabel={answerLabel}
                 isDark={isDark}
               />
@@ -332,10 +333,12 @@ function AskQuestionCard({
 
 function AskResultCard({
   entry,
+  bookId,
   answerLabel,
   isDark,
 }: {
   entry: QAEntry
+  bookId: string
   answerLabel: string
   isDark: boolean
 }) {
@@ -405,14 +408,25 @@ function AskResultCard({
                       Chapter {citation.chapter_num}
                       {citation.chapter_title ? ` - ${citation.chapter_title}` : ""}
                     </p>
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em]",
-                        isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-500"
-                      )}
-                    >
-                      {citation.source_type === "passage" ? "Passage" : "Summary"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em]",
+                          isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-500"
+                        )}
+                      >
+                        {citation.source_type === "passage" ? "Passage" : "Summary"}
+                      </span>
+                      <Link
+                        href={`/${bookId}/chapter/${citation.chapter_num}`}
+                        className={cn(
+                          "text-xs font-semibold transition",
+                          isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"
+                        )}
+                      >
+                        Jump to chapter
+                      </Link>
+                    </div>
                   </div>
                   <p className={cn("mt-3 text-sm leading-7", isDark ? "text-slate-300" : "text-stone-600")}>
                     {citation.excerpt}
