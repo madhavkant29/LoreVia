@@ -197,7 +197,7 @@ async def advisor_message_stream(
                 exc,
                 traceback.format_exc(),
             )
-            yield _advisor_sse("error", {"error": str(exc)})
+            yield _advisor_sse("error", {"error": public_error_message(500)})
 
     return StreamingResponse(
         event_stream(),
