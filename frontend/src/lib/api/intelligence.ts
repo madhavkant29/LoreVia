@@ -43,6 +43,17 @@ function clampAdvisorPassage(text: string) {
   return text.length > MAX_ADVISOR_PASSAGE_CHARS ? text.slice(0, MAX_ADVISOR_PASSAGE_CHARS) : text
 }
 
+function readCookie(name: string) {
+  if (typeof document === "undefined") return null
+  const prefix = `${name}=`
+  const cookies = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(prefix))
+  const cookie = cookies.at(-1)
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null
+}
+
 async function requestSse<T>(
   path: string,
   options: {
@@ -53,9 +64,14 @@ async function requestSse<T>(
   retried = false,
 ): Promise<T> {
   const method = options.method ?? "POST"
+  const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "text/event-stream" }
+  const csrfToken = readCookie("lorevia_csrf")
+  if (csrfToken) {
+    headers["X-CSRF-Token"] = csrfToken
+  }
   const response = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    headers,
     credentials: "include",
     body: method === "POST" ? JSON.stringify(options.payload ?? {}) : undefined,
     signal: handlers.signal,
@@ -67,7 +83,13 @@ async function requestSse<T>(
   }
 
   if (!response.ok) {
-    throw new Error(`${response.status}: Advisor stream failed`)
+    let detail = ""
+    try {
+      const body = await response.text()
+      const parsed = JSON.parse(body)
+      detail = parsed.detail ? ` — ${parsed.detail}` : ""
+    } catch { /* ignore parse errors */ }
+    throw new Error(`${response.status}: Advisor stream failed${detail}`)
   }
   if (!response.body) {
     throw new Error("Advisor stream is unavailable in this browser")

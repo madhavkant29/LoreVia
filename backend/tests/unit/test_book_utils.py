@@ -11,9 +11,11 @@ from PIL import Image
 from app.models.book import Book, Chapter, ManuscriptAnnotation
 from app.models.user import User
 from app.utils.book_utils import (
+    _build_revision_change_summary,
     _detect_continuity_flags_from_rows,
     _latest_state_before_chapter,
     _map_chapter_consistency_state_history,
+    _scene_keyword_set,
     list_manuscript_annotations,
     _build_knowledge_timeline,
     _build_narration_signature,
@@ -98,6 +100,51 @@ class _RowResult:
 
     def all(self):
         return list(self._rows)
+
+
+def test_scene_keyword_set_filters_common_revision_noise_but_keeps_story_terms():
+    keywords = _scene_keyword_set(
+        "Aide ailleurs apr auteurs said Nora crossed the silver gate with royal blood.",
+        character_names={"Nora"},
+        thread_terms={"Silver Gate"},
+    )
+
+    assert "aide" not in keywords
+    assert "ailleurs" not in keywords
+    assert "apr" not in keywords
+    assert "auteurs" not in keywords
+    assert {"nora", "silver gate", "royal", "blood"}.issubset(keywords)
+
+
+def test_build_revision_change_summary_falls_back_when_only_noise_terms_changed():
+    summary, focus_terms = _build_revision_change_summary(
+        before_text="Nora crossed the silver gate.",
+        after_text="Aide ailleurs apr auteurs. Nora crossed the silver gate.",
+        unit_label="Chapter 2",
+        character_names={"Nora"},
+        thread_terms={"Silver Gate"},
+        world_terms=set(),
+    )
+
+    assert summary == "You changed Chapter 2: the scene logic and wording shifted enough to re-check downstream assumptions."
+    assert focus_terms == []
+
+
+def test_normalize_writer_workspace_preserves_reprocess_metadata():
+    workspace = normalize_writer_workspace(
+        {
+            "reprocess": {
+                "auto_reprocess_enabled": False,
+                "pending_chapters": [3, 1, 3, 0, "bad"],
+                "last_manual_chapter_number": 3,
+                "last_manual_chapter_started_at": "2026-06-06T00:00:00+00:00",
+            }
+        }
+    )
+
+    assert workspace["reprocess"]["auto_reprocess_enabled"] is False
+    assert workspace["reprocess"]["pending_chapters"] == [1, 3]
+    assert workspace["reprocess"]["last_manual_chapter_number"] == 3
 
 
 class TestCleanMarkdownAsterisks:

@@ -1469,6 +1469,13 @@ const writerWorkspace = {
     items: [],
     last_generated_at: null,
   },
+  reprocess: {
+    auto_reprocess_enabled: true,
+    pending_chapters: [],
+    last_mode_changed_at: null,
+    last_manual_chapter_started_at: null,
+    last_manual_chapter_number: null,
+  },
   processing: book.processing,
 }
 
@@ -1777,6 +1784,18 @@ const notes = [
     chapter_title: "The Ember Gate",
     title: "Gate imagery",
     body: "Revisit the bell motif.",
+    created_at: "2026-05-08T10:00:00Z",
+    updated_at: "2026-05-08T10:00:00Z",
+  },
+]
+
+const vaultNotes = [
+  {
+    id: "vault-note-1",
+    book_id: "book-1",
+    path: "Manual Editor/Chapter 2/Gate imagery.md",
+    source: "manual_editor",
+    content: "# Gate imagery\n\nRevisit the bell motif.",
     created_at: "2026-05-08T10:00:00Z",
     updated_at: "2026-05-08T10:00:00Z",
   },
@@ -2212,6 +2231,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockCharacterReviewPayload = JSON.parse(JSON.stringify(characterReviewPayload))
   let mockRelationshipGraph = JSON.parse(JSON.stringify(relationshipGraph))
   let mockNotes = JSON.parse(JSON.stringify(notes))
+  let mockVaultNotes = JSON.parse(JSON.stringify(vaultNotes))
   let mockManuscriptAnnotations = JSON.parse(JSON.stringify(manuscriptAnnotations))
   let mockEmailPreferences: EmailPreferences = {
     email: user.email,
@@ -2474,6 +2494,45 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         total_words: 31500,
         upload_charge_consumed: true,
         charge_kind: "manual_reprocess",
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/manuscript/import" && method === "POST") {
+      if (mockWriterWorkspace.reprocess?.auto_reprocess_enabled === false) {
+        mockWriterWorkspace.reprocess = {
+          ...mockWriterWorkspace.reprocess,
+          pending_chapters: Array.from(new Set([...(mockWriterWorkspace.reprocess.pending_chapters ?? []), 1])),
+        }
+      }
+      return json(route, {
+        status: "imported",
+        book_id: "book-1",
+        imported_chapters: [1],
+        chapters_created: 1,
+        analysis_dispatched: 0,
+        analysis_tasks: [],
+        chapter_content_versions: { 1: 3 },
+        total_chapters: 3,
+        mode: "author",
+        source_kind: "chapter_wise",
+        chapter_reports: [],
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/manuscript/chapters/1/reprocess" && method === "POST") {
+      mockWriterWorkspace.reprocess = {
+        ...(mockWriterWorkspace.reprocess ?? { auto_reprocess_enabled: false, pending_chapters: [] }),
+        pending_chapters: (mockWriterWorkspace.reprocess?.pending_chapters ?? []).filter((chapter: number) => chapter !== 1),
+        last_manual_chapter_number: 1,
+        last_manual_chapter_started_at: "2026-06-06T00:00:00Z",
+      }
+      return json(route, {
+        book_id: "book-1",
+        status: "processing",
+        chapters_queued: 1,
+        total_words: 1000,
+        upload_charge_consumed: false,
+        charge_kind: null,
       })
     }
 
@@ -2989,6 +3048,47 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/notes" && method === "GET") {
       return json(route, mockNotes)
+    }
+
+    if (path === "/api/v1/books/book-1/notes" && method === "POST") {
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      const saved = {
+        id: body.note_id ? String(body.note_id) : `note-${mockNotes.length + 1}`,
+        book_id: "book-1",
+        book_title: "Sky of Ash",
+        chapter_number: typeof body.chapter_number === "number" ? body.chapter_number : null,
+        chapter_title: body.chapter_number === 2 ? "The Ember Gate" : null,
+        title: body.title ? String(body.title) : null,
+        body: String(body.body ?? ""),
+        created_at: "2026-05-08T12:00:00Z",
+        updated_at: "2026-05-08T12:00:00Z",
+      }
+      mockNotes = [saved, ...mockNotes.filter((note: typeof mockNotes[number]) => note.id !== saved.id)]
+      return json(route, saved)
+    }
+
+    if (path === "/api/v1/books/book-1/notes/vault" && method === "GET") {
+      return json(route, mockVaultNotes)
+    }
+
+    if (path === "/api/v1/books/book-1/notes/vault" && method === "PUT") {
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      const pathValue = String(body.path ?? "")
+      const saved = {
+        id: `vault-note-${mockVaultNotes.length + 1}`,
+        book_id: "book-1",
+        path: pathValue,
+        source: "manual_editor",
+        content: String(body.content ?? ""),
+        persisted: true,
+        created_at: "2026-05-08T12:00:00Z",
+        updated_at: "2026-05-08T12:00:00Z",
+      }
+      mockVaultNotes = [
+        saved,
+        ...mockVaultNotes.filter((note: typeof mockVaultNotes[number]) => note.path.toLowerCase() !== pathValue.toLowerCase()),
+      ]
+      return json(route, saved)
     }
 
     if (path === "/api/v1/reader/book-1/progress" && method === "GET") {

@@ -241,6 +241,10 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
               const recentEditLabel = typeof item.data?.recent_edit_label === "string" ? item.data.recent_edit_label : null
               const topRevisionTitle = typeof item.data?.top_item_title === "string" ? item.data.top_item_title : null
               const friendRequestId = typeof item.data?.friend_request_id === "string" ? item.data.friend_request_id : null
+              const hasRevisionDigestDetails =
+                item.kind === "revision_digest" &&
+                Boolean(revisionTagline || revisionHero || recentEditLabel || topRevisionTitle || activeRevisionItems !== null || highRevisionItems !== null)
+              const showNotificationBody = item.kind !== "revision_digest" || !hasRevisionDigestDetails
 
               return (
                 <article
@@ -250,7 +254,7 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{item.title}</p>
-                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{item.body}</p>
+                      {showNotificationBody ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{item.body}</p> : null}
                       {item.kind === "book_ready" ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {characterCount !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{characterCount} characters</span> : null}

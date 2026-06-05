@@ -14,6 +14,35 @@ import type {
   PublicUserProfile,
 } from "@/types/public"
 
+function appendOptionalForumField(formData: FormData, key: string, value: string | number | boolean | null | undefined) {
+  if (value === null || typeof value === "undefined") return
+  formData.append(key, String(value))
+}
+
+function forumPostFormData(payload: {
+  threadType?: "novel" | "general"
+  bookId?: string | null
+  headline: string
+  body: string
+  desiredBetaReaderCount?: number | null
+  allowContactRequests?: boolean
+  status?: string
+  removeImage?: boolean
+  imageFile?: File | null
+}) {
+  const formData = new FormData()
+  formData.append("thread_type", payload.threadType ?? "novel")
+  appendOptionalForumField(formData, "book_id", payload.bookId)
+  formData.append("headline", payload.headline)
+  formData.append("body", payload.body)
+  appendOptionalForumField(formData, "desired_beta_reader_count", payload.desiredBetaReaderCount)
+  formData.append("allow_contact_requests", String(payload.allowContactRequests ?? true))
+  appendOptionalForumField(formData, "status", payload.status)
+  if (payload.removeImage) formData.append("remove_image", "true")
+  if (payload.imageFile) formData.append("image", payload.imageFile)
+  return formData
+}
+
 export const publicApi = {
   listBooks: (options?: { contentSourceType?: string; catalog?: string; search?: string; page?: number; limit?: number }) =>
     apiClient.get<PublicBook[]>("/public/books", {
@@ -84,15 +113,21 @@ export const publicApi = {
     body: string
     desiredBetaReaderCount?: number | null
     allowContactRequests?: boolean
+    imageFile?: File | null
   }) =>
-    apiClient.post<PublicForumPost>("/public/forum/posts", {
-      thread_type: payload.threadType ?? "novel",
-      ...(payload.bookId ? { book_id: payload.bookId } : {}),
-      headline: payload.headline,
-      body: payload.body,
-      desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
-      allow_contact_requests: payload.allowContactRequests ?? true,
-    }).then((response) => response.data),
+    apiClient.post<PublicForumPost>(
+      "/public/forum/posts",
+      payload.imageFile
+        ? forumPostFormData(payload)
+        : {
+            thread_type: payload.threadType ?? "novel",
+            ...(payload.bookId ? { book_id: payload.bookId } : {}),
+            headline: payload.headline,
+            body: payload.body,
+            desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
+            allow_contact_requests: payload.allowContactRequests ?? true,
+          },
+    ).then((response) => response.data),
   updateForumPost: (postId: string, payload: {
     threadType?: "novel" | "general"
     headline: string
@@ -100,26 +135,44 @@ export const publicApi = {
     desiredBetaReaderCount?: number | null
     allowContactRequests?: boolean
     status?: string
+    removeImage?: boolean
+    imageFile?: File | null
   }) =>
-    apiClient.put<PublicForumPost>(`/public/forum/posts/${postId}`, {
-      thread_type: payload.threadType ?? "novel",
-      headline: payload.headline,
-      body: payload.body,
-      desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
-      allow_contact_requests: payload.allowContactRequests ?? true,
-      ...(payload.status ? { status: payload.status } : {}),
-    }).then((response) => response.data),
+    apiClient.put<PublicForumPost>(
+      `/public/forum/posts/${postId}`,
+      payload.imageFile
+        ? forumPostFormData(payload)
+        : {
+            thread_type: payload.threadType ?? "novel",
+            headline: payload.headline,
+            body: payload.body,
+            desired_beta_reader_count: payload.desiredBetaReaderCount ?? null,
+            allow_contact_requests: payload.allowContactRequests ?? true,
+            ...(payload.status ? { status: payload.status } : {}),
+            ...(payload.removeImage ? { remove_image: true } : {}),
+          },
+    ).then((response) => response.data),
   listForumComments: (postId: string) =>
     apiClient.get<PublicForumCommentListResponse>(`/public/forum/posts/${postId}/comments`).then((response) => response.data.items),
   listForumInterests: (postId: string) =>
     apiClient.get<PublicForumInterestListResponse>(`/public/forum/posts/${postId}/interests`).then((response) => response.data.items),
   createForumInterest: (postId: string, message: string) =>
     apiClient.post<PublicForumInterest>(`/public/forum/posts/${postId}/interests`, { message }).then((response) => response.data),
-  createForumComment: (postId: string, body: string, parentCommentId?: string | null) =>
-    apiClient.post<PublicForumComment>(`/public/forum/posts/${postId}/comments`, {
-      body,
-      ...(parentCommentId ? { parent_comment_id: parentCommentId } : {}),
-    }).then((response) => response.data),
+  createForumComment: (postId: string, body: string, parentCommentId?: string | null, imageFile?: File | null) => {
+    const payload = imageFile ? new FormData() : null
+    if (payload) {
+      payload.append("body", body)
+      if (parentCommentId) payload.append("parent_comment_id", parentCommentId)
+      payload.append("image", imageFile as File)
+    }
+    return apiClient.post<PublicForumComment>(
+      `/public/forum/posts/${postId}/comments`,
+      payload ?? {
+        body,
+        ...(parentCommentId ? { parent_comment_id: parentCommentId } : {}),
+      },
+    ).then((response) => response.data)
+  },
   reactToForumPost: (postId: string, reaction: "like" | "dislike" | "clear") =>
     apiClient.put<PublicForumPost>(`/public/forum/posts/${postId}/reaction`, { reaction }).then((response) => response.data),
   reactToForumComment: (commentId: string, reaction: "like" | "dislike" | "clear") =>

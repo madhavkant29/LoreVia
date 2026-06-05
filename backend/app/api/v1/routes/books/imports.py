@@ -57,13 +57,18 @@ from app.utils.book_utils import (
     touch_public_book_updated_at,
 )
 from app.utils.ingestion_utils import build_analysis_chapter_state
+from app.utils.ingestion_utils import load_processing_chapter_payload
+from app.utils.llm_usage_utils import (
+    assert_manual_reprocess_token_capacity,
+    estimate_manual_reprocess_tokens,
+)
 from app.utils.notification_utils import build_upload_processing_notification
 from app.utils.queue_utils import queue_for_user
 from app.utils.upload_security_utils import validate_document_upload_bytes
 from app.utils.user_utils import add_daily_word_progress, build_writing_activity_entry
 from app.workers.consumers.extraction_consumer import _process_chapter
 from app.workers.tasks.analysis_tasks import analyse_chapter_task
-from app.workers.tasks.extraction_tasks import process_book_task
+from app.workers.tasks.extraction_tasks import process_book_task, process_chapter_task
 from app.services.book_service import create_editor_project
 
 router = APIRouter()
@@ -327,6 +332,9 @@ async def import_manuscript_content(
     resolved_book_work_type = normalize_book_work_type(work_type, default=book.work_type or "novel")
     resolved_import_format: str | None = None
     first_pdf_raw_for_cover: bytes | None = None
+    from app.services.editor_project_service import auto_reprocess_enabled, update_reprocess_metadata
+
+    should_auto_reprocess = auto_reprocess_enabled(book)
 
     cleaned_html = clean_manuscript_html(html) if html else None
 
@@ -497,7 +505,7 @@ async def import_manuscript_content(
         )
         if writing_activity is not None:
             db.add(writing_activity)
-        if getattr(book, "is_editor_project", False):
+        if getattr(book, "is_editor_project", False) or not should_auto_reprocess:
             await persist_editor_chapter_content(
                 db,
                 book,
@@ -508,6 +516,8 @@ async def import_manuscript_content(
                 description=str(job.get("description") or "") or None,
                 content_version=int(job.get("content_version") or 1),
             )
+            if not should_auto_reprocess:
+                update_reprocess_metadata(book, add_pending_chapters=[job_number])
         else:
             await _process_chapter(
                 db,
@@ -783,4 +793,79 @@ async def reprocess_manuscript(
         total_words=total_words,
         upload_charge_consumed=True,
         charge_kind="manual_reprocess",
+    )
+
+
+@router.post("/{book_id}/manuscript/chapters/{chapter_number}/reprocess", response_model=ManuscriptReprocessOut)
+async def reprocess_manuscript_chapter(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+
+    from app.services.editor_project_service import (
+        get_rebuild_run_id,
+        purge_manual_chapter_reprocess_content,
+        update_reprocess_metadata,
+    )
+
+    if get_rebuild_run_id(book) is not None:
+        raise HTTPException(409, "A rebuild is already in progress for this project")
+    chapter = (
+        await db.execute(
+            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+        )
+    ).scalar_one_or_none()
+    if chapter is None:
+        raise HTTPException(404, "Chapter not found")
+    if not chapter.word_count or chapter.word_count <= 0:
+        raise HTTPException(400, "Save chapter content before reprocessing")
+    chapter_payload = await load_processing_chapter_payload(
+        book.id,
+        chapter_number,
+        chapter_s3_key=chapter.s3_key,
+        chapter_title=chapter.title,
+    )
+    if chapter_payload is None:
+        raise HTTPException(400, "Save chapter content before reprocessing")
+
+    estimated_tokens = estimate_manual_reprocess_tokens(str(chapter_payload.get("text") or ""))
+    await assert_manual_reprocess_token_capacity(
+        db,
+        current_user,
+        estimated_tokens=estimated_tokens,
+    )
+
+    await purge_manual_chapter_reprocess_content(db, book=book, chapter=chapter)
+    chapter.analysis_state = build_analysis_chapter_state(
+        chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
+        status="queued",
+        increment_attempt=True,
+    )
+    update_reprocess_metadata(
+        book,
+        clear_pending_chapters=[chapter_number],
+        last_manual_chapter_number=chapter_number,
+    )
+    await db.commit()
+    await db.refresh(book)
+    await invalidate_advisor_caches_for_book(db, book_id=book.id)
+    await mark_book_cache_dirty(str(book.id))
+
+    process_chapter_task.apply_async(
+        args=[str(book.id), chapter_number],
+        kwargs={"manual_reprocess": True},
+        queue=queue_for_user(current_user, "extraction"),
+    )
+
+    return ManuscriptReprocessOut(
+        book_id=str(book.id),
+        status="processing",
+        chapters_queued=1,
+        total_words=int(chapter.word_count or 0),
+        upload_charge_consumed=False,
+        charge_kind=None,
     )

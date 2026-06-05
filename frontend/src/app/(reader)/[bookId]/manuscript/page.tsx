@@ -48,7 +48,7 @@ import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "@/lib
 import { moveSceneIdToIndex, reorderWorkspaceSceneTree } from "@/lib/utils/sceneWorkspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCard, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptAnnotationCategory, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, SceneVersion, SceneVersionDetail, WriterWorkspace, WritingTemplate } from "@/types/book"
+import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCard, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptAnnotationCategory, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, SceneVersion, SceneVersionDetail, VaultNote, WriterWorkspace, WritingTemplate } from "@/types/book"
 import type { Character } from "@/types/character"
 import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, InlineContinuityResponse, ManuscriptSynopsis } from "@/types/intelligence"
@@ -276,6 +276,7 @@ function ManuscriptPageInner() {
   const [contentVersionByChapter, setContentVersionByChapter] = useState<Record<number, number>>({})
   const [exporting, setExporting] = useState<"pdf" | "docx" | "epub" | "vault" | null>(null)
   const [reprocessing, setReprocessing] = useState(false)
+  const [reprocessingChapterNumber, setReprocessingChapterNumber] = useState<number | null>(null)
   const [jumpTarget, setJumpTarget] = useState<number | null>(null)
   const [activeFindIndex, setActiveFindIndex] = useState(0)
   const [replaceQuery, setReplaceQuery] = useState("")
@@ -381,9 +382,16 @@ function ManuscriptPageInner() {
   const {
     data: notesData = EMPTY_NOTES,
     isFetching: notesQueryLoading,
+    refetch: refetchNotes,
   } = useQuery<BookNote[]>({
     queryKey: [`manuscript:${bookId}:notes`],
     queryFn: () => booksApi.getBookNotes(bookId),
+    enabled: showRightRail && activeRightPane === "notes",
+    staleTime: 30_000,
+  })
+  const { data: vaultNotesData = [], refetch: refetchVaultNotes } = useQuery<VaultNote[]>({
+    queryKey: [bookCacheKey(bookId, "vault-notes")],
+    queryFn: () => booksApi.listVaultNotes(bookId),
     enabled: showRightRail && activeRightPane === "notes",
     staleTime: 30_000,
   })
@@ -426,6 +434,13 @@ function ManuscriptPageInner() {
     () => deriveReprocessCta(book, hasPendingEdits),
     [book, hasPendingEdits],
   )
+  const reprocessMetadata = writerWorkspace?.reprocess
+  const autoReprocessEnabled = reprocessMetadata?.auto_reprocess_enabled !== false
+  const pendingReprocessChapters = useMemo(
+    () => new Set((reprocessMetadata?.pending_chapters ?? []).filter((chapterNumber) => Number.isFinite(chapterNumber) && chapterNumber > 0)),
+    [reprocessMetadata?.pending_chapters],
+  )
+  const activeChapterNeedsReprocess = pendingReprocessChapters.has(activeChapterNumber)
 
   const sheetStyle = {
     fontSize: `${fontSize}pt`,
@@ -1915,8 +1930,13 @@ function ManuscriptPageInner() {
       clearDraftDirty(chapterNumber)
       clearDraftDirty(importedChapter)
       await loadWorkspaceTree()
-      await runAutomaticChecks(importedChapter, currentDraft.text)
-      setStatusMessage(`Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`)
+      if (!autoReprocessEnabled) await refetchWriterWorkspace()
+      if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, currentDraft.text)
+      setStatusMessage(
+        autoReprocessEnabled
+          ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
+          : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
+      )
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 409) {
         await refreshChapterVersionToken(chapterNumber).catch(() => undefined)
@@ -1956,8 +1976,13 @@ function ManuscriptPageInner() {
         }))
       }
       await loadWorkspaceTree()
-      await runAutomaticChecks(importedChapter, text)
-      setStatusMessage(`Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`)
+      if (!autoReprocessEnabled) await refetchWriterWorkspace()
+      if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, text)
+      setStatusMessage(
+        autoReprocessEnabled
+          ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
+          : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
+      )
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 409 && selectedChapter !== null) {
         await refreshChapterVersionToken(activeChapterNumber).catch(() => undefined)
@@ -1983,6 +2008,53 @@ function ManuscriptPageInner() {
       setStatusMessage("Reprocess failed. Check your upload quota and try again.")
     } finally {
       setReprocessing(false)
+    }
+  }
+
+  const toggleAutoReprocess = async (enabled: boolean) => {
+    const currentReprocess = writerWorkspace?.reprocess ?? {
+      auto_reprocess_enabled: true,
+      pending_chapters: [],
+    }
+    await saveWorkspace({
+      reprocess: {
+        ...currentReprocess,
+        auto_reprocess_enabled: enabled,
+      },
+    }, { silent: true })
+    setStatusMessage(
+      enabled
+        ? "Auto reprocess edits is on."
+        : "Auto reprocess edits is off. Open each edited chapter and click Reprocess to update story memory.",
+    )
+  }
+
+  const reprocessChapter = async (chapterNumber: number) => {
+    if (!book || reprocessingChapterNumber !== null) return
+    setReprocessingChapterNumber(chapterNumber)
+    setStatusMessage(null)
+    try {
+      await booksApi.reprocessChapter(book.id, chapterNumber)
+      setWriterWorkspace((current) => current ? {
+        ...current,
+        reprocess: {
+          ...(current.reprocess ?? { auto_reprocess_enabled: true, pending_chapters: [] }),
+          pending_chapters: (current.reprocess?.pending_chapters ?? []).filter((item) => item !== chapterNumber),
+          last_manual_chapter_number: chapterNumber,
+          last_manual_chapter_started_at: new Date().toISOString(),
+        },
+      } : current)
+      await refetchWriterWorkspace()
+      await loadBase()
+      setStatusMessage(`Chapter ${chapterNumber} reprocessing started. This uses tokens, not a book upload.`)
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 429) {
+        setStatusMessage("Manual chapter reprocess token limit reached. Try again after your rolling window refreshes.")
+      } else {
+        setStatusMessage(`Chapter ${chapterNumber} reprocess failed. Try again later.`)
+      }
+    } finally {
+      setReprocessingChapterNumber(null)
     }
   }
 
@@ -2510,6 +2582,19 @@ function ManuscriptPageInner() {
                 <button onClick={() => setFocusMode((value) => !value)} className={`min-h-10 rounded-sm border px-4 text-sm font-medium ${focusMode ? isDark ? "border-emerald-300/40 bg-emerald-400/15 text-white" : "border-emerald-300 bg-emerald-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]" : "border-stone-200 bg-white text-stone-700"}`}>
                   {focusMode ? "Exit focus" : "Focus mode"}
                 </button>
+                <label
+                  className={`flex min-h-10 items-center gap-2 rounded-sm border px-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                  title="Turning this off stops LoreVia from reprocessing saved edits automatically."
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoReprocessEnabled}
+                    disabled={workspaceSaving}
+                    onChange={(event) => void toggleAutoReprocess(event.target.checked)}
+                    className="h-4 w-4 rounded border-stone-300"
+                  />
+                  Auto reprocess edits
+                </label>
                 {reprocessCta.visible ? (
                   <button
                     type="button"
@@ -2539,6 +2624,11 @@ function ManuscriptPageInner() {
                 </button>
               </div>
             </div>
+            {!autoReprocessEnabled ? (
+              <div className={`border-t px-4 py-2 text-sm lg:px-6 ${isDark ? "border-white/10 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                Turning this off stops LoreVia from reprocessing saved edits automatically. To update story memory, open each edited chapter and click Reprocess. This adds extra steps, but can reduce token usage.
+              </div>
+            ) : null}
             <div className={`flex flex-col gap-3 border-t px-4 py-2 lg:flex-row lg:items-center lg:justify-between lg:px-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
               <div className="flex flex-wrap items-center gap-8" role="tablist" aria-label="Manuscript workspace modes">
                 {WORKSPACE_TABS.map((tab) => (
@@ -2642,6 +2732,7 @@ function ManuscriptPageInner() {
               <div className="mt-2 space-y-2">
               {filteredChapterItems.map((chapter) => {
                 const active = selectedChapter === chapter.number || (selectedChapter === null && draftChapterNumber === chapter.number)
+                const needsReprocess = pendingReprocessChapters.has(chapter.number)
                 const rowStats = chapterRowStats[chapter.number] ?? { wordCount: 0, sceneCount: 0, readingTime: "0 min read" }
                 const rowScenes = { length: rowStats.sceneCount }
                 const rowReadingTime = rowStats.readingTime
@@ -2667,8 +2758,20 @@ function ManuscriptPageInner() {
                         </div>
                         <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${chapter.number}`}</p>
                         <p className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowScenes.length} scene{rowScenes.length === 1 ? "" : "s"} - {rowReadingTime}</p>
-                        <p className={`mt-2 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} - {dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}</p>
+                        <p className={`mt-2 text-3xs ${needsReprocess ? isDark ? "text-amber-200" : "text-amber-700" : isDark ? "text-slate-500" : "text-stone-500"}`}>
+                          {rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} - {needsReprocess ? "Needs reprocess" : dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}
+                        </p>
                       </button>
+                      {needsReprocess ? (
+                        <button
+                          type="button"
+                          disabled={reprocessingChapterNumber === chapter.number}
+                          onClick={() => void reprocessChapter(chapter.number)}
+                          className={`shrink-0 rounded-sm px-2.5 py-1 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-amber-400/40 disabled:cursor-wait disabled:opacity-60 ${isDark ? "bg-amber-400/10 text-amber-100 hover:bg-amber-400/20" : "bg-amber-50 text-amber-700 hover:bg-amber-100"}`}
+                        >
+                          {reprocessingChapterNumber === chapter.number ? "Starting" : "Reprocess"}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         aria-label={`Remove Chapter ${chapter.number}`}
@@ -2781,10 +2884,10 @@ function ManuscriptPageInner() {
                                   data-scene-id={scene.id}
                                   className={`rounded-sm border px-3 py-3 transition ${isDraggedScene ? "scale-[0.99] opacity-70" : ""} ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}
                                 >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="min-w-0">
                                       {isChapterSceneGroup ? (
-                                        <div className="flex shrink-0 items-center gap-1">
+                                        <div className="flex flex-wrap items-center gap-1">
                                           <button
                                             type="button"
                                             draggable={!chapterReorderDisabled}
@@ -2835,16 +2938,16 @@ function ManuscriptPageInner() {
                                           </button>
                                         </div>
                                       ) : null}
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2">
-                                          {isChapterSceneGroup ? <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene {scene.sort_order}</span> : null}
-                                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{scene.title}</p>
-                                        </div>
-                                        <p className={`mt-1 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
-                                        {scene.description ? <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
-                                      </div>
                                     </div>
-                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`rounded-sm px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`shrink-0 rounded-sm px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                                  </div>
+                                  <div data-testid={`scene-copy-${scene.id}`} className="mt-3 min-w-0">
+                                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                      {isChapterSceneGroup ? <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene {scene.sort_order}</span> : null}
+                                      <p className={`min-w-0 break-words text-sm font-semibold leading-5 ${isDark ? "text-white" : "text-stone-900"}`}>{scene.title}</p>
+                                    </div>
+                                    <p className={`mt-1 break-words text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
+                                    {scene.description ? <p className={`mt-2 break-words text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
                                   </div>
                                   <div className="mt-3 flex flex-wrap gap-2">
                                     <button onClick={() => openSceneEditor(scene)} className={`rounded-sm px-2.5 py-1 text-3xs ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
@@ -3034,6 +3137,16 @@ function ManuscriptPageInner() {
                         >
                           ⚙
                         </button>
+                        {activeChapterNeedsReprocess ? (
+                          <button
+                            type="button"
+                            onClick={() => void reprocessChapter(activeChapterNumber)}
+                            disabled={reprocessingChapterNumber === activeChapterNumber}
+                            className={`rounded-sm border px-3 py-2 text-sm font-semibold disabled:opacity-60 ${isDark ? "border-amber-300/30 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-700"}`}
+                          >
+                            {reprocessingChapterNumber === activeChapterNumber ? "Starting..." : "Reprocess chapter"}
+                          </button>
+                        ) : null}
                         <button
                           onClick={saveCurrentChapter}
                           disabled={saving || !text.trim()}
@@ -3246,6 +3359,7 @@ function ManuscriptPageInner() {
             <ManuscriptWriteRightRail
               isDark={isDark}
               bookId={bookId}
+              totalChapters={book?.total_chapters ?? chapterListItems.length}
               activeRightPane={activeRightPane}
               onOpenRightPane={openRightPane}
               selectedCharCard={selectedCharCard}
@@ -3266,8 +3380,16 @@ function ManuscriptPageInner() {
               chapterAnnotationsCount={chapterAnnotations.length}
               chapterManualNotes={chapterManualNotes}
               generalNotes={generalNotes}
+              vaultNotes={vaultNotesData}
               activeChapterNumber={activeChapterNumber}
               arcSummaryCharacter={arcSummaryCharacter}
+              onBookNoteSaved={(note) => {
+                setNotes((current) => [note, ...current.filter((item) => item.id !== note.id)])
+                void refetchNotes()
+              }}
+              onVaultNoteSaved={() => {
+                void refetchVaultNotes()
+              }}
             />
             </Suspense>
           ) : null}

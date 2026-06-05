@@ -39,15 +39,12 @@ from app.schemas.public import (
     PublicForumInterestCreateBody,
     PublicForumInterestListOut,
     PublicForumInterestOut,
-    PublicForumCommentCreateBody,
     PublicForumCommentListOut,
     PublicForumCommentOut,
     PublicForumPostReactionBody,
     PublicForumCommentReactionBody,
-    PublicForumPostCreateBody,
     PublicForumPostListOut,
     PublicForumPostOut,
-    PublicForumPostUpdateBody,
     PublicUploadsOverviewOut,
     PublicUserProfileOut,
 )
@@ -101,11 +98,15 @@ from app.utils.public_utils import (
     normalize_public_slug,
     normalize_public_ranking_key,
     normalize_public_ranking_window,
+    parse_public_forum_comment_create_request,
+    parse_public_forum_post_create_request,
+    parse_public_forum_post_update_request,
     public_visibility_notice,
     record_public_book_analytics_event,
     react_to_public_forum_post,
     react_to_public_forum_comment,
     resolve_optional_user,
+    get_public_forum_image_response,
     update_public_forum_post,
 )
 router = APIRouter()
@@ -192,23 +193,35 @@ async def get_public_beta_forum_post(
 
 @router.post("/forum/posts", response_model=PublicForumPostOut, status_code=201)
 async def create_public_beta_forum_post_endpoint(
-    body: PublicForumPostCreateBody,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     ensure_public_forum_write_enabled()
-    return await create_public_forum_post(db, current_user=current_user, body=body)
+    body, image_upload = await parse_public_forum_post_create_request(request)
+    return await create_public_forum_post(db, current_user=current_user, body=body, image_upload=image_upload)
 
 
 @router.put("/forum/posts/{post_id}", response_model=PublicForumPostOut)
 async def edit_public_beta_forum_post_endpoint(
     post_id: uuid.UUID,
-    body: PublicForumPostUpdateBody,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     ensure_public_forum_write_enabled()
-    return await update_public_forum_post(db, post_id=post_id, current_user=current_user, body=body)
+    body, image_upload = await parse_public_forum_post_update_request(request)
+    return await update_public_forum_post(db, post_id=post_id, current_user=current_user, body=body, image_upload=image_upload)
+
+
+@router.get("/forum/posts/{post_id}/image")
+async def get_public_forum_post_image(
+    post_id: uuid.UUID,
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_public_forum_read_enabled()
+    return await get_public_forum_image_response(db, target_kind="post", target_id=post_id, token=token)
 
 
 @router.post("/forum/posts/{post_id}/interests", response_model=PublicForumInterestOut, status_code=201)
@@ -269,12 +282,23 @@ async def list_public_beta_forum_comments(
 @router.post("/forum/posts/{post_id}/comments", response_model=PublicForumCommentOut, status_code=201)
 async def create_public_beta_forum_comment(
     post_id: uuid.UUID,
-    body: PublicForumCommentCreateBody,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     ensure_public_forum_write_enabled()
-    return await create_public_forum_comment(db, post_id=post_id, current_user=current_user, body=body)
+    body, image_upload = await parse_public_forum_comment_create_request(request)
+    return await create_public_forum_comment(db, post_id=post_id, current_user=current_user, body=body, image_upload=image_upload)
+
+
+@router.get("/forum/comments/{comment_id}/image")
+async def get_public_forum_comment_image(
+    comment_id: uuid.UUID,
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_public_forum_read_enabled()
+    return await get_public_forum_image_response(db, target_kind="comment", target_id=comment_id, token=token)
 
 
 @router.put("/forum/posts/{post_id}/reaction", response_model=PublicForumPostOut)

@@ -5,10 +5,12 @@ import hashlib
 import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast as type_cast
 from urllib.parse import urlparse
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import Numeric, and_, case, cast, delete, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +28,8 @@ from app.core.redis import (
     mark_public_profile_cache_dirty,
     set_public_user_profile_cache,
 )
-from app.core.storage import download_book, upload_text
+from app.core.security import create_asset_token, decode_token
+from app.core.storage import download_book, get_presigned_url, upload_binary, upload_text
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookForumComment, BookForumCommentReaction, BookForumInterest, BookForumPost, BookForumPostReaction, Chapter, PublicBookAnalyticsEvent, PublicBookRanking
 from app.models.character import Character
@@ -103,6 +106,7 @@ VALID_PUBLIC_SHARE_STATUSES = {
 DEFAULT_PUBLIC_FORUM_PAGE_SIZE = 20
 MAX_PUBLIC_FORUM_PAGE_SIZE = 100
 GENERAL_PUBLIC_FORUM_DAILY_POST_LIMIT = 5
+MAX_PUBLIC_FORUM_IMAGE_BYTES = 5 * 1024 * 1024
 PUBLIC_STATUS_DRAFT = "draft"
 PUBLIC_STATUS_PENDING_REVIEW = "pending_review"
 PUBLIC_STATUS_PUBLISHED = "published"
@@ -237,6 +241,12 @@ PUBLIC_RANKING_WINDOW_LABELS = {
     PUBLIC_RANKING_WINDOW_MONTHLY: "this month",
     PUBLIC_RANKING_WINDOW_YEARLY: "this year",
     PUBLIC_RANKING_WINDOW_ALL_TIME: "all time",
+}
+PUBLIC_FORUM_IMAGE_MAGIC: dict[bytes, tuple[str, str]] = {
+    b"\xff\xd8\xff": ("jpg", "image/jpeg"),
+    b"\x89PNG": ("png", "image/png"),
+    b"GIF8": ("gif", "image/gif"),
+    b"RIFF": ("webp", "image/webp"),
 }
 
 
@@ -387,6 +397,207 @@ def build_public_visitor_fingerprint(request: Request | None) -> str | None:
     user_agent = " ".join(str(request.headers.get("user-agent") or "").split()).strip().lower()
     fingerprint_source = "|".join(part for part in (client_host, user_agent) if part)
     return hash_text(fingerprint_source)
+
+
+def _form_text(form: Any, key: str, default: str | None = None) -> str | None:
+    value = form.get(key)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _form_bool(form: Any, key: str, default: bool = False) -> bool:
+    raw = _form_text(form, key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _form_int(form: Any, key: str) -> int | None:
+    raw = _form_text(form, key)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise HTTPException(422, f"{key} must be a whole number.")
+
+
+def _form_upload(form: Any, key: str) -> UploadFile | None:
+    value = form.get(key)
+    if value is None or not hasattr(value, "filename"):
+        return None
+    filename = str(getattr(value, "filename", "") or "").strip()
+    return value if filename else None
+
+
+def _json_payload_dict(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(422, "Request body must be a JSON object.")
+    return payload
+
+
+async def parse_public_forum_post_create_request(request: Request) -> tuple[PublicForumPostCreateBody, UploadFile | None]:
+    content_type = str(request.headers.get("content-type") or "").lower()
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        try:
+            return PublicForumPostCreateBody(
+                thread_type=_form_text(form, "thread_type", "novel") or "novel",
+                book_id=_form_text(form, "book_id") or None,
+                headline=_form_text(form, "headline", "") or "",
+                body=_form_text(form, "body", "") or "",
+                desired_beta_reader_count=_form_int(form, "desired_beta_reader_count"),
+                allow_contact_requests=_form_bool(form, "allow_contact_requests", True),
+            ), _form_upload(form, "image")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+
+    try:
+        return PublicForumPostCreateBody(**_json_payload_dict(await request.json())), None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+async def parse_public_forum_post_update_request(request: Request) -> tuple[PublicForumPostUpdateBody, UploadFile | None]:
+    content_type = str(request.headers.get("content-type") or "").lower()
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        try:
+            return PublicForumPostUpdateBody(
+                thread_type=_form_text(form, "thread_type", "novel") or "novel",
+                headline=_form_text(form, "headline", "") or "",
+                body=_form_text(form, "body", "") or "",
+                desired_beta_reader_count=_form_int(form, "desired_beta_reader_count"),
+                allow_contact_requests=_form_bool(form, "allow_contact_requests", True),
+                status=_form_text(form, "status", "open") or "open",
+                remove_image=_form_bool(form, "remove_image", False),
+            ), _form_upload(form, "image")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+
+    try:
+        return PublicForumPostUpdateBody(**_json_payload_dict(await request.json())), None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+async def parse_public_forum_comment_create_request(request: Request) -> tuple[PublicForumCommentCreateBody, UploadFile | None]:
+    content_type = str(request.headers.get("content-type") or "").lower()
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        try:
+            return PublicForumCommentCreateBody(
+                body=_form_text(form, "body", "") or "",
+                parent_comment_id=_form_text(form, "parent_comment_id") or None,
+            ), _form_upload(form, "image")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+
+    try:
+        return PublicForumCommentCreateBody(**_json_payload_dict(await request.json())), None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+async def _read_public_forum_image(upload: UploadFile) -> tuple[bytes, str, str]:
+    parts: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_PUBLIC_FORUM_IMAGE_BYTES:
+            raise HTTPException(413, "Forum image exceeds the maximum allowed size (5 MB).")
+        parts.append(chunk)
+    raw = b"".join(parts)
+    await upload.seek(0)
+    if not raw:
+        raise HTTPException(400, "Forum image cannot be empty.")
+    for magic, (suffix, mime) in PUBLIC_FORUM_IMAGE_MAGIC.items():
+        if raw[:len(magic)] == magic:
+            if mime == "image/webp" and raw[8:12] != b"WEBP":
+                continue
+            return raw, suffix, mime
+    raise HTTPException(400, "Forum image must be a JPEG, PNG, GIF, or WebP file.")
+
+
+def _safe_forum_image_filename(upload: UploadFile, suffix: str) -> str:
+    safe_name = Path(str(upload.filename or "")).name.strip()
+    if not safe_name:
+        return f"forum-image.{suffix}"
+    stem = Path(safe_name).stem.strip() or "forum-image"
+    return f"{stem[:80]}.{suffix}"
+
+
+async def store_public_forum_image(
+    upload: UploadFile,
+    *,
+    owner_user_id: uuid.UUID,
+    target_kind: str,
+    target_id: uuid.UUID,
+) -> tuple[str, str, str]:
+    raw, suffix, mime = await _read_public_forum_image(upload)
+    filename = _safe_forum_image_filename(upload, suffix)
+    storage_key = f"public-forum/{owner_user_id}/{target_kind}/{target_id}/{uuid.uuid4().hex}.{suffix}"
+    await asyncio.to_thread(upload_binary, storage_key, raw, mime)
+    return storage_key, mime, filename
+
+
+def public_forum_image_url(
+    *,
+    storage_key: str | None,
+    owner_user_id: uuid.UUID,
+    target_kind: str,
+    target_id: uuid.UUID,
+) -> str | None:
+    if not storage_key:
+        return None
+    presigned = get_presigned_url(storage_key)
+    if presigned:
+        return presigned
+    token = create_asset_token(
+        str(owner_user_id),
+        f"public-forum-{target_kind}-image:{target_id}",
+        expires_minutes=120,
+    )
+    return f"{settings.API_V1_PREFIX}/public/forum/{target_kind}s/{target_id}/image?token={token}"
+
+
+async def get_public_forum_image_response(
+    db: AsyncSession,
+    *,
+    target_kind: str,
+    target_id: uuid.UUID,
+    token: str,
+) -> Response:
+    if target_kind == "post":
+        target = await db.get(BookForumPost, target_id)
+        missing_message = "Forum post image not found."
+    elif target_kind == "comment":
+        target = await db.get(BookForumComment, target_id)
+        missing_message = "Forum comment image not found."
+    else:
+        raise HTTPException(404, "Forum image not found.")
+
+    if target is None or not getattr(target, "image_s3_key", None):
+        raise HTTPException(404, missing_message)
+
+    payload = decode_token(token)
+    if (
+        not payload
+        or payload.get("type") != "asset"
+        or payload.get("sub") != str(target.author_user_id)
+        or payload.get("res") != f"public-forum-{target_kind}-image:{target.id}"
+    ):
+        raise HTTPException(401, "Invalid forum image token")
+
+    try:
+        raw = await asyncio.to_thread(download_book, target.image_s3_key)
+    except Exception:
+        raise HTTPException(404, missing_message)
+    return Response(content=raw, media_type=target.image_content_type or "application/octet-stream")
 
 
 def normalize_public_analytics_event_type(event_type: str) -> str:
@@ -2694,6 +2905,14 @@ async def list_public_user_activity_posts(db: AsyncSession, *, user_id: uuid.UUI
             status=post.status,
             headline=post.headline,
             body=post.body,
+            image_url=public_forum_image_url(
+                storage_key=post.image_s3_key,
+                owner_user_id=post.author_user_id,
+                target_kind="post",
+                target_id=post.id,
+            ),
+            image_filename=post.image_filename,
+            image_content_type=post.image_content_type,
             title=getattr(book, "title", None),
             genre=getattr(book, "genre", None),
             work_type=getattr(book, "work_type", None),
@@ -2732,6 +2951,14 @@ async def list_public_user_activity_comments(db: AsyncSession, *, user_id: uuid.
             post_title=getattr(book, "title", None),
             book_id=str(comment.book_id) if comment.book_id is not None else None,
             body=comment.body,
+            image_url=public_forum_image_url(
+                storage_key=comment.image_s3_key,
+                owner_user_id=comment.author_user_id,
+                target_kind="comment",
+                target_id=comment.id,
+            ),
+            image_filename=comment.image_filename,
+            image_content_type=comment.image_content_type,
             like_count=int(comment.like_count or 0),
             dislike_count=int(comment.dislike_count or 0),
             created_at=comment.created_at,
@@ -2807,6 +3034,14 @@ def build_public_forum_post_out(
         work_type=getattr(book, "work_type", None),
         headline=post.headline,
         body=post.body,
+        image_url=public_forum_image_url(
+            storage_key=post.image_s3_key,
+            owner_user_id=post.author_user_id,
+            target_kind="post",
+            target_id=post.id,
+        ),
+        image_filename=post.image_filename,
+        image_content_type=post.image_content_type,
         desired_beta_reader_count=post.desired_beta_reader_count if thread_type == FORUM_THREAD_TYPE_NOVEL else None,
         allow_contact_requests=bool(post.allow_contact_requests) if thread_type == FORUM_THREAD_TYPE_NOVEL else False,
         status=post.status,
@@ -2828,6 +3063,7 @@ async def create_public_forum_post(
     *,
     current_user: User,
     body: PublicForumPostCreateBody,
+    image_upload: UploadFile | None = None,
 ) -> PublicForumPostOut:
     thread_type = _normalize_forum_thread_type(body.thread_type)
     headline = " ".join(body.headline.split()).strip()
@@ -2861,12 +3097,28 @@ async def create_public_forum_post(
             raise HTTPException(400, "General discussions cannot be attached to a manuscript.")
         await enforce_daily_general_forum_post_limit(db, user_id=current_user.id)
 
+    post_id = uuid.uuid4()
+    image_s3_key = None
+    image_content_type = None
+    image_filename = None
+    if image_upload is not None:
+        image_s3_key, image_content_type, image_filename = await store_public_forum_image(
+            image_upload,
+            owner_user_id=current_user.id,
+            target_kind="post",
+            target_id=post_id,
+        )
+
     post = BookForumPost(
+        id=post_id,
         book_id=book.id if book is not None else None,
         author_user_id=current_user.id,
         thread_type=thread_type,
         headline=headline,
         body=description,
+        image_s3_key=image_s3_key,
+        image_content_type=image_content_type,
+        image_filename=image_filename,
         desired_beta_reader_count=desired_beta_reader_count,
         allow_contact_requests=allow_contact_requests,
         status=FORUM_POST_OPEN,
@@ -2885,6 +3137,7 @@ async def update_public_forum_post(
     post_id: uuid.UUID,
     current_user: User,
     body: PublicForumPostUpdateBody,
+    image_upload: UploadFile | None = None,
 ) -> PublicForumPostOut:
     post = await _get_forum_post(db, post_id=post_id)
     if post.author_user_id != current_user.id:
@@ -2910,6 +3163,8 @@ async def update_public_forum_post(
             or description != post.body
             or body.desired_beta_reader_count != post.desired_beta_reader_count
             or bool(body.allow_contact_requests) != bool(post.allow_contact_requests)
+            or body.remove_image
+            or image_upload is not None
             or next_status != FORUM_POST_CLOSED
         )
         if attempted_non_closing_change:
@@ -2929,6 +3184,17 @@ async def update_public_forum_post(
             raise HTTPException(409, "This manuscript already has another open beta forum post.")
     post.headline = headline
     post.body = description
+    if image_upload is not None:
+        post.image_s3_key, post.image_content_type, post.image_filename = await store_public_forum_image(
+            image_upload,
+            owner_user_id=current_user.id,
+            target_kind="post",
+            target_id=post.id,
+        )
+    elif body.remove_image:
+        post.image_s3_key = None
+        post.image_content_type = None
+        post.image_filename = None
     post.desired_beta_reader_count = body.desired_beta_reader_count if thread_type == FORUM_THREAD_TYPE_NOVEL else None
     post.allow_contact_requests = bool(body.allow_contact_requests) if thread_type == FORUM_THREAD_TYPE_NOVEL else False
     post.status = next_status
@@ -3213,6 +3479,14 @@ async def build_public_forum_comment_out(
         author_reputation_score=int(resolved_author.reputation_score or 0),
         author_trust_level=reputation_trust_level(resolved_author.reputation_score),
         body=comment.body,
+        image_url=public_forum_image_url(
+            storage_key=comment.image_s3_key,
+            owner_user_id=comment.author_user_id,
+            target_kind="comment",
+            target_id=comment.id,
+        ),
+        image_filename=comment.image_filename,
+        image_content_type=comment.image_content_type,
         like_count=int(comment.like_count or 0),
         dislike_count=int(comment.dislike_count or 0),
         reaction=current_reaction,
@@ -3287,6 +3561,7 @@ async def create_public_forum_comment(
     post_id: uuid.UUID,
     current_user: User,
     body: PublicForumCommentCreateBody,
+    image_upload: UploadFile | None = None,
 ) -> PublicForumCommentOut:
     post, _book = await _get_visible_forum_post(db, post_id=post_id)
     comment_body = body.body.strip()
@@ -3297,12 +3572,28 @@ async def create_public_forum_comment(
         parent_comment = await db.get(BookForumComment, body.parent_comment_id)
         if parent_comment is None or parent_comment.post_id != post.id:
             raise HTTPException(404, "Parent forum comment not found.")
+    comment_id = uuid.uuid4()
+    image_s3_key = None
+    image_content_type = None
+    image_filename = None
+    if image_upload is not None:
+        image_s3_key, image_content_type, image_filename = await store_public_forum_image(
+            image_upload,
+            owner_user_id=current_user.id,
+            target_kind="comment",
+            target_id=comment_id,
+        )
+
     comment = BookForumComment(
+        id=comment_id,
         post_id=post.id,
         book_id=post.book_id,
         parent_comment_id=parent_comment.id if parent_comment is not None else None,
         author_user_id=current_user.id,
         body=comment_body,
+        image_s3_key=image_s3_key,
+        image_content_type=image_content_type,
+        image_filename=image_filename,
     )
     post.last_activity_at = func.now()
     db.add(comment)

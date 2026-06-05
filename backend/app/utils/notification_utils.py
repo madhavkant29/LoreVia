@@ -210,6 +210,52 @@ def _revision_digest_signature(payload: dict[str, Any]) -> str:
     return f"{active}:{high}:{recent_edit_label}:{'|'.join(top_ids)}"
 
 
+def _revision_digest_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    items_by_id: dict[str, dict[str, Any]] = {}
+    for key in ("change_impacts", "scene_advice", "confusion_map", "voice_alerts"):
+        for item in payload.get(key) or []:
+            if isinstance(item, dict):
+                items_by_id.setdefault(str(item.get("id") or id(item)), item)
+    for revision_pass in payload.get("revision_plan") or []:
+        if not isinstance(revision_pass, dict):
+            continue
+        for item in revision_pass.get("items") or []:
+            if isinstance(item, dict):
+                items_by_id.setdefault(str(item.get("id") or id(item)), item)
+    return list(items_by_id.values())
+
+
+def _revision_item_is_active(item: dict[str, Any]) -> bool:
+    return item.get("status") not in {"fixed", "ignored"}
+
+
+def _revision_item_has_specific_title(item: dict[str, Any]) -> bool:
+    title = str(item.get("title") or "").strip()
+    if not title:
+        return False
+    parts = title.lower().split()
+    return not (len(parts) == 2 and parts[0] in {"chapter", "scene"} and parts[1].isdigit())
+
+
+def _revision_item_priority(index: int, item: dict[str, Any]) -> tuple[int, int, int]:
+    severity_rank = {"high": 0, "medium": 1, "low": 2}.get(str(item.get("severity") or "").lower(), 3)
+    specific_rank = 0 if _revision_item_has_specific_title(item) else 1
+    return (severity_rank, specific_rank, index)
+
+
+def _select_revision_digest_top_item(payload: dict[str, Any]) -> dict[str, Any] | None:
+    active_items = [item for item in _revision_digest_items(payload) if _revision_item_is_active(item)]
+    if not active_items:
+        return None
+    return min(enumerate(active_items), key=lambda indexed: _revision_item_priority(indexed[0], indexed[1]))[1]
+
+
+def _revision_digest_body(active: int, high: int) -> str:
+    if high > 0:
+        return f"LoreVia found {active} active revision item{'s' if active != 1 else ''}, including {high} high-severity risk{'s' if high != 1 else ''}."
+    return f"LoreVia found {active} active revision item{'s' if active != 1 else ''} worth a structured pass."
+
+
 def build_revision_digest_notification(book: Book, payload: dict[str, Any]) -> Notification | None:
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     active = int(summary.get("active_item_count") or 0)
@@ -217,18 +263,14 @@ def build_revision_digest_notification(book: Book, payload: dict[str, Any]) -> N
     if active <= 0:
         return None
     recent_edit_label = str(summary.get("recent_edit_label") or "").strip() or None
-    top_item = next((item for item in (payload.get("change_impacts") or []) if isinstance(item, dict)), None)
+    top_item = _select_revision_digest_top_item(payload)
     top_title = str(top_item.get("title") or "").strip() if isinstance(top_item, dict) else ""
     title = (
         f"{high} revision risk{'s' if high != 1 else ''} surfaced in {book.title}"
         if high > 0
         else f"{active} revision item{'s' if active != 1 else ''} surfaced in {book.title}"
     )
-    body = str(summary.get("hero_message") or "LoreVia surfaced new downstream revision risks.")
-    if recent_edit_label:
-        body = f"{recent_edit_label} {body}".strip()
-    if top_title:
-        body = f"{body} Top issue: {top_title}."
+    body = _revision_digest_body(active, high)
     return Notification(
         user_id=book.user_id,
         book_id=book.id,

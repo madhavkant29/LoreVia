@@ -25,6 +25,7 @@ from app.models.character import (
     CharacterCandidate,
     CharacterDuplicateSuggestion,
     CharacterMention,
+    CharacterRelationshipCandidate,
     CharacterState,
     CharacterVoiceProfile,
 )
@@ -52,6 +53,93 @@ def _reprocess_metadata(book: Book) -> dict[str, Any]:
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
     metadata = workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else {}
     return dict(metadata)
+
+
+def auto_reprocess_enabled(book: Book) -> bool:
+    metadata = _reprocess_metadata(book)
+    return bool(metadata.get("auto_reprocess_enabled", True))
+
+
+def update_reprocess_metadata(
+    book: Book,
+    *,
+    auto_reprocess_enabled: bool | None = None,
+    add_pending_chapters: list[int] | None = None,
+    clear_pending_chapters: list[int] | None = None,
+    last_manual_chapter_number: int | None = None,
+) -> None:
+    from app.utils.book_utils import normalize_reprocess_metadata, normalize_writer_workspace
+
+    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    metadata = normalize_reprocess_metadata(workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else None)
+    now = datetime.now(UTC).isoformat()
+    if auto_reprocess_enabled is not None:
+        metadata["auto_reprocess_enabled"] = bool(auto_reprocess_enabled)
+        metadata["last_mode_changed_at"] = now
+    pending = {
+        int(item)
+        for item in (metadata.get("pending_chapters") or [])
+        if isinstance(item, (int, float)) and int(item) > 0
+    }
+    for chapter_number in add_pending_chapters or []:
+        if isinstance(chapter_number, int) and chapter_number > 0:
+            pending.add(chapter_number)
+    for chapter_number in clear_pending_chapters or []:
+        if isinstance(chapter_number, int) and chapter_number > 0:
+            pending.discard(chapter_number)
+    metadata["pending_chapters"] = sorted(pending)
+    if last_manual_chapter_number is not None:
+        metadata["last_manual_chapter_started_at"] = now
+        metadata["last_manual_chapter_number"] = int(last_manual_chapter_number)
+    workspace["reprocess"] = metadata
+    book.writer_workspace = workspace
+
+
+async def purge_manual_chapter_reprocess_content(
+    db: AsyncSession,
+    *,
+    book: Book,
+    chapter: Chapter,
+) -> None:
+    await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
+    await db.execute(delete(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id))
+    await db.execute(
+        delete(CharacterMention).where(
+            CharacterMention.book_id == book.id,
+            CharacterMention.chapter_number == chapter.number,
+        )
+    )
+    await db.execute(
+        delete(CharacterCandidate).where(
+            CharacterCandidate.book_id == book.id,
+            CharacterCandidate.chapter_number == chapter.number,
+            CharacterCandidate.status.in_((CHARACTER_CANDIDATE_PENDING, CHARACTER_CANDIDATE_SUPPRESSED)),
+        )
+    )
+    await db.execute(
+        delete(CharacterRelationshipCandidate).where(
+            CharacterRelationshipCandidate.book_id == book.id,
+            CharacterRelationshipCandidate.chapter_number == chapter.number,
+        )
+    )
+    await db.execute(
+        delete(CharacterRelationship).where(
+            CharacterRelationship.book_id == book.id,
+            CharacterRelationship.from_chapter == chapter.number,
+            CharacterRelationship.edited_by_author == False,
+        )
+    )
+    await db.execute(
+        delete(CharacterState).where(
+            CharacterState.character_id.in_(
+                select(Character.id).where(Character.book_id == book.id)
+            ),
+            CharacterState.at_chapter == chapter.number,
+        )
+    )
+    chapter.processed = False
+    chapter.analysis_state = {}
+    await db.flush()
 
 
 def has_reprocess_started(book: Book) -> bool:
@@ -418,6 +506,8 @@ async def dispatch_rebuild(db: AsyncSession, book: Book) -> tuple[int, int]:
 async def maybe_auto_reprocess_editor_project(db: AsyncSession, book: Book) -> tuple[bool, int, int]:
     """Start the free first rebuild for editor projects once they cross the word threshold."""
     if not getattr(book, "is_editor_project", False):
+        return False, 0, 0
+    if not auto_reprocess_enabled(book):
         return False, 0, 0
     if get_rebuild_run_id(book) is not None or has_reprocess_started(book):
         return False, 0, 0

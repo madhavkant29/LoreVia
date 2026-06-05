@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import traceback
 import uuid
 from typing import Any, cast
 
@@ -188,7 +190,14 @@ async def advisor_message_stream(
             ):
                 yield _advisor_sse(item["event"], item["data"])
         except Exception as exc:
-            yield _advisor_sse("error", {"error": public_error_message(500)})
+            logging.getLogger(__name__).error(
+                "advisor_message_stream failed book_id=%s user_id=%s: %s\n%s",
+                book_id,
+                current_user.id,
+                exc,
+                traceback.format_exc(),
+            )
+            yield _advisor_sse("error", {"error": str(exc)})
 
     return StreamingResponse(
         event_stream(),

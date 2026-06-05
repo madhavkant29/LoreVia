@@ -49,7 +49,12 @@ from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
-from app.utils.llm_usage_utils import create_tracked_chat_completion, record_llm_usage_counts
+from app.utils.llm_usage_utils import (
+    assert_llm_token_capacity,
+    create_tracked_chat_completion,
+    estimate_chat_completion_tokens,
+    record_llm_usage_counts,
+)
 from app.utils.world_building_utils import build_world_logic_response, classify_world_intent
 
 log = logging.getLogger(__name__)
@@ -1301,6 +1306,13 @@ async def stream_advisor_reply_payload(
     reply_parts: list[str] = []
     usage_counts: tuple[int, int, int] | None = None
     try:
+        await assert_llm_token_capacity(
+            db,
+            user_id=user_id,
+            estimated_tokens=estimate_chat_completion_tokens(
+                {"messages": prepared["llm_messages"], "max_tokens": 800}
+            ),
+        )
         stream = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
             temperature=0.55,
@@ -1520,6 +1532,13 @@ async def stream_series_advisor_reply_payload(
     reply_parts: list[str] = []
     usage_counts: tuple[int, int, int] | None = None
     try:
+        await assert_llm_token_capacity(
+            db,
+            user_id=user_id,
+            estimated_tokens=estimate_chat_completion_tokens(
+                {"messages": prepared["llm_messages"], "max_tokens": 900}
+            ),
+        )
         stream = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
             temperature=0.55,

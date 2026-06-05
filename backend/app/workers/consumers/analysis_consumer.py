@@ -59,6 +59,7 @@ async def analyse_chapter(
     chapter_title: str = "",
     queue_wait_ms: int | None = None,
     rebuild_run_id: str | None = None,
+    manual_reprocess: bool = False,
 ) -> dict:
     async with AsyncSessionLocal() as db:
         db_load_started = time.perf_counter()
@@ -74,7 +75,7 @@ async def analyse_chapter(
         if rebuild_run_id is not None and active_rebuild_run_id != rebuild_run_id:
             log.info("Skipping stale rebuild analysis chapter_id=%s", chapter_id)
             return {"error": "stale_rebuild_run"}
-        if getattr(book, "is_editor_project", False) and not active_rebuild_run_id:
+        if getattr(book, "is_editor_project", False) and not active_rebuild_run_id and not manual_reprocess:
             log.info("Skipping stale editor-project analysis chapter_id=%s", chapter_id)
             return {"error": "stale_editor_project_run"}
         log.info(

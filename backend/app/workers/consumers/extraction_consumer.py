@@ -661,6 +661,7 @@ async def _process_chapter(
     ch_data: dict,
     queue_wait_ms: int | None = None,
     rebuild_run_id: str | None = None,
+    manual_reprocess: bool = False,
 ):
     """Extract characters, relationships, store chunks for one chapter."""
     if book.hidden_at is not None:
@@ -673,7 +674,7 @@ async def _process_chapter(
     if rebuild_run_id is not None and active_rebuild_run_id != rebuild_run_id:
         log.info("Skipping stale rebuild extraction book_id=%s", book.id)
         return
-    if getattr(book, "is_editor_project", False) and not active_rebuild_run_id:
+    if getattr(book, "is_editor_project", False) and not active_rebuild_run_id and not manual_reprocess:
         log.info("Skipping stale editor-project extraction book_id=%s", book.id)
         return
 
@@ -1691,6 +1692,8 @@ async def _process_chapter(
         analysis_task_options: dict[str, Any] = {}
         if rebuild_run_id is not None:
             analysis_task_options["kwargs"] = {"rebuild_run_id": rebuild_run_id}
+        if manual_reprocess:
+            analysis_task_options.setdefault("kwargs", {})["manual_reprocess"] = True
         analyse_chapter_task.apply_async(
             args=[str(chapter.id), ch_data["text"], ch_data.get("title") or ""],
             queue=queue_for_user(user, "analysis") if user else "analysis",

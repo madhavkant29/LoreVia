@@ -751,6 +751,10 @@ async def update_writer_workspace(
         require_author_access(current_user)
     next_payload = build_writer_workspace_update(book, body.model_dump(exclude_none=True))
     book.writer_workspace = next_payload
+    if body.reprocess is not None and body.reprocess.auto_reprocess_enabled is not None:
+        from app.services.editor_project_service import update_reprocess_metadata
+
+        update_reprocess_metadata(book, auto_reprocess_enabled=body.reprocess.auto_reprocess_enabled)
     await db.commit()
     await db.refresh(book)
     await mark_book_cache_dirty(str(book.id))

@@ -186,6 +186,7 @@ class PublicForumPostUpdateBody(BaseModel):
     desired_beta_reader_count: int | None = Field(default=None, ge=1, le=500)
     allow_contact_requests: bool = True
     status: str = Field(default="open", min_length=4, max_length=32)
+    remove_image: bool = False
 
 
 class PublicForumPostOut(BaseModel):
@@ -203,6 +204,9 @@ class PublicForumPostOut(BaseModel):
     work_type: str | None = None
     headline: str
     body: str
+    image_url: str | None = None
+    image_filename: str | None = None
+    image_content_type: str | None = None
     desired_beta_reader_count: int | None = None
     allow_contact_requests: bool
     status: str
@@ -275,6 +279,9 @@ class PublicForumCommentOut(BaseModel):
     author_reputation_score: int = 0
     author_trust_level: str
     body: str
+    image_url: str | None = None
+    image_filename: str | None = None
+    image_content_type: str | None = None
     like_count: int = 0
     dislike_count: int = 0
     reaction: str | None = None
@@ -333,6 +340,9 @@ class PublicUserActivityPostOut(BaseModel):
     status: str
     headline: str
     body: str
+    image_url: str | None = None
+    image_filename: str | None = None
+    image_content_type: str | None = None
     title: str | None = None
     genre: str | None = None
     work_type: str | None = None
@@ -354,6 +364,9 @@ class PublicUserActivityCommentOut(BaseModel):
     post_title: str | None = None
     book_id: str | None = None
     body: str
+    image_url: str | None = None
+    image_filename: str | None = None
+    image_content_type: str | None = None
     like_count: int = 0
     dislike_count: int = 0
     created_at: datetime

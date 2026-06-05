@@ -121,6 +121,7 @@ describe("NotificationsPanel", () => {
     })
 
     const view = renderNotificationsPanel()
+    expect(view.textContent?.match(/2 downstream logic risks need attention first\./g)).toHaveLength(1)
     const detailsButton = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.trim() === "View details")
     expect(detailsButton).not.toBeNull()
 

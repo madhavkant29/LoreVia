@@ -6,11 +6,14 @@ import { useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { strToU8, zipSync } from "fflate"
 
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { READER_FONT_OPTIONS } from "@/lib/utils/readerTypography"
+import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
 import type { Book, VaultPreview, VaultNote } from "@/types/book"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
@@ -33,6 +36,8 @@ const VaultPreview = dynamic(
 type ExportFormat = "md" | "pdf" | "docx" | "vault_folder"
 type ManuscriptExportFormat = "pdf" | "docx" | "epub" | "vault"
 
+const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ["docx", "pdf", "epub", "vault"]
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob)
   const anchor = document.createElement("a")
@@ -46,6 +51,10 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function safeFileBase(value: string | undefined, fallback: string) {
   return (value || fallback).replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-") || fallback
+}
+
+async function blobToBytes(blob: Blob) {
+  return new Uint8Array(await blob.arrayBuffer())
 }
 
 function getApiErrorDetail(error: unknown) {
@@ -65,6 +74,7 @@ export default function ExportStudioPage() {
   const [status, setStatus] = useState<string | null>(null)
   const [bibleFormat, setBibleFormat] = useState<ExportFormat>("vault_folder")
   const [manuscriptFormat, setManuscriptFormat] = useState<ManuscriptExportFormat>("docx")
+  const [exportFontFamily, setExportFontFamily] = useState<ReaderFontFamily>("serif")
   const [includeSceneMetadata, setIncludeSceneMetadata] = useState(true)
   const [exporting, setExporting] = useState<string | null>(null)
   const [vaultPreview, setVaultPreview] = useState<VaultPreview | null>(null)
@@ -88,12 +98,30 @@ export default function ExportStudioPage() {
     []
   )
 
+  const selectedExportFontLabel = useMemo(
+    () => READER_FONT_OPTIONS.find((option) => option.value === exportFontFamily)?.label ?? "Serif",
+    [exportFontFamily]
+  )
+
+  const exportBundleFontNotice = useMemo(
+    () => [
+      "LoreVia Font Notice",
+      "",
+      `Selected export font: ${selectedExportFontLabel}`,
+      "",
+      "DOCX and EPUB exports declare the selected font family. PDF exports use safe built-in PDF mappings unless an open font file is explicitly bundled.",
+      "Old Style Serif is a fallback stack and LoreVia does not redistribute proprietary Apple, Microsoft, Monotype, or other system font files.",
+      "EB Garamond is licensed under the SIL Open Font License, Version 1.1. Copyright 2017 The EB Garamond Project Authors. License: https://openfontlicense.org.",
+    ].join("\n"),
+    [selectedExportFontLabel]
+  )
+
   const exportCharacterBible = async () => {
     if (!book) return
     setExporting("character-bible")
     setStatus(null)
     try {
-      const blob = await booksApi.exportCharacterBible(bookId, bibleFormat)
+      const blob = await booksApi.exportCharacterBible(bookId, bibleFormat, exportFontFamily)
       const extension = bibleFormat === "vault_folder" ? "zip" : bibleFormat
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-character-bible.${extension}`)
       setStatus(`Downloaded character bible as ${extension.toUpperCase()}.`)
@@ -109,7 +137,7 @@ export default function ExportStudioPage() {
     setExporting("manuscript")
     setStatus(null)
     try {
-      const blob = await booksApi.exportManuscript(bookId, manuscriptFormat, "standard_manuscript", includeSceneMetadata)
+      const blob = await booksApi.exportManuscript(bookId, manuscriptFormat, "standard_manuscript", includeSceneMetadata, exportFontFamily)
       const extension = manuscriptFormat === "vault" ? "zip" : manuscriptFormat
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-manuscript.${extension}`)
       setStatus(`Downloaded manuscript as ${extension.toUpperCase()}.`)
@@ -130,6 +158,37 @@ export default function ExportStudioPage() {
       setStatus("Downloaded notes workspace ZIP.")
     } catch {
       setStatus("Could not export the notes workspace.")
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const exportAllDocuments = async () => {
+    if (!book) return
+    setExporting("all")
+    setStatus(null)
+    try {
+      const base = safeFileBase(book.title, "lorevia")
+      const files: Record<string, Uint8Array> = {
+        "FONT-NOTICE.txt": strToU8(exportBundleFontNotice),
+      }
+      for (const format of formatCards.map((item) => item.value)) {
+        const blob = await booksApi.exportCharacterBible(bookId, format, exportFontFamily)
+        const extension = format === "vault_folder" ? "zip" : format
+        files[`character-bible/${base}-character-bible.${extension}`] = await blobToBytes(blob)
+      }
+      for (const format of MANUSCRIPT_EXPORT_FORMATS) {
+        const blob = await booksApi.exportManuscript(bookId, format, "standard_manuscript", includeSceneMetadata, exportFontFamily)
+        const extension = format === "vault" ? "zip" : format
+        files[`manuscript/${base}-manuscript.${extension}`] = await blobToBytes(blob)
+      }
+      const notesBlob = await booksApi.exportVaultNotes(bookId)
+      files[`notes/${base}-notes.zip`] = await blobToBytes(notesBlob)
+      const archive = zipSync(files)
+      downloadBlob(new Blob([archive as unknown as BlobPart], { type: "application/zip" }), `${base}-all-exports.zip`)
+      setStatus("Downloaded one ZIP with all manuscript, character bible, and notes export files.")
+    } catch {
+      setStatus("Could not export every document. Try the single export buttons for any failed format.")
     } finally {
       setExporting(null)
     }
@@ -310,6 +369,38 @@ export default function ExportStudioPage() {
 
                 <div className="mt-6 space-y-5">
                   <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                      <label className="block">
+                        <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Export font</span>
+                        <select
+                          value={exportFontFamily}
+                          onChange={(event) => setExportFontFamily(event.target.value as ReaderFontFamily)}
+                          className={`mt-2 min-h-11 w-full rounded-md border px-3 text-sm outline-none transition focus:ring-2 focus:ring-teal-500/30 ${
+                            isDark ? "border-white/10 bg-black/30 text-slate-100" : "border-stone-200 bg-white text-stone-800"
+                          }`}
+                        >
+                          {READER_FONT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void exportAllDocuments()}
+                        disabled={exporting !== null}
+                        className="inline-flex min-h-11 items-center justify-center rounded-md bg-stone-900 px-5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-60 dark:bg-white dark:text-stone-950 dark:hover:bg-slate-200"
+                      >
+                        {exporting === "all" ? "Preparing all..." : "Export everything"}
+                      </button>
+                    </div>
+                    <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                      DOCX and EPUB declare this font family. PDF exports use safe built-in PDF mappings, and ZIP exports include a font notice. Proprietary system font files are not redistributed.
+                    </p>
+                  </div>
+
+                  <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character bible export</p>
                     <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       {formatCards.map((item) => (
@@ -367,7 +458,7 @@ export default function ExportStudioPage() {
                   <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript export</p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {(["docx", "pdf", "epub", "vault"] as ManuscriptExportFormat[]).map((format) => (
+                      {MANUSCRIPT_EXPORT_FORMATS.map((format) => (
                         <button
                           key={format}
                           type="button"

@@ -32,7 +32,7 @@ export function RecentActivityList({
         <div className="mt-4 space-y-3">
           {items.slice(0, 5).map((item) => {
             const content = (
-              <div className="flex gap-3 rounded-md border border-[rgba(var(--border),0.72)] bg-[rgba(var(--card),0.72)] px-3 py-3 transition hover:bg-[rgba(var(--muted),0.4)]">
+              <div className="flex gap-3 rounded-md bg-[rgba(var(--card),0.72)] px-3 py-3 transition hover:bg-[rgba(var(--muted),0.4)]">
                 <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${toneDot[item.tone ?? "default"]}`} />
                 <span className="min-w-0">
                   <span className="block text-sm font-semibold text-[rgb(var(--foreground))]">{item.label}</span>

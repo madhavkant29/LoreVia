@@ -485,3 +485,106 @@ async def test_editor_project_import_auto_reprocesses_once_at_word_threshold_wit
     assert len(dispatched) == 1
     assert dispatched[0]["kwargs"]["kwargs"]["rebuild_run_id"]
     assert charge_count == 0
+
+
+@pytest.mark.asyncio
+async def test_manual_reprocess_mode_marks_saved_chapter_pending_without_queue(client, db, monkeypatch):
+    headers, user_id = await _register_author(
+        client, f"repr-manual-mode-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
+    )
+    book_id = await _create_editor_project(client, headers, title="Manual Mode Draft")
+
+    dispatched: list[dict] = []
+
+    def _fake_apply_async(*args, **kwargs):
+        dispatched.append({"args": args, "kwargs": kwargs})
+        return type("Result", (), {"id": f"task-{len(dispatched)}"})()
+
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.process_chapter_task.apply_async",
+        _fake_apply_async,
+    )
+
+    workspace_response = await client.put(
+        f"/api/v1/books/{book_id}/writer-workspace",
+        headers=headers,
+        json={"reprocess": {"auto_reprocess_enabled": False}},
+    )
+    assert workspace_response.status_code == 200
+
+    response = await client.post(
+        f"/api/v1/books/{book_id}/manuscript/import",
+        headers=headers,
+        data={
+            "text": " ".join(["manual"] * 2000),
+            "title": "Manual Opening",
+            "chapter_number": "1",
+            "replace_existing": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert dispatched == []
+    workspace = (await client.get(f"/api/v1/books/{book_id}/writer-workspace", headers=headers)).json()
+    assert workspace["reprocess"]["auto_reprocess_enabled"] is False
+    assert workspace["reprocess"]["pending_chapters"] == [1]
+    assert workspace["reprocess"]["last_mode_changed_at"]
+
+
+@pytest.mark.asyncio
+async def test_manual_chapter_reprocess_queues_one_chapter_without_upload_charge(client, db, monkeypatch):
+    headers, user_id = await _register_author(
+        client, f"repr-one-chapter-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
+    )
+    book_id = await _create_editor_project(client, headers, title="One Chapter Draft")
+
+    import_response = await client.post(
+        f"/api/v1/books/{book_id}/manuscript/import",
+        headers=headers,
+        data={
+            "text": "Chapter text that needs a targeted reprocess.",
+            "title": "Opening",
+            "chapter_number": "1",
+            "replace_existing": "true",
+        },
+    )
+    assert import_response.status_code == 200
+    await client.put(
+        f"/api/v1/books/{book_id}/writer-workspace",
+        headers=headers,
+        json={"reprocess": {"auto_reprocess_enabled": False, "pending_chapters": [1]}},
+    )
+
+    dispatched: list[dict] = []
+
+    def _fake_apply_async(*args, **kwargs):
+        dispatched.append({"args": args, "kwargs": kwargs})
+        return type("Result", (), {"id": f"task-{len(dispatched)}"})()
+
+    monkeypatch.setattr(
+        "app.api.v1.routes.books.imports.process_chapter_task.apply_async",
+        _fake_apply_async,
+    )
+
+    response = await client.post(
+        f"/api/v1/books/{book_id}/manuscript/chapters/1/reprocess",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["chapters_queued"] == 1
+    assert body["upload_charge_consumed"] is False
+    assert len(dispatched) == 1
+    assert dispatched[0]["kwargs"]["args"] == [book_id, 1]
+    assert dispatched[0]["kwargs"]["kwargs"] == {"manual_reprocess": True}
+    from app.models.book import Book, BookUploadCharge
+
+    book = await db.get(Book, uuid.UUID(book_id))
+    assert book.writer_workspace["reprocess"]["pending_chapters"] == []
+    charge_count = len(
+        (
+            await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == uuid.UUID(book_id)))
+        ).scalars().all()
+    )
+    assert charge_count == 0

@@ -38,6 +38,7 @@ export function SiteFooter() {
     { href: "/blog", label: "Blog", external: false as const },
     { href: "/answers", label: "Answers", external: false as const },
     { href: "/demo", label: "Demo", external: false as const },
+    { href: "/font-notice", label: "Font Notice", external: false as const },
     { href: "/status", label: "Status", external: false as const },
   ]
   const navigationColumns = [navigationLinks.slice(0, 6), navigationLinks.slice(6)]

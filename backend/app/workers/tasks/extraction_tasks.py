@@ -30,6 +30,7 @@ def process_chapter_task(
     chapter_num: int,
     chapter_version_id: str | None = None,
     rebuild_run_id: str | None = None,
+    manual_reprocess: bool = False,
 ):
     async def _run():
         import uuid
@@ -111,6 +112,7 @@ def process_chapter_task(
                     chapter_payload,
                     queue_wait_ms=queue_wait_ms,
                     rebuild_run_id=rebuild_run_id,
+                    manual_reprocess=manual_reprocess,
                 )
                 await r.set(f"chapter_reprocess:{book_id}:{chapter_num}", "1", ex=30)
 

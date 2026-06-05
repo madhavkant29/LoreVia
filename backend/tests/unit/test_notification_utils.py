@@ -28,6 +28,8 @@ def test_build_revision_digest_notification_includes_revision_summary():
             {
                 "id": "impact-1",
                 "title": "Chapter 2 assumption may break later payoff",
+                "severity": "high",
+                "status": "pending",
             }
         ],
     }
@@ -37,10 +39,53 @@ def test_build_revision_digest_notification_includes_revision_summary():
     assert notification is not None
     assert notification.kind == "revision_digest"
     assert notification.title == "2 revision risks surfaced in Sky of Ash"
-    assert "Top issue: Chapter 2 assumption may break later payoff." in notification.body
+    assert notification.body == "LoreVia found 5 active revision items, including 2 high-severity risks."
     assert notification.data["active_item_count"] == 5
     assert notification.data["high_severity_count"] == 2
+    assert notification.data["top_item_title"] == "Chapter 2 assumption may break later payoff"
     assert notification.data["signature"] == "5:2:You changed Chapter 2: removed silver gate.:impact-1"
+
+
+def test_build_revision_digest_notification_prefers_active_high_severity_top_issue():
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="First Empty")
+    payload = {
+        "summary": {
+            "hero_message": "1 downstream logic risk need attention first.",
+            "active_item_count": 3,
+            "high_severity_count": 1,
+            "task_ready_count": 3,
+            "recent_edit_label": "You changed Chapter 2.",
+        },
+        "change_impacts": [
+            {
+                "id": "impact-generic",
+                "title": "Chapter 2",
+                "severity": "medium",
+                "status": "pending",
+            },
+            {
+                "id": "impact-fixed",
+                "title": "Fixed high severity issue",
+                "severity": "high",
+                "status": "fixed",
+            },
+        ],
+        "scene_advice": [
+            {
+                "id": "scene-1",
+                "title": "Gate rule contradiction",
+                "severity": "high",
+                "status": "pending",
+            }
+        ],
+    }
+
+    notification = build_revision_digest_notification(book, payload)
+
+    assert notification is not None
+    assert notification.body == "LoreVia found 3 active revision items, including 1 high-severity risk."
+    assert notification.data["recent_edit_label"] == "You changed Chapter 2."
+    assert notification.data["top_item_title"] == "Gate rule contradiction"
 
 
 def test_build_revision_digest_notification_returns_none_when_no_active_items():

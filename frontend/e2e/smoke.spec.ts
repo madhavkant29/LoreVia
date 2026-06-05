@@ -424,6 +424,34 @@ test("manuscript reprocess requires confirmation before consuming an upload", as
   expect(JSON.parse(reprocessRequests[0] ?? "{}")).toEqual({ confirm_upload_charge: true })
 })
 
+test("manual chapter reprocess marks saved edits pending and starts without upload charge", async ({ page }) => {
+  await installMockApi(page)
+  const reprocessRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/manuscript/chapters/1/reprocess") && request.method() === "POST") {
+      reprocessRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  const autoReprocessToggle = page.getByLabel("Auto reprocess edits")
+  await expect(autoReprocessToggle).toBeChecked()
+  await autoReprocessToggle.click()
+  await expect(autoReprocessToggle).not.toBeChecked()
+  await expect(page.getByText("Turning this off stops LoreVia from reprocessing saved edits automatically. To update story memory, open each edited chapter and click Reprocess. This adds extra steps, but can reduce token usage.")).toBeVisible()
+
+  await page.getByRole("button", { name: /Chapter 1 Ashfall/ }).click()
+  await page.locator('[contenteditable="true"]').first().fill("A new sentence for the saved chapter.")
+  await page.getByRole("button", { name: "Save now" }).click()
+  await expect(page.getByText("Needs reprocess")).toBeVisible()
+
+  await page.getByRole("button", { name: "Reprocess chapter" }).click()
+  await expect(page.getByText("Chapter 1 reprocessing started. This uses tokens, not a book upload.")).toBeVisible()
+  await expect(page.getByText("Needs reprocess")).toHaveCount(0)
+  expect(reprocessRequests).toHaveLength(1)
+})
+
 test("manuscript workspace switches into paged preview for chapter and full-book views", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/manuscript`)
@@ -480,6 +508,11 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
 
   const sceneCards = page.locator("[data-scene-id]")
   await expect(sceneCards).toHaveCount(2)
+  const firstSceneCopy = page.getByTestId("scene-copy-scene-1")
+  await expect(firstSceneCopy).toBeVisible()
+  await expect.poll(async () => {
+    return firstSceneCopy.evaluate((node) => Math.round(node.getBoundingClientRect().width))
+  }).toBeGreaterThanOrEqual(220)
   await expect(sceneCards.nth(0)).toHaveAttribute("data-scene-id", "scene-1")
   await expect(sceneCards.nth(1)).toHaveAttribute("data-scene-id", "scene-2")
 
@@ -507,8 +540,16 @@ test("manuscript workspace surfaces chapter annotations in the notes rail", asyn
   await expect(page.locator('[data-editor-key="chapter-2"]')).toBeVisible()
 
   await page.getByTitle("Open notes").click()
+  await expect(page.getByText("New note")).toBeVisible()
+  await expect(page.getByText("Notes workspace", { exact: true })).toBeVisible()
+  await expect(page.getByText("Manual Editor/Chapter 2/Gate imagery.md")).toBeVisible()
   await expect(page.getByText("1 annotation anchored to this chapter.")).toBeVisible()
-  await expect(page.getByText("Gate imagery")).toBeVisible()
+  await expect(page.getByText("Gate imagery", { exact: true })).toHaveCount(2)
+  await page.getByPlaceholder("Chapter 2 note title").fill("Rail smoke note")
+  await page.getByPlaceholder("Capture a beat, fix, continuity concern, or draft thought...").fill("Remember the gate-bell echo before the bridge.")
+  await page.getByRole("button", { name: "Save note" }).click()
+  await expect(page.getByRole("status")).toContainText("Saved to manuscript notes and the notes workspace.")
+  await expect(page.getByText("Rail smoke note").first()).toBeVisible()
 })
 
 test("collaboration workspace creates a story-scoped share", async ({ page }) => {

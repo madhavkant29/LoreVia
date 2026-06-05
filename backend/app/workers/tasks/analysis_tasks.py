@@ -53,6 +53,7 @@ def analyse_chapter_task(
     chapter_title: str = "",
     is_reprocessing: bool | None = None,
     rebuild_run_id: str | None = None,
+    manual_reprocess: bool = False,
 ):
     try:
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
@@ -72,6 +73,7 @@ def analyse_chapter_task(
                     str(payload.get("title") or ""),
                     queue_wait_ms=queue_wait_ms,
                     rebuild_run_id=rebuild_run_id,
+                    manual_reprocess=manual_reprocess,
                 )
 
             return run_worker_coro(analyse_stored_chapter())
@@ -82,6 +84,7 @@ def analyse_chapter_task(
                 chapter_title,
                 queue_wait_ms=queue_wait_ms,
                 rebuild_run_id=rebuild_run_id,
+                manual_reprocess=manual_reprocess,
             )
         )
     except Exception as exc:

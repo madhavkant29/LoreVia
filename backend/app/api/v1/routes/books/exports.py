@@ -48,6 +48,7 @@ from app.utils.export_utils import (
     character_card_markdown,
     character_card_pdf,
     export_filename_base,
+    normalize_export_font_family,
     manuscript_docx,
     manuscript_epub_compiled,
     manuscript_vault_zip,
@@ -65,9 +66,11 @@ async def export_manuscript(
     format: str = Query("docx", pattern="^(pdf|docx|epub|vault)$"),
     preset: str = Query("standard_manuscript", pattern="^(standard_manuscript|trade_paperback|kdp_paperback)$"),
     include_scene_metadata: bool = Query(True),
+    font_family: str = Query("serif", pattern="^(serif|sans|mono|italian-old-style|eb-garamond)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    selected_font = normalize_export_font_family(font_family)
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if collaborator and not collaboration_can_export(collaborator):
         raise HTTPException(403, "This share cannot export the manuscript.")
@@ -122,6 +125,7 @@ async def export_manuscript(
             scenes=[],
             preset=preset,
             front_matter=cast(dict | None, front_matter),
+            font_family=selected_font,
         )
         return Response(
             content=raw,
@@ -135,6 +139,7 @@ async def export_manuscript(
             scenes=[],
             preset=preset,
             front_matter=cast(dict | None, front_matter),
+            font_family=selected_font,
         )
         return Response(
             content=raw,
@@ -154,6 +159,7 @@ async def export_manuscript(
             scenes=manuscript_scenes,
             notes=notes,
             front_matter=cast(dict | None, front_matter),
+            font_family=selected_font,
         )
         return Response(
             content=raw,
@@ -167,6 +173,7 @@ async def export_manuscript(
         scenes=[],
         preset=preset,
         front_matter=cast(dict | None, front_matter),
+        font_family=selected_font,
     )
     return Response(
         content=raw,
@@ -216,9 +223,11 @@ async def export_character_card(
 async def export_character_bible(
     book_id: uuid.UUID,
     format: str = Query("md", pattern="^(md|pdf|docx|vault_folder)$"),
+    font_family: str = Query("serif", pattern="^(serif|sans|mono|italian-old-style|eb-garamond)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    selected_font = normalize_export_font_family(font_family)
     context = await build_character_bible_vault_context(db, book_id)
     book = context.get("book")
     if not book:
@@ -257,6 +266,7 @@ async def export_character_bible(
             rel_summaries=rel_summaries,
             thread_summaries=thread_summaries,
             overrides=overrides,
+            font_family=selected_font,
         )
         return Response(content=zip_data, media_type="application/zip",
                         headers={"Content-Disposition": f"attachment; filename=\"{filename_base}-character-bible.zip\""})
@@ -272,10 +282,10 @@ async def export_character_bible(
         return Response(content=markdown, media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename=\"{filename_base}-character-bible.md\""})
     if format == "pdf":
-        raw = character_bible_pdf(markdown=markdown, title=title)
+        raw = character_bible_pdf(markdown=markdown, title=title, font_family=selected_font)
         return Response(content=raw, media_type="application/pdf",
                         headers={"Content-Disposition": f"attachment; filename=\"{filename_base}-character-bible.pdf\""})
-    raw = character_bible_docx(markdown=markdown, title=title)
+    raw = character_bible_docx(markdown=markdown, title=title, font_family=selected_font)
     return Response(content=raw,
                     media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     headers={"Content-Disposition": f"attachment; filename=\"{filename_base}-character-bible.docx\""})

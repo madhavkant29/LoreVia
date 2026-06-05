@@ -8,6 +8,7 @@ import { authApi } from "@/lib/api/auth"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { publicApi } from "@/lib/api/public"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { formatReputationScore } from "@/lib/utils/publicForum"
 import type { PublicForumComment, PublicForumInterest, PublicForumPost } from "@/types/public"
 import type { User } from "@/types/user"
@@ -26,11 +27,15 @@ export function PublicForumPostPageClient({
   const [interests, setInterests] = useState<PublicForumInterest[]>([])
   const [viewer, setViewer] = useState<User | null>(null)
   const [draft, setDraft] = useState("")
+  const [commentImageFile, setCommentImageFile] = useState<File | null>(null)
   const [replyDraft, setReplyDraft] = useState("")
+  const [replyImageFile, setReplyImageFile] = useState<File | null>(null)
   const [activeReplyCommentId, setActiveReplyCommentId] = useState<string | null>(null)
   const [interestDraft, setInterestDraft] = useState("")
   const [editHeadline, setEditHeadline] = useState(initialPost?.headline ?? "")
   const [editBody, setEditBody] = useState(initialPost?.body ?? "")
+  const [editImageFile, setEditImageFile] = useState<File | null>(null)
+  const [editRemoveImage, setEditRemoveImage] = useState(false)
   const [editDesiredCount, setEditDesiredCount] = useState(initialPost?.desired_beta_reader_count ? String(initialPost.desired_beta_reader_count) : "")
   const [editAllowContactRequests, setEditAllowContactRequests] = useState(initialPost?.allow_contact_requests ?? true)
   const [viewerContextEnabled, setViewerContextEnabled] = useState(false)
@@ -75,6 +80,8 @@ export function PublicForumPostPageClient({
   const resetEditorFromPost = (source: PublicForumPost) => {
     setEditHeadline(source.headline)
     setEditBody(source.body)
+    setEditImageFile(null)
+    setEditRemoveImage(false)
     setEditDesiredCount(source.desired_beta_reader_count ? String(source.desired_beta_reader_count) : "")
     setEditAllowContactRequests(source.allow_contact_requests)
   }
@@ -164,10 +171,11 @@ export function PublicForumPostPageClient({
     setSubmitting(true)
     setStatus(null)
     try {
-      const created = await publicApi.createForumComment(postId, draft.trim())
+      const created = await publicApi.createForumComment(postId, draft.trim(), null, commentImageFile)
       setComments((current) => [...current, created])
       setPost((current) => current ? { ...current, comment_count: current.comment_count + 1 } : current)
       setDraft("")
+      setCommentImageFile(null)
     } catch {
       setStatus("Could not post your comment.")
     } finally {
@@ -184,10 +192,11 @@ export function PublicForumPostPageClient({
     setReplySubmittingId(parentCommentId)
     setStatus(null)
     try {
-      const created = await publicApi.createForumComment(postId, replyDraft.trim(), parentCommentId)
+      const created = await publicApi.createForumComment(postId, replyDraft.trim(), parentCommentId, replyImageFile)
       setComments((current) => appendCommentToTree(current, created))
       setPost((current) => current ? { ...current, comment_count: current.comment_count + 1 } : current)
       setReplyDraft("")
+      setReplyImageFile(null)
       setActiveReplyCommentId(null)
     } catch {
       setStatus("Could not post your reply.")
@@ -242,6 +251,8 @@ export function PublicForumPostPageClient({
         desiredBetaReaderCount: isNovelThread ? parsedDesiredCount : null,
         allowContactRequests: isNovelThread ? editAllowContactRequests : false,
         status: post.status,
+        removeImage: editRemoveImage,
+        imageFile: editImageFile,
       })
       setPost(updated)
       setEditing(false)
@@ -399,6 +410,12 @@ export function PublicForumPostPageClient({
                   <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{post.description}</p>
                 ) : null}
                 <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{post.body}</p>
+                <ForumImage
+                  src={post.image_url ?? null}
+                  alt={post.image_filename || "Forum discussion image"}
+                  isDark={isDark}
+                  className="mt-4"
+                />
 
                 <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
                   <ActionPill isDark={isDark} icon={<CommentBubbleIcon className="h-3.5 w-3.5" />}>
@@ -506,6 +523,26 @@ export function PublicForumPostPageClient({
                   aria-label="Discussion body"
                   className={`min-h-[10rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                 />
+                <ImagePicker
+                  isDark={isDark}
+                  label="Discussion image"
+                  file={editImageFile}
+                  onChange={(file) => {
+                    setEditImageFile(file)
+                    if (file) setEditRemoveImage(false)
+                  }}
+                />
+                {post.image_url && !editImageFile ? (
+                  <label className={`flex items-center justify-between rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
+                    <span>Remove current image</span>
+                    <input
+                      type="checkbox"
+                      checked={editRemoveImage}
+                      onChange={(event) => setEditRemoveImage(event.target.checked)}
+                      className="h-4 w-4"
+                    />
+                  </label>
+                ) : null}
                 {isNovelThread ? (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <input
@@ -574,6 +611,12 @@ export function PublicForumPostPageClient({
                       className={`min-h-[8.5rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                     />
                   </div>
+                  <ImagePicker
+                    isDark={isDark}
+                    label="Comment image"
+                    file={commentImageFile}
+                    onChange={setCommentImageFile}
+                  />
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
@@ -606,11 +649,14 @@ export function PublicForumPostPageClient({
                   reactingId={reactingId}
                   activeReplyCommentId={activeReplyCommentId}
                   replyDraft={replyDraft}
+                  replyImageFile={replyImageFile}
                   replySubmittingId={replySubmittingId}
                   onReplyDraftChange={setReplyDraft}
+                  onReplyImageChange={setReplyImageFile}
                   onReplyToggle={(commentId) => {
                     setStatus(null)
                     setReplyDraft("")
+                    setReplyImageFile(null)
                     setActiveReplyCommentId((current) => current === commentId ? null : commentId)
                   }}
                   onReplySubmit={submitReply}
@@ -744,8 +790,10 @@ function CommentRow({
   reactingId,
   activeReplyCommentId,
   replyDraft,
+  replyImageFile,
   replySubmittingId,
   onReplyDraftChange,
+  onReplyImageChange,
   onReplyToggle,
   onReplySubmit,
   onReact,
@@ -757,8 +805,10 @@ function CommentRow({
   reactingId: string | null
   activeReplyCommentId: string | null
   replyDraft: string
+  replyImageFile: File | null
   replySubmittingId: string | null
   onReplyDraftChange: (value: string) => void
+  onReplyImageChange: (file: File | null) => void
   onReplyToggle: (commentId: string) => void
   onReplySubmit: (commentId: string) => Promise<void>
   onReact: (comment: PublicForumComment, reaction: "like" | "dislike") => Promise<void>
@@ -796,6 +846,12 @@ function CommentRow({
         </div>
 
         <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{comment.body}</p>
+        <ForumImage
+          src={comment.image_url ?? null}
+          alt={comment.image_filename || "Forum comment image"}
+          isDark={isDark}
+          className="mt-3"
+        />
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
           <button
@@ -838,6 +894,12 @@ function CommentRow({
               aria-label={`Reply to @${comment.author_username || "commenter"}`}
               className={`min-h-[6rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#121821] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
             />
+            <ImagePicker
+              isDark={isDark}
+              label="Reply image"
+              file={replyImageFile}
+              onChange={onReplyImageChange}
+            />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -872,8 +934,10 @@ function CommentRow({
               reactingId={reactingId}
               activeReplyCommentId={activeReplyCommentId}
               replyDraft={replyDraft}
+              replyImageFile={replyImageFile}
               replySubmittingId={replySubmittingId}
               onReplyDraftChange={onReplyDraftChange}
+              onReplyImageChange={onReplyImageChange}
               onReplyToggle={onReplyToggle}
               onReplySubmit={onReplySubmit}
               onReact={onReact}
@@ -927,6 +991,64 @@ function replaceCommentInTree(comments: PublicForumComment[], updated: PublicFor
 
 function countComments(comments: PublicForumComment[]): number {
   return comments.reduce((total, comment) => total + 1 + countComments(comment.replies), 0)
+}
+
+function ForumImage({
+  src,
+  alt,
+  isDark,
+  className = "",
+}: {
+  src: string | null
+  alt: string
+  isDark: boolean
+  className?: string
+}) {
+  const resolvedSrc = resolveAssetUrl(src)
+  if (!resolvedSrc) return null
+  return (
+    <div className={`overflow-hidden rounded-md border ${className} ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
+      <img src={resolvedSrc} alt={alt} className="max-h-[420px] w-full object-contain" />
+    </div>
+  )
+}
+
+function ImagePicker({
+  isDark,
+  label,
+  file,
+  onChange,
+}: {
+  isDark: boolean
+  label: string
+  file: File | null
+  onChange: (file: File | null) => void
+}) {
+  return (
+    <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="inline-flex cursor-pointer items-center gap-2 font-semibold">
+          <ImageIcon className={isDark ? "text-slate-400" : "text-slate-500"} />
+          <span>{file ? file.name : label}</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="sr-only"
+            onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        {file ? (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"}`}
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 function formatRelativeDay(value: string): string {
@@ -1006,6 +1128,16 @@ function InboxIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 20 20" fill="none" className={`${className || "h-4 w-4"}`} aria-hidden="true">
       <path d="M4 6.5h12l1 6.5h-4.5L10 15.5 7.5 13H3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
       <path d="M4.5 6.5 6 4.5h8l1.5 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ImageIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className={`h-4 w-4 ${className || ""}`} aria-hidden="true">
+      <rect x="3.25" y="4.25" width="13.5" height="11.5" rx="1.75" stroke="currentColor" strokeWidth="1.5" />
+      <path d="m4.5 14 3.25-3.25 2.25 2.25 2.75-3.5L15.5 14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx="7.25" cy="7.75" r="1" fill="currentColor" />
     </svg>
   )
 }

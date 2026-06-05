@@ -32,7 +32,12 @@ from app.schemas.intelligence import (
     GroundedCitationOut,
     QARequest,
 )
-from app.utils.llm_usage_utils import create_tracked_chat_completion, record_llm_usage_counts
+from app.utils.llm_usage_utils import (
+    assert_llm_token_capacity,
+    create_tracked_chat_completion,
+    estimate_chat_completion_tokens,
+    record_llm_usage_counts,
+)
 from app.utils.intelligence_utils import (
     build_grounded_qa_context,
     compute_cross_book_snapshot_hash,
@@ -236,6 +241,13 @@ async def qa_stream_endpoint(
         {"role": "system", "content": system},
         {"role": "user", "content": f"Question: {body.question}\n\nContext:\n\n" + "\n\n".join(context_blocks)},
     ]
+    await assert_llm_token_capacity(
+        db,
+        user=current_user,
+        estimated_tokens=estimate_chat_completion_tokens(
+            {"messages": llm_messages, "max_tokens": 220}
+        ),
+    )
 
     async def event_stream():
         client = get_client()
@@ -293,6 +305,5 @@ async def qa_stream_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
 
 

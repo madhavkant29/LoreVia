@@ -584,8 +584,8 @@ export const booksApi = {
     apiClient.post<CharacterShareResponse>(bookPath(bookId, `/characters/${characterId}/share`)).then(r => r.data),
   exportCharacterCard: (bookId: string, characterId: string, format: "md" | "pdf" | "docx" = "pdf") =>
     apiClient.get<Blob>(bookPath(bookId, `/characters/${characterId}/export`), { params: { format }, responseType: "blob" }).then(r => r.data),
-  exportCharacterBible: (id: string, format: "md" | "pdf" | "docx" | "vault_folder" = "md") =>
-    apiClient.get<Blob>(bookPath(id, "/export/character-bible"), { params: { format }, responseType: "blob" }).then(r => r.data),
+  exportCharacterBible: (id: string, format: "md" | "pdf" | "docx" | "vault_folder" = "md", fontFamily = "serif") =>
+    apiClient.get<Blob>(bookPath(id, "/export/character-bible"), { params: { format, font_family: fontFamily }, responseType: "blob" }).then(r => r.data),
   previewCharacterBibleVault: (id: string) =>
     apiClient.get<VaultPreview>(bookPath(id, "/export/character-bible/preview")).then(r => r.data),
   listCharacterBibleVaultNotes: (id: string) =>
@@ -847,10 +847,11 @@ export const booksApi = {
     bookId: string,
     format: "pdf" | "docx" | "epub" | "vault" = "docx",
     preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript",
-    includeSceneMetadata = true
+    includeSceneMetadata = true,
+    fontFamily = "serif"
   ) =>
     apiClient.get<Blob>(bookPath(bookId, "/manuscript/export"), {
-      params: { format, preset, include_scene_metadata: includeSceneMetadata },
+      params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily },
       responseType: "blob",
     }).then(r => r.data),
   delete: (id: string) => apiClient.delete<Book>(bookPath(id)).then(r => {
@@ -882,6 +883,23 @@ export const booksApi = {
       { confirm_upload_charge: true }
     ).then(r => {
       invalidateBookCache(bookId)
+      return r.data
+    }),
+  reprocessChapter: (bookId: string, chapterNumber: number) =>
+    apiClient.post<{
+      book_id: string
+      status: string
+      chapters_queued: number
+      total_words: number
+      upload_charge_consumed: boolean
+      charge_kind?: "manual_reprocess" | null
+    }>(
+      bookPath(bookId, `/manuscript/chapters/${chapterNumber}/reprocess`),
+      null
+    ).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      void invalidateQueryKeys(bookCacheKey(bookId, "writer-workspace"))
       return r.data
     }),
 }

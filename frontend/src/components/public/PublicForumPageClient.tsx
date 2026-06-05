@@ -12,6 +12,7 @@ import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { formatReputationScore, getEligibleForumAuthorBooks } from "@/lib/utils/publicForum"
 import type { Book } from "@/types/book"
 import type { PublicForumPost, PublicForumPostListResponse } from "@/types/public"
@@ -54,6 +55,7 @@ export function PublicForumPageClient({
   const [selectedBookId, setSelectedBookId] = useState("")
   const [headline, setHeadline] = useState("")
   const [body, setBody] = useState("")
+  const [imageFile, setImageFile] = useState<File | null>(null)
   const [novelTitle, setNovelTitle] = useState("")
   const [novelGenre, setNovelGenre] = useState("")
   const [novelDescription, setNovelDescription] = useState("")
@@ -249,6 +251,7 @@ export function PublicForumPageClient({
         body: body.trim(),
         desiredBetaReaderCount: composerThreadType === "novel" ? parsedDesiredCount : null,
         allowContactRequests: composerThreadType === "novel" ? allowContactRequests : false,
+        imageFile,
       })
       router.push(`/public/forum/${created.id}` as Route)
     } catch (error) {
@@ -545,6 +548,11 @@ export function PublicForumPageClient({
                 <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
                   {composerThreadType === "novel" ? "Tell readers what to focus on: hook, pacing, emotional clarity, or worldbuilding." : "Describe what you want advice or discussion on."}
                 </p>
+                <ImagePicker
+                  isDark={isDark}
+                  file={imageFile}
+                  onChange={setImageFile}
+                />
                 {composerStatus ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{composerStatus}</p> : null}
                 <button
                   type="button"
@@ -646,6 +654,12 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
           </Link>
 
           <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{truncateBody(post.body)}</p>
+          <ForumImage
+            src={post.image_url ?? null}
+            alt={post.image_filename || "Forum discussion image"}
+            isDark={isDark}
+            className="mt-3"
+          />
           {post.ranking?.supporting_note ? (
             <p className={`mt-3 text-xs leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{post.ranking.supporting_note}</p>
           ) : null}
@@ -695,6 +709,62 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
         </div>
       </div>
     </article>
+  )
+}
+
+function ForumImage({
+  src,
+  alt,
+  isDark,
+  className = "",
+}: {
+  src: string | null
+  alt: string
+  isDark: boolean
+  className?: string
+}) {
+  const resolvedSrc = resolveAssetUrl(src)
+  if (!resolvedSrc) return null
+  return (
+    <div className={`overflow-hidden rounded-md border ${className} ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
+      <img src={resolvedSrc} alt={alt} className="max-h-[260px] w-full object-contain" />
+    </div>
+  )
+}
+
+function ImagePicker({
+  isDark,
+  file,
+  onChange,
+}: {
+  isDark: boolean
+  file: File | null
+  onChange: (file: File | null) => void
+}) {
+  return (
+    <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="inline-flex cursor-pointer items-center gap-2 font-semibold">
+          <ImageIcon className={isDark ? "text-slate-400" : "text-slate-500"} />
+          <span>{file ? file.name : "Discussion image"}</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="sr-only"
+            onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        {file ? (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"}`}
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
@@ -842,6 +912,16 @@ function InboxIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 20 20" fill="none" className={`${className || "h-4 w-4"}`} aria-hidden="true">
       <path d="M4 6.5h12l1 6.5h-4.5L10 15.5 7.5 13H3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
       <path d="M4.5 6.5 6 4.5h8l1.5 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ImageIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className={`h-4 w-4 ${className || ""}`} aria-hidden="true">
+      <rect x="3.25" y="4.25" width="13.5" height="11.5" rx="1.75" stroke="currentColor" strokeWidth="1.5" />
+      <path d="m4.5 14 3.25-3.25 2.25 2.25 2.75-3.5L15.5 14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx="7.25" cy="7.75" r="1" fill="currentColor" />
     </svg>
   )
 }

@@ -619,6 +619,51 @@ async def test_general_public_discussions_are_open_to_signed_in_users_and_visibl
 
 
 @pytest.mark.asyncio
+async def test_public_forum_posts_and_comments_accept_images(client, db):
+    member = await _create_user(db, email="forum-image-member@lorevia.test", tier="free")
+    png_bytes = b"\x89PNG\r\n\x1a\nforum-image"
+
+    create_response = await client.post(
+        "/api/v1/public/forum/posts",
+        headers=_auth_headers(member.id),
+        data={
+            "thread_type": "general",
+            "headline": "Which map detail should I keep in a chapter discussion?",
+            "body": "I want feedback on whether this reference image clarifies the scene geography for readers.",
+        },
+        files={"image": ("map.png", png_bytes, "image/png")},
+    )
+
+    assert create_response.status_code == 201
+    post_payload = create_response.json()
+    assert post_payload["image_url"]
+    assert post_payload["image_filename"] == "map.png"
+    assert post_payload["image_content_type"] == "image/png"
+
+    image_response = await client.get(post_payload["image_url"])
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"].startswith("image/png")
+    assert image_response.content == png_bytes
+
+    comment_response = await client.post(
+        f"/api/v1/public/forum/posts/{post_payload['id']}/comments",
+        headers=_auth_headers(member.id),
+        data={"body": "This image helps me explain the staging issue."},
+        files={"image": ("staging.png", png_bytes, "image/png")},
+    )
+
+    assert comment_response.status_code == 201
+    comment_payload = comment_response.json()
+    assert comment_payload["image_url"]
+    assert comment_payload["image_filename"] == "staging.png"
+    assert comment_payload["image_content_type"] == "image/png"
+
+    comment_image_response = await client.get(comment_payload["image_url"])
+    assert comment_image_response.status_code == 200
+    assert comment_image_response.content == png_bytes
+
+
+@pytest.mark.asyncio
 async def test_novel_public_discussions_require_book_title_genre_and_description(client, db):
     author = await _create_user(db, email="forum-metadata-author@lorevia.test", tier="author")
     book = await _create_book(

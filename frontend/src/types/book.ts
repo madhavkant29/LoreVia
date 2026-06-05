@@ -721,7 +721,16 @@ export interface WriterWorkspace {
   typewriter_mode?: TypewriterModeSettings
   manuscript_layout?: ManuscriptLayoutSettings
   structure_tree?: WorkspaceStructureNode[]
+  reprocess?: ReprocessMetadata
   processing?: BookProcessing | null
+}
+
+export interface ReprocessMetadata {
+  auto_reprocess_enabled: boolean
+  pending_chapters: number[]
+  last_mode_changed_at?: string | null
+  last_manual_chapter_started_at?: string | null
+  last_manual_chapter_number?: number | null
 }
 
 export interface RevisionActionItem {

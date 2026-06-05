@@ -44,6 +44,23 @@ class _FakeDB:
         self.flush_called = True
 
 
+class _Upload:
+    def __init__(self, raw: bytes, filename: str):
+        self._raw = raw
+        self._offset = 0
+        self.filename = filename
+
+    async def read(self, size: int = -1):
+        if size < 0:
+            size = len(self._raw) - self._offset
+        chunk = self._raw[self._offset:self._offset + size]
+        self._offset += len(chunk)
+        return chunk
+
+    async def seek(self, offset: int):
+        self._offset = offset
+
+
 def _profile_payload(user_id: uuid.UUID, username: str) -> PublicUserProfileOut:
     return PublicUserProfileOut(
         user_id=str(user_id),
@@ -175,6 +192,61 @@ def test_nest_public_forum_comments_builds_reply_tree():
     assert nested[0].id == parent_id
     assert len(nested[0].replies) == 1
     assert nested[0].replies[0].id == reply_id
+
+
+@pytest.mark.asyncio
+async def test_store_public_forum_image_validates_and_uploads_png(monkeypatch):
+    captured: dict[str, object] = {}
+    owner_user_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+    upload = _Upload(b"\x89PNG\r\n\x1a\nimage-bytes", "sketch.png")
+
+    def _upload_binary(key, raw, content_type=None):
+        captured["key"] = key
+        captured["raw"] = raw
+        captured["content_type"] = content_type
+        return key
+
+    monkeypatch.setattr(public_utils, "upload_binary", _upload_binary)
+
+    storage_key, content_type, filename = await public_utils.store_public_forum_image(
+        upload,
+        owner_user_id=owner_user_id,
+        target_kind="post",
+        target_id=target_id,
+    )
+
+    assert storage_key == captured["key"]
+    assert str(owner_user_id) in storage_key
+    assert str(target_id) in storage_key
+    assert content_type == "image/png"
+    assert filename == "sketch.png"
+    assert captured["raw"] == b"\x89PNG\r\n\x1a\nimage-bytes"
+    assert captured["content_type"] == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_store_public_forum_image_rejects_non_image_upload():
+    with pytest.raises(public_utils.HTTPException) as exc:
+        await public_utils.store_public_forum_image(
+            _Upload(b"not an image", "notes.txt"),
+            owner_user_id=uuid.uuid4(),
+            target_kind="comment",
+            target_id=uuid.uuid4(),
+        )
+
+    assert exc.value.status_code == 400
+
+
+def test_public_forum_image_url_uses_presigned_url_when_available(monkeypatch):
+    monkeypatch.setattr(public_utils, "get_presigned_url", lambda key: f"https://assets.example/{key}")
+
+    assert public_utils.public_forum_image_url(
+        storage_key="public-forum/image.png",
+        owner_user_id=uuid.uuid4(),
+        target_kind="post",
+        target_id=uuid.uuid4(),
+    ) == "https://assets.example/public-forum/image.png"
 
 
 def test_public_ranking_normalizers_accept_supported_values():

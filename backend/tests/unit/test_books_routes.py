@@ -1215,6 +1215,7 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
 
     assert [call["format"] for call in compiled_calls] == ["pdf", "epub"]
     assert all(call["chapters"] == [{"number": 1, "title": "One", "text": "Body", "html": None}] for call in compiled_calls)
+    assert all(call["font_family"] == "serif" for call in compiled_calls)
 
     cover_book = _book(user_id=user.id, cover_s3_key="covers/atlas.png")
     monkeypatch.setattr(books, "ensure_book_cover", _async_value(None))

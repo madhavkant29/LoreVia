@@ -446,6 +446,22 @@ class ManuscriptReprocessBody(BaseModel):
     confirm_upload_charge: bool = False
 
 
+class ReprocessMetadataOut(BaseModel):
+    auto_reprocess_enabled: bool = True
+    pending_chapters: list[int] = Field(default_factory=list)
+    last_mode_changed_at: str | None = None
+    last_manual_chapter_started_at: str | None = None
+    last_manual_chapter_number: int | None = None
+
+
+class ReprocessMetadataBody(BaseModel):
+    auto_reprocess_enabled: bool | None = None
+    pending_chapters: list[int] | None = None
+    last_mode_changed_at: str | None = None
+    last_manual_chapter_started_at: str | None = None
+    last_manual_chapter_number: int | None = None
+
+
 class PreWritingCharacterOut(BaseModel):
     id: str
     name: str
@@ -733,6 +749,7 @@ class WriterWorkspaceOut(BaseModel):
     typewriter_mode: TypewriterModeOut = Field(default_factory=TypewriterModeOut)
     manuscript_layout: ManuscriptLayoutOut = Field(default_factory=ManuscriptLayoutOut)
     structure_tree: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
+    reprocess: ReprocessMetadataOut = Field(default_factory=ReprocessMetadataOut)
     processing: BookProcessingOut | None = None
 
 
@@ -862,6 +879,7 @@ class WriterWorkspaceBody(BaseModel):
     typewriter_mode: TypewriterModeBody | None = None
     manuscript_layout: ManuscriptLayoutBody | None = None
     structure_tree: list[WorkspaceStructureNodeBody] | None = None
+    reprocess: ReprocessMetadataBody | None = None
 
 
 class RevisionActionItemOut(BaseModel):

@@ -214,6 +214,15 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
   })
 
+  it("reprocesses a single chapter without upload confirmation", async () => {
+    await booksApi.reprocessChapter("book-1", 3)
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/manuscript/chapters/3/reprocess", null)
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:writer-workspace")
+  })
+
   it("restores chapter versions and invalidates book and reader caches", async () => {
     await booksApi.restoreChapterVersion("book-1", "version-9")
 

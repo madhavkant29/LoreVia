@@ -194,6 +194,100 @@ CHAPTER_TITLE_STOPWORDS = {
     "to",
     "with",
 }
+REVISION_KEYWORD_STOPWORDS = CHAPTER_TITLE_STOPWORDS | {
+    "all",
+    "also",
+    "aide",
+    "ailleurs",
+    "almost",
+    "already",
+    "another",
+    "anything",
+    "apr",
+    "are",
+    "around",
+    "asked",
+    "auteur",
+    "auteurs",
+    "been",
+    "being",
+    "but",
+    "can",
+    "cannot",
+    "could",
+    "did",
+    "does",
+    "done",
+    "down",
+    "else",
+    "even",
+    "every",
+    "find",
+    "from",
+    "get",
+    "got",
+    "had",
+    "has",
+    "have",
+    "her",
+    "here",
+    "hers",
+    "him",
+    "his",
+    "how",
+    "into",
+    "just",
+    "learns",
+    "made",
+    "make",
+    "more",
+    "most",
+    "much",
+    "need",
+    "needs",
+    "not",
+    "now",
+    "off",
+    "one",
+    "only",
+    "open",
+    "our",
+    "out",
+    "over",
+    "own",
+    "said",
+    "same",
+    "says",
+    "she",
+    "should",
+    "some",
+    "still",
+    "than",
+    "that",
+    "them",
+    "then",
+    "these",
+    "they",
+    "this",
+    "those",
+    "told",
+    "too",
+    "under",
+    "very",
+    "wait",
+    "was",
+    "way",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "will",
+    "would",
+    "your",
+}
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 
@@ -390,6 +484,10 @@ DEFAULT_WRITER_WORKSPACE = {
         "last_generated_at": None,
     },
     "revision_recent_edits": [],
+    "reprocess": {
+        "auto_reprocess_enabled": True,
+        "pending_chapters": [],
+    },
     "processing": None,
 }
 
@@ -806,6 +904,31 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
     return payload or None
 
 
+def normalize_reprocess_metadata(raw: dict | None) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    payload = json.loads(json.dumps(source, default=str))
+    payload["auto_reprocess_enabled"] = bool(source.get("auto_reprocess_enabled", True))
+    pending_chapters = sorted({
+        int(item)
+        for item in (source.get("pending_chapters") or [])
+        if isinstance(item, (int, float)) and int(item) > 0
+    })
+    payload["pending_chapters"] = pending_chapters
+    for key in (
+        "last_mode_changed_at",
+        "last_manual_chapter_started_at",
+        "last_manual_chapter_number",
+    ):
+        value = source.get(key)
+        if value is None or value == "":
+            payload.pop(key, None)
+        elif key == "last_manual_chapter_number" and isinstance(value, (int, float)):
+            payload[key] = int(value)
+        else:
+            payload[key] = str(value).strip()
+    return payload
+
+
 def _derive_front_matter_defaults(raw: dict | None = None, *, title: str = "", author: str = "") -> dict[str, Any]:
     payload = json.loads(json.dumps(DEFAULT_WRITER_WORKSPACE["manuscript_front_matter"]))
     source = raw if isinstance(raw, dict) else {}
@@ -1072,8 +1195,7 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
     payload["revision_board"] = _normalize_revision_board(source.get("revision_board"))
     payload["revision_recent_edits"] = _normalize_revision_recent_edits(source.get("revision_recent_edits") or [])
     payload["processing"] = _normalize_processing_state(source.get("processing")) if isinstance(source.get("processing"), dict) else None
-    if isinstance(source.get("reprocess"), dict):
-        payload["reprocess"] = json.loads(json.dumps(source["reprocess"], default=str))
+    payload["reprocess"] = normalize_reprocess_metadata(source.get("reprocess") if isinstance(source.get("reprocess"), dict) else None)
 
     return payload
 
@@ -1180,10 +1302,18 @@ def _flatten_summary_points(value: object) -> list[str]:
 
 
 def _scene_keyword_set(text: str, *, character_names: set[str], thread_terms: set[str]) -> set[str]:
-    tokens = {token.lower() for token in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", text or "")}
-    tokens -= {"chapter", "scene", "their", "there", "about", "after", "before", "because", "through", "while"}
-    tokens |= {name.lower() for name in character_names if name.lower() in (text or "").lower()}
-    tokens |= {term.lower() for term in thread_terms if term.lower() in (text or "").lower()}
+    lowered = (text or "").lower()
+    tokens = {
+        token.lower().strip("'-")
+        for token in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", text or "")
+    }
+    tokens = {
+        token
+        for token in tokens
+        if len(token) > 2 and token not in REVISION_KEYWORD_STOPWORDS and not token.endswith("'")
+    }
+    tokens |= {name.lower() for name in character_names if name.lower() in lowered}
+    tokens |= {term.lower() for term in thread_terms if term.lower() in lowered}
     return tokens
 
 
