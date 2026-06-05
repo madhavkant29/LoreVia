@@ -65,16 +65,9 @@ export function ManuscriptNonWriteWorkspace({
   activeChapterNumber,
   preWritingCheck,
   editorMode,
-  onEditorModeChange,
   draftSurfaceMode,
-  onDraftSurfaceModeChange,
   leftRailVisible,
   onToggleLeftRail,
-  chapterWordCount,
-  fullBookWordCount,
-  chapterPageSummaryLabel,
-  fullBookPageSummaryLabel,
-  draftSurfaceSummaryLabel,
   showPageSetup,
   onTogglePageSetup,
   showSearchTools,
@@ -131,33 +124,7 @@ export function ManuscriptNonWriteWorkspace({
       ) : null}
 
       <div className={`mb-8 rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/40 shadow-inner" : "border border-stone-200 bg-stone-100 shadow-inner"}`}>
-              {(["chapter", "book"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => onEditorModeChange(mode)}
-                  className={`rounded-full px-5 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950 shadow-sm" : "bg-stone-900 text-white shadow-sm" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                >
-                  {mode === "chapter" ? "Chapter" : "Full book"}
-                </button>
-              ))}
-            </div>
-            <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30 shadow-inner" : "border border-stone-200 bg-stone-50 shadow-inner"}`}>
-              {(["edit", "paged"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={draftSurfaceMode === mode}
-                  onClick={() => onDraftSurfaceModeChange(mode)}
-                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${draftSurfaceMode === mode ? isDark ? "bg-sky-300 text-slate-950 shadow-sm" : "bg-sky-700 text-white shadow-sm" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                >
-                  {mode === "edit" ? "Draft" : "Paged preview"}
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={onTogglePageSetup} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
               {showPageSetup ? "Hide page setup" : "Page setup"}
@@ -169,11 +136,6 @@ export function ManuscriptNonWriteWorkspace({
               {leftRailVisible ? "Hide chapters" : "Show chapters"}
             </button>
           </div>
-        </div>
-        <div className={`mt-3 flex flex-wrap items-center gap-4 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-          <span>{editorMode === "chapter" ? `${chapterWordCount.toLocaleString()} words` : `${fullBookWordCount.toLocaleString()} words`}</span>
-          <span>{editorMode === "chapter" ? chapterPageSummaryLabel : fullBookPageSummaryLabel}</span>
-          <span>{draftSurfaceSummaryLabel}</span>
         </div>
         {showPageSetup ? (
           <div className="mt-4 grid gap-3 md:grid-cols-[auto_auto_auto_1fr]">

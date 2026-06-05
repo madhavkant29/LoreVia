@@ -54,17 +54,17 @@ export default function AuthCallbackPage() {
         }
 
         if (active) {
-          setStatus("Checking Supabase session...")
+          setStatus("Checking your session...")
         }
-        let session = (await withTimeout(supabase.auth.getSession(), "Checking Supabase session")).data.session
+        let session = (await withTimeout(supabase.auth.getSession(), "Checking your session")).data.session
 
         if (!session && code) {
           if (active) {
-            setStatus("Completing Google sign-in with Supabase...")
+            setStatus("Completing sign-in...")
           }
           const { data, error } = await withTimeout(
             supabase.auth.exchangeCodeForSession(code),
-            "Completing Google sign-in with Supabase",
+            "Completing sign-in",
           )
           if (error) {
             fail("Could not complete Google sign-in.")
@@ -74,7 +74,7 @@ export default function AuthCallbackPage() {
         }
 
         if (!session) {
-          fail("No OAuth session was returned by Supabase.")
+          fail("No session was returned. Please try signing in again.")
           return
         }
 

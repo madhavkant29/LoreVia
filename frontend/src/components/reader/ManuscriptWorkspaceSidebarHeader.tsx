@@ -15,25 +15,25 @@ export function ManuscriptWorkspaceSidebarHeader({
 }) {
   return (
     <>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Workspace</p>
-          <p className={`mt-1 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{bookTitle || "Current project"}</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={onCreateChapter} className={`rounded-md px-3 py-1.5 text-xs ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+      <div>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Workspace</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button onClick={onCreateChapter} className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-sm border px-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+            <span aria-hidden>+</span>
             New chapter
           </button>
-          <button onClick={onCreateScene} className={`rounded-md px-3 py-1.5 text-xs ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>
+          <button onClick={onCreateScene} className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-sm border px-3 text-sm font-medium ${isDark ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+            <span aria-hidden>+</span>
             New scene
           </button>
         </div>
       </div>
-      <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white"}`}>
+      <div className={`mt-4 rounded-sm border p-4 ${isDark ? "border-white/10 bg-white/[0.035]" : "border-stone-200 bg-white"}`}>
         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Manuscript</p>
-        <h2 className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{bookTitle}</h2>
-        <p className={`mt-2 text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>Story manuscript</p>
-        <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{fullBookWordCount.toLocaleString()} words across the working draft / {fullBookReadingTime}</p>
+        <h2 className={`mt-3 font-serif text-2xl leading-tight ${isDark ? "text-white" : "text-stone-950"}`}>{bookTitle}</h2>
+        <p className={`mt-2 text-sm font-medium ${isDark ? "text-teal-300" : "text-teal-700"}`}>Story manuscript</p>
+        <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{fullBookWordCount.toLocaleString()} words across the working draft</p>
+        <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{fullBookReadingTime}</p>
       </div>
     </>
   )

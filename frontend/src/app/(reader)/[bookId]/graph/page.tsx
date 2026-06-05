@@ -12,15 +12,14 @@ import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { cn } from "@/lib/utils/text"
+import { Skeleton } from "@/components/ui/Skeleton"
 
 const RelationshipGraph = dynamic(
   () => import("@/components/intelligence/RelationshipGraph"),
   {
     ssr: false,
     loading: () => (
-      <div className="app-panel flex min-h-[36rem] items-center justify-center text-sm text-[rgb(var(--muted-foreground))]">
-        Loading relationship graph...
-      </div>
+      <RelationshipGraphSkeleton />
     ),
   }
 )
@@ -82,6 +81,43 @@ export default function GraphPage() {
         />
 
         <RelationshipGraph bookId={bookId} upToChapter={chapter} theme={isDark ? "dark" : "light"} authorMode={authorMode} />
+      </div>
+    </div>
+  )
+}
+
+function RelationshipGraphSkeleton() {
+  return (
+    <div className="app-panel relative min-h-[36rem] overflow-hidden" role="status" aria-label="Loading relationship graph" aria-busy="true">
+      <span className="sr-only">Loading relationship graph</span>
+      <div className="absolute left-4 top-4 z-10 rounded-md border border-[rgba(var(--border),0.85)] bg-[rgb(var(--surface))] p-3">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="mt-2 h-4 w-36" />
+        <Skeleton className="mt-2 h-3 w-48" />
+      </div>
+      <div className="absolute right-4 top-4 z-10 flex gap-2 rounded-md border border-[rgba(var(--border),0.85)] bg-[rgb(var(--surface))] p-2">
+        <Skeleton className="h-8 w-8 rounded-md" />
+        <Skeleton className="h-8 w-8 rounded-md" />
+        <Skeleton className="h-8 w-14 rounded-md" />
+        <Skeleton className="h-8 w-16 rounded-md" />
+      </div>
+      <div className="grid h-[36rem] place-items-center">
+        <div className="relative h-72 w-full max-w-3xl">
+          {[
+            "left-[8%] top-[20%] h-14 w-14",
+            "left-[28%] top-[8%] h-10 w-10",
+            "left-[45%] top-[34%] h-16 w-16",
+            "right-[26%] top-[18%] h-12 w-12",
+            "right-[8%] top-[42%] h-10 w-10",
+            "left-[18%] bottom-[18%] h-12 w-12",
+            "right-[38%] bottom-[10%] h-14 w-14",
+          ].map((className) => (
+            <Skeleton key={className} variant="circle" className={`absolute ${className}`} />
+          ))}
+          <Skeleton className="absolute left-[14%] top-[35%] h-px w-48 rotate-12" />
+          <Skeleton className="absolute left-[42%] top-[52%] h-px w-56 -rotate-12" />
+          <Skeleton className="absolute right-[22%] top-[38%] h-px w-36 rotate-45" />
+        </div>
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
-import { startTransition, useDeferredValue, useEffect, useMemo, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react"
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import type { Route } from "next"
 import Link from "next/link"
@@ -15,6 +15,7 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import {
   buildSceneChapterOptions,
   extractChapterNumberFromSceneFolder,
+  findWorkspaceStructurePath,
   parseStoredSceneFolders,
   SCENE_FOLDER_STORAGE_KEY_PREFIX,
 } from "@/lib/utils/sceneWorkspace"
@@ -27,22 +28,17 @@ import {
   type WorkspaceFolderNode,
 } from "@/lib/utils/workspacePaths"
 import type { Book, ManuscriptWorkspaceTree, NovelScene, SceneMetadata } from "@/types/book"
+import type { Character } from "@/types/character"
+import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
 
 type FolderNode = WorkspaceFolderNode
+type StructureNode = NonNullable<ManuscriptWorkspaceTree["structure_tree"]>[number]
 type SceneDragItem = { kind: "scene"; id: string }
 type BrowserView = "folders" | "scenes"
 
 const EditorToolbar = dynamic(
   () => import("@/components/editor/SharedRichTextEditor").then((module) => module.EditorToolbar),
   { ssr: false }
-)
-
-const AuthorToolsNav = dynamic(
-  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
-  {
-    ssr: false,
-    loading: () => <div className="rounded-lg border border-dashed border-white/10 p-8" />,
-  }
 )
 
 const RichTextEditor = dynamic(
@@ -138,6 +134,10 @@ export default function ScenesPage() {
   const [showBrowserOnMobile, setShowBrowserOnMobile] = useState(true)
   const [showInspectorOnMobile, setShowInspectorOnMobile] = useState(false)
   const [showWritingTools, setShowWritingTools] = useState(false)
+  const [selectionMenu, setSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
+  const [addCharacterOpen, setAddCharacterOpen] = useState(false)
+  const [addCharacterText, setAddCharacterText] = useState("")
+  const selectionRef = useRef<string>("")
 
   const { data: book = null } = useBookDetail(bookId)
   const {
@@ -228,6 +228,57 @@ export default function ScenesPage() {
   useEffect(() => {
     syncWorkspaceSelection(tree)
   }, [tree])
+
+  useEffect(() => {
+    const syncSelectionMenu = () => {
+      const selection = window.getSelection()
+      const selectedText = selection?.toString().trim() ?? ""
+      const editor = document.querySelector<HTMLElement>(`[data-editor-key="scene-workspace-editor"]`)
+      const anchorNode = selection?.anchorNode
+
+      if (!selection || !selectedText || !editor || !anchorNode || !editor.contains(anchorNode) || selection.rangeCount === 0) {
+        setSelectionMenu(null)
+        return
+      }
+
+      const rect = selection.getRangeAt(0).getBoundingClientRect()
+      if (!rect.width && !rect.height) {
+        setSelectionMenu(null)
+        return
+      }
+
+      selectionRef.current = selectedText
+      setSelectionMenu({
+        text: selectedText.slice(0, 100),
+        top: rect.top + window.scrollY - 48,
+        left: rect.left + window.scrollX + (rect.width / 2),
+      })
+    }
+
+    document.addEventListener("selectionchange", syncSelectionMenu)
+    window.addEventListener("resize", syncSelectionMenu)
+    window.addEventListener("scroll", syncSelectionMenu, true)
+    return () => {
+      document.removeEventListener("selectionchange", syncSelectionMenu)
+      window.removeEventListener("resize", syncSelectionMenu)
+      window.removeEventListener("scroll", syncSelectionMenu, true)
+    }
+  }, [])
+
+  const openAddCharacterFromSelection = () => {
+    const text = selectionRef.current.trim()
+    if (!text) {
+      setStatus("Select a character name in the scene first.")
+      return
+    }
+    setAddCharacterText(text)
+    setAddCharacterOpen(true)
+    setSelectionMenu(null)
+  }
+
+  const handleCharacterCreated = (character: Character) => {
+    setStatus(`Character "${character.name}" added to the story bible.`)
+  }
 
   function selectScene(scene: NovelScene) {
     const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
@@ -355,22 +406,8 @@ export default function ScenesPage() {
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
-      <div className="mx-auto max-w-[108rem] px-4 pb-12 pt-4 sm:px-6 lg:px-8">
-        <div className="grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)]">
-          <div className="xl:sticky xl:top-6 xl:self-start">
-            <AuthorToolsNav
-              bookId={bookId}
-              active="scenes"
-              isDark={isDark}
-              bookData={book}
-              title="Scene workspace"
-              description="Draft, organize, and prepare scene files before pulling them into the manuscript."
-              variant="rail"
-              railSize="compact"
-            />
-          </div>
-
-          <main className="min-w-0 space-y-4">
+      <div className="w-full px-4 pb-12 pt-0 sm:px-5 lg:px-6">
+        <main className="min-w-0 space-y-6">
             <WorkspaceHeader
               bookId={bookId}
               book={book}
@@ -402,7 +439,7 @@ export default function ScenesPage() {
                   action={<ActionButton type="button" variant="secondary" isDark={isDark} onClick={() => void refetchTree()}>Retry</ActionButton>}
                 />
               ) : (
-                <div className="grid gap-0 xl:min-h-[44rem] xl:grid-cols-[17rem_minmax(0,1fr)_15.5rem]">
+                <div className="grid gap-0 xl:min-h-[44rem] xl:grid-cols-[24rem_minmax(0,1fr)_21rem]">
                   <div className={`${showBrowserOnMobile ? "block" : "hidden"} min-w-0 xl:block`}>
                     <SceneBrowserPanel
                       isDark={isDark}
@@ -428,7 +465,7 @@ export default function ScenesPage() {
                   </div>
 
                   <div className="min-w-0 border-y xl:border-x xl:border-y-0" style={{ borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(216, 216, 216, 0.9)" }}>
-                    <div className="min-w-0 p-4 sm:p-5 xl:p-6">
+                    <div className="min-w-0 p-4 sm:p-5 xl:p-8">
                       <div className="grid gap-5">
                         <SceneMetadataForm
                           isDark={isDark}
@@ -478,15 +515,48 @@ export default function ScenesPage() {
                     <MetadataPreviewPanel
                       isDark={isDark}
                       metadataRows={metadataRows}
+                      sceneTitle={title.trim() || "Untitled scene"}
+                      sceneDescription={description.trim()}
+                      chapterNumber={chapterNumber}
+                      wordCount={sceneWordCount}
+                      readingTime={sceneReadingTime}
                       currentScenePath={currentScenePath}
+                      selectedSceneId={selectedSceneId}
                       structureTree={tree?.structure_tree ?? []}
                     />
                   </div>
                 </div>
               )}
             </section>
-          </main>
-        </div>
+        </main>
+
+        {selectionMenu ? (
+          <div
+            className="pointer-events-none fixed z-50 hidden -translate-x-1/2 xl:block"
+            style={{ top: selectionMenu.top, left: selectionMenu.left }}
+          >
+            <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => openAddCharacterFromSelection()}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-violet-700/30 text-violet-200" : "bg-violet-100 text-violet-800"}`}
+              >
+                Add as character
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <AddCharacterFromSelection
+          bookId={bookId}
+          selectedText={addCharacterText}
+          isDark={isDark}
+          firstChapter={chapterNumber ?? undefined}
+          open={addCharacterOpen}
+          onClose={() => setAddCharacterOpen(false)}
+          onCreated={handleCharacterCreated}
+        />
       </div>
     </div>
   )
@@ -505,23 +575,27 @@ function WorkspaceHeader({
   onNewScene: () => void
   onNewFolder: () => void
 }) {
+  const headerSecondaryClass = isDark
+    ? "!border-white/10 !bg-[#0d1917] !text-slate-100 hover:!border-white/15 hover:!bg-[#14231f]"
+    : undefined
+
   return (
-    <section className={`rounded-lg border px-5 py-5 sm:px-6 sm:py-6 ${isDark ? "border-white/10 bg-[#08111d]/84" : "border-white/70 bg-white/88"}`}>
-      <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-        <div className="min-w-0">
+    <section className={`flex min-h-[16.25rem] rounded-lg border px-5 py-6 sm:px-8 sm:py-6 ${isDark ? "border-white/10 bg-[#08111d]/84" : "border-white/70 bg-white/88"}`}>
+      <div className="flex w-full flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 xl:pt-6">
           <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>Scene workspace</p>
-          <h1 className="mt-3 font-serif text-3xl sm:text-[2.75rem]">{book?.title || "Manuscript"} scenes</h1>
-          <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+          <h1 className="mt-3 font-serif text-4xl leading-none sm:text-[3.85rem]">{book?.title || "Manuscript"} scenes</h1>
+          <p className={`mt-4 max-w-5xl text-sm leading-8 sm:text-base ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             Organize scenes with nested folders, move them between planning buckets, and keep metadata attached when you import them into the manuscript.
           </p>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2 xl:w-[31rem] xl:grid-cols-2">
           <ActionButton type="button" isDark={isDark} onClick={onNewScene}><IconSparkPlus />New scene</ActionButton>
-          <ActionButton type="button" variant="secondary" isDark={isDark} onClick={onNewFolder}><IconFolderPlus />New folder</ActionButton>
-          <ActionLink href={`/${bookId}/notes`} isDark={isDark}><IconNote />Open notes</ActionLink>
-          <ActionLink href={`/${bookId}/voice` as Route} isDark={isDark}><IconMic />Open voice workspace</ActionLink>
-          <ActionLink href={`/${bookId}/manuscript`} variant="secondary" isDark={isDark} className="sm:col-span-2"><IconBook />Open manuscript</ActionLink>
+          <ActionButton type="button" variant="secondary" isDark={isDark} onClick={onNewFolder} className={headerSecondaryClass}><IconFolderPlus />New folder</ActionButton>
+          <ActionLink href={`/${bookId}/notes`} isDark={isDark} className={headerSecondaryClass}><IconNote />Open notes</ActionLink>
+          <ActionLink href={`/${bookId}/voice` as Route} isDark={isDark} className={headerSecondaryClass}><IconMic />Open voice workspace</ActionLink>
+          <ActionLink href={`/${bookId}/manuscript`} variant="secondary" isDark={isDark} className={`sm:col-span-2 ${headerSecondaryClass ?? ""}`}><IconBook />Open manuscript</ActionLink>
         </div>
       </div>
     </section>
@@ -786,13 +860,13 @@ function SceneMetadataForm({
   }
 
   return (
-    <section className={`rounded-md border px-4 py-4 sm:px-5 sm:py-5 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
-      <div className="flex flex-col gap-1 border-b border-white/10 pb-4">
+    <section className={`rounded-md border px-4 py-6 sm:px-7 sm:py-8 ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
+      <div className="flex flex-col gap-2 border-b border-white/10 pb-7">
         <p className={sectionLabel(isDark)}>Scene metadata</p>
         <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Keep chapter assignment, folder path, POV, and planning notes aligned with the current draft.</p>
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
+      <div className="mt-8 grid gap-6 md:grid-cols-2">
         <Field label="Scene title" isDark={isDark}>
           <input value={title} onChange={(event) => onTitleChange(event.target.value)} className={inputClass(isDark)} placeholder="Scene title" />
         </Field>
@@ -806,17 +880,17 @@ function SceneMetadataForm({
         </Field>
       </div>
 
-      <div className="mt-4 grid gap-4">
+      <div className="mt-7 grid gap-6">
         <Field label="Folder path" isDark={isDark}>
           <input value={sceneFolderDraft} onChange={(event) => onSceneFolderDraftChange(event.target.value)} className={inputClass(isDark)} placeholder="scenes/act-1/opening" />
         </Field>
 
         <Field label="Description" isDark={isDark}>
-          <textarea value={description} onChange={(event) => onDescriptionChange(event.target.value)} className={`${inputClass(isDark)} min-h-[4.75rem] resize-y`} placeholder="Optional scene summary" />
+          <textarea value={description} onChange={(event) => onDescriptionChange(event.target.value)} className={`${inputClass(isDark)} min-h-[9rem] resize-y`} placeholder="Optional scene summary" />
         </Field>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-7 grid gap-7 lg:grid-cols-2">
         <Field label="POV character" isDark={isDark}>
           <input value={sceneMetadata.pov ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, pov: event.target.value || null }))} className={inputClass(isDark)} placeholder="Whose eyes are we in?" />
         </Field>
@@ -919,63 +993,107 @@ function SceneEditorPanel({
 function MetadataPreviewPanel({
   isDark,
   metadataRows,
+  sceneTitle,
+  sceneDescription,
+  chapterNumber,
+  wordCount,
+  readingTime,
   currentScenePath,
+  selectedSceneId,
   structureTree,
 }: {
   isDark: boolean
   metadataRows: Array<[string, unknown]>
+  sceneTitle: string
+  sceneDescription: string
+  chapterNumber: number | null
+  wordCount: number
+  readingTime: string
   currentScenePath: string | null
+  selectedSceneId: string | null
   structureTree: NonNullable<ManuscriptWorkspaceTree["structure_tree"]>
 }) {
+  const hierarchyPath = findWorkspaceStructurePath(structureTree, selectedSceneId, sceneTitle)
+  const displayHierarchyPath: StructureNode[] = hierarchyPath.length
+    ? hierarchyPath
+    : chapterNumber
+      ? [
+          { id: `chapter-${chapterNumber}`, label: `Chapter ${chapterNumber}`, kind: "chapter", chapter_number: chapterNumber, children: [] },
+          { id: selectedSceneId ?? "draft-scene", label: sceneTitle, kind: "scene", chapter_number: chapterNumber, scene_id: selectedSceneId, children: [] },
+        ]
+      : []
+  const summaryFromMetadata = metadataRows.find(([key]) => key === "summary")?.[1]
+  const summary = summaryFromMetadata ? formatMetadataValue(summaryFromMetadata) : sceneDescription
+  const detailRows: Array<[string, string]> = [
+    ["Chapter", chapterNumber ? `Chapter ${chapterNumber}` : "Unassigned"],
+    ["Words", `${wordCount.toLocaleString()} words`],
+    ["Read time", readingTime],
+    ...metadataRows
+      .filter(([key]) => key !== "summary")
+      .slice(0, 5)
+      .map(([key, value]) => [formatInspectorLabel(key), formatMetadataValue(value)] as [string, string]),
+  ]
+
   return (
     <aside className={`h-full min-w-0 p-4 sm:p-5 ${isDark ? "bg-[#07101c]" : "bg-stone-50/70"}`}>
-      <div className="space-y-4">
-        <PanelCard isDark={isDark} label="Metadata preview" title="Scene metadata">
-          {metadataRows.length === 0 ? (
-            <p className={`rounded-md border border-dashed px-4 py-6 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
-              Save labels such as POV, Location, Time, Characters, Goals, Conflict, Objects, Plot Threads, or Mood to populate this panel.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {metadataRows.map(([key, value]) => (
-                <div key={key} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{key.replaceAll("_", " ")}</p>
-                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{formatMetadataValue(value)}</p>
+      <div className={`rounded-md border ${isDark ? "border-white/10 bg-[#0b1421]" : "border-stone-200 bg-white"}`}>
+        <div className={`border-b px-4 py-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+          <p className={sectionLabel(isDark)}>Inspector</p>
+          <h2 className={`mt-1 truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{sceneTitle}</h2>
+          <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterNumber ? `Chapter ${chapterNumber}` : "No chapter assigned"}</p>
+        </div>
+
+        <div className="space-y-5 px-4 py-4">
+          <InspectorSection isDark={isDark} label="Summary">
+            {summary ? (
+              <p className={`max-h-36 overflow-hidden text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{summary}</p>
+            ) : (
+              <p className={`rounded-md border border-dashed px-3 py-4 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+                Add a description or summary to preview the scene here.
+              </p>
+            )}
+          </InspectorSection>
+
+          <InspectorSection isDark={isDark} label="Details">
+            <dl className="space-y-2.5">
+              {detailRows.map(([label, value]) => (
+                <div key={label} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
+                  <dt className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</dt>
+                  <dd className={`min-w-0 break-words text-right text-xs font-medium leading-5 ${isDark ? "text-slate-200" : "text-stone-800"}`}>{value}</dd>
                 </div>
               ))}
-            </div>
-          )}
-        </PanelCard>
+            </dl>
+          </InspectorSection>
 
-        <PanelCard isDark={isDark} label="Metadata note" title="Folder-aware metadata">
-          <p className={`rounded-md border px-4 py-4 text-sm leading-6 ${isDark ? "border-teal-400/18 bg-teal-400/10 text-teal-50" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
-            Scene files follow folder paths directly, so you can keep planning by act, chapter, POV, or any other structure that fits your process.
-          </p>
-        </PanelCard>
-
-        <PanelCard isDark={isDark} label="Scene file" title="Current file">
-          <div className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
-            <p className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
+          <InspectorSection isDark={isDark} label="File">
+            <p className={`break-words rounded-sm border px-3 py-3 text-xs leading-5 ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
               {currentScenePath ?? "Set a title to generate the scene filename."}
             </p>
-          </div>
-        </PanelCard>
+          </InspectorSection>
 
-        <PanelCard isDark={isDark} label="Story hierarchy" title="Current hierarchy">
-          {structureTree.length ? (
-            <div className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+          <InspectorSection isDark={isDark} label="Hierarchy">
+            {displayHierarchyPath.length ? (
               <div className="space-y-2">
-                {structureTree.map((node) => (
-                  <StructureTreePreview key={node.id} node={node} isDark={isDark} depth={0} />
+                {displayHierarchyPath.map((node, index) => (
+                  <StructureTreePreview
+                    key={`${node.id}-${index}`}
+                    node={node}
+                    isDark={isDark}
+                    isCurrent={index === displayHierarchyPath.length - 1}
+                  />
                 ))}
               </div>
-            </div>
-          ) : (
-            <p className={`rounded-md border border-dashed px-4 py-6 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
-              No hierarchy is available for this manuscript yet.
-            </p>
-          )}
-        </PanelCard>
+            ) : (
+              <p className={`rounded-md border border-dashed px-3 py-4 text-sm leading-6 ${isDark ? "border-white/10 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+                No hierarchy is available for this scene yet.
+              </p>
+            )}
+          </InspectorSection>
+
+          <p className={`border-t pt-4 text-xs leading-5 ${isDark ? "border-white/10 text-slate-500" : "border-stone-200 text-stone-500"}`}>
+            Folder paths stay attached when scenes move into the manuscript.
+          </p>
+        </div>
       </div>
     </aside>
   )
@@ -1047,6 +1165,23 @@ function PanelCard({
         {action}
       </div>
       <div className="mt-4">{children}</div>
+    </section>
+  )
+}
+
+function InspectorSection({
+  isDark,
+  label,
+  children,
+}: {
+  isDark: boolean
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <section>
+      <p className={`mb-2 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+      {children}
     </section>
   )
 }
@@ -1274,6 +1409,12 @@ function formatMetadataValue(value: unknown) {
   return String(value ?? "")
 }
 
+function formatInspectorLabel(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 function sectionLabel(isDark: boolean) {
   return `text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`
 }
@@ -1283,7 +1424,7 @@ function labelClass(isDark: boolean) {
 }
 
 function inputClass(isDark: boolean) {
-  return `w-full rounded-md border px-3 py-2.5 text-sm outline-none transition focus-visible:ring-2 ${
+  return `w-full rounded-md border px-4 py-4 text-sm outline-none transition focus-visible:ring-2 ${
     isDark
       ? "border-white/10 bg-[#040b15] text-slate-100 placeholder:text-slate-500 focus-visible:border-teal-300/30 focus-visible:ring-teal-300/20"
       : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus-visible:border-teal-400 focus-visible:ring-teal-200"
@@ -1373,22 +1514,19 @@ function IconBook() {
 function StructureTreePreview({
   node,
   isDark,
-  depth,
+  isCurrent,
 }: {
-  node: NonNullable<ManuscriptWorkspaceTree["structure_tree"]>[number]
+  node: StructureNode
   isDark: boolean
-  depth: number
+  isCurrent: boolean
 }) {
   return (
-    <div style={{ marginLeft: `${depth * 12}px` }}>
-      <p className={`text-sm ${isDark ? "text-slate-200" : "text-stone-700"}`}>{node.label}</p>
-      {node.children?.length ? (
-        <div className="mt-1 space-y-1">
-          {node.children.map((child) => (
-            <StructureTreePreview key={child.id} node={child} isDark={isDark} depth={depth + 1} />
-          ))}
-        </div>
-      ) : null}
+    <div className="flex min-w-0 items-start gap-2">
+      <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${isCurrent ? (isDark ? "bg-teal-300" : "bg-teal-600") : isDark ? "bg-slate-600" : "bg-stone-300"}`} />
+      <div className="min-w-0">
+        <p className={`truncate text-sm font-medium ${isCurrent ? (isDark ? "text-teal-50" : "text-teal-800") : isDark ? "text-slate-300" : "text-stone-700"}`}>{node.label}</p>
+        <p className={`mt-0.5 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-600" : "text-stone-400"}`}>{node.kind}</p>
+      </div>
     </div>
   )
 }

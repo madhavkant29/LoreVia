@@ -313,7 +313,7 @@ async def oauth_supabase(
 ):
     device_id = resolve_device_id_optional(request, body.device_id)
     if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
-        raise HTTPException(503, "Supabase OAuth is not configured")
+        raise HTTPException(503, "OAuth sign-in is not configured")
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             verification_response = await client.get(
@@ -325,27 +325,27 @@ async def oauth_supabase(
             )
     except httpx.HTTPError:
         log.exception("Supabase OAuth verification request failed")
-        raise HTTPException(503, "Supabase OAuth verification is unavailable")
+        raise HTTPException(503, "OAuth verification is temporarily unavailable")
 
     if verification_response.status_code != 200:
         log.warning(
             "Supabase OAuth verification failed: %s",
             verification_response.status_code,
         )
-        raise HTTPException(401, f"Invalid Supabase token ({verification_response.status_code})")
+        raise HTTPException(401, f"Invalid sign-in token ({verification_response.status_code})")
 
     try:
         sb_user = verification_response.json()
     except ValueError:
-        raise HTTPException(503, "Supabase OAuth verification returned invalid data")
+        raise HTTPException(503, "OAuth verification returned invalid data")
 
     email = normalize_email(sb_user.get("email", ""))
     if not email:
-        raise HTTPException(401, "Invalid Supabase token")
+        raise HTTPException(401, "Invalid sign-in token")
     try:
         supabase_auth_id = parse_auth_subject_uuid(sb_user.get("id"))
     except ValueError:
-        raise HTTPException(401, "Invalid Supabase token")
+        raise HTTPException(401, "Invalid sign-in token")
 
     try:
         existing = (
@@ -363,7 +363,7 @@ async def oauth_supabase(
                     "email": email,
                 },
             )
-            raise HTTPException(409, "This email is already linked to another Supabase identity.")
+            raise HTTPException(409, "This email is already linked to another account.")
         if not existing:
             raise HTTPException(
                 401,

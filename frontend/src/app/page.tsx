@@ -49,7 +49,7 @@ export const metadata: Metadata = {
   },
 }
 
-const fileFormats = ["DOCX", "PDF", "EPUB", "Markdown", "TXT", "Obsidian"]
+const fileFormats = ["DOCX", "PDF", "EPUB", "Markdown", "TXT", "Vault"]
 
 const featureStrip = [
   {

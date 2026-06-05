@@ -376,6 +376,7 @@ async def setup_db(setup_engine):
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(_drop_orphan_test_rowtypes)
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(_drop_orphan_test_rowtypes)
         await conn.run_sync(Base.metadata.create_all)

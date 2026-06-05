@@ -7,6 +7,7 @@ import type { ReactNode } from "react"
 import Link from "next/link"
 import type { Route } from "next"
 
+import { Skeleton } from "@/components/ui/Skeleton"
 import { booksApi } from "@/lib/api/books"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { asQueryKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
@@ -650,8 +651,12 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
           </WorkspaceCard>
 
           {loadingDocumentBody ? (
-            <div className={`rounded-lg border px-5 py-10 text-center ${panelClass(isDark)}`}>
-              <p className={`text-sm ${mutedTextClass(isDark)}`}>Loading document content...</p>
+            <div className={`rounded-lg border px-5 py-6 ${panelClass(isDark)}`} role="status" aria-label="Loading document content" aria-busy="true">
+              <span className="sr-only">Loading document content</span>
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="mt-4 h-4 w-full" />
+              <Skeleton className="mt-2 h-4 w-5/6" />
+              <Skeleton className="mt-2 h-4 w-2/3" />
             </div>
           ) : null}
 
@@ -1429,8 +1434,11 @@ function EmptyState({
 
 function LoadingState({ label, isDark }: { label: string; isDark: boolean }) {
   return (
-    <div className={`rounded-lg border border-dashed px-5 py-10 text-center ${isDark ? "border-white/10 bg-white/[0.02] text-slate-400" : "border-stone-300 bg-stone-50 text-stone-500"}`}>
-      {label}
+    <div className={`rounded-lg border border-dashed px-5 py-6 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-stone-300 bg-stone-50"}`} role="status" aria-label={label} aria-busy="true">
+      <span className="sr-only">{label}</span>
+      <Skeleton className="h-4 w-52 max-w-full" />
+      <Skeleton className="mt-3 h-3 w-full" />
+      <Skeleton className="mt-2 h-3 w-4/5" />
     </div>
   )
 }

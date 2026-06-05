@@ -164,7 +164,7 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
 
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
   await expect(page.getByText("Upcoming Beta Reads")).toBeVisible()
-  await expect(page.getByText("Complete reviews before the deadline.")).toBeVisible()
+  await expect(page.getByText("Complete reviews before the deadline")).toBeVisible()
   await expect(page.getByText("Chapter 12 feedback - Seraphina Vale")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.getByRole("button", { name: /^new project$/i }).click()
@@ -181,17 +181,26 @@ test("settings page updates the public username", async ({ page }) => {
   await page.getByRole("button", { name: /change username/i }).click()
 
   await expect(page.getByText("Public username updated.")).toBeVisible()
-  await expect(page.getByText("@storysmith")).toBeVisible()
+  await expect(page.locator("#identity").getByText("@storysmith")).toBeVisible()
 })
 
 test("settings page updates promotional email preferences", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/settings")
 
-  await expect(page.getByText("Control promotional LoreVia emails")).toBeVisible()
+  await expect(page.getByText("LoreVia emails")).toBeVisible()
   await page.getByRole("button", { name: /Product updates/i }).click()
 
   await expect(page.getByText("Email preferences updated.")).toBeVisible()
+})
+
+test("settings sidebar follows the current section while scrolling", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/settings")
+
+  await expect(page.getByRole("link", { name: "Account" })).toHaveAttribute("aria-current", "location")
+  await page.locator("#session").scrollIntoViewIfNeeded()
+  await expect(page.getByRole("link", { name: "Session" })).toHaveAttribute("aria-current", "location")
 })
 
 test("author uploads default the manuscript byline from the public username", async ({ page }) => {
@@ -250,6 +259,15 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(sidebarRail).toBeVisible()
   await sidebarRail.hover()
   await expect(sidebarRail.locator('[data-testid="author-nav-helper-overview"]')).toContainText("See progress, next steps, and the latest signals around this book.")
+  await expect(sidebarRail.locator('[data-testid="author-nav-item-scenes"]')).toContainText("Scene Workspace")
+  await expect(sidebarRail.locator('[data-testid="author-nav-item-notes"]')).toContainText("Notes Workspace")
+  await expect.poll(async () => {
+    return sidebarRail.evaluate((rail) => {
+      const scenes = rail.querySelector('[data-testid="author-nav-item-scenes"]')
+      const notes = rail.querySelector('[data-testid="author-nav-item-notes"]')
+      return Boolean(scenes && notes && scenes.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+  }).toBe(true)
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -298,7 +316,85 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await expect(page.getByPlaceholder("Search chapters")).toBeVisible()
   await expect(page.getByRole("link", { name: /open workspace/i })).toBeVisible()
+  const workspaceModes = page.getByRole("tablist", { name: "Manuscript workspace modes" })
+  await expect(workspaceModes.getByRole("tab", { name: "Write" })).toBeVisible()
+  await expect(workspaceModes.getByRole("tab", { name: "Plan" })).toBeVisible()
+  await expect(workspaceModes.getByRole("tab", { name: "Analysis" })).toBeVisible()
+  await expect(workspaceModes.getByRole("tab", { name: "Characters" })).toHaveCount(0)
   await expect(page.getByText(/^Gate Crossing$/)).toBeVisible()
+  await workspaceModes.getByRole("tab", { name: "Plan" }).click()
+  await expect(page.getByRole("spinbutton", { name: "Chapter target words" })).toHaveValue("2500")
+  await expect(page.getByRole("spinbutton", { name: "Book target words" })).toHaveValue("90000")
+  await expect(page.getByRole("spinbutton", { name: "Session target words" })).toHaveValue("800")
+  await expect(page.getByText("No manual chapter snapshots yet.")).toBeVisible()
+  await page.getByRole("button", { name: "Use template" }).first().click()
+  await expect(page.getByRole("heading", { name: "Use or customize template" })).toBeVisible()
+  await expect(page.getByRole("radio", { name: /chapter note/i })).toBeChecked()
+  await expect(page.getByRole("radio", { name: /corkboard card/i })).toBeVisible()
+  await expect(page.getByRole("radio", { name: /draft outline block/i })).toBeVisible()
+  await page.getByRole("button", { name: "Close" }).click()
+  await workspaceModes.getByRole("tab", { name: "Analysis" }).click()
+  const analysisPanels = page.getByRole("tablist", { name: "Analysis workspace panels" })
+  await expect(analysisPanels.getByRole("tab", { name: "Insights" })).toBeVisible()
+  await expect(analysisPanels.getByRole("tab", { name: "Characters" })).toBeVisible()
+})
+
+test("manuscript workspace removes a chapter from the editor rail", async ({ page }) => {
+  await installMockApi(page)
+  const deleteRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/books/book-1/chapters/2") && request.method() === "DELETE") {
+      deleteRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+  const removeChapterButton = page.getByRole("button", { name: "Remove Chapter 2" })
+  await expect(removeChapterButton).toBeVisible()
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Remove Chapter 2?")
+    await dialog.accept()
+  })
+  await removeChapterButton.click()
+
+  await expect(page.getByRole("button", { name: "Remove Chapter 2" })).toHaveCount(0)
+  await expect(page.getByText(/^Gate Crossing$/)).toHaveCount(0)
+  await expect(page.locator('input[value="3. River of Glass"]')).toBeVisible()
+  expect(deleteRequests).toHaveLength(1)
+})
+
+test("chapter navigator removes a chapter after confirmation", async ({ page }) => {
+  await installMockApi(page)
+  const deleteRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/books/book-1/chapters/2") && request.method() === "DELETE") {
+      deleteRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/chapters`)
+  const chapterRow = page.locator("article").filter({ hasText: "The Ember Gate" })
+  await expect(chapterRow).toContainText("The Ember Gate")
+  await chapterRow.scrollIntoViewIfNeeded()
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Remove Chapter 2?")
+    await dialog.dismiss()
+  })
+  await chapterRow.getByRole("button", { name: "Remove" }).click()
+  await expect(chapterRow).toContainText("The Ember Gate")
+  expect(deleteRequests).toHaveLength(0)
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Remove Chapter 2?")
+    await dialog.accept()
+  })
+  await chapterRow.getByRole("button", { name: "Remove" }).click()
+  await expect(page.getByRole("status")).toContainText("Chapter 2 removed.")
+  await expect(chapterRow).toHaveCount(0)
+  await expect(page.locator("article").filter({ hasText: "River of Glass" })).toContainText("River of Glass")
+  expect(deleteRequests).toHaveLength(1)
 })
 
 test("manuscript reprocess requires confirmation before consuming an upload", async ({ page }) => {
@@ -349,6 +445,25 @@ test("manuscript workspace switches into paged preview for chapter and full-book
   await page.getByRole("button", { name: "Full book" }).click()
   await expect(page.getByText("Read-only paged preview")).toBeVisible()
   await expect(page.getByText("Page 1 of")).toBeVisible()
+  await expect.poll(async () => {
+    const raw = await previewShell.getAttribute("data-preview-page-count")
+    return Number(raw ?? "0")
+  }).toBeGreaterThan(1)
+  await expect.poll(async () => {
+    return previewShell.evaluate((node) => Math.round(node.getBoundingClientRect().width))
+  }).toBeLessThanOrEqual(830)
+  await expect.poll(async () => {
+    return previewShell.evaluate((node) => window.getComputedStyle(node).backgroundColor)
+  }).not.toBe("rgb(5, 7, 10)")
+
+  await previewShell.evaluate((node) => {
+    const pointerId = 1
+    node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, button: 0, clientX: 700 }))
+    node.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, button: 0, clientX: 120 }))
+    node.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, button: 0, clientX: 120 }))
+  })
+
+  await expect(page.getByText("Page 2 of")).toBeVisible()
 })
 
 test("manuscript workspace reorders chapter scenes within the sidebar", async ({ page }) => {

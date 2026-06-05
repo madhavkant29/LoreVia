@@ -331,17 +331,17 @@ export interface ManuscriptAnnotation {
   updated_at: string
 }
 
-export interface ObsidianPreviewFile {
+export interface VaultPreviewFile {
   path: string
   content: string
 }
 
-export interface ObsidianPreview {
+export interface VaultPreview {
   root_folder: string
-  files: ObsidianPreviewFile[]
+  files: VaultPreviewFile[]
 }
 
-export interface ObsidianVaultNote {
+export interface VaultNote {
   id: string
   book_id: string
   path: string
@@ -351,7 +351,7 @@ export interface ObsidianVaultNote {
   updated_at: string
 }
 
-export interface ObsidianVaultNoteSaveResult {
+export interface VaultNoteSaveResult {
   path: string
   source: string
   content: string
@@ -360,7 +360,7 @@ export interface ObsidianVaultNoteSaveResult {
   updated_at: string | null
 }
 
-export interface ObsidianNoteLink {
+export interface VaultNoteLink {
   id: string
   book_id: string
   source_note_id: string
@@ -372,7 +372,7 @@ export interface ObsidianNoteLink {
   created_at: string
 }
 
-export interface ObsidianNoteTag {
+export interface VaultNoteTag {
   id: string
   book_id: string
   note_id: string
@@ -381,7 +381,7 @@ export interface ObsidianNoteTag {
   created_at: string
 }
 
-export interface ObsidianNoteSeriesLink {
+export interface VaultNoteSeriesLink {
   id: string
   series_id: string
   source_book_id: string
@@ -394,14 +394,14 @@ export interface ObsidianNoteSeriesLink {
   created_at: string
 }
 
-export interface ObsidianNoteRelations {
-  links: ObsidianNoteLink[]
-  backlinks: ObsidianNoteLink[]
-  tags: ObsidianNoteTag[]
-  series_links: ObsidianNoteSeriesLink[]
+export interface VaultNoteRelations {
+  links: VaultNoteLink[]
+  backlinks: VaultNoteLink[]
+  tags: VaultNoteTag[]
+  series_links: VaultNoteSeriesLink[]
 }
 
-export interface ObsidianGraphNode {
+export interface VaultGraphNode {
   id: string
   path: string
   title: string
@@ -409,15 +409,15 @@ export interface ObsidianGraphNode {
   link_count: number
 }
 
-export interface ObsidianGraphEdge {
+export interface VaultGraphEdge {
   source: string
   target: string
   label?: string | null
 }
 
-export interface ObsidianGraph {
-  nodes: ObsidianGraphNode[]
-  edges: ObsidianGraphEdge[]
+export interface VaultGraph {
+  nodes: VaultGraphNode[]
+  edges: VaultGraphEdge[]
 }
 
 export interface UserStats {

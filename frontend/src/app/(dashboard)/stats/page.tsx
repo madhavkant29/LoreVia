@@ -40,7 +40,7 @@ export default function StatsPage() {
               <h1 className="mt-4 max-w-[700px] font-display text-[3rem] leading-[0.94] tracking-[-0.06em] text-stone-950 dark:text-[#f3ede4] sm:text-[4rem]">
                 Writing momentum,
                 <br className="hidden sm:block" />
-                not just account totals.
+                {" "}not just account totals.
               </h1>
               <p className="mt-5 max-w-[620px] text-[1.02rem] leading-8 text-stone-600 dark:text-slate-300">
                 Track your writing output across time, see how your habits compound, and stay aligned with your goals.

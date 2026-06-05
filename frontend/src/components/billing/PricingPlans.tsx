@@ -163,11 +163,16 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           </div>
 
           <div className="flex flex-col items-start gap-3 lg:items-end">
-            <div className={`inline-flex w-fit items-center rounded-md border p-1 ${toggleShellClass}`}>
+            <div
+              className={`inline-flex w-fit items-center rounded-md border p-1 ${toggleShellClass}`}
+              role="group"
+              aria-label="Billing cadence"
+            >
               {(["monthly", "annual"] as const).map((cycle) => (
                 <button
                   key={cycle}
                   type="button"
+                  aria-pressed={billingCycle === cycle}
                   onClick={() => setBillingCycle(cycle)}
                   className={`rounded-sm px-6 py-2.5 text-sm font-semibold transition ${
                     billingCycle === cycle

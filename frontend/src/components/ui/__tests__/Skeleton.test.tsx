@@ -4,7 +4,15 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { Skeleton } from "../Skeleton"
+import {
+  CardSkeleton,
+  DashboardSkeleton,
+  EditorSkeleton,
+  MetricCardSkeleton,
+  RowSkeleton,
+  SidebarSkeleton,
+  Skeleton,
+} from "../Skeleton"
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -112,5 +120,33 @@ describe("Skeleton", () => {
     const el = renderSkeleton("text")
 
     expect(el?.tagName).toBe("DIV")
+  })
+
+  it("marks primitive skeleton blocks as decorative", () => {
+    const el = renderSkeleton("text")
+
+    expect(el?.getAttribute("aria-hidden")).toBe("true")
+  })
+
+  it("exports layout skeleton primitives", () => {
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+
+    act(() => {
+      root?.render(
+        <div>
+          <CardSkeleton />
+          <RowSkeleton />
+          <MetricCardSkeleton />
+          <SidebarSkeleton />
+          <EditorSkeleton />
+          <DashboardSkeleton />
+        </div>,
+      )
+    })
+
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(10)
+    expect(container.querySelector('[role="status"]')?.getAttribute("aria-busy")).toBe("true")
   })
 })

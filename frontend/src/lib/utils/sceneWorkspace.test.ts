@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildSceneChapterOptions,
   extractChapterNumberFromSceneFolder,
+  findWorkspaceStructurePath,
   moveSceneIdToIndex,
   parseStoredSceneFolders,
   reorderSceneIds,
@@ -42,6 +43,68 @@ describe("scene workspace utilities", () => {
   it("returns an empty list for invalid stored scene folders", () => {
     expect(parseStoredSceneFolders("{bad json")).toEqual([])
     expect(parseStoredSceneFolders('{"folder":"scenes"}')).toEqual([])
+  })
+
+  it("finds the current scene path from the workspace structure by scene id", () => {
+    const path = findWorkspaceStructurePath(
+      [
+        {
+          id: "book-1",
+          label: "Book",
+          kind: "book",
+          children: [
+            {
+              id: "chapter-1",
+              label: "Chapter 1",
+              kind: "chapter",
+              chapter_number: 1,
+              children: [
+                {
+                  id: "scene-1",
+                  label: "Opening",
+                  kind: "scene",
+                  chapter_number: 1,
+                  scene_id: "scene-1",
+                  children: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      "scene-1",
+      "Draft title"
+    )
+
+    expect(path.map((node) => node.label)).toEqual(["Book", "Chapter 1", "Opening"])
+  })
+
+  it("finds an unsaved scene path by title when no scene id is selected", () => {
+    const path = findWorkspaceStructurePath(
+      [
+        {
+          id: "book-1",
+          label: "Book",
+          kind: "book",
+          children: [
+            {
+              id: "scene-draft",
+              label: "Untitled scene",
+              kind: "scene",
+              children: [],
+            },
+          ],
+        },
+      ],
+      null,
+      "Untitled scene"
+    )
+
+    expect(path.map((node) => node.id)).toEqual(["book-1", "scene-draft"])
+  })
+
+  it("returns an empty structure path when the scene is not in the hierarchy", () => {
+    expect(findWorkspaceStructurePath([], "missing-scene", "Missing")).toEqual([])
   })
 
   it("reorders scene ids within a chapter sequence", () => {

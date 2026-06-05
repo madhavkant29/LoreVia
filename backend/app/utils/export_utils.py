@@ -61,18 +61,18 @@ def _apply_pdf_metadata(canvas: Any, *, title: str, author: str = "LoreVia", sub
         canvas.setCreator("LoreVia")
 
 
-def _obsidian_note_title(value: object | None) -> str:
+def _vault_note_title(value: object | None) -> str:
     cleaned = _clean_line(value)
     return cleaned or "Untitled"
 
 
-def _obsidian_safe_name(value: object | None) -> str:
-    cleaned = _obsidian_note_title(value)
+def _vault_safe_name(value: object | None) -> str:
+    cleaned = _vault_note_title(value)
     safe = "".join(ch for ch in cleaned if ch.isalnum() or ch in {" ", "-", "_", "(", ")"}).strip()
     return safe or "Untitled"
 
 
-def _obsidian_link(title: str) -> str:
+def _vault_link(title: str) -> str:
     return f"[[{title}]]"
 
 
@@ -100,7 +100,7 @@ def _build_link_targets(characters: list[Character]) -> dict[str, str]:
     for char in characters:
         if not char.name:
             continue
-        title = _obsidian_note_title(char.name)
+        title = _vault_note_title(char.name)
         targets.setdefault(_normalize_lookup(char.name), title)
         for alias in char.aliases or []:
             alias_key = _normalize_lookup(alias)
@@ -148,14 +148,14 @@ def _character_names_from_values(
 
 
 def _major_event_path(root_folder: str, title: str) -> str:
-    return f"{root_folder}/Major Events/{_obsidian_safe_name(title)}.md"
+    return f"{root_folder}/Major Events/{_vault_safe_name(title)}.md"
 
 
 def _plot_thread_path(root_folder: str, title: str) -> str:
-    return f"{root_folder}/Plot Threads/{_obsidian_safe_name(title)}.md"
+    return f"{root_folder}/Plot Threads/{_vault_safe_name(title)}.md"
 
 
-def _dedupe_obsidian_path(path: str, used_paths: set[str]) -> str:
+def _dedupe_vault_path(path: str, used_paths: set[str]) -> str:
     if path not in used_paths:
         used_paths.add(path)
         return path
@@ -320,7 +320,7 @@ def _obj_value(obj: object, key: str, default: object = None) -> object:
     return getattr(obj, key, default)
 
 
-def _build_obsidian_manifest(
+def _build_vault_manifest(
     *,
     book: Book,
     characters: list[Character],
@@ -343,25 +343,25 @@ def _build_obsidian_manifest(
         return _linkify_text(text, link_targets, skip=skip)
 
     def add_file(path: str, content: str) -> None:
-        files.append({"path": _dedupe_obsidian_path(path, used_paths), "content": _append_export_attribution(content)})
+        files.append({"path": _dedupe_vault_path(path, used_paths), "content": _append_export_attribution(content)})
 
     files: list[dict[str, str]] = []
     used_paths: set[str] = set()
     character_keys = {str(char.id): _character_reference_keys(char) for char in characters}
-    character_note_paths = {char.name: f"{root_folder}/Characters/{_obsidian_safe_name(char.name)}.md" for char in characters if char.name}
+    character_note_paths = {char.name: f"{root_folder}/Characters/{_vault_safe_name(char.name)}.md" for char in characters if char.name}
     chapter_lookup = {int(row["number"]): row for row in chapter_rows if row.get("number") is not None}
     event_paths = {
-        _obsidian_note_title(event["title"]): _major_event_path(root_folder, _obsidian_note_title(event["title"]))
+        _vault_note_title(event["title"]): _major_event_path(root_folder, _vault_note_title(event["title"]))
         for event in chapter_events
     }
     thread_paths = {
-        _obsidian_note_title(_obj_value(thread, "title")): _plot_thread_path(root_folder, _obsidian_note_title(_obj_value(thread, "title")))
+        _vault_note_title(_obj_value(thread, "title")): _plot_thread_path(root_folder, _vault_note_title(_obj_value(thread, "title")))
         for thread in plot_threads
         if _clean_line(_obj_value(thread, "title"))
     }
 
     for char in characters:
-        char_name = _obsidian_note_title(char.name)
+        char_name = _vault_note_title(char.name)
         relationship_lines = dedupe_preserve_order(rel_summaries.get(str(char.id), []))
         description = _clean_line(build_description(char.trait_state or {}, char.archetype))
         if relationship_lines:
@@ -415,7 +415,7 @@ def _build_obsidian_manifest(
         if continuity_watch:
             char_lines.extend(["## Continuity Watch", "", *[f"- {item}" for item in continuity_watch], ""])
 
-        add_file(f"{root_folder}/Characters/{_obsidian_safe_name(char_name)}.md", "\n".join(char_lines))
+        add_file(f"{root_folder}/Characters/{_vault_safe_name(char_name)}.md", "\n".join(char_lines))
 
     relationship_index_lines = [
         "# Relationship Map",
@@ -424,8 +424,8 @@ def _build_obsidian_manifest(
         "| --- | --- | --- | --- | --- |",
     ]
     for rel in relationships:
-        a_name = _obsidian_note_title(_obj_value(rel, "character_a_name") or characters_by_id.get(str(_obj_value(rel, "character_a_id") or ""), "Unknown"))
-        b_name = _obsidian_note_title(_obj_value(rel, "character_b_name") or characters_by_id.get(str(_obj_value(rel, "character_b_id") or ""), "Unknown"))
+        a_name = _vault_note_title(_obj_value(rel, "character_a_name") or characters_by_id.get(str(_obj_value(rel, "character_a_id") or ""), "Unknown"))
+        b_name = _vault_note_title(_obj_value(rel, "character_b_name") or characters_by_id.get(str(_obj_value(rel, "character_b_id") or ""), "Unknown"))
         rel_type = _clean_line(str(_obj_value(rel, "rel_type") or "neutral")).replace("_", " ").title()
         chapter_range = f"{_format_story_label(book, _to_int(_obj_value(rel, 'from_chapter') or 0) or None)}"
         if _obj_value(rel, "to_chapter"):
@@ -447,7 +447,7 @@ def _build_obsidian_manifest(
         ),
     )
     for thread in sorted_threads:
-        title = _obsidian_note_title(_obj_value(thread, "title"))
+        title = _vault_note_title(_obj_value(thread, "title"))
         notes = relink(cast(str | None, _obj_value(thread, "note")), skip=title)
         description = relink(cast(str | None, _obj_value(thread, "description")), skip=title)
         related_names = _character_names_from_values(_obj_value(thread, "character_ids") or [], characters, keys_by_character=character_keys)
@@ -459,7 +459,7 @@ def _build_obsidian_manifest(
         thread_start = _to_int(_obj_value(thread, "introduced_at") or 0)
         thread_end = _to_int(resolved or 0)
         for event in chapter_events:
-            event_title = _obsidian_note_title(event["title"])
+            event_title = _vault_note_title(event["title"])
             event_chapter = int(event.get("chapter_number") or 0)
             involved_names = _character_names_from_values(event.get("involved_characters"), characters, keys_by_character=character_keys)
             overlaps_characters = bool(set(involved_names) & set(related_names))
@@ -498,11 +498,11 @@ def _build_obsidian_manifest(
             lines.extend(["## Arc Pressure", "", "This thread stays active because it keeps redirecting character choices and raising continuity stakes across the manuscript.", ""])
         if connected_events:
             progression_lines = [
-                f"- {event_title}: tied to {title.lower()} during {_format_story_label(book, cast(int | None, next((event.get('chapter_number') for event in chapter_events if _obsidian_note_title(event['title']) == event_title), None)))}."
+                f"- {event_title}: tied to {title.lower()} during {_format_story_label(book, cast(int | None, next((event.get('chapter_number') for event in chapter_events if _vault_note_title(event['title']) == event_title), None)))}."
                 for event_title in connected_events[:6]
             ]
             lines.extend(["## Progression", "", *progression_lines, ""])
-        add_file(f"{root_folder}/Plot Threads/{_obsidian_safe_name(title)}.md", "\n".join(lines))
+        add_file(f"{root_folder}/Plot Threads/{_vault_safe_name(title)}.md", "\n".join(lines))
 
     wiki_groups: dict[str, list[object]] = defaultdict(list)
     for entry in wiki_entries:
@@ -518,7 +518,7 @@ def _build_obsidian_manifest(
             "event": "Events",
             "concept": "Concepts",
         }.get(entry_type, "Concepts")
-        name = _obsidian_note_title(_obj_value(entry, "name"))
+        name = _vault_note_title(_obj_value(entry, "name"))
         desc = relink(cast(str | None, _obj_value(entry, "description")))
         related_ids = _obj_value(entry, "related_char_ids")
         related_characters = _extract_related_character_names(related_ids, characters_by_id, link_targets)
@@ -533,7 +533,7 @@ def _build_obsidian_manifest(
             lines.extend([desc, ""])
         if related_characters:
             lines.extend(["## Related Characters", "", *[f"- {item}" for item in related_characters], ""])
-        add_file(f"{root_folder}/Wiki/{folder_name}/{_obsidian_safe_name(name)}.md", "\n".join(lines))
+        add_file(f"{root_folder}/Wiki/{folder_name}/{_vault_safe_name(name)}.md", "\n".join(lines))
 
     sorted_chapters = sorted(chapter_rows, key=lambda row: int(row["number"]))
     events_by_chapter: dict[int, list[dict]] = defaultdict(list)
@@ -545,7 +545,7 @@ def _build_obsidian_manifest(
         chapter_title = row.get("title") or story_unit_label(book, chapter_number)
         summary_text = relink(cast(str | None, row.get("content"))) or f"{story_unit_label(book, chapter_number)} moves the story forward, but LoreVia has not generated a full reading summary for it yet."
         key_events = events_by_chapter.get(chapter_number, [])
-        file_label = f"{story_unit_label(book, chapter_number)} - {_obsidian_safe_name(chapter_title)}"
+        file_label = f"{story_unit_label(book, chapter_number)} - {_vault_safe_name(chapter_title)}"
         lines = [
             f"# {story_unit_label(book, chapter_number)}",
             "",
@@ -570,7 +570,7 @@ def _build_obsidian_manifest(
         ),
     )
     for index, event in enumerate(sorted_events):
-        title = _obsidian_note_title(event["title"])
+        title = _vault_note_title(event["title"])
         previous_title = sorted_events[index - 1]["title"] if index > 0 else None
         next_title = sorted_events[index + 1]["title"] if index + 1 < len(sorted_events) else None
         chapter_number = cast(int | None, event["chapter_number"])
@@ -579,7 +579,7 @@ def _build_obsidian_manifest(
         involved = [relink(name, skip=title) for name in involved_names]
         related_threads: list[str] = []
         for thread in sorted_threads:
-            thread_title = _obsidian_note_title(_obj_value(thread, "title"))
+            thread_title = _vault_note_title(_obj_value(thread, "title"))
             thread_names = _character_names_from_values(_obj_value(thread, "character_ids") or [], characters, keys_by_character=character_keys)
             thread_start = _to_int(_obj_value(thread, "introduced_at") or 0)
             thread_end = _to_int(_obj_value(thread, "resolved_at") or 0)
@@ -626,19 +626,19 @@ def _build_obsidian_manifest(
             explanation_parts: list[str] = []
             if related_threads:
                 explanation_parts.append(
-                    f"This moment pushes {', '.join(_obsidian_link(thread_title) for thread_title in related_threads[:3])} into its next phase."
+                    f"This moment pushes {', '.join(_vault_link(thread_title) for thread_title in related_threads[:3])} into its next phase."
                 )
             if involved_names:
                 explanation_parts.append(
-                    f"It also changes the pressure around {', '.join(_obsidian_link(name) for name in involved_names[:3])}."
+                    f"It also changes the pressure around {', '.join(_vault_link(name) for name in involved_names[:3])}."
                 )
             lines.extend(["## Why It Matters", "", " ".join(explanation_parts), ""])
-        add_file(f"{root_folder}/Major Events/{_obsidian_safe_name(title)}.md", "\n".join(lines))
+        add_file(f"{root_folder}/Major Events/{_vault_safe_name(title)}.md", "\n".join(lines))
 
     return root_folder, files
 
 
-async def build_character_bible_obsidian_context(db, book_id) -> dict:
+async def build_character_bible_vault_context(db, book_id) -> dict:
     from sqlalchemy import select
 
     from app.engine.character.consolidator import consolidate_characters
@@ -1248,7 +1248,7 @@ def character_bible_docx(*, markdown: bytes, title: str) -> bytes:
     return buffer.getvalue()
 
 
-def character_bible_obsidian_manifest(
+def character_bible_vault_manifest(
     *,
     book: Book,
     characters: list[Character],
@@ -1260,7 +1260,7 @@ def character_bible_obsidian_manifest(
     rel_summaries: dict[str, list[str]],
     thread_summaries: dict[str, list[str]],
 ) -> tuple[str, list[dict[str, str]]]:
-    return _build_obsidian_manifest(
+    return _build_vault_manifest(
         book=book,
         characters=characters,
         relationships=relationships,
@@ -1273,7 +1273,7 @@ def character_bible_obsidian_manifest(
     )
 
 
-def _apply_obsidian_overrides(files: list[dict[str, str]], overrides: dict[str, str] | None) -> list[dict[str, str]]:
+def _apply_vault_overrides(files: list[dict[str, str]], overrides: dict[str, str] | None) -> list[dict[str, str]]:
     if not overrides:
         return files
     return [
@@ -1285,7 +1285,7 @@ def _apply_obsidian_overrides(files: list[dict[str, str]], overrides: dict[str, 
     ]
 
 
-def character_bible_obsidian_folder(
+def character_bible_vault_folder(
     *,
     book: Book,
     characters: list[Character],
@@ -1301,7 +1301,7 @@ def character_bible_obsidian_folder(
     from io import BytesIO
     from zipfile import ZIP_DEFLATED, ZipFile
 
-    root_folder, files = character_bible_obsidian_manifest(
+    root_folder, files = character_bible_vault_manifest(
         book=book,
         characters=characters,
         relationships=relationships,
@@ -1312,7 +1312,7 @@ def character_bible_obsidian_folder(
         rel_summaries=rel_summaries,
         thread_summaries=thread_summaries,
     )
-    files = _apply_obsidian_overrides(files, overrides)
+    files = _apply_vault_overrides(files, overrides)
 
     buffer = BytesIO()
     with ZipFile(buffer, "w", ZIP_DEFLATED) as zipf:
@@ -1322,7 +1322,7 @@ def character_bible_obsidian_folder(
     return buffer.getvalue(), root_folder.replace("LoreVia Export - ", "")
 
 
-def character_bible_obsidian_preview(
+def character_bible_vault_preview(
     *,
     book: Book,
     characters: list[Character],
@@ -1335,7 +1335,7 @@ def character_bible_obsidian_preview(
     thread_summaries: dict[str, list[str]],
     overrides: dict[str, str] | None = None,
 ) -> dict:
-    root_folder, files = character_bible_obsidian_manifest(
+    root_folder, files = character_bible_vault_manifest(
         book=book,
         characters=characters,
         relationships=relationships,
@@ -1346,7 +1346,7 @@ def character_bible_obsidian_preview(
         rel_summaries=rel_summaries,
         thread_summaries=thread_summaries,
     )
-    files = _apply_obsidian_overrides(files, overrides)
+    files = _apply_vault_overrides(files, overrides)
     return {
         "root_folder": root_folder,
         "files": files,
@@ -1361,7 +1361,7 @@ def _manuscript_export_preset(preset: str) -> dict[str, Any]:
             "docx_font_size": 11,
             "pdf_page_size": "LETTER",
             "pdf_margins": (0.88, 0.75, 0.8, 0.8),
-            "title": "Amazon KDP paperback",
+            "title": "6×9 print paperback",
         }
     if normalized == "trade_paperback":
         return {
@@ -2042,7 +2042,7 @@ def manuscript_epub_compiled(
             return handle.read()
 
 
-def manuscript_obsidian_vault_zip(
+def manuscript_vault_zip(
     *,
     title: str,
     chapters: list[dict],

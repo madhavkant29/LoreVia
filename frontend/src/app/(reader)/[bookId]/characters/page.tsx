@@ -18,6 +18,7 @@ import { CharacterProfileTabs, type CharacterProfileTab } from "@/components/rea
 import { CharacterWorkspaceHeader } from "@/components/reader/CharacterWorkspaceHeader"
 import { CharacterWorkspaceSidebarHeader } from "@/components/reader/CharacterWorkspaceSidebarHeader"
 import { FirstTimeTooltip } from "@/components/tooltips/FirstTimeTooltip"
+import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 import type { Book } from "@/types/book"
 import type {
   Character,
@@ -36,8 +37,17 @@ const RelationshipGraph = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex min-h-[32rem] items-center justify-center rounded-lg border border-dashed text-sm text-inherit">
-        Loading relationship graph...
+      <div className="min-h-[32rem] rounded-lg border border-dashed p-5" role="status" aria-label="Loading relationship graph" aria-busy="true">
+        <span className="sr-only">Loading relationship graph</span>
+        <Skeleton className="h-4 w-40" />
+        <div className="relative mt-8 h-80">
+          <Skeleton variant="circle" className="absolute left-[12%] top-[18%] h-14 w-14" />
+          <Skeleton variant="circle" className="absolute left-[38%] top-[8%] h-10 w-10" />
+          <Skeleton variant="circle" className="absolute left-[52%] top-[44%] h-16 w-16" />
+          <Skeleton variant="circle" className="absolute right-[16%] top-[24%] h-12 w-12" />
+          <Skeleton className="absolute left-[20%] top-[34%] h-px w-52 rotate-12" />
+          <Skeleton className="absolute left-[50%] top-[50%] h-px w-44 -rotate-12" />
+        </div>
       </div>
     ),
   }
@@ -663,6 +673,54 @@ function ShellIcon({
       <path d="M6.25 5.5h7.5M6.25 9.5h7.5M6.25 13.5h4.5" strokeLinecap="round" />
       <path d="m13 13 3 3m0-3-3 3" strokeLinecap="round" />
     </svg>
+  )
+}
+
+function CharacterBibleSkeleton({ isDark, atmosphere }: { isDark: boolean; atmosphere: string }) {
+  const panelClass = isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/85"
+
+  return (
+    <div className={`min-h-screen ${atmosphere}`}>
+      <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8" role="status" aria-label="Loading Character Bible" aria-busy="true">
+        <span className="sr-only">Loading Character Bible</span>
+        <section className={`rounded-lg border p-5 ${panelClass}`}>
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="mt-4 h-9 w-64 max-w-full" />
+              <Skeleton className="mt-3 h-4 w-full max-w-2xl" />
+            </div>
+            <div className="grid w-full grid-cols-2 gap-3 md:grid-cols-4 xl:max-w-xl">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-20 rounded-md" />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)_18rem]">
+          <SidebarSkeleton className={panelClass} />
+          <div className="space-y-5">
+            <CardSkeleton className={panelClass} />
+            <div className="grid gap-4 md:grid-cols-2">
+              <CardSkeleton className={panelClass} />
+              <CardSkeleton className={panelClass} />
+            </div>
+            <div className={`rounded-md border p-4 ${panelClass}`}>
+              <Skeleton className="h-4 w-32" />
+              <div className="mt-4 space-y-3">
+                <RowSkeleton />
+                <RowSkeleton />
+              </div>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <CardSkeleton className={panelClass} />
+            <CardSkeleton className={panelClass} />
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -2114,15 +2172,7 @@ export default function CharactersPage() {
           : `${filteredChars.length} characters`
 
   if (loading) {
-    return (
-      <div className={`min-h-screen ${atmosphere}`}>
-        <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">
-          <div className={`rounded-lg border p-6 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white/85 text-stone-600"}`}>
-            Loading the Character Bible...
-          </div>
-        </div>
-      </div>
-    )
+    return <CharacterBibleSkeleton isDark={isDark} atmosphere={atmosphere} />
   }
 
   return (

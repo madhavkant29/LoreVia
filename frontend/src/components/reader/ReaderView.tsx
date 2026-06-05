@@ -10,6 +10,7 @@ import { ReaderQuickRail } from "./ReaderQuickRail"
 import { ReadingProgressRail } from "./ReadingProgressRail"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { ReaderDisplayStyle } from "@/types/reader"
+import { Skeleton } from "@/components/ui/Skeleton"
 
 interface Props { bookId: string; chapterNum: number }
 type ReaderTheme = "light" | "dark"
@@ -206,15 +207,7 @@ export function ReaderView({ bookId, chapterNum }: Props) {
   const showMobileSheet = canUseQuoteMode && (hasActiveContext || contextLoading)
 
   if (loading) {
-    return (
-      <div className="reader-display-shell flex min-h-[100dvh] items-center justify-center bg-[#080d17] px-6 text-slate-300">
-        <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.03] px-8 py-10 text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-teal-300/40 border-t-teal-200" />
-          <p className="mt-5 text-sm uppercase tracking-[0.22em] text-slate-500">Reader</p>
-          <p className="mt-3 text-lg text-slate-100">Loading chapter...</p>
-        </div>
-      </div>
-    )
+    return <ReaderChapterSkeleton />
   }
 
   if (error || !data) {
@@ -340,4 +333,63 @@ function countWords(text: string): number {
   const normalized = text.replace(/\[\[IMAGE:[^\]]+\]\]/g, " ")
   const matches = normalized.match(/\b[\p{L}\p{N}']+\b/gu)
   return matches?.length ?? 0
+}
+
+function ReaderChapterSkeleton() {
+  return (
+    <div className="reader-display-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden bg-[#070c16] text-stone-100" role="status" aria-label="Loading chapter" aria-busy="true">
+      <span className="sr-only">Loading chapter</span>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="reader-app-chrome sticky top-0 z-20 shrink-0 border-b border-white/8 bg-[#070d18]/96">
+          <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8 xl:px-10">
+            <div className="flex items-center justify-between gap-4">
+              <Skeleton className="h-10 w-[154px] rounded-md bg-white/10" />
+              <div className="hidden items-center gap-3 md:flex">
+                <Skeleton className="h-11 w-28 rounded-md bg-white/10" />
+                <Skeleton className="h-11 w-24 rounded-md bg-white/10" />
+                <Skeleton className="h-11 w-24 rounded-md bg-white/10" />
+              </div>
+              <Skeleton className="h-10 w-20 rounded-md bg-white/10 md:hidden" />
+            </div>
+            <div>
+              <Skeleton className="h-4 w-72 max-w-full bg-white/10" />
+              <div className="mt-2.5 flex items-center gap-4">
+                <Skeleton className="h-1 w-full rounded-full bg-white/10" />
+                <Skeleton className="h-4 w-9 bg-white/10" />
+              </div>
+            </div>
+          </div>
+        </header>
+        <div className="border-b border-white/8 bg-[#0b1120]/94">
+          <div className="mx-auto flex w-full max-w-[1620px] flex-wrap gap-3 px-4 py-3 sm:px-6 lg:px-8 xl:px-10">
+            <Skeleton className="h-10 w-44 rounded-md bg-white/10" />
+            <Skeleton className="h-10 w-64 rounded-md bg-white/10" />
+            <Skeleton className="h-10 w-48 rounded-md bg-white/10" />
+          </div>
+        </div>
+        <main className="reader-scrollbar min-h-0 flex-1 overflow-y-auto bg-[#071211]">
+          <div className="mx-auto w-full max-w-[1620px] px-4 pb-12 pt-4 sm:px-6 lg:px-8 xl:px-10">
+            <div className="grid gap-6 xl:grid-cols-[64px_minmax(0,1fr)_88px] xl:items-start">
+              <div className="hidden space-y-3 xl:block">
+                <Skeleton className="h-12 w-12 rounded-md bg-white/10" />
+                <Skeleton className="h-12 w-12 rounded-md bg-white/10" />
+              </div>
+              <article className="mx-auto w-full max-w-[72ch] rounded-md border border-white/10 bg-white/[0.03] px-5 py-8 sm:px-8">
+                <Skeleton className="h-8 w-2/3 bg-white/10" />
+                <div className="mt-8 space-y-4">
+                  {Array.from({ length: 12 }).map((_, index) => (
+                    <Skeleton key={index} className={`h-5 bg-white/10 ${index % 4 === 3 ? "w-4/5" : "w-full"}`} />
+                  ))}
+                </div>
+              </article>
+              <div className="hidden space-y-3 xl:block">
+                <Skeleton className="h-24 w-full rounded-md bg-white/10" />
+                <Skeleton className="h-36 w-full rounded-md bg-white/10" />
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  )
 }

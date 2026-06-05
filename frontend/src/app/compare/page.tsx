@@ -97,6 +97,12 @@ export default function CompareIndexPage() {
             ))}
           </div>
         </section>
+
+        <section className="mx-auto max-w-7xl px-5 pb-24 md:px-8">
+          <p className="text-xs leading-6 text-[#4a5a54]">
+            All product names, logos, and brands are property of their respective owners. Comparison is for informational purposes only and reflects LoreVia&apos;s perspective. Feature availability may change over time.
+          </p>
+        </section>
       </main>
     </>
   )

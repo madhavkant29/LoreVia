@@ -1,6 +1,6 @@
 "use client"
 
-import type { CSSProperties } from "react"
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { PublishingPreset } from "@/types/book"
@@ -33,10 +33,12 @@ export function ManuscriptPagedPreview({
   isDark: boolean
   onPageCountChange?: (count: number) => void
 }) {
+  const dragStateRef = useRef<{ pointerId: number; startPage: number; startX: number; startScrollLeft: number; moved: boolean } | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
   const [pageCount, setPageCount] = useState(1)
   const [currentPage, setCurrentPage] = useState(1)
+  const [isDragging, setIsDragging] = useState(false)
 
   const layout = useMemo(() => getManuscriptPreviewLayout(preset), [preset])
   const contentWidthMm = useMemo(() => getManuscriptPreviewContentWidthMm(layout), [layout])
@@ -117,6 +119,65 @@ export function ManuscriptPagedPreview({
     setCurrentPage(nextPage)
   }
 
+  const finishDrag = (pointerId?: number) => {
+    const shell = shellRef.current
+    const dragState = dragStateRef.current
+    if (!shell || !dragState) return
+    if (pointerId !== undefined && dragState.pointerId !== pointerId) return
+
+    dragStateRef.current = null
+    setIsDragging(false)
+    if (!("hasPointerCapture" in shell) || !shell.hasPointerCapture(dragState.pointerId)) {
+      // no-op when the browser already dropped capture
+    } else {
+      shell.releasePointerCapture(dragState.pointerId)
+    }
+
+    if (!dragState.moved) return
+
+    const pageExtent = getManuscriptPreviewPageExtentPx(layout)
+    const dragDistance = shell.scrollLeft - dragState.startScrollLeft
+    const threshold = Math.min(120, pageExtent * 0.18)
+    const pageDelta = Math.abs(dragDistance) < threshold
+      ? 0
+      : Math.max(1, Math.round(Math.abs(dragDistance) / pageExtent)) * Math.sign(dragDistance)
+    const nearestPage = Math.min(pageCount, Math.max(1, dragState.startPage + pageDelta))
+    shell.scrollTo({ left: (nearestPage - 1) * pageExtent, behavior: "smooth" })
+    setCurrentPage(nearestPage)
+  }
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const shell = shellRef.current
+    if (!shell || pageCount <= 1 || event.button !== 0) return
+    if (event.target instanceof HTMLElement && event.target.closest("a, button, input, select, textarea, summary")) return
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startPage: currentPage,
+      startX: event.clientX,
+      startScrollLeft: shell.scrollLeft,
+      moved: false,
+    }
+    setIsDragging(false)
+    shell.setPointerCapture(event.pointerId)
+  }
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const shell = shellRef.current
+    const dragState = dragStateRef.current
+    if (!shell || !dragState || dragState.pointerId !== event.pointerId) return
+
+    const deltaX = event.clientX - dragState.startX
+    if (!dragState.moved && Math.abs(deltaX) > 4) {
+      dragState.moved = true
+      setIsDragging(true)
+    }
+    if (!dragState.moved) return
+
+    event.preventDefault()
+    shell.scrollLeft = dragState.startScrollLeft - deltaX
+  }
+
   return (
     <div
       className={`rounded-lg border p-4 ${
@@ -168,10 +229,16 @@ export function ManuscriptPagedPreview({
         ref={shellRef}
         data-testid="manuscript-paged-preview-shell"
         data-preview-page-count={pageCount}
-        className={`manuscript-paged-preview-shell relative mx-auto mt-4 max-w-[980px] rounded-md border ${
+        className={`manuscript-paged-preview-shell relative mx-auto mt-4 rounded-md border ${
+          pageCount > 1 ? (isDragging ? "cursor-grabbing select-none" : "cursor-grab") : ""
+        } ${
           isDark ? "border-white/10 bg-[#05070a]" : "border-[#e7dfd3] bg-[#efe6d8]"
         }`}
         style={previewStyle}
+        onPointerCancel={(event) => finishDrag(event.pointerId)}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={(event) => finishDrag(event.pointerId)}
       >
         <div
           ref={previewRef}

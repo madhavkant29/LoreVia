@@ -11,26 +11,27 @@ import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, ObsidianPreview, ObsidianVaultNote } from "@/types/book"
+import type { Book, VaultPreview, VaultNote } from "@/types/book"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 
 const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-lg border border-dashed p-8" />,
+    loading: () => <SidebarSkeleton />,
   }
 )
 
-const ObsidianVaultPreview = dynamic(
-  () => import("@/components/reader/ObsidianVaultPreview").then((module) => module.ObsidianVaultPreview),
+const VaultPreview = dynamic(
+  () => import("@/components/reader/VaultPreview").then((module) => module.VaultPreview),
   {
     loading: () => null,
   }
 )
 
-type ExportFormat = "md" | "pdf" | "docx" | "obsidian_folder"
-type ManuscriptExportFormat = "pdf" | "docx" | "epub" | "obsidian"
+type ExportFormat = "md" | "pdf" | "docx" | "vault_folder"
+type ManuscriptExportFormat = "pdf" | "docx" | "epub" | "vault"
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob)
@@ -62,12 +63,12 @@ export default function ExportStudioPage() {
     queryFn: () => booksApi.get(bookId),
   })
   const [status, setStatus] = useState<string | null>(null)
-  const [bibleFormat, setBibleFormat] = useState<ExportFormat>("obsidian_folder")
+  const [bibleFormat, setBibleFormat] = useState<ExportFormat>("vault_folder")
   const [manuscriptFormat, setManuscriptFormat] = useState<ManuscriptExportFormat>("docx")
   const [includeSceneMetadata, setIncludeSceneMetadata] = useState(true)
   const [exporting, setExporting] = useState<string | null>(null)
-  const [obsidianPreview, setObsidianPreview] = useState<ObsidianPreview | null>(null)
-  const [bibleNotes, setBibleNotes] = useState<ObsidianVaultNote[]>([])
+  const [vaultPreview, setVaultPreview] = useState<VaultPreview | null>(null)
+  const [bibleNotes, setBibleNotes] = useState<VaultNote[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [manuscriptFiles, setManuscriptFiles] = useState<File[]>([])
   const [notesArchive, setNotesArchive] = useState<File | null>(null)
@@ -79,7 +80,7 @@ export default function ExportStudioPage() {
 
   const formatCards = useMemo(
     () => [
-      { value: "obsidian_folder" as const, label: "Vault ZIP", meta: "Folder structure for note apps" },
+      { value: "vault_folder" as const, label: "Vault ZIP", meta: "Folder structure for note apps" },
       { value: "docx" as const, label: "DOCX", meta: "Word-ready bible" },
       { value: "pdf" as const, label: "PDF", meta: "Shareable reference" },
       { value: "md" as const, label: "Markdown", meta: "Plain text export" },
@@ -93,7 +94,7 @@ export default function ExportStudioPage() {
     setStatus(null)
     try {
       const blob = await booksApi.exportCharacterBible(bookId, bibleFormat)
-      const extension = bibleFormat === "obsidian_folder" ? "zip" : bibleFormat
+      const extension = bibleFormat === "vault_folder" ? "zip" : bibleFormat
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-character-bible.${extension}`)
       setStatus(`Downloaded character bible as ${extension.toUpperCase()}.`)
     } catch {
@@ -109,7 +110,7 @@ export default function ExportStudioPage() {
     setStatus(null)
     try {
       const blob = await booksApi.exportManuscript(bookId, manuscriptFormat, "standard_manuscript", includeSceneMetadata)
-      const extension = manuscriptFormat === "obsidian" ? "zip" : manuscriptFormat
+      const extension = manuscriptFormat === "vault" ? "zip" : manuscriptFormat
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-manuscript.${extension}`)
       setStatus(`Downloaded manuscript as ${extension.toUpperCase()}.`)
     } catch {
@@ -124,7 +125,7 @@ export default function ExportStudioPage() {
     setExporting("notes")
     setStatus(null)
     try {
-      const blob = await booksApi.exportObsidianNotes(bookId)
+      const blob = await booksApi.exportVaultNotes(bookId)
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-notes.zip`)
       setStatus("Downloaded notes workspace ZIP.")
     } catch {
@@ -139,10 +140,10 @@ export default function ExportStudioPage() {
     setStatus(null)
     try {
       const [preview, savedNotes] = await Promise.all([
-        booksApi.previewCharacterBibleObsidian(bookId),
-        booksApi.listCharacterBibleObsidianNotes(bookId).catch(() => []),
+        booksApi.previewCharacterBibleVault(bookId),
+        booksApi.listCharacterBibleVaultNotes(bookId).catch(() => []),
       ])
-      setObsidianPreview(preview)
+      setVaultPreview(preview)
       setBibleNotes(savedNotes)
       setStatus("Loaded the character bible file preview.")
     } catch {
@@ -177,7 +178,7 @@ export default function ExportStudioPage() {
     setImporting("notes")
     setStatus(null)
     try {
-      await booksApi.importObsidianNotes(bookId, notesArchive)
+      await booksApi.importVaultNotes(bookId, notesArchive)
       setStatus(`Imported ${notesArchive.name} into the notes workspace.`)
       setNotesArchive(null)
     } catch {
@@ -203,7 +204,7 @@ export default function ExportStudioPage() {
   }
 
   if (loading || !book) {
-    return <div className={`flex min-h-screen items-center justify-center ${isDark ? "bg-[#030711] text-slate-400" : "bg-[#f7f5ef] text-stone-500"}`}>Loading export studio...</div>
+    return <ExportStudioSkeleton isDark={isDark} />
   }
 
   return (
@@ -366,7 +367,7 @@ export default function ExportStudioPage() {
                   <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript export</p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {(["docx", "pdf", "epub", "obsidian"] as ManuscriptExportFormat[]).map((format) => (
+                      {(["docx", "pdf", "epub", "vault"] as ManuscriptExportFormat[]).map((format) => (
                         <button
                           key={format}
                           type="button"
@@ -381,7 +382,7 @@ export default function ExportStudioPage() {
                                 : "border-stone-200 bg-white text-stone-700"
                           }`}
                         >
-                          {format === "obsidian" ? "Vault ZIP" : format.toUpperCase()}
+                          {format === "vault" ? "Vault ZIP" : format.toUpperCase()}
                         </button>
                       ))}
                     </div>
@@ -433,9 +434,41 @@ export default function ExportStudioPage() {
               </div>
             ) : null}
 
-            {obsidianPreview ? (
-              <ObsidianVaultPreview bookId={bookId} preview={obsidianPreview} isDark={isDark} />
+            {vaultPreview ? (
+              <VaultPreview bookId={bookId} preview={vaultPreview} isDark={isDark} />
             ) : null}
+          </main>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ExportStudioSkeleton({ isDark }: { isDark: boolean }) {
+  return (
+    <div className={`min-h-screen ${isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
+      <div className="mx-auto max-w-[96rem] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
+        <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
+          <SidebarSkeleton />
+          <main className="space-y-6" role="status" aria-label="Loading export studio" aria-busy="true">
+            <span className="sr-only">Loading export studio</span>
+            <section className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="mt-4 h-8 w-64 max-w-full" />
+              <Skeleton className="mt-3 h-4 w-full max-w-2xl" />
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Skeleton className="h-10 w-36 rounded-md" />
+                <Skeleton className="h-10 w-32 rounded-md" />
+              </div>
+            </section>
+            <div className="grid gap-6 2xl:grid-cols-2">
+              <CardSkeleton className="min-h-[28rem]" />
+              <div className="space-y-5">
+                <CardSkeleton />
+                <RowSkeleton />
+                <RowSkeleton />
+              </div>
+            </div>
           </main>
         </div>
       </div>

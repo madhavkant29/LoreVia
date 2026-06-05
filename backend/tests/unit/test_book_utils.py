@@ -905,11 +905,11 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
             "tags": ["dagger", "reveal"],
         }]
 
-    async def _fake_list_obsidian_notes(*_args, **_kwargs):
+    async def _fake_list_vault_notes(*_args, **_kwargs):
         return [{"path": "Plot Threads/Silver Gate.md", "content": "# Silver Gate\n\nMira hides the dagger near the gate."}]
 
     monkeypatch.setattr("app.utils.book_utils.list_novel_scenes", _fake_list_novel_scenes)
-    monkeypatch.setattr("app.utils.book_utils.list_obsidian_notes", _fake_list_obsidian_notes)
+    monkeypatch.setattr("app.utils.book_utils.list_vault_notes", _fake_list_vault_notes)
     monkeypatch.setattr(
         "app.utils.book_utils.download_book",
         lambda _key: serialize_manuscript_content("The silver gate loomed over the harbor.", "<p>The silver gate loomed over the harbor.</p>").encode("utf-8"),

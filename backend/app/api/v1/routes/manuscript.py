@@ -34,6 +34,7 @@ from app.utils.book_utils import (
     collaboration_allows_chapter,
     collaboration_can_comment,
     collaboration_can_edit,
+    delete_chapter,
     delete_manuscript_annotation,
     delete_novel_scene,
     get_chapter_version_content,
@@ -327,6 +328,24 @@ async def remove_novel_scene(
         require_author_access(current_user)
     assert_editor_project_not_rebuilding(book)
     await delete_novel_scene(db, book=book, scene_id=scene_id)
+    return Response(status_code=204)
+
+
+@router.delete("/{book_id}/chapters/{chapter_number}", status_code=204)
+async def remove_chapter(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot edit the manuscript.")
+    if collaborator and not collaboration_allows_chapter(collaborator, chapter_number):
+        raise HTTPException(403, "This share cannot remove that chapter.")
+    if collaborator is None:
+        require_author_access(current_user)
+    await delete_chapter(db, book=book, chapter_number=chapter_number)
     return Response(status_code=204)
 
 

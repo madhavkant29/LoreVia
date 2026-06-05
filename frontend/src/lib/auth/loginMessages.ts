@@ -49,7 +49,7 @@ export function normalizeLoginError(error: string | null | undefined, status?: n
     return deviceAccountLimitMessage(Number(deviceAccountLimitMatch[1]))
   }
 
-  if (detail === "This email is already linked to another Supabase identity.") {
+  if (detail === "This email is already linked to another account.") {
     return "This email is already associated with a different Google account. Contact support if you need to relink."
   }
 

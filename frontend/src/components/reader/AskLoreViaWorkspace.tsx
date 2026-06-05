@@ -8,6 +8,7 @@ import {
   getAskLoreViaDescription,
   getAskLoreViaHelperText,
 } from "@/lib/utils/askLoreVia"
+import { Skeleton } from "@/components/ui/Skeleton"
 import type { GroundedCitation } from "@/types/intelligence"
 
 interface QAEntry {
@@ -430,14 +431,18 @@ function LoadingResultCard({ isDark }: { isDark: boolean }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-lg border px-5 py-5 sm:px-6",
+        "rounded-lg border px-5 py-5 sm:px-6",
         isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-white/90"
       )}
+      role="status"
+      aria-label="Loading Ask LoreVia answer"
+      aria-busy="true"
     >
-      <div className={cn("h-2.5 w-40 rounded-full", isDark ? "bg-white/10" : "bg-stone-200")} />
-      <div className={cn("mt-4 h-3 w-full rounded-full", isDark ? "bg-white/8" : "bg-stone-100")} />
-      <div className={cn("mt-3 h-3 w-5/6 rounded-full", isDark ? "bg-white/8" : "bg-stone-100")} />
-      <div className={cn("mt-3 h-3 w-2/3 rounded-full", isDark ? "bg-white/8" : "bg-stone-100")} />
+      <span className="sr-only">Loading Ask LoreVia answer</span>
+      <Skeleton className={cn("h-2.5 w-40", isDark ? "bg-white/10" : "bg-stone-200")} />
+      <Skeleton className={cn("mt-4 h-3 w-full", isDark ? "bg-white/8" : "bg-stone-100")} />
+      <Skeleton className={cn("mt-3 h-3 w-5/6", isDark ? "bg-white/8" : "bg-stone-100")} />
+      <Skeleton className={cn("mt-3 h-3 w-2/3", isDark ? "bg-white/8" : "bg-stone-100")} />
     </div>
   )
 }

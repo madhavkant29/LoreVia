@@ -17,6 +17,8 @@ import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, ImportPr
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
 import { ImportStructureEditor } from "@/components/modals/ImportStructureEditor"
+import { Skeleton } from "@/components/ui/Skeleton"
+import { Tooltip } from "@/components/ui/Tooltip"
 
 const MAX_TAGS = 8
 const TAG_SUGGESTION_LIMIT = 18
@@ -624,10 +626,7 @@ export const UploadModal = memo(function UploadModal({
                   >
                     {previewLoading ? (
                       <span className="flex items-center gap-2">
-                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
+                        <Skeleton className="h-3.5 w-3.5 rounded-full bg-white/35" />
                         Analyzing structure...
                       </span>
                     ) : (
@@ -1303,30 +1302,38 @@ export const UploadModal = memo(function UploadModal({
                         <input type="checkbox" checked={splitIntoChapters} onChange={(e) => setSplitIntoChapters(e.target.checked)} />
                         <span className="inline-flex items-center gap-1">
                           <span>{isScreenplayWorkspace ? "Split screenplay PDFs into scenes" : "Split PDFs into chapters"}</span>
-                          <button
-                            type="button"
-                            title={isScreenplayWorkspace
+                          <Tooltip
+                            content={isScreenplayWorkspace
                               ? "Keeps detected scene headings together. If screenplay formatting is noisy, LoreVia will still build a stable scene order."
                               : "Keeps detected chapters together. If chapter numbering is inconsistent, LoreVia will use its normal sequential split."}
-                            aria-label={isScreenplayWorkspace ? "What Split screenplay PDFs into scenes means" : "What Split PDFs into chapters means"}
-                            className={infoButtonClass}
                           >
-                            i
-                          </button>
+                            <button
+                              type="button"
+                              title={isScreenplayWorkspace
+                                ? "Keeps detected scene headings together. If screenplay formatting is noisy, LoreVia will still build a stable scene order."
+                                : "Keeps detected chapters together. If chapter numbering is inconsistent, LoreVia will use its normal sequential split."}
+                              aria-label={isScreenplayWorkspace ? "What Split screenplay PDFs into scenes means" : "What Split PDFs into chapters means"}
+                              className={infoButtonClass}
+                            >
+                              i
+                            </button>
+                          </Tooltip>
                         </span>
                       </label>
                       <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         <input type="checkbox" checked={chunkLongDocuments} onChange={(e) => setChunkLongDocuments(e.target.checked)} />
                         <span className="inline-flex items-center gap-1">
                           <span>Chunk long files</span>
-                          <button
-                            type="button"
-                            title="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript."
-                            aria-label="What Chunk long files means"
-                            className={infoButtonClass}
-                          >
-                            i
-                          </button>
+                          <Tooltip content="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript.">
+                            <button
+                              type="button"
+                              title="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript."
+                              aria-label="What Chunk long files means"
+                              className={infoButtonClass}
+                            >
+                              i
+                            </button>
+                          </Tooltip>
                         </span>
                       </label>
                       {chunkLongDocuments ? (

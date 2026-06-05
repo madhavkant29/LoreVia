@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, ObsidianGraph, ObsidianNoteRelations, ObsidianPreview, ObsidianVaultNote, ObsidianVaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -239,6 +239,14 @@ export const booksApi = {
       void invalidateQueryKeys(bookCacheKey(id, "scenes:"))
       void invalidateQueryKeys(bookCacheKey(id, "revision-intelligence"))
       void invalidateQueryKeys(readerCacheKey(id, ""))
+    }),
+  deleteChapter: (id: string, chapterNumber: number) =>
+    apiClient.delete(bookPath(id, `/chapters/${chapterNumber}`)).then(() => {
+      invalidateBookCache(id)
+      invalidateReaderCache(id)
+      void invalidateQueryKeys(bookCacheKey(id, "workspace-tree"))
+      void invalidateQueryKeys(bookCacheKey(id, "revision-intelligence"))
+      void invalidateQueryKeys(bookCacheKey(id, `chapter-versions:${chapterNumber}:`))
     }),
   reorderChapterScenes: (
     id: string,
@@ -576,48 +584,48 @@ export const booksApi = {
     apiClient.post<CharacterShareResponse>(bookPath(bookId, `/characters/${characterId}/share`)).then(r => r.data),
   exportCharacterCard: (bookId: string, characterId: string, format: "md" | "pdf" | "docx" = "pdf") =>
     apiClient.get<Blob>(bookPath(bookId, `/characters/${characterId}/export`), { params: { format }, responseType: "blob" }).then(r => r.data),
-  exportCharacterBible: (id: string, format: "md" | "pdf" | "docx" | "obsidian_folder" = "md") =>
+  exportCharacterBible: (id: string, format: "md" | "pdf" | "docx" | "vault_folder" = "md") =>
     apiClient.get<Blob>(bookPath(id, "/export/character-bible"), { params: { format }, responseType: "blob" }).then(r => r.data),
-  previewCharacterBibleObsidian: (id: string) =>
-    apiClient.get<ObsidianPreview>(bookPath(id, "/export/character-bible/preview")).then(r => r.data),
-  listCharacterBibleObsidianNotes: (id: string) =>
-    apiClient.get<ObsidianVaultNote[]>(bookPath(id, "/export/character-bible/notes")).then(r => r.data),
-  saveCharacterBibleObsidianNote: (id: string, payload: { path: string; content: string }) =>
-    apiClient.put<ObsidianVaultNoteSaveResult>(bookPath(id, "/export/character-bible/notes"), payload).then(r => r.data),
-  listObsidianNotes: (id: string) =>
-    apiClient.get<ObsidianVaultNote[]>(bookPath(id, "/notes/obsidian")).then(r => r.data),
-  getObsidianGraph: (id: string) =>
-    apiClient.get<ObsidianGraph>(bookPath(id, "/notes/obsidian/graph")).then(r => r.data),
-  getObsidianNoteRelations: (id: string, path: string) =>
-    apiClient.get<ObsidianNoteRelations>(bookPath(id, "/notes/obsidian/relations"), { params: { path } }).then(r => r.data),
-  saveObsidianNote: (id: string, payload: { path: string; content: string }) =>
-    apiClient.put<ObsidianVaultNoteSaveResult>(bookPath(id, "/notes/obsidian"), payload).then(r => {
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-notes"))
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-graph"))
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-relations:"))
+  previewCharacterBibleVault: (id: string) =>
+    apiClient.get<VaultPreview>(bookPath(id, "/export/character-bible/preview")).then(r => r.data),
+  listCharacterBibleVaultNotes: (id: string) =>
+    apiClient.get<VaultNote[]>(bookPath(id, "/export/character-bible/notes")).then(r => r.data),
+  saveCharacterBibleVaultNote: (id: string, payload: { path: string; content: string }) =>
+    apiClient.put<VaultNoteSaveResult>(bookPath(id, "/export/character-bible/notes"), payload).then(r => r.data),
+  listVaultNotes: (id: string) =>
+    apiClient.get<VaultNote[]>(bookPath(id, "/notes/vault")).then(r => r.data),
+  getVaultGraph: (id: string) =>
+    apiClient.get<VaultGraph>(bookPath(id, "/notes/vault/graph")).then(r => r.data),
+  getVaultNoteRelations: (id: string, path: string) =>
+    apiClient.get<VaultNoteRelations>(bookPath(id, "/notes/vault/relations"), { params: { path } }).then(r => r.data),
+  saveVaultNote: (id: string, payload: { path: string; content: string }) =>
+    apiClient.put<VaultNoteSaveResult>(bookPath(id, "/notes/vault"), payload).then(r => {
+      void invalidateQueryKeys(bookCacheKey(id, "vault-notes"))
+      void invalidateQueryKeys(bookCacheKey(id, "vault-graph"))
+      void invalidateQueryKeys(bookCacheKey(id, "vault-relations:"))
       void invalidateQueryKeys(bookCacheKey(id, "workspace-tree"))
       return r.data
     }),
-  deleteObsidianNote: (id: string, path: string) =>
-    apiClient.delete(bookPath(id, `/notes/obsidian/${encodeURIComponent(path)}`)).then(() => {
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-notes"))
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-graph"))
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-relations:"))
+  deleteVaultNote: (id: string, path: string) =>
+    apiClient.delete(bookPath(id, `/notes/vault/${encodeURIComponent(path)}`)).then(() => {
+      void invalidateQueryKeys(bookCacheKey(id, "vault-notes"))
+      void invalidateQueryKeys(bookCacheKey(id, "vault-graph"))
+      void invalidateQueryKeys(bookCacheKey(id, "vault-relations:"))
       void invalidateQueryKeys(bookCacheKey(id, "workspace-tree"))
     }),
-  importObsidianNotes: (id: string, file: File) => {
+  importVaultNotes: (id: string, file: File) => {
     const form = new FormData()
     form.append("file", file)
-    return apiClient.post<ObsidianVaultNoteSaveResult[]>(bookPath(id, "/notes/obsidian/import"), form).then(r => {
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-notes"))
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-graph"))
-      void invalidateQueryKeys(bookCacheKey(id, "obsidian-relations:"))
+    return apiClient.post<VaultNoteSaveResult[]>(bookPath(id, "/notes/vault/import"), form).then(r => {
+      void invalidateQueryKeys(bookCacheKey(id, "vault-notes"))
+      void invalidateQueryKeys(bookCacheKey(id, "vault-graph"))
+      void invalidateQueryKeys(bookCacheKey(id, "vault-relations:"))
       void invalidateQueryKeys(bookCacheKey(id, "workspace-tree"))
       return r.data
     })
   },
-  exportObsidianNotes: (id: string) =>
-    apiClient.get<Blob>(bookPath(id, "/notes/obsidian/export"), { responseType: "blob" }).then(r => r.data),
+  exportVaultNotes: (id: string) =>
+    apiClient.get<Blob>(bookPath(id, "/notes/vault/export"), { responseType: "blob" }).then(r => r.data),
   saveBookNote: (
     id: string,
     payload: { noteId?: string | null; chapterNumber?: number | null; title?: string | null; body: string }
@@ -837,7 +845,7 @@ export const booksApi = {
   },
   exportManuscript: (
     bookId: string,
-    format: "pdf" | "docx" | "epub" | "obsidian" = "docx",
+    format: "pdf" | "docx" | "epub" | "vault" = "docx",
     preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript",
     includeSceneMetadata = true
   ) =>

@@ -2202,6 +2202,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockWriterWorkspace = JSON.parse(JSON.stringify(writerWorkspace))
   let mockNotifications = JSON.parse(JSON.stringify(notifications))
   let mockWorkspaceTree = JSON.parse(JSON.stringify(workspaceTree))
+  let mockChapterList = JSON.parse(JSON.stringify(chapterList))
   let mockBetaReads = JSON.parse(JSON.stringify(initialBetaReads))
   let mockBetaReadQuestions = JSON.parse(JSON.stringify(initialBetaReadQuestions))
   let mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
@@ -2878,6 +2879,28 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    const chapterDeleteMatch = path.match(/^\/api\/v1\/books\/book-1\/chapters\/(\d+)$/)
+    if (chapterDeleteMatch && method === "DELETE") {
+      const chapterNumber = Number.parseInt(chapterDeleteMatch[1] ?? "", 10)
+      const beforeCount = mockChapterList.chapters.length
+      mockChapterList = {
+        ...mockChapterList,
+        chapters: mockChapterList.chapters.filter((item: typeof mockChapterList.chapters[number]) => item.number !== chapterNumber),
+      }
+      if (mockChapterList.chapters.length === beforeCount) {
+        return notFound(route)
+      }
+      mockChapterList.read_upto = Math.max(0, ...mockChapterList.chapters.filter((item: typeof mockChapterList.chapters[number]) => item.read).map((item: typeof mockChapterList.chapters[number]) => item.number))
+      mockChapterList.current_chapter = mockChapterList.read_upto
+      mockWorkspaceTree = {
+        ...mockWorkspaceTree,
+        chapters: mockWorkspaceTree.chapters.filter((item: typeof mockWorkspaceTree.chapters[number]) => item.chapter_number !== chapterNumber),
+        scene_groups: mockWorkspaceTree.scene_groups.filter((item: typeof mockWorkspaceTree.scene_groups[number]) => item.chapter_number !== chapterNumber),
+      }
+      mockManuscriptAnnotations = mockManuscriptAnnotations.filter((annotation: typeof mockManuscriptAnnotations[number]) => annotation.chapter_number !== chapterNumber)
+      return route.fulfill({ status: 204 })
+    }
+
     if (path === "/api/v1/books/book-1/chapter-versions" && method === "GET") {
       return json(route, [])
     }
@@ -3128,7 +3151,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/reader/book-1/chapters" && method === "GET") {
-      return json(route, chapterList)
+      return json(route, mockChapterList)
     }
 
     if (path === "/api/v1/reader/book-1/relationships" && method === "GET") {

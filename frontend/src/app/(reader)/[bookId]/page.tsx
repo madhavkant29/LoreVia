@@ -9,7 +9,7 @@ import { useParams, useRouter } from "next/navigation"
 
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ErrorCard } from "@/components/ui/ErrorCard"
-import { Skeleton } from "@/components/ui/Skeleton"
+import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
 import { capture } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
@@ -468,8 +468,15 @@ export default function BookOverviewPage() {
 
   if (!book) {
     return (
-      <div className="min-h-screen bg-background text-muted-foreground">
-        <div className="flex min-h-screen items-center justify-center text-sm font-medium">Loading...</div>
+      <div className="min-h-screen bg-background text-foreground">
+        <div className="mx-auto grid max-w-[100rem] gap-5 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[15.5rem_minmax(0,1fr)] lg:px-8 xl:gap-6">
+          <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
+            <NavPanelLoadingState />
+          </div>
+          <main className="min-w-0">
+            <DashboardSkeleton />
+          </main>
+        </div>
       </div>
     )
   }
@@ -607,61 +614,9 @@ export default function BookOverviewPage() {
 }
 
 function WorkspacePanelLoadingState() {
-  return (
-    <div className="space-y-5">
-      <div className="rounded-md border border-border bg-card/60 p-4 sm:p-5">
-        <Skeleton variant="text" className="mb-4 h-5 w-32" />
-        <div className="grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)_minmax(13rem,0.78fr)]">
-          <Skeleton variant="card" className="aspect-[0.72] min-h-48" />
-          <div className="space-y-4">
-            <Skeleton variant="text" className="h-7 w-3/4" />
-            <Skeleton variant="text" className="h-4 w-1/3" />
-            <Skeleton variant="text" className="mt-6 h-2.5 w-full" />
-            <Skeleton variant="text" className="h-3 w-1/2" />
-          </div>
-          <div className="space-y-3">
-            <Skeleton variant="text" className="h-3 w-1/3" />
-            <Skeleton variant="text" className="h-3 w-full" />
-            <Skeleton variant="text" className="h-3 w-full" />
-            <Skeleton variant="text" className="h-3 w-2/3" />
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-md border border-border bg-card/60 p-4 sm:p-5">
-        <Skeleton variant="text" className="mb-5 h-5 w-28" />
-        <div className="grid gap-4 sm:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i}>
-              <Skeleton variant="text" className="h-3 w-16" />
-              <Skeleton variant="text" className="mt-2 h-7 w-20" />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-md border border-border bg-card/60 p-4 sm:p-5">
-        <Skeleton variant="text" className="mb-4 h-5 w-24" />
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} variant="card" className="min-h-32" />
-          ))}
-        </div>
-      </div>
-    </div>
-  )
+  return <DashboardSkeleton />
 }
 
 function NavPanelLoadingState() {
-  return (
-    <div className="space-y-3 rounded-md border border-border bg-card/60 p-4">
-      <Skeleton variant="circle" className="mx-auto h-8 w-8" />
-      <Skeleton variant="text" className="h-3 w-full" />
-      <Skeleton variant="text" className="h-3 w-3/4" />
-      <Skeleton variant="text" className="h-3 w-5/6" />
-      <Skeleton variant="text" className="h-3 w-2/3" />
-      <Skeleton variant="text" className="h-3 w-full" />
-      <Skeleton variant="text" className="h-3 w-1/2" />
-    </div>
-  )
+  return <SidebarSkeleton />
 }

@@ -19,8 +19,8 @@ describe("reader typography", () => {
     expect(resolveReaderFontStack("serif", "relaxed")).toContain("Newsreader")
   })
 
-  it("includes Monotype Italian Old Style Pro in the reader font stack", () => {
-    expect(resolveReaderFontStack("italian-old-style", "published")).toContain("Monotype Italian Old Style Pro Regular")
+  it("includes Iowan Old Style in the reader font stack", () => {
+    expect(resolveReaderFontStack("italian-old-style", "published")).toContain("Iowan Old Style")
   })
 
   it("includes EB Garamond in the reader font stack", () => {

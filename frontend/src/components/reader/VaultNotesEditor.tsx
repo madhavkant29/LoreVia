@@ -15,7 +15,12 @@ import {
   workspaceFolderFromPath,
   type WorkspaceFolderNode,
 } from "@/lib/utils/workspacePaths"
-import type { ManuscriptWorkspaceTree, ObsidianGraph, ObsidianNoteRelations, ObsidianVaultNote } from "@/types/book"
+import type { ManuscriptWorkspaceTree, VaultGraph, VaultNoteRelations, VaultNote } from "@/types/book"
+import type { Character } from "@/types/character"
+import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
+import { Skeleton } from "@/components/ui/Skeleton"
+import { Tooltip } from "@/components/ui/Tooltip"
+import { migrateVaultStorage } from "@/lib/utils/vaultStorageMigration"
 
 const WhatsTheWordPanel = dynamic(
   () => import("@/components/intelligence/WhatsTheWordPanel").then((module) => module.WhatsTheWordPanel),
@@ -26,7 +31,7 @@ const GraphViewer = dynamic(
   () => import("./GraphViewer").then((module) => module.GraphViewer),
   {
     ssr: false,
-    loading: () => <div className="min-h-[34rem] animate-pulse rounded-lg bg-black/5" />,
+    loading: () => <Skeleton variant="card" className="min-h-[34rem] rounded-lg" />,
   }
 )
 
@@ -34,12 +39,12 @@ const MarkdownPreview = dynamic(
   () => import("./MarkdownPreview").then((module) => module.MarkdownPreview),
   {
     ssr: false,
-    loading: () => <div className="min-h-[32rem] animate-pulse rounded-md bg-black/5" />,
+    loading: () => <Skeleton variant="card" className="min-h-[32rem] rounded-md" />,
   }
 )
 
-const FAVORITES_STORAGE_KEY = "obsidian-note-favorites:v1"
-const FOLDERS_STORAGE_KEY_PREFIX = "obsidian-note-folders:v1:"
+const FAVORITES_STORAGE_KEY = "vault-note-favorites:v1"
+const FOLDERS_STORAGE_KEY_PREFIX = "vault-note-folders:v1:"
 const CORE_NOTE_FOLDERS = ["Characters", "Plot Threads", "Story Advisor", "Manual Editor", "Worldbuilding", "Timeline", "Themes", "Templates", "Custom"]
 
 type NotesView = "recent" | "favorites"
@@ -106,7 +111,7 @@ function buildFolderTree(paths: string[], seededFolders: string[] = []) {
   return root
 }
 
-function buildUniqueNotePath(notes: ObsidianVaultNote[], folder: string | null, baseTitle: string) {
+function buildUniqueNotePath(notes: VaultNote[], folder: string | null, baseTitle: string) {
   return buildUniqueWorkspacePath(notes.map((note) => note.path), folder, baseTitle)
 }
 
@@ -187,7 +192,7 @@ function markdownButtonClass(isDark: boolean) {
   }`
 }
 
-export function ObsidianNotesEditor({
+export function VaultNotesEditor({
   bookId,
   bookTitle,
   initialNotes,
@@ -196,13 +201,15 @@ export function ObsidianNotesEditor({
 }: {
   bookId: string
   bookTitle: string
-  initialNotes: ObsidianVaultNote[]
-  initialGraph: ObsidianGraph
+  initialNotes: VaultNote[]
+  initialGraph: VaultGraph
   isDark: boolean
 }) {
-  const [notes, setNotes] = useState<ObsidianVaultNote[]>(initialNotes)
-  const [graph, setGraph] = useState<ObsidianGraph>(initialGraph)
-  const [relations, setRelations] = useState<ObsidianNoteRelations | null>(null)
+  migrateVaultStorage(bookId)
+
+  const [notes, setNotes] = useState<VaultNote[]>(initialNotes)
+  const [graph, setGraph] = useState<VaultGraph>(initialGraph)
+  const [relations, setRelations] = useState<VaultNoteRelations | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | null>(initialNotes[0]?.path ?? null)
   const [selectedFolder, setSelectedFolder] = useState<string | null>(noteFolder(initialNotes[0]?.path ?? ""))
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -224,6 +231,10 @@ export function ObsidianNotesEditor({
   const [findWithinNote, setFindWithinNote] = useState("")
   const [replaceWithinNote, setReplaceWithinNote] = useState("")
   const [secondaryPanelsEnabled, setSecondaryPanelsEnabled] = useState(false)
+  const [notesSelectionMenu, setNotesSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
+  const [addCharacterOpen, setAddCharacterOpen] = useState(false)
+  const [addCharacterText, setAddCharacterText] = useState("")
+  const notesSelectionRef = useRef("")
   const deferredQuery = useDeferredValue(query)
   const saveTimersRef = useRef<Record<string, number>>({})
   const latestDraftRef = useRef<Record<string, string>>({})
@@ -403,7 +414,7 @@ export function ObsidianNotesEditor({
 
     let cancelled = false
     setRelations(null)
-    void booksApi.getObsidianNoteRelations(bookId, selectedNote.path)
+    void booksApi.getVaultNoteRelations(bookId, selectedNote.path)
       .then((value) => {
         if (!cancelled) setRelations(value)
       })
@@ -426,14 +437,14 @@ export function ObsidianNotesEditor({
   }, [selectedNote?.path])
 
   const refreshGraph = async () => {
-    const nextGraph = await booksApi.getObsidianGraph(bookId)
+    const nextGraph = await booksApi.getVaultGraph(bookId)
     setGraph(nextGraph)
   }
 
   const saveNote = async (path: string, content: string) => {
     latestDraftRef.current[path] = content
     try {
-      const result = await booksApi.saveObsidianNote(bookId, { path, content })
+      const result = await booksApi.saveVaultNote(bookId, { path, content })
       if (latestDraftRef.current[path] !== result.content) return
       setNotes((current) =>
         current
@@ -446,7 +457,7 @@ export function ObsidianNotesEditor({
       setStatus("Saved just now")
       void refreshGraph()
       if (selectedPath === path) {
-        void booksApi.getObsidianNoteRelations(bookId, path).then((value) => setRelations(value))
+        void booksApi.getVaultNoteRelations(bookId, path).then((value) => setRelations(value))
       }
     } catch {
       setStatus(`Could not save ${path}`)
@@ -509,7 +520,7 @@ export function ObsidianNotesEditor({
     const title = noteTitle(path)
     setBusy(true)
     try {
-      const result = await booksApi.saveObsidianNote(bookId, { path, content: `# ${title}\n\n` })
+      const result = await booksApi.saveVaultNote(bookId, { path, content: `# ${title}\n\n` })
       setNotes((current) =>
         [...current, {
           id: `${result.path}:${Date.now()}`,
@@ -549,8 +560,8 @@ export function ObsidianNotesEditor({
     setBusy(true)
     try {
       const content = drafts[note.path] ?? note.content
-      const result = await booksApi.saveObsidianNote(bookId, { path: nextPath, content })
-      await booksApi.deleteObsidianNote(bookId, note.path)
+      const result = await booksApi.saveVaultNote(bookId, { path: nextPath, content })
+      await booksApi.deleteVaultNote(bookId, note.path)
       setNotes((current) =>
         current
           .filter((item) => item.path !== note.path)
@@ -598,7 +609,7 @@ export function ObsidianNotesEditor({
     if (!proceed) return
     setBusy(true)
     try {
-      await booksApi.deleteObsidianNote(bookId, selectedNote.path)
+      await booksApi.deleteVaultNote(bookId, selectedNote.path)
       const remaining = notes.filter((note) => note.path !== selectedNote.path)
       setNotes(remaining)
       setDrafts((current) => {
@@ -635,8 +646,8 @@ export function ObsidianNotesEditor({
 
     setBusy(true)
     try {
-      const result = await booksApi.saveObsidianNote(bookId, { path: nextPath, content: selectedContent })
-      await booksApi.deleteObsidianNote(bookId, selectedNote.path)
+      const result = await booksApi.saveVaultNote(bookId, { path: nextPath, content: selectedContent })
+      await booksApi.deleteVaultNote(bookId, selectedNote.path)
       setNotes((current) =>
         current
           .filter((note) => note.path !== selectedNote.path)
@@ -681,7 +692,7 @@ export function ObsidianNotesEditor({
     const path = buildUniqueNotePath(notes, folder, `${noteTitle(selectedNote.path)} Copy`)
     setBusy(true)
     try {
-      const result = await booksApi.saveObsidianNote(bookId, { path, content: selectedContent })
+      const result = await booksApi.saveVaultNote(bookId, { path, content: selectedContent })
       setNotes((current) =>
         [...current, {
           id: `${result.path}:${Date.now()}`,
@@ -712,7 +723,7 @@ export function ObsidianNotesEditor({
   }
 
   const exportNotes = async () => {
-    const blob = await booksApi.exportObsidianNotes(bookId)
+    const blob = await booksApi.exportVaultNotes(bookId)
     const url = window.URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
@@ -727,8 +738,8 @@ export function ObsidianNotesEditor({
   const importNotes = async (file: File) => {
     setBusy(true)
     try {
-      await booksApi.importObsidianNotes(bookId, file)
-      const [nextNotes, nextGraph] = await Promise.all([booksApi.listObsidianNotes(bookId), booksApi.getObsidianGraph(bookId)])
+      await booksApi.importVaultNotes(bookId, file)
+      const [nextNotes, nextGraph] = await Promise.all([booksApi.listVaultNotes(bookId), booksApi.getVaultGraph(bookId)])
       setNotes(nextNotes)
       setGraph(nextGraph)
       setSelectedPath(nextNotes[0]?.path ?? null)
@@ -857,6 +868,53 @@ export function ObsidianNotesEditor({
     setStatus("Updated note draft with replacements")
   }
 
+  const syncNotesSelectionMenu = (mouseEvent?: Pick<MouseEvent, "clientX" | "clientY">) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const selectedText = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd).trim()
+    if (!selectedText) {
+      setNotesSelectionMenu(null)
+      return
+    }
+    notesSelectionRef.current = selectedText
+    if (mouseEvent) {
+      setNotesSelectionMenu({
+        text: selectedText.slice(0, 100),
+        top: mouseEvent.clientY - 48,
+        left: mouseEvent.clientX,
+      })
+    } else {
+      const rect = textarea.getBoundingClientRect()
+      setNotesSelectionMenu({
+        text: selectedText.slice(0, 100),
+        top: rect.top + window.scrollY + 60,
+        left: rect.left + window.scrollX + (rect.width / 2),
+      })
+    }
+  }
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (target.closest('[data-notes-add-character]')) return
+      setNotesSelectionMenu(null)
+    }
+    document.addEventListener("click", handleClick)
+    return () => document.removeEventListener("click", handleClick)
+  }, [])
+
+  const openAddCharacterFromNotes = () => {
+    const text = notesSelectionRef.current.trim()
+    if (!text) return
+    setAddCharacterText(text)
+    setAddCharacterOpen(true)
+    setNotesSelectionMenu(null)
+  }
+
+  const handleCharacterCreated = (character: Character) => {
+    setStatus(`Character "${character.name}" added to the story bible.`)
+  }
+
   return (
     <div
       className={`rounded-lg border p-4 sm:p-5 ${
@@ -884,9 +942,11 @@ export function ObsidianNotesEditor({
             <IconUpload className="rotate-180" />
             Export ZIP
           </button>
-          <button type="button" onClick={() => void duplicateCurrent()} disabled={!selectedNote || busy} className={`inline-flex h-[3rem] w-[3rem] items-center justify-center rounded-md border ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`} title="Duplicate note">
-            <IconMore />
-          </button>
+          <Tooltip content="Duplicate selected note">
+            <button type="button" aria-label="Duplicate selected note" onClick={() => void duplicateCurrent()} disabled={!selectedNote || busy} className={`inline-flex h-[3rem] w-[3rem] items-center justify-center rounded-md border ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+              <IconMore />
+            </button>
+          </Tooltip>
           <input
             ref={importInputRef}
             type="file"
@@ -926,16 +986,20 @@ export function ObsidianNotesEditor({
                   className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-inherit"
                 />
               </label>
-              <button type="button" onClick={() => setSelectedFolder(null)} className={`flex h-12 w-12 items-center justify-center rounded-md border ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Show all folders">
-                <IconSliders />
-              </button>
+              <Tooltip content="Show all folders">
+                <button type="button" aria-label="Show all folders" onClick={() => setSelectedFolder(null)} className={`flex h-12 w-12 items-center justify-center rounded-md border ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                  <IconSliders />
+                </button>
+              </Tooltip>
             </div>
 
             <div className="mt-6 flex items-center justify-between">
               <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Folders</p>
-              <button type="button" onClick={() => createFolder()} className={`rounded-full p-1.5 ${isDark ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`} title="Create folder">
-                <IconPlus />
-              </button>
+              <Tooltip content="Create folder">
+                <button type="button" aria-label="Create folder" onClick={() => createFolder()} className={`rounded-full p-1.5 ${isDark ? "text-slate-400 hover:bg-white/[0.06] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
+                  <IconPlus />
+                </button>
+              </Tooltip>
             </div>
 
             <div className="mt-3 max-h-[23rem] overflow-auto pr-1">
@@ -983,11 +1047,11 @@ export function ObsidianNotesEditor({
 
             <div className="mt-6">
               <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes</p>
-              <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => setNotesView("recent")} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${notesView === "recent" ? "bg-emerald-500/16 text-emerald-200" : isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
+              <div className="mt-3 flex gap-2" role="tablist" aria-label="Notes view">
+                <button type="button" role="tab" aria-selected={notesView === "recent"} onClick={() => setNotesView("recent")} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${notesView === "recent" ? "bg-emerald-500/16 text-emerald-200" : isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
                   Recent
                 </button>
-                <button type="button" onClick={() => setNotesView("favorites")} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${notesView === "favorites" ? "bg-emerald-500/16 text-emerald-200" : isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
+                <button type="button" role="tab" aria-selected={notesView === "favorites"} onClick={() => setNotesView("favorites")} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${notesView === "favorites" ? "bg-emerald-500/16 text-emerald-200" : isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
                   Favorites
                 </button>
               </div>
@@ -1070,21 +1134,25 @@ export function ObsidianNotesEditor({
                     <div className="min-w-0">
                       <h3 className={`truncate font-serif text-5xl tracking-[-0.05em] ${isDark ? "text-white" : "text-stone-950"}`}>{noteTitle(selectedNote.path)}</h3>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setFavorites((current) => ({ ...current, [selectedNote.path]: !current[selectedNote.path] }))}
-                      className={`mt-1 rounded-full p-2 transition ${isFavorite ? "text-amber-300" : isDark ? "text-slate-500 hover:bg-white/[0.05] hover:text-white" : "text-stone-400 hover:bg-stone-100 hover:text-stone-900"}`}
-                      title={isFavorite ? "Remove from favorites" : "Add to favorites"}
-                    >
-                      <IconStar filled={isFavorite} />
-                    </button>
+                    <Tooltip content={isFavorite ? "Remove from favorites" : "Add to favorites"}>
+                      <button
+                        type="button"
+                        aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                        onClick={() => setFavorites((current) => ({ ...current, [selectedNote.path]: !current[selectedNote.path] }))}
+                        className={`mt-1 rounded-full p-2 transition ${isFavorite ? "text-amber-300" : isDark ? "text-slate-500 hover:bg-white/[0.05] hover:text-white" : "text-stone-400 hover:bg-stone-100 hover:text-stone-900"}`}
+                      >
+                        <IconStar filled={isFavorite} />
+                      </button>
+                    </Tooltip>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Note editor mode">
                     {(["edit", "preview", "split"] as EditorMode[]).map((value) => (
                       <button
                         key={value}
                         type="button"
+                        role="tab"
+                        aria-selected={mode === value}
                         onClick={() => setMode(value)}
                         className={`rounded-md px-4 py-2 text-sm font-medium capitalize transition ${
                           mode === value
@@ -1105,12 +1173,16 @@ export function ObsidianNotesEditor({
                   <button type="button" onClick={() => void saveNote(selectedNote.path, selectedContent)} className={`rounded-md border px-3 py-2 text-sm font-medium ${isDark ? "border-white/8 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
                     <span className="inline-flex items-center gap-2"><IconCheck />Save now</span>
                   </button>
-                  <button type="button" onClick={() => void copyCurrentReference()} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Copy note reference">
-                    <IconCopy />
-                  </button>
-                  <button type="button" onClick={() => setGraphExpanded(true)} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`} title="Open full graph">
-                    <IconExpand />
-                  </button>
+                  <Tooltip content="Copy note reference">
+                    <button type="button" aria-label="Copy note reference" onClick={() => void copyCurrentReference()} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                      <IconCopy />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Open full graph">
+                    <button type="button" aria-label="Open full graph" onClick={() => setGraphExpanded(true)} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                      <IconExpand />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -1121,15 +1193,16 @@ export function ObsidianNotesEditor({
                     <div className={`border-b px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white/80"}`}>
                       <div className="flex flex-wrap gap-2">
                         {toolbarButtons.map((button) => (
-                          <button
-                            key={button.key}
-                            type="button"
-                            onClick={button.action}
-                            title={button.title}
-                            className={`${markdownButtonClass(isDark)} ${button.className ?? ""}`}
-                          >
-                            {button.label}
-                          </button>
+                          <Tooltip key={button.key} content={button.title}>
+                            <button
+                              type="button"
+                              aria-label={button.title}
+                              onClick={button.action}
+                              className={`${markdownButtonClass(isDark)} ${button.className ?? ""}`}
+                            >
+                              {button.label}
+                            </button>
+                          </Tooltip>
                         ))}
                       </div>
                       <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
@@ -1158,6 +1231,8 @@ export function ObsidianNotesEditor({
                         ref={textareaRef}
                         value={selectedContent}
                         onChange={(event) => updateDraft(selectedNote.path, event.target.value)}
+                        onMouseUp={(event) => syncNotesSelectionMenu(event)}
+                        onKeyUp={() => syncNotesSelectionMenu()}
                         spellCheck={false}
                         className={`min-h-[42rem] w-full resize-none border-0 px-4 py-5 font-mono text-base leading-8 outline-none ${
                           isDark
@@ -1307,9 +1382,11 @@ export function ObsidianNotesEditor({
                     {tag.tag_name}
                   </span>
                 ))}
-                <button type="button" className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-stone-100 text-stone-700"}`} title="Add tag">
-                  <IconPlus />
-                </button>
+                <Tooltip content="Add tag">
+                  <button type="button" aria-label="Add tag" className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-stone-100 text-stone-700"}`}>
+                    <IconPlus />
+                  </button>
+                </Tooltip>
               </div>
             ) : (
               <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No tags found for this note.</p>
@@ -1358,7 +1435,7 @@ export function ObsidianNotesEditor({
           <div className={`flex h-full w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-[#08111d]" : "border-stone-200 bg-[#f4f7fb]"}`}>
             <div className={`flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/70"}`}>
               <div>
-                <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Obsidian graph</p>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Vault graph</p>
                 <h3 className={`mt-1 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Vault graph view</h3>
                 <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                   Pan, zoom, drag nodes, and open linked notes directly from the site.
@@ -1422,6 +1499,34 @@ export function ObsidianNotesEditor({
           </div>
         </div>
       ) : null}
+
+      {notesSelectionMenu ? (
+        <div
+          className="pointer-events-none fixed z-50 hidden -translate-x-1/2 xl:block"
+          style={{ top: notesSelectionMenu.top, left: notesSelectionMenu.left }}
+        >
+          <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`} data-notes-add-character>
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => openAddCharacterFromNotes()}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-violet-700/30 text-violet-200" : "bg-violet-100 text-violet-800"}`}
+            >
+              Add as character
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <AddCharacterFromSelection
+        bookId={bookId}
+        selectedText={addCharacterText}
+        isDark={isDark}
+        firstChapter={1}
+        open={addCharacterOpen}
+        onClose={() => setAddCharacterOpen(false)}
+        onCreated={handleCharacterCreated}
+      />
     </div>
   )
 }

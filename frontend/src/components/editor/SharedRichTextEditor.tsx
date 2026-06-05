@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { EditorContent, useEditor } from "@tiptap/react"
 import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
@@ -14,6 +14,7 @@ import Color from "@tiptap/extension-color"
 import TaskList from "@tiptap/extension-task-list"
 import TaskItem from "@tiptap/extension-task-item"
 
+import { Tooltip } from "@/components/ui/Tooltip"
 import type { Character } from "@/types/character"
 
 type EditorLookup = Map<string, ReturnType<typeof useEditor>>
@@ -31,8 +32,8 @@ const FONT_OPTIONS = [
   { value: "Georgia", label: "Georgia" },
   { value: "Space Grotesk", label: "Space Grotesk" },
   {
-    value: '"Monotype Italian Old Style Pro Regular", "Monotype Italian Old Style Pro", "Italian Old Style", "Iowan Old Style", Georgia, serif',
-    label: "Italian Old Style",
+    value: '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif',
+    label: "Old Style",
   },
   { value: '"EB Garamond", Garamond, "Times New Roman", Georgia, serif', label: "EB Garamond" },
 ]
@@ -207,6 +208,26 @@ function colorValue(value: string) {
   return value.trim() || "#0f172a"
 }
 
+function ToolbarButton({
+  title,
+  className,
+  onClick,
+  children,
+}: {
+  title: string
+  className: string
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <Tooltip content={title}>
+      <button type="button" aria-label={title} title={title} onClick={onClick} className={className}>
+        {children}
+      </button>
+    </Tooltip>
+  )
+}
+
 export function EditorToolbar({
   isDark,
   compact = false,
@@ -227,11 +248,11 @@ export function EditorToolbar({
   const editor = currentEditor(editorKey)
 
   const shellClass = compact
-    ? `rounded-md border px-2 py-2 ${isDark ? "border-white/10 bg-black/50" : "border-stone-200 bg-white"}`
+    ? `rounded-sm border px-2 py-2 ${isDark ? "border-white/10 bg-[#0b1014]" : "border-stone-200 bg-white"}`
     : ""
   const groupClass = "flex flex-wrap items-center gap-1"
-  const buttonClass = `rounded-lg px-2.5 py-2 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`
-  const selectClass = `rounded-lg border px-2 py-2 text-3xs focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${isDark ? "border-white/10 bg-[#090d13] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`
+  const buttonClass = `rounded-sm px-2.5 py-2 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-teal-300/40 ${isDark ? "text-slate-200 hover:bg-white/[0.07]" : "text-stone-700 hover:bg-stone-100"}`
+  const selectClass = `rounded-sm border px-2 py-2 text-3xs focus:outline-none focus:ring-2 focus:ring-teal-300/40 ${isDark ? "border-white/10 bg-[#0f1418] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`
   const dividerClass = isDark ? "h-5 w-px bg-white/10" : "h-5 w-px bg-stone-200"
   const mentionableCharacters = characters.slice(0, 8)
 
@@ -267,27 +288,27 @@ export function EditorToolbar({
         <select aria-label="Font size" className={selectClass} defaultValue="12" onChange={(event) => run((instance) => instance.chain().focus().setFontSize(`${event.target.value}px`).run())}>
           {FONT_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} pt</option>)}
         </select>
-        <button type="button" title="Heading 2" onClick={() => run((instance) => instance.chain().focus().toggleHeading({ level: 2 }).run())} className={buttonClass}>H2</button>
-        <button type="button" title="Heading 3" onClick={() => run((instance) => instance.chain().focus().toggleHeading({ level: 3 }).run())} className={buttonClass}>H3</button>
-        <button type="button" title="Bold" onClick={() => run((instance) => instance.chain().focus().toggleBold().run())} className={buttonClass}>B</button>
-        <button type="button" title="Italic" onClick={() => run((instance) => instance.chain().focus().toggleItalic().run())} className={`${buttonClass} italic`}>I</button>
-        <button type="button" title="Underline" onClick={() => run((instance) => instance.chain().focus().toggleUnderline().run())} className={buttonClass}>U</button>
-        <button type="button" title="Strikethrough" onClick={() => run((instance) => instance.chain().focus().toggleStrike().run())} className={`${buttonClass} line-through`}>S</button>
+        <ToolbarButton title="Heading 2" onClick={() => run((instance) => instance.chain().focus().toggleHeading({ level: 2 }).run())} className={buttonClass}>H2</ToolbarButton>
+        <ToolbarButton title="Heading 3" onClick={() => run((instance) => instance.chain().focus().toggleHeading({ level: 3 }).run())} className={buttonClass}>H3</ToolbarButton>
+        <ToolbarButton title="Bold" onClick={() => run((instance) => instance.chain().focus().toggleBold().run())} className={buttonClass}>B</ToolbarButton>
+        <ToolbarButton title="Italic" onClick={() => run((instance) => instance.chain().focus().toggleItalic().run())} className={`${buttonClass} italic`}>I</ToolbarButton>
+        <ToolbarButton title="Underline" onClick={() => run((instance) => instance.chain().focus().toggleUnderline().run())} className={buttonClass}>U</ToolbarButton>
+        <ToolbarButton title="Strikethrough" onClick={() => run((instance) => instance.chain().focus().toggleStrike().run())} className={`${buttonClass} line-through`}>S</ToolbarButton>
         <span className={dividerClass} />
-        <button type="button" title="Bulleted list" onClick={() => run((instance) => instance.chain().focus().toggleBulletList().run())} className={buttonClass}>List</button>
-        <button type="button" title="Numbered list" onClick={() => run((instance) => instance.chain().focus().toggleOrderedList().run())} className={buttonClass}>1.</button>
-        <button type="button" title="Align left" onClick={() => run((instance) => instance.chain().focus().setTextAlign("left").run())} className={buttonClass}>Left</button>
-        <button type="button" title="Align center" onClick={() => run((instance) => instance.chain().focus().setTextAlign("center").run())} className={buttonClass}>Center</button>
-        <button type="button" title="Align right" onClick={() => run((instance) => instance.chain().focus().setTextAlign("right").run())} className={buttonClass}>Right</button>
+        <ToolbarButton title="Bulleted list" onClick={() => run((instance) => instance.chain().focus().toggleBulletList().run())} className={buttonClass}>•</ToolbarButton>
+        <ToolbarButton title="Numbered list" onClick={() => run((instance) => instance.chain().focus().toggleOrderedList().run())} className={buttonClass}>1.</ToolbarButton>
+        <ToolbarButton title="Align left" onClick={() => run((instance) => instance.chain().focus().setTextAlign("left").run())} className={buttonClass}>≡</ToolbarButton>
+        <ToolbarButton title="Align center" onClick={() => run((instance) => instance.chain().focus().setTextAlign("center").run())} className={buttonClass}>≣</ToolbarButton>
+        <ToolbarButton title="Align right" onClick={() => run((instance) => instance.chain().focus().setTextAlign("right").run())} className={buttonClass}>≡</ToolbarButton>
         <span className={dividerClass} />
-        <button type="button" title="Insert link" onClick={() => {
+        <ToolbarButton title="Insert link" onClick={() => {
           const href = window.prompt("Enter a URL")
           if (!href) return
           run((instance) => instance.chain().focus().extendMarkRange("link").setLink({ href }).run())
-        }} className={buttonClass}>Link</button>
-        <button type="button" title="Insert image" onClick={() => fileInputRef.current?.click()} className={buttonClass}>Image</button>
+        }} className={buttonClass}>↗</ToolbarButton>
+        <ToolbarButton title="Insert image" onClick={() => fileInputRef.current?.click()} className={buttonClass}>▧</ToolbarButton>
         <div className="relative">
-          <button type="button" title="Mention character" onClick={() => setShowMentionPicker((current) => !current)} className={buttonClass}>@</button>
+          <ToolbarButton title="Mention character" onClick={() => setShowMentionPicker((current) => !current)} className={buttonClass}>@</ToolbarButton>
           {showMentionPicker && mentionableCharacters.length > 0 ? (
             <div className={`absolute left-0 top-full z-20 mt-2 w-52 rounded-md border p-1 ${isDark ? "border-white/10 bg-[#0f172a]" : "border-stone-200 bg-white"}`}>
               {mentionableCharacters.map((character) => (
@@ -298,7 +319,7 @@ export function EditorToolbar({
                     run((instance) => instance.chain().focus().insertContent({ type: "mentionToken", attrs: { mention: character.name, label: character.name } }).insertContent(" ").run())
                     setShowMentionPicker(false)
                   }}
-                  className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${isDark ? "text-slate-200 hover:bg-white/8" : "text-stone-700 hover:bg-stone-100"}`}
+                  className={`block w-full rounded-sm px-3 py-2 text-left text-sm transition ${isDark ? "text-slate-200 hover:bg-white/8" : "text-stone-700 hover:bg-stone-100"}`}
                 >
                   @{character.name}
                 </button>
@@ -306,13 +327,13 @@ export function EditorToolbar({
             </div>
           ) : null}
         </div>
-        {onAddComment ? <button type="button" title="Add comment" onClick={onAddComment} className={buttonClass}>Comment</button> : null}
-        {onOpenNotes ? <button type="button" title="Open notes" onClick={onOpenNotes} className={buttonClass}>Notes</button> : null}
+        {onAddComment ? <ToolbarButton title="Add comment" onClick={onAddComment} className={buttonClass}>Comment</ToolbarButton> : null}
+        {onOpenNotes ? <ToolbarButton title="Open notes" onClick={onOpenNotes} className={buttonClass}>Notes</ToolbarButton> : null}
         <span className={dividerClass} />
-        <button type="button" title="Undo" onClick={() => run((instance) => instance.chain().focus().undo().run())} className={buttonClass}>Undo</button>
-        <button type="button" title="Redo" onClick={() => run((instance) => instance.chain().focus().redo().run())} className={buttonClass}>Redo</button>
+        <ToolbarButton title="Undo" onClick={() => run((instance) => instance.chain().focus().undo().run())} className={buttonClass}>Undo</ToolbarButton>
+        <ToolbarButton title="Redo" onClick={() => run((instance) => instance.chain().focus().redo().run())} className={buttonClass}>Redo</ToolbarButton>
         <details className="relative">
-          <summary className={`${buttonClass} list-none cursor-pointer`}>More</summary>
+          <summary aria-label="More formatting controls" className={`${buttonClass} list-none cursor-pointer`}>More</summary>
           <div className={`absolute right-0 top-full z-30 mt-2 grid w-64 gap-2 rounded-md border p-3 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white"}`}>
             <div className="grid grid-cols-2 gap-2">
               <select aria-label="Text color" className={selectClass} defaultValue={COLOR_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().setColor(colorValue(event.target.value)).run())}>
@@ -329,14 +350,14 @@ export function EditorToolbar({
               </select>
             </div>
             <div className="flex flex-wrap gap-1">
-              <button type="button" title="Clear formatting" onClick={() => run((instance) => instance.chain().focus().unsetAllMarks().clearNodes().run())} className={buttonClass}>Clear</button>
-              <button type="button" title="Checklist" onClick={() => run((instance) => instance.chain().focus().toggleTaskList().run())} className={buttonClass}>[ ]</button>
-              <button type="button" title="Quote" onClick={() => run((instance) => instance.chain().focus().toggleBlockquote().run())} className={buttonClass}>Quote</button>
-              <button type="button" title="Justify" onClick={() => run((instance) => instance.chain().focus().setTextAlign("justify").run())} className={buttonClass}>Justify</button>
-              <button type="button" title="Divider" onClick={() => run((instance) => instance.chain().focus().setHorizontalRule().run())} className={buttonClass}>Rule</button>
-              <button type="button" title="Scene break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "sceneBreak" }).run())} className={buttonClass}>***</button>
-              <button type="button" title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</button>
-              <button type="button" title="First-line indent" onClick={() => run((instance) => focusedRichTextChain(instance).setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</button>
+              <ToolbarButton title="Clear formatting" onClick={() => run((instance) => instance.chain().focus().unsetAllMarks().clearNodes().run())} className={buttonClass}>Clear</ToolbarButton>
+              <ToolbarButton title="Checklist" onClick={() => run((instance) => instance.chain().focus().toggleTaskList().run())} className={buttonClass}>[ ]</ToolbarButton>
+              <ToolbarButton title="Quote" onClick={() => run((instance) => instance.chain().focus().toggleBlockquote().run())} className={buttonClass}>Quote</ToolbarButton>
+              <ToolbarButton title="Justify" onClick={() => run((instance) => instance.chain().focus().setTextAlign("justify").run())} className={buttonClass}>Justify</ToolbarButton>
+              <ToolbarButton title="Divider" onClick={() => run((instance) => instance.chain().focus().setHorizontalRule().run())} className={buttonClass}>Rule</ToolbarButton>
+              <ToolbarButton title="Scene break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "sceneBreak" }).run())} className={buttonClass}>***</ToolbarButton>
+              <ToolbarButton title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</ToolbarButton>
+              <ToolbarButton title="First-line indent" onClick={() => run((instance) => focusedRichTextChain(instance).setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</ToolbarButton>
             </div>
           </div>
         </details>

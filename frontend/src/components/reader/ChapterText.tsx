@@ -4,6 +4,7 @@ import { parsePublishedTextBlocks } from "@/lib/utils/publishedLayout"
 import { resolveReaderFontStack } from "@/lib/utils/readerTypography"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { PRIVATE_SHARE_COPY_NOTICE, preventProtectedManuscriptCopy } from "@/lib/utils/manuscriptCopyProtection"
+import { Skeleton } from "@/components/ui/Skeleton"
 import type { ChapterCharacter, ChapterMedia, ReaderDisplayStyle } from "@/types/reader"
 import { resolveMediaAssetSrc } from "@/lib/utils/assetUrls"
 import type { PublishedBlockType } from "@/lib/utils/publishedLayout"
@@ -151,9 +152,13 @@ export function ChapterText({
 
   if (!text && !htmlContent) {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-12">
-        <div className="flex justify-center">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+      <div className="mx-auto max-w-2xl px-6 py-12" role="status" aria-label="Loading chapter text" aria-busy="true">
+        <span className="sr-only">Loading chapter text</span>
+        <div className="space-y-3">
+          <Skeleton className="mx-auto h-4 w-2/3" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-3/4" />
         </div>
       </div>
     )

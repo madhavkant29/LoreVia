@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 
-class ObsidianVaultNoteSource(str, enum.Enum):
+class VaultNoteSource(str, enum.Enum):
     CHARACTER_BIBLE = "character_bible"
     USER_NOTES = "user_notes"
 
@@ -111,11 +111,11 @@ class Book(Base):
     reading_sessions = relationship("ReadingSession", back_populates="book", cascade="all, delete-orphan")
     notes = relationship("BookNote", back_populates="book", cascade="all, delete-orphan")
     manuscript_annotations = relationship("ManuscriptAnnotation", back_populates="book", cascade="all, delete-orphan")
-    obsidian_notes = relationship("ObsidianVaultNote", back_populates="book", cascade="all, delete-orphan")
-    obsidian_note_links = relationship("NoteLink", back_populates="book", cascade="all, delete-orphan")
-    obsidian_note_backlinks = relationship("NoteBacklink", back_populates="book", cascade="all, delete-orphan")
-    obsidian_note_tags = relationship("NoteTag", back_populates="book", cascade="all, delete-orphan")
-    obsidian_note_series_links = relationship(
+    vault_notes = relationship("VaultNote", back_populates="book", cascade="all, delete-orphan")
+    vault_note_links = relationship("NoteLink", back_populates="book", cascade="all, delete-orphan")
+    vault_note_backlinks = relationship("NoteBacklink", back_populates="book", cascade="all, delete-orphan")
+    vault_note_tags = relationship("NoteTag", back_populates="book", cascade="all, delete-orphan")
+    vault_note_series_links = relationship(
         "NoteSeriesLink",
         foreign_keys="NoteSeriesLink.source_book_id",
         back_populates="source_book",
@@ -449,28 +449,28 @@ class ManuscriptAnnotation(Base):
     user = relationship("User")
 
 
-class ObsidianVaultNote(Base):
-    __tablename__ = "book_obsidian_notes"
+class VaultNote(Base):
+    __tablename__ = "book_vault_notes"
     __table_args__ = (
-        UniqueConstraint("user_id", "book_id", "path", "source", name="uq_book_obsidian_notes_user_book_path_source"),
+        UniqueConstraint("user_id", "book_id", "path", "source", name="uq_book_vault_notes_user_book_path_source"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
     path: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    source: Mapped[ObsidianVaultNoteSource] = mapped_column(
+    source: Mapped[VaultNoteSource] = mapped_column(
         String,
         nullable=False,
-        default=ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
-        server_default=ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
+        default=VaultNoteSource.CHARACTER_BIBLE.value,
+        server_default=VaultNoteSource.CHARACTER_BIBLE.value,
         index=True,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
 
-    book = relationship("Book", back_populates="obsidian_notes")
+    book = relationship("Book", back_populates="vault_notes")
     outgoing_links = relationship("NoteLink", foreign_keys="NoteLink.source_note_id", back_populates="source_note", cascade="all, delete-orphan")
     incoming_links = relationship("NoteLink", foreign_keys="NoteLink.target_note_id", back_populates="target_note", cascade="all, delete-orphan")
     backlinks = relationship("NoteBacklink", foreign_keys="NoteBacklink.target_note_id", back_populates="target_note", cascade="all, delete-orphan")
@@ -478,65 +478,65 @@ class ObsidianVaultNote(Base):
 
 
 class NoteLink(Base):
-    __tablename__ = "book_obsidian_note_links"
+    __tablename__ = "book_vault_note_links"
     __table_args__ = (
-        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_book_obsidian_note_links_source_target_type"),
+        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_book_vault_note_links_source_target_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    source_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_obsidian_notes.id", ondelete="CASCADE"), nullable=False, index=True)
-    target_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_obsidian_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_vault_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_vault_notes.id", ondelete="CASCADE"), nullable=False, index=True)
     link_type: Mapped[str] = mapped_column(String, nullable=False, default="reference", server_default="reference", index=True)
     target_label: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    book = relationship("Book", back_populates="obsidian_note_links")
-    source_note = relationship("ObsidianVaultNote", foreign_keys=[source_note_id], back_populates="outgoing_links")
-    target_note = relationship("ObsidianVaultNote", foreign_keys=[target_note_id], back_populates="incoming_links")
+    book = relationship("Book", back_populates="vault_note_links")
+    source_note = relationship("VaultNote", foreign_keys=[source_note_id], back_populates="outgoing_links")
+    target_note = relationship("VaultNote", foreign_keys=[target_note_id], back_populates="incoming_links")
 
 
 class NoteBacklink(Base):
-    __tablename__ = "book_obsidian_note_backlinks"
+    __tablename__ = "book_vault_note_backlinks"
     __table_args__ = (
-        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_book_obsidian_note_backlinks_source_target_type"),
+        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_book_vault_note_backlinks_source_target_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    source_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_obsidian_notes.id", ondelete="CASCADE"), nullable=False, index=True)
-    target_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_obsidian_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_vault_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_vault_notes.id", ondelete="CASCADE"), nullable=False, index=True)
     link_type: Mapped[str] = mapped_column(String, nullable=False, default="reference", server_default="reference", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    book = relationship("Book", back_populates="obsidian_note_backlinks")
-    source_note = relationship("ObsidianVaultNote", foreign_keys=[source_note_id])
-    target_note = relationship("ObsidianVaultNote", foreign_keys=[target_note_id], back_populates="backlinks")
+    book = relationship("Book", back_populates="vault_note_backlinks")
+    source_note = relationship("VaultNote", foreign_keys=[source_note_id])
+    target_note = relationship("VaultNote", foreign_keys=[target_note_id], back_populates="backlinks")
 
 
 class NoteTag(Base):
-    __tablename__ = "book_obsidian_note_tags"
+    __tablename__ = "book_vault_note_tags"
     __table_args__ = (
-        UniqueConstraint("note_id", "tag_name", name="uq_book_obsidian_note_tags_note_tag"),
+        UniqueConstraint("note_id", "tag_name", name="uq_book_vault_note_tags_note_tag"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_obsidian_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_vault_notes.id", ondelete="CASCADE"), nullable=False, index=True)
     tag_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    book = relationship("Book", back_populates="obsidian_note_tags")
-    note = relationship("ObsidianVaultNote", back_populates="tags")
+    book = relationship("Book", back_populates="vault_note_tags")
+    note = relationship("VaultNote", back_populates="tags")
 
 
 class NoteSeriesLink(Base):
-    __tablename__ = "book_obsidian_note_series_links"
+    __tablename__ = "book_vault_note_series_links"
     __table_args__ = (
-        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_book_obsidian_note_series_links_source_target_type"),
+        UniqueConstraint("source_note_id", "target_note_id", "link_type", name="uq_book_vault_note_series_links_source_target_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -544,15 +544,15 @@ class NoteSeriesLink(Base):
     series_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE"), nullable=False, index=True)
     source_book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
     target_book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    source_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_obsidian_notes.id", ondelete="CASCADE"), nullable=False, index=True)
-    target_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_obsidian_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_vault_notes.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_note_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("book_vault_notes.id", ondelete="CASCADE"), nullable=False, index=True)
     link_type: Mapped[str] = mapped_column(String, nullable=False, default="reference", server_default="reference", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    source_book = relationship("Book", foreign_keys=[source_book_id], back_populates="obsidian_note_series_links")
+    source_book = relationship("Book", foreign_keys=[source_book_id], back_populates="vault_note_series_links")
     target_book = relationship("Book", foreign_keys=[target_book_id])
-    source_note = relationship("ObsidianVaultNote", foreign_keys=[source_note_id])
-    target_note = relationship("ObsidianVaultNote", foreign_keys=[target_note_id])
+    source_note = relationship("VaultNote", foreign_keys=[source_note_id])
+    target_note = relationship("VaultNote", foreign_keys=[target_note_id])
 
 
 class ChapterMedia(Base):

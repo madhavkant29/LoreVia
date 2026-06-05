@@ -13,6 +13,7 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { Button } from "@/components/ui/Button"
+import { Skeleton } from "@/components/ui/Skeleton"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import type {
   AdvisorMessage,
@@ -61,8 +62,14 @@ const StoryAdvisorEditorialPanel = dynamic(
   () => import("@/components/reader/StoryAdvisorEditorialPanel").then(mod => mod.StoryAdvisorEditorialPanel),
   {
     loading: () => (
-      <div className="rounded-lg border border-white/10 bg-[#0b1220]/88 p-6 text-sm text-slate-400">
-        Loading editorial review...
+      <div className="rounded-lg border border-white/10 bg-[#0b1220]/88 p-6" role="status" aria-label="Loading editorial review" aria-busy="true">
+        <span className="sr-only">Loading editorial review</span>
+        <Skeleton className="h-4 w-40 bg-white/10" />
+        <Skeleton className="mt-4 h-24 rounded-md bg-white/10" />
+        <div className="mt-4 flex gap-2">
+          <Skeleton className="h-9 w-32 rounded-sm bg-white/10" />
+          <Skeleton className="h-9 w-28 rounded-sm bg-white/10" />
+        </div>
       </div>
     ),
   },
@@ -910,11 +917,12 @@ export default function AdvisorPage() {
 
                   {/* Loading */}
                   {loading && (
-                    <div className={`rounded-md border p-5 animate-pulse ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`}>
-                      <div className={`h-2.5 w-24 rounded-full mb-3 ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
-                      <div className={`h-2.5 w-full rounded-full mb-2 ${isDark ? "bg-white/8" : "bg-stone-100"}`} />
-                      <div className={`h-2.5 w-3/4 rounded-full mb-2 ${isDark ? "bg-white/8" : "bg-stone-100"}`} />
-                      <div className={`h-2.5 w-1/2 rounded-full ${isDark ? "bg-white/6" : "bg-stone-100"}`} />
+                    <div className={`rounded-md border p-5 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} role="status" aria-label="Loading advisor response" aria-busy="true">
+                      <span className="sr-only">Loading advisor response</span>
+                      <Skeleton className="mb-3 h-2.5 w-24 rounded-full" />
+                      <Skeleton className="mb-2 h-2.5 w-full rounded-full" />
+                      <Skeleton className="mb-2 h-2.5 w-3/4 rounded-full" />
+                      <Skeleton className="h-2.5 w-1/2 rounded-full" />
                     </div>
                   )}
 
@@ -1160,17 +1168,14 @@ export default function AdvisorPage() {
                   {suggestionsLoading || scanStatus === "scanning" ? (
                     <div className="space-y-3">
                       {scanStatus === "scanning" && (
-                        <div className={`mb-3 rounded-md border px-4 py-3 animate-pulse ${isDark ? "border-violet-500/30 bg-violet-500/10" : "border-violet-200 bg-violet-50"}`}>
-                          <p className={`text-sm font-medium ${isDark ? "text-violet-200" : "text-violet-800"}`}>
-                            Running continuity scan across extracted story data...
-                          </p>
-                          <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                            This may take a moment if an LLM audit is needed.
-                          </p>
+                        <div className={`mb-3 rounded-md border px-4 py-3 ${isDark ? "border-violet-500/30 bg-violet-500/10" : "border-violet-200 bg-violet-50"}`} role="status" aria-label="Running continuity scan" aria-busy="true">
+                          <span className="sr-only">Running continuity scan across extracted story data</span>
+                          <Skeleton className="h-4 w-72 max-w-full" />
+                          <Skeleton className="mt-2 h-3 w-96 max-w-full" />
                         </div>
                       )}
                       {[1, 2, 3].map(i => (
-                        <div key={i} className={`h-28 animate-pulse rounded-lg border ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} />
+                        <Skeleton key={i} variant="card" className={`h-28 rounded-lg border ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} />
                       ))}
                     </div>
                   ) : scanStatus === "failed" && scanError ? (

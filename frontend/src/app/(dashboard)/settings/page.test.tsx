@@ -188,7 +188,7 @@ describe("SettingsPage billing actions", () => {
 
     const view = await renderSettingsPage()
     expect(view.textContent).toContain("This is your public")
-    expect(view.textContent).toContain("separate from the author or pen name")
+    expect(view.textContent).toContain("Your manuscript author or pen name can be changed per book")
 
     const usernameInput = view.querySelector('input[autocomplete="username"]') as HTMLInputElement | null
     const saveButton = findButton(view, "Change username")
@@ -226,7 +226,7 @@ describe("SettingsPage billing actions", () => {
       await Promise.resolve()
     })
 
-    expect(view.textContent).toContain("Control promotional LoreVia emails")
+    expect(view.textContent).toContain("LoreVia emails")
     expect(getEmailPreferencesMock).toHaveBeenCalledTimes(1)
 
     const button = findButton(view, "Product updates")
@@ -240,6 +240,67 @@ describe("SettingsPage billing actions", () => {
       marketing: true,
     })
     expect(view.textContent).toContain("Email preferences updated.")
+  })
+
+  it("marks the settings sidebar item for the section nearest the scroll position", async () => {
+    const view = await renderSettingsPage()
+    const accountLink = view.querySelector('a[href="#account"]') as HTMLAnchorElement | null
+    const sessionLink = view.querySelector('a[href="#session"]') as HTMLAnchorElement | null
+
+    expect(accountLink?.getAttribute("aria-current")).toBe("location")
+
+    const sectionRects: Record<string, DOMRect> = {
+      account: makeRect(-900, -760),
+      identity: makeRect(-720, -520),
+      appearance: makeRect(-500, -380),
+      reading: makeRect(-360, -220),
+      privacy: makeRect(-200, -80),
+      emails: makeRect(-60, 80),
+      goals: makeRect(90, 250),
+      session: makeRect(150, 260),
+    }
+
+    for (const [id, rect] of Object.entries(sectionRects)) {
+      const section = view.querySelector(`#${id}`) as HTMLElement | null
+      if (section) {
+        section.getBoundingClientRect = vi.fn(() => rect)
+      }
+    }
+
+    const requestAnimationFrameMock = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(0)
+        return 1
+      })
+    const cancelAnimationFrameMock = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined)
+
+    Object.defineProperty(document.documentElement, "scrollHeight", {
+      configurable: true,
+      value: 3000,
+    })
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 800,
+    })
+    Object.defineProperty(window, "scrollY", {
+      configurable: true,
+      value: 1000,
+    })
+
+    await act(async () => {
+      window.dispatchEvent(new Event("scroll"))
+      await Promise.resolve()
+    })
+
+    expect(sessionLink?.getAttribute("aria-current")).toBe("location")
+    expect(sessionLink?.className).toContain("settings-section-nav__item--active")
+    expect(accountLink?.getAttribute("aria-current")).toBeNull()
+
+    requestAnimationFrameMock.mockRestore()
+    cancelAnimationFrameMock.mockRestore()
   })
 })
 
@@ -260,4 +321,18 @@ async function renderSettingsPage() {
 
 function findButton(view: HTMLDivElement, label: string) {
   return Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes(label))
+}
+
+function makeRect(top: number, bottom: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    width: 100,
+    height: bottom - top,
+    top,
+    right: 100,
+    bottom,
+    left: 0,
+    toJSON: () => ({}),
+  } as DOMRect
 }

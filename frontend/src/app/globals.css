@@ -727,32 +727,20 @@ body {
 }
 
 .manuscript-paged-preview-shell {
+  width: var(--manuscript-page-width);
+  max-width: 100%;
   height: var(--manuscript-page-height);
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x proximity;
+  touch-action: pan-x pinch-zoom;
   padding: var(--manuscript-page-padding-top) 0 var(--manuscript-page-padding-bottom);
   box-sizing: border-box;
-  background-image:
-    repeating-linear-gradient(
-      to right,
-      rgba(253, 252, 249, 0.98) 0,
-      rgba(253, 252, 249, 0.98) var(--manuscript-page-width),
-      transparent var(--manuscript-page-width),
-      transparent calc(var(--manuscript-page-width) + var(--manuscript-page-gap))
-    );
-  background-position-x: center;
+  background-color: rgba(253, 252, 249, 0.98);
 }
 
 .dark .manuscript-paged-preview-shell {
-  background-image:
-    repeating-linear-gradient(
-      to right,
-      rgba(253, 252, 249, 0.99) 0,
-      rgba(253, 252, 249, 0.99) var(--manuscript-page-width),
-      transparent var(--manuscript-page-width),
-      transparent calc(var(--manuscript-page-width) + var(--manuscript-page-gap))
-    );
+  background-color: rgba(253, 252, 249, 0.99);
 }
 
 .manuscript-paged-preview {

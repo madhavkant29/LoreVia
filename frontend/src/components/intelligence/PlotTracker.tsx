@@ -118,7 +118,7 @@ export const PlotTracker = memo(function PlotTracker({ bookId, chapter, mode = "
       })
     } finally {
       setVaultSavingId(null)
-      void booksApi.listObsidianNotes(bookId).catch(() => null)
+      void booksApi.listVaultNotes(bookId).catch(() => null)
     }
   }
 

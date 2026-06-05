@@ -1,5 +1,5 @@
 import { booksApi } from "@/lib/api/books"
-import type { ObsidianVaultNoteSaveResult } from "@/types/book"
+import type { VaultNoteSaveResult } from "@/types/book"
 
 export type VaultNoteContext =
   | "characters"
@@ -67,10 +67,10 @@ export async function saveContextualVaultNote({
   context,
   folderSegments,
   explicitFolder,
-}: SaveContextualVaultNoteInput): Promise<ObsidianVaultNoteSaveResult> {
+}: SaveContextualVaultNoteInput): Promise<VaultNoteSaveResult> {
   const normalizedTitle = sanitizeNotePathSegment(title) || "Untitled note"
   const normalizedContent = content.replace(/\r\n/g, "\n").trim()
-  const existing = await booksApi.listObsidianNotes(bookId)
+  const existing = await booksApi.listVaultNotes(bookId)
   const existingPaths = new Set(existing.map((note) => note.path.toLowerCase()))
   const folder = buildContextualNoteFolder(context, { folderSegments, explicitFolder })
 
@@ -84,7 +84,7 @@ export async function saveContextualVaultNote({
     }
   }
 
-  return booksApi.saveObsidianNote(bookId, {
+  return booksApi.saveVaultNote(bookId, {
     path,
     content: normalizedContent.startsWith("# ") ? normalizedContent : `# ${normalizedTitle}\n\n${normalizedContent}`,
   })

@@ -21,7 +21,7 @@ from app.utils.export_utils import (
     manuscript_epub_compiled,
     manuscript_docx,
     manuscript_pdf_compiled,
-    manuscript_obsidian_vault_zip,
+    manuscript_vault_zip,
     _chapter_body_blocks,
 )
 
@@ -426,8 +426,8 @@ def test_manuscript_epub_compiled_preserves_scene_breaks_and_line_breaks():
     assert "<p>Third paragraph.</p>" in chapter_html
 
 
-def test_manuscript_obsidian_vault_zip_creates_expected_folders():
-    raw = manuscript_obsidian_vault_zip(
+def test_manuscript_vault_zip_creates_expected_folders():
+    raw = manuscript_vault_zip(
         title="Atlas",
         chapters=[{"number": 1, "title": "Opening", "text": "Chapter text"}],
         scenes=[{"title": "Forest Ambush", "description": "Setup", "chapter_number": 1, "status": "assigned", "body": "Scene body"}],

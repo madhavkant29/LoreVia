@@ -327,9 +327,29 @@ async def dispatch_rebuild(db: AsyncSession, book: Book) -> tuple[int, int]:
     from app.utils.queue_utils import queue_for_user
     from app.workers.tasks.extraction_tasks import process_chapter_task
     from app.models.user import User
+    from app.utils.billing_utils import has_paid_reading_access
 
     user = await db.get(User, book.user_id)
     rebuild_run_id = get_rebuild_run_id(book)
+
+    if user and not has_paid_reading_access(user):
+        result = await db.execute(
+            select(func.sum(Book.total_tokens))
+            .where(Book.user_id == user.id, Book.id != book.id, Book.status != "error")
+        )
+        used_so_far = result.scalar() or 0
+        remaining_budget = max(0, settings.FREE_TOTAL_TOKEN_BUDGET - used_so_far)
+        if remaining_budget == 0:
+            await fail_rebuild_if_active(
+                db,
+                book,
+                expected_rebuild_run_id=rebuild_run_id,
+                error="token_budget_exhausted",
+            )
+            book.status = "error"
+            book.total_tokens = 0
+            await db.commit()
+            return 0, 0
     if not rebuild_run_id:
         raise RuntimeError("active_rebuild_run_required")
 
@@ -444,6 +464,9 @@ async def complete_rebuild_if_ready(db: AsyncSession, book: Book) -> bool:
     processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else None
     if not processing or not processing.get("rebuild_run_id"):
         return False
+    processing = await reconcile_editor_rebuild_processing_state(db, book, processing=processing)
+    workspace["processing"] = processing
+    book.writer_workspace = workspace
     if not processing.get("is_fully_ready"):
         return False
     now = datetime.now(UTC)
@@ -452,6 +475,8 @@ async def complete_rebuild_if_ready(db: AsyncSession, book: Book) -> bool:
     reprocess_metadata["last_completed_rebuild_run_id"] = processing.get("rebuild_run_id")
     workspace["reprocess"] = reprocess_metadata
     processing.pop("rebuild_run_id", None)
+    processing["status"] = "ready"
+    processing["stage"] = "complete"
     processing["completed_at"] = now.isoformat()
     workspace["processing"] = processing
     book.writer_workspace = workspace
@@ -459,6 +484,83 @@ async def complete_rebuild_if_ready(db: AsyncSession, book: Book) -> bool:
         book.status = "ready"
     await db.flush()
     return True
+
+
+async def reconcile_editor_rebuild_processing_state(
+    db: AsyncSession,
+    book: Book,
+    *,
+    processing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bring editor rebuild processing state back in sync with persisted chapter rows."""
+    from app.models.intelligence import ChapterSummary
+    from app.utils.ingestion_utils import merge_processing_pipeline
+
+    next_processing = dict(processing if isinstance(processing, dict) else {})
+    chapter_count = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(Chapter).where(
+                    Chapter.book_id == book.id,
+                    Chapter.word_count > 0,
+                )
+            )
+        ).scalar_one()
+    )
+    processed_count = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(Chapter).where(
+                    Chapter.book_id == book.id,
+                    Chapter.word_count > 0,
+                    Chapter.processed.is_(True),
+                )
+            )
+        ).scalar_one()
+    )
+    analyzed_count = int(
+        (
+            await db.execute(
+                select(func.count(func.distinct(ChapterSummary.chapter_id)))
+                .select_from(ChapterSummary)
+                .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
+                .where(
+                    Chapter.book_id == book.id,
+                    Chapter.word_count > 0,
+                    Chapter.processed.is_(True),
+                    ChapterSummary.mode == "detailed",
+                )
+            )
+        ).scalar_one()
+    )
+    now = datetime.now(UTC).isoformat()
+    if chapter_count == 0:
+        extraction_status = "succeeded"
+        analysis_status = "succeeded"
+    else:
+        extraction_status = "succeeded" if processed_count >= chapter_count else "running"
+        analysis_status = "succeeded" if analyzed_count >= chapter_count else "running"
+
+    next_processing["chapters_completed"] = processed_count
+    next_processing["chapters_total"] = chapter_count
+    if chapter_count > 0:
+        next_processing["progress_pct"] = round((processed_count / chapter_count) * 100, 1)
+
+    return merge_processing_pipeline(
+        next_processing,
+        extraction={
+            "status": extraction_status,
+            "completed_chapters": processed_count,
+            "total_chapters": chapter_count,
+            "updated_at": now,
+        },
+        analysis={
+            "status": analysis_status,
+            "completed_chapters": analyzed_count,
+            "total_chapters": chapter_count,
+            "updated_at": now,
+        },
+    )
 
 
 async def fail_rebuild_if_active(
@@ -508,6 +610,42 @@ async def fail_rebuild_run(
         expected_rebuild_run_id=expected_rebuild_run_id,
         error=error,
     )
+
+
+async def cancel_rebuild_for_manual_edit(
+    db: AsyncSession,
+    book: Book,
+    *,
+    reason: str,
+) -> bool:
+    """Cancel an active editor rebuild because the saved manuscript changed."""
+    if not getattr(book, "is_editor_project", False):
+        return False
+
+    workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
+    processing = dict(workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {})
+    rebuild_run_id = processing.get("rebuild_run_id")
+    if not rebuild_run_id:
+        return False
+
+    now = datetime.now(UTC)
+    reprocess_metadata = dict(workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else {})
+    reprocess_metadata["last_cancelled_at"] = now.isoformat()
+    reprocess_metadata["last_cancelled_rebuild_run_id"] = rebuild_run_id
+    reprocess_metadata["last_cancelled_reason"] = reason
+
+    processing.pop("rebuild_run_id", None)
+    processing["status"] = "cancelled"
+    processing["stage"] = "cancelled"
+    processing["cancelled_at"] = now.isoformat()
+    processing["last_error"] = reason
+
+    workspace["reprocess"] = reprocess_metadata
+    workspace["processing"] = processing
+    book.writer_workspace = workspace
+    book.status = "ready"
+    await db.flush()
+    return True
 
 
 def get_rebuild_run_id(book: Book) -> str | None:

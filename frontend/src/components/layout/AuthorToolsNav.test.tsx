@@ -142,6 +142,28 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-characters"]')?.textContent).toContain("Character Bible")
   })
 
+  it("places notes workspace directly under the scene workspace", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+    const manuscriptItem = view.querySelector('[data-testid="author-nav-item-manuscript"]')
+    const scenesItem = view.querySelector('[data-testid="author-nav-item-scenes"]')
+    const notesItem = view.querySelector('[data-testid="author-nav-item-notes"]')
+
+    expect(scenesItem?.textContent).toContain("Scene Workspace")
+    expect(notesItem?.textContent).toContain("Notes Workspace")
+    expect(notesItem?.getAttribute("href")).toBe("/book-1/notes")
+    expect(
+      Boolean(
+        manuscriptItem &&
+          scenesItem &&
+          notesItem &&
+          manuscriptItem.compareDocumentPosition(scenesItem) & Node.DOCUMENT_POSITION_FOLLOWING &&
+          scenesItem.compareDocumentPosition(notesItem) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    ).toBe(true)
+  })
+
   it("renders the author lens entry in the shared author rail", () => {
     mockBaseState()
 

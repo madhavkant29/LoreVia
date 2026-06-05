@@ -255,6 +255,17 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
   })
 
+  it("deletes chapters and invalidates book, reader, workspace, and version caches", async () => {
+    await booksApi.deleteChapter("book-1", 2)
+
+    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/chapters/2")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:workspace-tree")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:revision-intelligence")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:chapter-versions:2:")
+  })
+
   it("reorders chapter scenes with version-aware payloads", async () => {
     await booksApi.reorderChapterScenes("book-1", 2, {
       sceneIds: ["scene-3", "scene-1", "scene-2"],
@@ -509,24 +520,24 @@ describe("books api", () => {
     })
   })
 
-  it("saves obsidian notes and invalidates related caches", async () => {
-    await booksApi.saveObsidianNote("book-1", { path: "Scenes/One.md", content: "# One" })
+  it("saves vault notes and invalidates related caches", async () => {
+    await booksApi.saveVaultNote("book-1", { path: "Scenes/One.md", content: "# One" })
 
-    expect(putMock).toHaveBeenCalledWith("/books/book-1/notes/obsidian", {
+    expect(putMock).toHaveBeenCalledWith("/books/book-1/notes/vault", {
       path: "Scenes/One.md",
       content: "# One",
     })
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-notes")
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-graph")
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-relations:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-notes")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-graph")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-relations:")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:workspace-tree")
   })
 
-  it("deletes obsidian notes with encoded paths and invalidates caches", async () => {
-    await booksApi.deleteObsidianNote("book-1", "Scenes/Act 1.md")
+  it("deletes vault notes with encoded paths and invalidates caches", async () => {
+    await booksApi.deleteVaultNote("book-1", "Scenes/Act 1.md")
 
-    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/notes/obsidian/Scenes%2FAct%201.md")
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-notes")
+    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/notes/vault/Scenes%2FAct%201.md")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-notes")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:workspace-tree")
   })
 

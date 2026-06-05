@@ -8,8 +8,10 @@ type ChapterListProps = {
   unitLabel: string
   isDark: boolean
   readBusyKey: string | null
+  deleteBusyKey?: string | null
   onOpenChapter: (chapterNumber: number) => void
   onToggleChapterRead: (chapterNumber: number, nextRead: boolean) => void
+  onDeleteChapter?: (chapterNumber: number) => void
 }
 
 export function ChapterList({
@@ -17,8 +19,10 @@ export function ChapterList({
   unitLabel,
   isDark,
   readBusyKey,
+  deleteBusyKey = null,
   onOpenChapter,
   onToggleChapterRead,
+  onDeleteChapter,
 }: ChapterListProps) {
   return (
     <section aria-labelledby="chapters-section-heading" className="space-y-4">
@@ -39,8 +43,10 @@ export function ChapterList({
             unitLabel={unitLabel}
             isDark={isDark}
             readBusy={readBusyKey === `chapter:${chapter.number}`}
+            deleteBusy={deleteBusyKey === `chapter:${chapter.number}`}
             onOpen={() => onOpenChapter(chapter.number)}
             onToggleRead={() => onToggleChapterRead(chapter.number, !chapter.read)}
+            onDelete={onDeleteChapter ? () => onDeleteChapter(chapter.number) : undefined}
           />
         ))}
       </div>

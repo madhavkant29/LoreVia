@@ -38,7 +38,13 @@ def process_chapter_task(
         from sqlalchemy import select
 
         from app.core.database import AsyncSessionLocal
+        from app.core.redis import get_redis
         from app.models.book import Book, Chapter
+
+        r = await get_redis()
+        if await r.exists(f"chapter_reprocess:{book_id}:{chapter_num}"):
+            return
+
         try:
             from app.models.book import ChapterVersion
         except ImportError:
@@ -106,6 +112,8 @@ def process_chapter_task(
                     queue_wait_ms=queue_wait_ms,
                     rebuild_run_id=rebuild_run_id,
                 )
+                await r.set(f"chapter_reprocess:{book_id}:{chapter_num}", "1", ex=30)
+
                 if version_uuid is not None and book.work_type != "screenplay":
                     from app.utils.book_utils import (
                         extract_novel_scene_candidates,

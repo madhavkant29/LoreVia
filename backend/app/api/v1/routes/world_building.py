@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import rate_limit_world_building_ai, rate_limit_world_building_upload
+from app.api.deps.rate_limit import enforce_world_building_upload_rate_limit, rate_limit_world_building_ai
 from app.api.deps.subscription import check_upload_limit
 from app.core.config import settings
 from app.core.database import get_db
@@ -148,10 +148,12 @@ async def upload_world_documents(
     replace_existing: str = Form("false"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-    _=Depends(rate_limit_world_building_upload),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     upload_files = [upload for upload in (files or []) if upload.filename]
+
+    if upload_files:
+        await enforce_world_building_upload_rate_limit(db, current_user.id)
     if len(upload_files) > settings.WORLD_BUILDING_UPLOAD_MAX_FILES:
         raise HTTPException(413, f"World-building upload accepts at most {settings.WORLD_BUILDING_UPLOAD_MAX_FILES} files at once.")
 

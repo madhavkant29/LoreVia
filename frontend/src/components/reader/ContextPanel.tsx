@@ -6,6 +6,7 @@ import Link from "next/link"
 
 import { readerApi } from "@/lib/api/reader"
 import { booksApi } from "@/lib/api/books"
+import { Skeleton } from "@/components/ui/Skeleton"
 import type { ChapterCharacter, ContextResult } from "@/types/reader"
 
 interface Props {
@@ -274,7 +275,7 @@ export const ContextPanel = memo(function ContextPanel({
           </div>
         ) : null}
 
-        {loading ? <div className={`py-8 text-center text-sm ${shell.muted}`}>Loading...</div> : null}
+        {loading ? <ContextLoadingRows label="Loading character context" /> : null}
 
         {!loading && activeCharacter ? (
           <div className={`rounded-xl border p-5 ${shell.card}`}>
@@ -286,6 +287,7 @@ export const ContextPanel = memo(function ContextPanel({
                   <div className="absolute top-4 right-4">
                     <button
                       onClick={() => setEditing(false)}
+                      aria-label="Close character editor"
                       className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${shell.tab}`}
                     >
                       x
@@ -482,7 +484,7 @@ export const ContextPanel = memo(function ContextPanel({
                   <div className="mt-4">
                     <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Recall</p>
                     {recallLoading ? (
-                      <p className={`mt-2 text-sm ${shell.muted}`}>Loading...</p>
+                      <ContextLoadingRows label="Loading recall context" compact />
                     ) : recallText ? (
                       <p className={`mt-2 text-sm leading-6 ${shell.body}`}>
                         {recallText}
@@ -528,3 +530,14 @@ export const ContextPanel = memo(function ContextPanel({
     </aside>
   )
 })
+
+function ContextLoadingRows({ compact = false, label }: { compact?: boolean; label: string }) {
+  return (
+    <div className={compact ? "mt-2 space-y-2" : "py-8 space-y-2"} role="status" aria-label={label} aria-busy="true">
+      <span className="sr-only">{label}</span>
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-5/6" />
+      {!compact ? <Skeleton className="h-3 w-2/3" /> : null}
+    </div>
+  )
+}

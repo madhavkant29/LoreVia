@@ -1,13 +1,13 @@
-"""Unit tests for the richer Obsidian bible export."""
+"""Unit tests for the richer vault bible export."""
 
 import uuid
 
 from app.models.book import Book
 from app.models.character import Character
-from app.utils.export_utils import EXPORT_ATTRIBUTION, character_bible_obsidian_manifest
+from app.utils.export_utils import EXPORT_ATTRIBUTION, character_bible_vault_manifest
 
 
-def test_character_bible_obsidian_manifest_builds_linked_vault_structure():
+def test_character_bible_vault_manifest_builds_linked_vault_structure():
     book = Book(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -101,7 +101,7 @@ def test_character_bible_obsidian_manifest_builds_linked_vault_structure():
         str(blaire.id): ["The Hidden Map [ongoing] — note: Aria and Blaire pursue the map."],
     }
 
-    root_folder, files = character_bible_obsidian_manifest(
+    root_folder, files = character_bible_vault_manifest(
         book=book,
         characters=[aria, blaire],
         relationships=relationships,
@@ -134,7 +134,7 @@ def test_character_bible_obsidian_manifest_builds_linked_vault_structure():
     assert all(content.rstrip().endswith(EXPORT_ATTRIBUTION) for content in paths.values())
 
 
-def test_character_bible_obsidian_manifest_preserves_spaces_in_character_note_paths():
+def test_character_bible_vault_manifest_preserves_spaces_in_character_note_paths():
     book = Book(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -152,7 +152,7 @@ def test_character_bible_obsidian_manifest_preserves_spaces_in_character_note_pa
         trait_state={},
     )
 
-    root_folder, files = character_bible_obsidian_manifest(
+    root_folder, files = character_bible_vault_manifest(
         book=book,
         characters=[mayoi],
         relationships=[],
@@ -170,7 +170,7 @@ def test_character_bible_obsidian_manifest_preserves_spaces_in_character_note_pa
     assert f"{root_folder}/Characters/Mayoi-Hachikuji.md" not in paths
 
 
-def test_character_bible_obsidian_manifest_dedupes_colliding_obsidian_paths():
+def test_character_bible_vault_manifest_dedupes_colliding_vault_paths():
     book = Book(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -180,7 +180,7 @@ def test_character_bible_obsidian_manifest_dedupes_colliding_obsidian_paths():
         status="ready",
     )
 
-    root_folder, files = character_bible_obsidian_manifest(
+    root_folder, files = character_bible_vault_manifest(
         book=book,
         characters=[],
         relationships=[],

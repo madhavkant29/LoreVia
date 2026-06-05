@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .core import _clean_optional_text, _clean_text, _read_upload_bounded, _validate_cover_magic, log
 from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import rate_limit_manuscript_import, rate_limit_upload
+from app.api.deps.rate_limit import enforce_manuscript_import_rate_limit, rate_limit_upload
 from app.api.deps.subscription import check_upload_limit
 from app.core import storage
 from app.core.config import settings
@@ -30,6 +30,7 @@ from app.schemas.books import (
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.billing_utils import record_book_upload_charge, require_author_access
 from app.utils.book_utils import (
+    SCENE_BREAK_LINE_RE,
     _append_recent_revision_edit,
     as_bool,
     assert_editor_project_not_rebuilding,
@@ -60,7 +61,6 @@ from app.utils.queue_utils import queue_for_user
 from app.utils.upload_security_utils import validate_document_upload_bytes
 from app.utils.user_utils import add_daily_word_progress, build_writing_activity_entry
 from app.workers.consumers.extraction_consumer import _process_chapter
-from app.workers.tasks.analysis_tasks import analyse_chapter_task
 from app.workers.tasks.extraction_tasks import process_book_task
 from app.services.book_service import create_editor_project
 
@@ -278,7 +278,6 @@ async def import_manuscript_content(
     split_into_chapters: str = Form("true"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-    _=Depends(rate_limit_manuscript_import),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
@@ -343,6 +342,9 @@ async def import_manuscript_content(
     manuscript_files = [upload for upload in (files or []) if upload.filename]
     if len(manuscript_files) > settings.MANUSCRIPT_IMPORT_MAX_FILES:
         raise HTTPException(413, f"Manuscript import accepts at most {settings.MANUSCRIPT_IMPORT_MAX_FILES} files at once.")
+
+    if manuscript_files:
+        await enforce_manuscript_import_rate_limit(db, current_user.id)
 
     for upload in manuscript_files:
         if not upload.filename:
@@ -503,12 +505,13 @@ async def import_manuscript_content(
                 chapter_number=job_number,
                 scenes=extracted_scenes,
             )
-            await sync_chapter_content_from_novel_scenes(
-                db,
-                book=book,
-                chapter_number=job_number,
-                increment_content_version=False,
-            )
+            if SCENE_BREAK_LINE_RE.search(next_text):
+                await sync_chapter_content_from_novel_scenes(
+                    db,
+                    book=book,
+                    chapter_number=job_number,
+                    increment_content_version=False,
+                )
         _append_recent_revision_edit(
             book,
             kind="chapter",
@@ -600,7 +603,6 @@ async def import_manuscript_content(
 
     chapter_reports: list[ChapterConsistencyReport] = []
     chapters_for_analysis: list[tuple[int, str]] = []
-    analysis_tasks: list[dict[str, object]] = []
     for number in ([] if getattr(book, "is_editor_project", False) else imported_numbers):
         chapter = (
             await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == number))
@@ -616,28 +618,6 @@ async def import_manuscript_content(
     if chapters_for_analysis:
         await db.commit()
 
-    for number, chapter_id in chapters_for_analysis:
-        try:
-            task_result = analyse_chapter_task.apply_async(
-                args=[chapter_id, str(book.id)],
-                kwargs={"is_reprocessing": False},
-                queue="analysis",
-            )
-            analysis_tasks.append(
-                {
-                    "chapter_id": chapter_id,
-                    "chapter_number": number,
-                    "task_id": getattr(task_result, "id", None),
-                }
-            )
-        except Exception:
-            log.warning(
-                "manuscript_import_analysis_dispatch_failed book_id=%s chapter_number=%s",
-                book.id,
-                number,
-                exc_info=True,
-            )
-
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
 
     return ManuscriptImportResult(
@@ -645,8 +625,8 @@ async def import_manuscript_content(
         book_id=str(book.id),
         imported_chapters=sorted(set(imported_numbers)),
         chapters_created=len(imported_numbers),
-        analysis_dispatched=len(analysis_tasks),
-        analysis_tasks=analysis_tasks,
+        analysis_dispatched=0,
+        analysis_tasks=[],
         chapter_content_versions=imported_content_versions,
         total_chapters=book.total_chapters or total_chapters,
         mode=book.mode or "author",

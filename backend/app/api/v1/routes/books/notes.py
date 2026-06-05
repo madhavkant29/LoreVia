@@ -9,33 +9,33 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_manuscript_import
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.book import Book, BookNote, ObsidianVaultNoteSource
+from app.models.book import Book, BookNote, VaultNoteSource
 from app.schemas.books import (
     BookNoteBody,
     BookNoteOut,
     EntityTagSetOut,
     EntityTagUpdateBody,
-    ObsidianGraphOut,
-    ObsidianNoteLinkListOut,
-    ObsidianVaultNoteBody,
-    ObsidianVaultNoteOut,
-    ObsidianVaultNoteSaveOut,
+    VaultGraphOut,
+    VaultNoteLinkListOut,
+    VaultNoteBody,
+    VaultNoteOut,
+    VaultNoteSaveOut,
 )
 from app.utils.book_utils import (
-    build_obsidian_graph,
+    build_vault_graph,
     collaboration_allows_chapter,
     collaboration_can_comment,
     delete_book_note,
-    delete_obsidian_note,
-    export_obsidian_notes_zip,
+    delete_vault_note,
+    export_vault_notes_zip,
     get_book_with_collaboration_access,
     get_owned_book,
-    import_obsidian_notes_zip,
+    import_vault_notes_zip,
     list_book_notes,
-    list_obsidian_note_relations,
-    list_obsidian_notes,
+    list_vault_note_relations,
+    list_vault_notes,
     save_book_note,
-    save_obsidian_vault_note,
+    save_vault_note,
 )
 from app.utils.tag_utils import (
     ENTITY_TYPE_NOTE,
@@ -141,59 +141,59 @@ async def remove_book_note(
     return Response(status_code=204)
 
 
-@router.get("/{book_id}/notes/obsidian", response_model=list[ObsidianVaultNoteOut])
-async def list_book_obsidian_notes(
+@router.get("/{book_id}/notes/vault", response_model=list[VaultNoteOut])
+async def list_book_vault_notes(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    return await list_obsidian_notes(
+    return await list_vault_notes(
         db,
         book=book,
         user_id=current_user.id,
-        source=ObsidianVaultNoteSource.USER_NOTES.value,
+        source=VaultNoteSource.USER_NOTES.value,
     )
 
 
-@router.put("/{book_id}/notes/obsidian", response_model=ObsidianVaultNoteSaveOut)
-async def save_book_obsidian_note(
+@router.put("/{book_id}/notes/vault", response_model=VaultNoteSaveOut)
+async def save_book_vault_note(
     book_id: uuid.UUID,
-    body: ObsidianVaultNoteBody,
+    body: VaultNoteBody,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    return await save_obsidian_vault_note(
+    return await save_vault_note(
         db,
         book=book,
         user_id=current_user.id,
         path=body.path,
         content=body.content,
-        source=ObsidianVaultNoteSource.USER_NOTES.value,
+        source=VaultNoteSource.USER_NOTES.value,
     )
 
 
-@router.delete("/{book_id}/notes/obsidian/{path:path}", status_code=204)
-async def delete_book_obsidian_note(
+@router.delete("/{book_id}/notes/vault/{path:path}", status_code=204)
+async def delete_book_vault_note(
     book_id: uuid.UUID,
     path: str,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    await delete_obsidian_note(
+    await delete_vault_note(
         db,
         book=book,
         user_id=current_user.id,
         path=path,
-        source=ObsidianVaultNoteSource.USER_NOTES.value,
+        source=VaultNoteSource.USER_NOTES.value,
     )
     return Response(status_code=204)
 
 
-@router.post("/{book_id}/notes/obsidian/import", response_model=list[ObsidianVaultNoteSaveOut])
-async def import_book_obsidian_notes(
+@router.post("/{book_id}/notes/vault/import", response_model=list[VaultNoteSaveOut])
+async def import_book_vault_notes(
     book_id: uuid.UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -201,32 +201,32 @@ async def import_book_obsidian_notes(
     _=Depends(rate_limit_manuscript_import),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    archive_bytes = await _read_upload_bounded(file, settings.OBSIDIAN_IMPORT_MAX_BYTES, "ZIP file")
-    return await import_obsidian_notes_zip(
+    archive_bytes = await _read_upload_bounded(file, settings.VAULT_IMPORT_MAX_BYTES, "ZIP file")
+    return await import_vault_notes_zip(
         db,
         book=book,
         user_id=current_user.id,
         archive_bytes=archive_bytes,
-        source=ObsidianVaultNoteSource.USER_NOTES.value,
+        source=VaultNoteSource.USER_NOTES.value,
     )
 
 
-@router.get("/{book_id}/notes/obsidian/export")
-async def export_book_obsidian_notes(
+@router.get("/{book_id}/notes/vault/export")
+async def export_book_vault_notes(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    notes = await list_obsidian_notes(
+    notes = await list_vault_notes(
         db,
         book=book,
         user_id=current_user.id,
-        source=ObsidianVaultNoteSource.USER_NOTES.value,
+        source=VaultNoteSource.USER_NOTES.value,
     )
-    zip_data = export_obsidian_notes_zip(notes=notes)
+    zip_data = export_vault_notes_zip(notes=notes)
     safe_title = _clean_text(book.title or "notes").strip() or "notes"
-    filename = f"{safe_title.replace(' ', '-')}-obsidian-notes.zip"
+    filename = f"{safe_title.replace(' ', '-')}-vault-notes.zip"
     return Response(
         content=zip_data,
         media_type="application/zip",
@@ -234,31 +234,31 @@ async def export_book_obsidian_notes(
     )
 
 
-@router.get("/{book_id}/notes/obsidian/graph", response_model=ObsidianGraphOut)
-async def get_book_obsidian_graph(
+@router.get("/{book_id}/notes/vault/graph", response_model=VaultGraphOut)
+async def get_book_vault_graph(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    notes = await list_obsidian_notes(
+    notes = await list_vault_notes(
         db,
         book=book,
         user_id=current_user.id,
-        source=ObsidianVaultNoteSource.USER_NOTES.value,
+        source=VaultNoteSource.USER_NOTES.value,
     )
-    return build_obsidian_graph(notes)
+    return build_vault_graph(notes)
 
 
-@router.get("/{book_id}/notes/obsidian/relations", response_model=ObsidianNoteLinkListOut)
-async def get_book_obsidian_note_relations(
+@router.get("/{book_id}/notes/vault/relations", response_model=VaultNoteLinkListOut)
+async def get_book_vault_note_relations(
     book_id: uuid.UUID,
     path: str = Query(..., min_length=1),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    return await list_obsidian_note_relations(
+    return await list_vault_note_relations(
         db,
         book=book,
         user_id=current_user.id,

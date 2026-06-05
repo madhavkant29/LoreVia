@@ -320,6 +320,21 @@ async def rate_limit_manuscript_import(
     )
 
 
+async def enforce_manuscript_import_rate_limit(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> None:
+    await _user_window_limit(
+        db,
+        user_id,
+        "manuscript_import",
+        field="manuscript_imports_per_hour",
+        default=12,
+        window=3600,
+        message="Manuscript import rate limit exceeded. Please wait before importing more files.",
+    )
+
+
 async def rate_limit_world_building_upload(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -327,6 +342,21 @@ async def rate_limit_world_building_upload(
     await _user_window_limit(
         db,
         current_user.id,
+        "world_building_upload",
+        field="world_building_uploads_per_hour",
+        default=10,
+        window=3600,
+        message="World-building upload rate limit exceeded. Please wait before uploading more documents.",
+    )
+
+
+async def enforce_world_building_upload_rate_limit(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> None:
+    await _user_window_limit(
+        db,
+        user_id,
         "world_building_upload",
         field="world_building_uploads_per_hour",
         default=10,

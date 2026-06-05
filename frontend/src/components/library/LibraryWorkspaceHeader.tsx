@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/Button"
+import { Tooltip } from "@/components/ui/Tooltip"
 
 export function LibraryWorkspaceHeader({
   createDisabled,
@@ -12,23 +13,25 @@ export function LibraryWorkspaceHeader({
   onOpenForum: () => void
 }) {
   return (
-    <header className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-      <div className="space-y-4">
-        <p className="app-eyebrow">Author workspace</p>
-        <h1 className={`font-display text-[3rem] leading-[0.94] tracking-[-0.04em] sm:text-[3.5rem] ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>
+    <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <div className="space-y-3">
+        <p className={`text-[0.68rem] font-semibold uppercase tracking-[0.22em] ${isDark ? "text-teal-200" : "text-teal-700"}`}>Author workspace</p>
+        <h1 className={`font-display text-[2.75rem] leading-none tracking-[-0.04em] sm:text-[3.25rem] ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>
           Library
         </h1>
-        <p className={`max-w-2xl text-base leading-8 sm:text-[1.1rem] ${isDark ? "text-[#a6a39b]" : "text-stone-600"}`}>
+        <p className={`max-w-2xl text-base leading-7 ${isDark ? "text-[#a6a39b]" : "text-stone-600"}`}>
           Organize serious writing projects, track manuscript readiness, and return to the next editorial decision without losing context.
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row lg:pt-6">
-        <Button variant="secondary" size="md" onClick={onOpenForum} className="min-h-11 rounded-lg">
-          <ForumIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
-          Beta forum
-        </Button>
-        <Button variant="primary" size="md" disabled={createDisabled} onClick={onCreate} className="min-h-11 rounded-lg">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Tooltip content="Open public beta reader discussions" className="w-full sm:w-auto">
+          <Button variant="secondary" size="md" onClick={onOpenForum} className="min-h-11 w-full rounded-sm px-4 sm:w-auto">
+            <ForumIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
+            Beta forum
+          </Button>
+        </Tooltip>
+        <Button variant="primary" size="md" disabled={createDisabled} onClick={onCreate} className="min-h-11 w-full rounded-sm px-4 sm:w-auto">
           <PlusIcon />
           New project
         </Button>

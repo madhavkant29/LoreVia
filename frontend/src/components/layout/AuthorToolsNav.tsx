@@ -119,6 +119,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     items: [
       { id: "manuscript", label: "Manuscript Editor", href: `/${bookId}/manuscript` as Route, tone: "Drafting", helper: "Write, revise, and shape the working manuscript with your drafting tools close by.", icon: "pen" },
       { id: "scenes", label: "Scene Workspace", href: `/${bookId}/scenes` as Route, tone: "File tree", helper: "Organize scenes, reorder structure, and manage the story at a scene-by-scene level.", icon: "files" },
+      { id: "notes", label: "Notes Workspace", href: `/${bookId}/notes` as Route, tone: "Vault", helper: "Keep book-specific notes, reminders, and reference details beside the draft.", icon: "notes" },
 
     ],
   },
@@ -154,7 +155,6 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     title: "Collaborate",
     authorOnly: true,
     items: [
-      { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", helper: "Keep book-specific notes, reminders, and reference details beside the draft.", icon: "notes" },
       { id: "author-loop", label: "Author Lens", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark" },
       { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", helper: "Manage who can access the book and what each collaborator is allowed to do.", icon: "users" },
     ],
@@ -447,8 +447,7 @@ function NavHeader({
         <ThemeBrandImage variant="icon" mode={isDark ? "dark" : "light"} className="h-5 w-5 object-contain" />
       </div>
       <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
-        <ThemeBrandImage variant="lockup" mode={isDark ? "dark" : "light"} className="h-5 w-auto object-contain" />
-        <h2 className={`mt-2 truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
+        <h2 className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
       </div>
     </div>
   )

@@ -3,17 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { zipSync, strToU8 } from "fflate"
 import { booksApi } from "@/lib/api/books"
-import type { ObsidianPreview, ObsidianPreviewFile } from "@/types/book"
+import type { VaultPreview, VaultPreviewFile } from "@/types/book"
 
 function cleanSegment(value: string) {
   return value.replace(/\.[^.]+$/, "").replace(/^\d+\s*-\s*/, "").trim()
 }
 
-function noteTitle(file: ObsidianPreviewFile) {
+function noteTitle(file: VaultPreviewFile) {
   return cleanSegment(file.path.split("/").pop() ?? file.path)
 }
 
-function folderLabel(file: ObsidianPreviewFile, rootFolder: string) {
+function folderLabel(file: VaultPreviewFile, rootFolder: string) {
   const relative = file.path.replace(`${rootFolder}/`, "")
   const folder = relative.includes("/") ? relative.split("/").slice(0, -1).join("/") : "Root"
   return folder || "Root"
@@ -28,16 +28,16 @@ function safeSlug(value: string) {
     .replace(/[^\w\s-]/g, "")
     .trim()
     .replace(/\s+/g, "-")
-    .toLowerCase() || "obsidian-vault"
+    .toLowerCase() || "vault-export"
 }
 
-export function ObsidianVaultPreview({
+export function VaultPreview({
   bookId,
   preview,
   isDark,
 }: {
   bookId: string
-  preview: ObsidianPreview
+  preview: VaultPreview
   isDark: boolean
 }) {
   const [query, setQuery] = useState("")
@@ -138,7 +138,7 @@ export function ObsidianVaultPreview({
     const relative = path.replace(`${preview.root_folder}/`, "")
     setStatus(`Saving ${relative}...`)
     try {
-      const result = await booksApi.saveCharacterBibleObsidianNote(bookId, { path, content })
+      const result = await booksApi.saveCharacterBibleVaultNote(bookId, { path, content })
       if (latestDraftRef.current[path] !== result.content) {
         return
       }
@@ -376,7 +376,7 @@ export function ObsidianVaultPreview({
                       <ul className={`mt-3 space-y-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                         <li>Use the search box to jump between any exported note.</li>
                         <li>Edit notes directly here, then export the updated vault ZIP.</li>
-                        <li>Obsidian will open the edited archive the same way as the original export.</li>
+                        <li>Your notes app will open the edited archive the same way as the original export.</li>
                       </ul>
                   </div>
 

@@ -78,7 +78,7 @@ describe("ReaderToolbar", () => {
     expect(container.textContent).toContain("Search passages")
     expect(container.textContent).toContain("The Lantern Room")
     expect(container.textContent).toContain("33%")
-    expect(container.textContent).toContain("Italian Old Style")
+    expect(container.textContent).toContain("Old Style Serif")
     expect(container.textContent).toContain("EB Garamond")
 
     const publishedButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Published")

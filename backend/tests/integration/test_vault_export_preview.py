@@ -1,4 +1,4 @@
-"""Integration tests for the Obsidian export preview endpoint."""
+"""Integration tests for the vault export preview endpoint."""
 
 import io
 import uuid
@@ -7,7 +7,7 @@ import zipfile
 import pytest
 
 from app.core.security import create_access_token
-from app.models.book import Book, Chapter, NoteSeriesLink, NovelScene, ObsidianVaultNote, Series
+from app.models.book import Book, Chapter, NoteSeriesLink, NovelScene, VaultNote, Series
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
 from app.models.user import User
@@ -20,11 +20,11 @@ def _auth_headers(user_id) -> dict[str, str]:
     return {"Cookie": f"lorevia_access_token={token}"}
 
 
-async def _build_obsidian_preview_book(db):
+async def _build_vault_preview_book(db):
     suffix = uuid.uuid4().hex[:8]
     user = User(
-        email=f"obsidian-preview-{suffix}@lorevia.app",
-        username=f"obsidian-preview-{suffix}",
+        email=f"vault-preview-{suffix}@lorevia.app",
+        username=f"vault-preview-{suffix}",
         password_hash="hash",
     )
     db.add(user)
@@ -113,10 +113,10 @@ async def _build_obsidian_preview_book(db):
     return user, book
 
 
-async def _build_obsidian_series_link(db):
+async def _build_vault_series_link(db):
     user = User(
-        email="obsidian-series@lorevia.app",
-        username="obsidian-series",
+        email="vault-series@lorevia.app",
+        username="vault-series",
         password_hash="hash",
     )
     db.add(user)
@@ -143,14 +143,14 @@ async def _build_obsidian_series_link(db):
     db.add_all([source_book, target_book, series])
     await db.flush()
 
-    source_note = ObsidianVaultNote(
+    source_note = VaultNote(
         user_id=user.id,
         book_id=source_book.id,
         path="Characters/Aria.md",
         source="user_notes",
         content="# Aria",
     )
-    target_note = ObsidianVaultNote(
+    target_note = VaultNote(
         user_id=user.id,
         book_id=target_book.id,
         path="Characters/Blaire.md",
@@ -177,8 +177,8 @@ async def _build_obsidian_series_link(db):
 
 
 @pytest.mark.asyncio
-async def test_obsidian_bible_preview_returns_folder_manifest(client, db):
-    user, book = await _build_obsidian_preview_book(db)
+async def test_vault_bible_preview_returns_folder_manifest(client, db):
+    user, book = await _build_vault_preview_book(db)
     response = await client.get(
         f"/api/v1/books/{book.id}/export/character-bible/preview",
         headers=_auth_headers(user.id),
@@ -194,18 +194,18 @@ async def test_obsidian_bible_preview_returns_folder_manifest(client, db):
 
 
 @pytest.mark.asyncio
-async def test_obsidian_note_series_links_are_bound_to_source_book(db):
-    source_book, target_book, link = await _build_obsidian_series_link(db)
+async def test_vault_note_series_links_are_bound_to_source_book(db):
+    source_book, target_book, link = await _build_vault_series_link(db)
 
-    assert len(source_book.obsidian_note_series_links) == 1
-    assert source_book.obsidian_note_series_links[0].id == link.id
-    assert source_book.obsidian_note_series_links[0].source_book_id == source_book.id
-    assert target_book.obsidian_note_series_links == []
+    assert len(source_book.vault_note_series_links) == 1
+    assert source_book.vault_note_series_links[0].id == link.id
+    assert source_book.vault_note_series_links[0].source_book_id == source_book.id
+    assert target_book.vault_note_series_links == []
 
 
 @pytest.mark.asyncio
-async def test_obsidian_bible_notes_save_is_visible_in_preview_and_notes_list(client, db):
-    user, book = await _build_obsidian_preview_book(db)
+async def test_vault_bible_notes_save_is_visible_in_preview_and_notes_list(client, db):
+    user, book = await _build_vault_preview_book(db)
     headers = _auth_headers(user.id)
     preview_before = await client.get(
         f"/api/v1/books/{book.id}/export/character-bible/preview",
@@ -246,11 +246,11 @@ async def test_obsidian_bible_notes_save_is_visible_in_preview_and_notes_list(cl
 
 
 @pytest.mark.asyncio
-async def test_user_obsidian_notes_crud_graph_and_export(client, db):
-    user, book = await _build_obsidian_preview_book(db)
+async def test_user_vault_notes_crud_graph_and_export(client, db):
+    user, book = await _build_vault_preview_book(db)
     headers = _auth_headers(user.id)
     save_one = await client.put(
-        f"/api/v1/books/{book.id}/notes/obsidian",
+        f"/api/v1/books/{book.id}/notes/vault",
         headers=headers,
         json={"path": "Characters/Aria.md", "content": "# Aria\n\nLinks to [[Blaire]]."},
     )
@@ -258,18 +258,18 @@ async def test_user_obsidian_notes_crud_graph_and_export(client, db):
     assert save_one.json()["source"] == "user_notes"
 
     save_two = await client.put(
-        f"/api/v1/books/{book.id}/notes/obsidian",
+        f"/api/v1/books/{book.id}/notes/vault",
         headers=headers,
         json={"path": "Characters/Blaire.md", "content": "# Blaire"},
     )
     assert save_two.status_code == 200
 
-    list_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian", headers=headers)
+    list_response = await client.get(f"/api/v1/books/{book.id}/notes/vault", headers=headers)
     assert list_response.status_code == 200
     notes = list_response.json()
     assert len(notes) == 2
 
-    graph_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/graph", headers=headers)
+    graph_response = await client.get(f"/api/v1/books/{book.id}/notes/vault/graph", headers=headers)
     assert graph_response.status_code == 200
     graph = graph_response.json()
     assert len(graph["nodes"]) == 2
@@ -277,7 +277,7 @@ async def test_user_obsidian_notes_crud_graph_and_export(client, db):
     assert graph["edges"][0]["target"] == "Characters/Blaire.md"
 
     relations_response = await client.get(
-        f"/api/v1/books/{book.id}/notes/obsidian/relations",
+        f"/api/v1/books/{book.id}/notes/vault/relations",
         headers=headers,
         params={"path": "Characters/Aria.md"},
     )
@@ -287,28 +287,28 @@ async def test_user_obsidian_notes_crud_graph_and_export(client, db):
     assert relations["links"][0]["target_note_path"] == "Characters/Blaire.md"
     assert relations["tags"] == []
 
-    export_response = await client.get(f"/api/v1/books/{book.id}/notes/obsidian/export", headers=headers)
+    export_response = await client.get(f"/api/v1/books/{book.id}/notes/vault/export", headers=headers)
     assert export_response.status_code == 200
     with zipfile.ZipFile(io.BytesIO(export_response.content)) as archive:
         assert sorted(archive.namelist()) == ["Characters/Aria.md", "Characters/Blaire.md"]
 
     delete_response = await client.delete(
-        f"/api/v1/books/{book.id}/notes/obsidian/Characters/Blaire.md",
+        f"/api/v1/books/{book.id}/notes/vault/Characters/Blaire.md",
         headers=headers,
     )
     assert delete_response.status_code == 204
 
 
 @pytest.mark.asyncio
-async def test_user_obsidian_notes_import_zip(client, db):
-    user, book = await _build_obsidian_preview_book(db)
+async def test_user_vault_notes_import_zip(client, db):
+    user, book = await _build_vault_preview_book(db)
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("Plot/Thread.md", "# Thread\n\n[[Characters]]")
         archive.writestr("Characters.md", "# Characters")
     response = await client.post(
-        f"/api/v1/books/{book.id}/notes/obsidian/import",
+        f"/api/v1/books/{book.id}/notes/vault/import",
         headers=_auth_headers(user.id),
         files={"file": ("vault.zip", buffer.getvalue(), "application/zip")},
     )
@@ -321,7 +321,7 @@ async def test_user_obsidian_notes_import_zip(client, db):
 
 @pytest.mark.asyncio
 async def test_manuscript_export_includes_manual_scenes_without_server_error(client, db):
-    user, book = await _build_obsidian_preview_book(db)
+    user, book = await _build_vault_preview_book(db)
 
     manual_scene = NovelScene(
         book_id=book.id,

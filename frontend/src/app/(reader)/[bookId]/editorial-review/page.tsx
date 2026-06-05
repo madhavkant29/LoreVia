@@ -16,6 +16,7 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 import type { Book } from "@/types/book"
 import type { EditorialReview, EditorialReviewPassage } from "@/types/intelligence"
 
@@ -25,7 +26,7 @@ const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-lg border border-dashed p-8" />,
+    loading: () => <SidebarSkeleton className="min-h-[28rem]" />,
   }
 )
 
@@ -35,10 +36,11 @@ const EditorialReviewResults = dynamic(
     ssr: false,
     loading: () => (
       <section className="space-y-4">
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6">
-          <div className="h-3 w-28 animate-pulse rounded-full bg-white/10" />
-          <div className="mt-4 h-4 w-3/4 animate-pulse rounded-full bg-white/10" />
-          <div className="mt-2 h-4 w-1/2 animate-pulse rounded-full bg-white/10" />
+        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6" role="status" aria-label="Loading editorial review results" aria-busy="true">
+          <span className="sr-only">Loading editorial review results</span>
+          <Skeleton className="h-3 w-28 bg-white/10" />
+          <Skeleton className="mt-4 h-4 w-3/4 bg-white/10" />
+          <Skeleton className="mt-2 h-4 w-1/2 bg-white/10" />
         </div>
       </section>
     ),
@@ -355,10 +357,11 @@ export default function EditorialReviewPage() {
                 {saveStatus ? <StatusBanner isDark={isDark} message={saveStatus} tone={inferStatusTone(saveStatus)} /> : null}
 
                 {editLoading ? (
-                  <div className={`space-y-3 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
-                    <div className={`h-2.5 w-40 animate-pulse rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
-                    <div className={`h-2.5 w-full animate-pulse rounded-full ${isDark ? "bg-white/8" : "bg-stone-200/80"}`} />
-                    <div className={`h-2.5 w-3/4 animate-pulse rounded-full ${isDark ? "bg-white/6" : "bg-stone-200/70"}`} />
+                  <div className={`space-y-3 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`} role="status" aria-label="Loading editorial review" aria-busy="true">
+                    <span className="sr-only">Loading editorial review</span>
+                    <Skeleton className={`h-2.5 w-40 ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
+                    <Skeleton className={`h-2.5 w-full ${isDark ? "bg-white/8" : "bg-stone-200/80"}`} />
+                    <Skeleton className={`h-2.5 w-3/4 ${isDark ? "bg-white/6" : "bg-stone-200/70"}`} />
                   </div>
                 ) : null}
               </div>

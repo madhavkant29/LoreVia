@@ -297,7 +297,7 @@ export default function SeriesPage() {
                       onClick={() => void toggleSeriesBible(lane.id)}
                       className={`inline-flex items-center gap-1.5 rounded-sm border px-4 py-2 text-xs font-semibold transition ${secondaryButtonClass}`}
                     >
-                      {seriesBibleLoadingId === lane.id ? "Loading..." : bibleOpen ? "Hide Series Bible" : "View Series Bible"}
+                      {seriesBibleLoadingId === lane.id ? "Opening..." : bibleOpen ? "Hide Series Bible" : "View Series Bible"}
                     </button>
                   ) : null}
                   <button
@@ -305,7 +305,7 @@ export default function SeriesPage() {
                     onClick={() => void loadSeriesWorldAnalysis(lane.id)}
                     className={`inline-flex items-center gap-1.5 rounded-sm border px-4 py-2 text-xs font-semibold transition ${secondaryButtonClass}`}
                   >
-                    {worldAnalysisLoadingId === lane.id ? "Loading..." : "World analysis"}
+                    {worldAnalysisLoadingId === lane.id ? "Analyzing..." : "World analysis"}
                   </button>
                 </div>
               </div>

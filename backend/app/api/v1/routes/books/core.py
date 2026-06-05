@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import Response
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import noload, selectinload
 
 # ─── Upload limits ────────────────────────────────────────────────────────────
 MAX_BOOK_UPLOAD_BYTES = 100 * 1024 * 1024   # 100 MB
@@ -111,7 +111,7 @@ from app.models.book import (
     BookCollaborator,
     BookNote,
     Chapter,
-    ObsidianVaultNoteSource,
+    VaultNoteSource,
     Series,
     SeriesBook,
 )
@@ -150,12 +150,12 @@ from app.schemas.books import (
     EntityTagUpdateBody,
     MajorEventOut,
     ManuscriptImportResult,
-    ObsidianGraphOut,
-    ObsidianNoteLinkListOut,
-    ObsidianPreviewOut,
-    ObsidianVaultNoteBody,
-    ObsidianVaultNoteOut,
-    ObsidianVaultNoteSaveOut,
+    VaultGraphOut,
+    VaultNoteLinkListOut,
+    VaultPreviewOut,
+    VaultNoteBody,
+    VaultNoteOut,
+    VaultNoteSaveOut,
     PreWritingCheckOut,
     PrivateUserStats,
     PublicUserStats,
@@ -191,7 +191,7 @@ from app.utils.book_utils import (
     build_book_out_list,
     build_character_card_payload,
     build_emotional_arc_payload,
-    build_obsidian_graph,
+    build_vault_graph,
     build_prewriting_check,
     build_revision_intelligence_payload,
     build_single_series_out,
@@ -207,25 +207,25 @@ from app.utils.book_utils import (
     collaboration_has_resource,
     compute_words_read_for_books,
     delete_book_note,
-    delete_obsidian_note,
+    delete_vault_note,
     deserialize_manuscript_content,
     ensure_book_cover,
     estimate_readability,
-    export_obsidian_notes_zip,
+    export_vault_notes_zip,
     extract_novel_scene_candidates,
     get_book_with_collaboration_access,
     get_owned_book,
     get_owned_series,
-    import_obsidian_notes_zip,
+    import_vault_notes_zip,
     list_book_notes,
     list_chapter_consistency_reports,
     list_chapter_versions,
     list_novel_scenes,
-    list_obsidian_note_relations,
-    list_obsidian_notes,
-    list_obsidian_vault_notes,
+    list_vault_note_relations,
+    list_vault_notes,
+    list_vault_bible_notes,
     list_user_notes,
-    load_obsidian_vault_overrides,
+    load_vault_note_overrides,
     next_chapter_number,
     normalize_chapter_title,
     normalize_book_work_type,
@@ -238,13 +238,14 @@ from app.utils.book_utils import (
     resolve_owned_series_ids,
     resolve_upload_format_and_work_type,
     save_book_note,
-    save_obsidian_vault_note,
+    save_vault_note,
     snapshot_chapter_version,
     story_unit_name,
     strip_scene_metadata_from_manuscript_text,
     sync_chapter_content_from_novel_scenes,
     touch_public_book_updated_at,
 )
+from app.utils.db_utils import run_read_with_retry
 
 from app.utils.character_utils import (
     CHARACTER_APPROVAL_APPROVED,
@@ -313,11 +314,11 @@ from app.utils.relationship_utils import (
     upsert_relationship_timeline_state,
 )
 from app.utils.export_utils import (
-    build_character_bible_obsidian_context,
+    build_character_bible_vault_context,
     character_bible_docx,
     character_bible_markdown,
-    character_bible_obsidian_folder,
-    character_bible_obsidian_preview,
+    character_bible_vault_folder,
+    character_bible_vault_preview,
     character_bible_pdf,
     character_card_docx,
     character_card_markdown,
@@ -325,7 +326,7 @@ from app.utils.export_utils import (
     export_filename_base,
     manuscript_docx,
     manuscript_epub_compiled,
-    manuscript_obsidian_vault_zip,
+    manuscript_vault_zip,
     manuscript_pdf_compiled,
 )
 from app.utils.llm_usage_utils import summarize_llm_usage_for_user
@@ -413,35 +414,46 @@ async def list_books(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    stmt = select(Book).where(Book.user_id == current_user.id)
-    if not include_hidden:
-        stmt = stmt.where(Book.hidden_at.is_(None))
-    result = await db.execute(stmt.order_by(Book.created_at.desc()))
-    books = list(result.scalars().all())
-    shared_rows = (
-        await db.execute(
-            select(Book, BookCollaborator)
-            .join(BookCollaborator, BookCollaborator.book_id == Book.id)
-            .where(
-                BookCollaborator.email == str(current_user.email).strip().lower(),
-                BookCollaborator.invite_status == "active",
-                Book.user_id != current_user.id,
-            )
-            .order_by(BookCollaborator.invited_at.desc())
-        )
-    ).all()
-    if not include_hidden:
-        shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
+    current_user_id = current_user.id
+    current_user_email = str(current_user.email).strip().lower()
 
-    owned_payloads = await build_book_out_list(db, books=books, user_id=current_user.id)
-    shared_books = [book for book, _ in shared_rows]
-    shared_payloads = await build_book_out_list(
-        db,
-        books=shared_books,
-        user_id=current_user.id,
-        collaborators_by_book_id={book.id: collaborator for book, collaborator in shared_rows},
-    )
-    return owned_payloads + shared_payloads
+    async def load_book_list() -> list[BookOut]:
+        stmt = (
+            select(Book)
+            .options(noload(Book.vault_note_series_links))
+            .where(Book.user_id == current_user_id)
+        )
+        if not include_hidden:
+            stmt = stmt.where(Book.hidden_at.is_(None))
+        result = await db.execute(stmt.order_by(Book.created_at.desc()))
+        books = list(result.scalars().all())
+        shared_rows = (
+            await db.execute(
+                select(Book, BookCollaborator)
+                .options(noload(Book.vault_note_series_links))
+                .join(BookCollaborator, BookCollaborator.book_id == Book.id)
+                .where(
+                    BookCollaborator.email == current_user_email,
+                    BookCollaborator.invite_status == "active",
+                    Book.user_id != current_user_id,
+                )
+                .order_by(BookCollaborator.invited_at.desc())
+            )
+        ).all()
+        if not include_hidden:
+            shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
+
+        owned_payloads = await build_book_out_list(db, books=books, user_id=current_user_id)
+        shared_books = [book for book, _ in shared_rows]
+        shared_payloads = await build_book_out_list(
+            db,
+            books=shared_books,
+            user_id=current_user_id,
+            collaborators_by_book_id={book.id: collaborator for book, collaborator in shared_rows},
+        )
+        return owned_payloads + shared_payloads
+
+    return await run_read_with_retry(db, load_book_list)
 
 
 @router.get("/stats", response_model=UserStatsOut)

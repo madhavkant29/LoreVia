@@ -54,6 +54,20 @@ const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
   "verify-email",
 ])
 
+const DASHBOARD_SHELL_TOP_LEVEL_SEGMENTS = new Set([
+  "beta-reads",
+  "chats",
+  "library",
+  "notes",
+  "notifications",
+  "points",
+  "quotes",
+  "series",
+  "settings",
+  "stats",
+  "upgrade",
+])
+
 const AUTH_BOOTSTRAP_EXCLUDED_PREFIXES = [
   "/auth/callback",
   "/answers",
@@ -100,6 +114,15 @@ export function shouldHideSiteFooter(pathname: string | null): boolean {
   if (!topLevelSegment) return false
 
   return !NON_BOOK_TOP_LEVEL_SEGMENTS.has(topLevelSegment)
+}
+
+export function shouldOffsetSiteFooterForDashboardShell(pathname: string | null): boolean {
+  if (!pathname) return false
+
+  const [topLevelSegment] = pathname.split("/").filter(Boolean)
+  if (!topLevelSegment) return false
+
+  return DASHBOARD_SHELL_TOP_LEVEL_SEGMENTS.has(topLevelSegment)
 }
 
 function isPublicOrAuthNextExcludedPath(pathname: string): boolean {

@@ -257,6 +257,13 @@ class UserRateLimitOverride(Base):
     summary_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
     chat_per_day: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
     api_per_minute: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    advisor_per_day: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    uploads_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    public_publish_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    public_unpublish_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    manuscript_imports_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    world_building_uploads_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    world_building_ai_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

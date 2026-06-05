@@ -1051,29 +1051,29 @@ class ManuscriptAnnotationOut(BaseModel):
     updated_at: datetime
 
 
-class ObsidianPreviewFileOut(BaseModel):
+class VaultPreviewFileOut(BaseModel):
     path: str
     content: str
 
 
-class ObsidianPreviewOut(BaseModel):
+class VaultPreviewOut(BaseModel):
     root_folder: str
-    files: list[ObsidianPreviewFileOut]
+    files: list[VaultPreviewFileOut]
 
 
-class ObsidianVaultNoteBody(BaseModel):
+class VaultNoteBody(BaseModel):
     path: str
     content: str
 
 
-class ObsidianNoteLinkBody(BaseModel):
+class VaultNoteLinkBody(BaseModel):
     source_path: str
     target_path: str
     link_type: str = "reference"
     target_label: str | None = None
 
 
-class ObsidianVaultNoteOut(BaseModel):
+class VaultNoteOut(BaseModel):
     id: str
     book_id: str
     path: str
@@ -1083,7 +1083,7 @@ class ObsidianVaultNoteOut(BaseModel):
     updated_at: datetime
 
 
-class ObsidianVaultNoteSaveOut(BaseModel):
+class VaultNoteSaveOut(BaseModel):
     path: str
     source: str
     content: str
@@ -1092,7 +1092,7 @@ class ObsidianVaultNoteSaveOut(BaseModel):
     updated_at: datetime | None = None
 
 
-class ObsidianNoteTagOut(BaseModel):
+class VaultNoteTagOut(BaseModel):
     id: str
     book_id: str
     note_id: str
@@ -1101,7 +1101,7 @@ class ObsidianNoteTagOut(BaseModel):
     created_at: datetime
 
 
-class ObsidianNoteLinkOut(BaseModel):
+class VaultNoteLinkOut(BaseModel):
     id: str
     book_id: str
     source_note_id: str
@@ -1113,7 +1113,7 @@ class ObsidianNoteLinkOut(BaseModel):
     created_at: datetime
 
 
-class ObsidianNoteSeriesLinkOut(BaseModel):
+class VaultNoteSeriesLinkOut(BaseModel):
     id: str
     series_id: str
     source_book_id: str
@@ -1126,11 +1126,11 @@ class ObsidianNoteSeriesLinkOut(BaseModel):
     created_at: datetime
 
 
-class ObsidianNoteLinkListOut(BaseModel):
-    links: list[ObsidianNoteLinkOut]
-    backlinks: list[ObsidianNoteLinkOut]
-    tags: list[ObsidianNoteTagOut]
-    series_links: list[ObsidianNoteSeriesLinkOut]
+class VaultNoteLinkListOut(BaseModel):
+    links: list[VaultNoteLinkOut]
+    backlinks: list[VaultNoteLinkOut]
+    tags: list[VaultNoteTagOut]
+    series_links: list[VaultNoteSeriesLinkOut]
 
 
 class SceneMetadataBody(BaseModel):
@@ -1236,7 +1236,7 @@ class ChapterSceneOrderOut(BaseModel):
     scenes: list[ChapterSceneOrderItemOut] = Field(default_factory=list)
 
 
-class ObsidianGraphNodeOut(BaseModel):
+class VaultGraphNodeOut(BaseModel):
     id: str
     path: str
     title: str
@@ -1244,15 +1244,15 @@ class ObsidianGraphNodeOut(BaseModel):
     link_count: int = 0
 
 
-class ObsidianGraphEdgeOut(BaseModel):
+class VaultGraphEdgeOut(BaseModel):
     source: str
     target: str
     label: str | None = None
 
 
-class ObsidianGraphOut(BaseModel):
-    nodes: list[ObsidianGraphNodeOut]
-    edges: list[ObsidianGraphEdgeOut]
+class VaultGraphOut(BaseModel):
+    nodes: list[VaultGraphNodeOut]
+    edges: list[VaultGraphEdgeOut]
 
 
 class WorkspaceSearchFiltersBody(BaseModel):

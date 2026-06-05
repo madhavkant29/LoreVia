@@ -35,7 +35,7 @@ export function getManuscriptPreviewLayout(
       }
     case "kdp_paperback":
       return {
-        label: "Amazon KDP paperback",
+        label: "6×9 print paperback",
         pageWidthMm: 215.9,
         pageHeightMm: 279.4,
         paddingTopMm: 20.32,

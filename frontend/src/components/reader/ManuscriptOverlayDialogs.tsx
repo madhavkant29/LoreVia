@@ -43,12 +43,12 @@ type ManuscriptOverlayDialogsProps = {
   writerWorkspace: WriterWorkspace | null
   manuscriptFrontMatter: ManuscriptFrontMatter | null
   onCloseCompileDialog: () => void
-  compileFormat: "pdf" | "docx" | "epub" | "obsidian"
+  compileFormat: "pdf" | "docx" | "epub" | "vault"
   fullBookWordCount: number
   includeSceneMetadataOnExport: boolean
   onIncludeSceneMetadataOnExportChange: (checked: boolean) => void
   onUpdateFrontMatter: (field: keyof ManuscriptFrontMatter, value: string | boolean) => void
-  exporting: "pdf" | "docx" | "epub" | "obsidian" | null
+  exporting: "pdf" | "docx" | "epub" | "vault" | null
   workspaceSaving: boolean
   onCompileManuscript: () => void
 }

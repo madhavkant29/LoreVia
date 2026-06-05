@@ -10,13 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps.auth import get_current_user
 from app.core import storage
 from app.core.database import get_db
-from app.models.book import Book, Chapter, ObsidianVaultNoteSource
+from app.models.book import Book, Chapter, VaultNoteSource
 from app.models.character import Character
 from app.schemas.books import (
-    ObsidianPreviewOut,
-    ObsidianVaultNoteBody,
-    ObsidianVaultNoteOut,
-    ObsidianVaultNoteSaveOut,
+    VaultPreviewOut,
+    VaultNoteBody,
+    VaultNoteOut,
+    VaultNoteSaveOut,
 )
 from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import (
@@ -30,19 +30,19 @@ from app.utils.book_utils import (
     get_book_with_collaboration_access,
     get_owned_book,
     list_novel_scenes,
-    list_obsidian_notes,
-    list_obsidian_vault_notes,
-    load_obsidian_vault_overrides,
-    save_obsidian_vault_note,
+    list_vault_notes,
+    list_vault_bible_notes,
+    load_vault_note_overrides,
+    save_vault_note,
     strip_scene_metadata_from_manuscript_text,
 )
 from app.utils.character_utils import is_displayable_character
 from app.utils.export_utils import (
-    build_character_bible_obsidian_context,
+    build_character_bible_vault_context,
     character_bible_docx,
     character_bible_markdown,
-    character_bible_obsidian_folder,
-    character_bible_obsidian_preview,
+    character_bible_vault_folder,
+    character_bible_vault_preview,
     character_bible_pdf,
     character_card_docx,
     character_card_markdown,
@@ -50,7 +50,7 @@ from app.utils.export_utils import (
     export_filename_base,
     manuscript_docx,
     manuscript_epub_compiled,
-    manuscript_obsidian_vault_zip,
+    manuscript_vault_zip,
     manuscript_pdf_compiled,
 )
 
@@ -62,7 +62,7 @@ router = APIRouter()
 @router.get("/{book_id}/manuscript/export")
 async def export_manuscript(
     book_id: uuid.UUID,
-    format: str = Query("docx", pattern="^(pdf|docx|epub|obsidian)$"),
+    format: str = Query("docx", pattern="^(pdf|docx|epub|vault)$"),
     preset: str = Query("standard_manuscript", pattern="^(standard_manuscript|trade_paperback|kdp_paperback)$"),
     include_scene_metadata: bool = Query(True),
     db: AsyncSession = Depends(get_db),
@@ -141,14 +141,14 @@ async def export_manuscript(
             media_type="application/epub+zip",
             headers={"Content-Disposition": f"attachment; filename=\"{filename_base}-manuscript.epub\""},
         )
-    if format == "obsidian":
-        notes = await list_obsidian_notes(
+    if format == "vault":
+        notes = await list_vault_notes(
             db,
             book=book,
             user_id=current_user.id,
-            source=ObsidianVaultNoteSource.USER_NOTES.value,
+            source=VaultNoteSource.USER_NOTES.value,
         )
-        raw = manuscript_obsidian_vault_zip(
+        raw = manuscript_vault_zip(
             title=book.title or "LoreVia Manuscript",
             chapters=chapters,
             scenes=manuscript_scenes,
@@ -215,11 +215,11 @@ async def export_character_card(
 @router.get("/{book_id}/export/character-bible")
 async def export_character_bible(
     book_id: uuid.UUID,
-    format: str = Query("md", pattern="^(md|pdf|docx|obsidian_folder)$"),
+    format: str = Query("md", pattern="^(md|pdf|docx|vault_folder)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    context = await build_character_bible_obsidian_context(db, book_id)
+    context = await build_character_bible_vault_context(db, book_id)
     book = context.get("book")
     if not book:
         raise HTTPException(404)
@@ -244,9 +244,9 @@ async def export_character_bible(
 
     title = f"{book.title} - Character Bible" if book.title else "LoreVia - Character Bible"
 
-    if format == "obsidian_folder":
-        overrides = await load_obsidian_vault_overrides(db, book, current_user.id)
-        zip_data, filename_base = character_bible_obsidian_folder(
+    if format == "vault_folder":
+        overrides = await load_vault_note_overrides(db, book, current_user.id)
+        zip_data, filename_base = character_bible_vault_folder(
             book=book,
             characters=characters,
             relationships=relationships,
@@ -281,13 +281,13 @@ async def export_character_bible(
                     headers={"Content-Disposition": f"attachment; filename=\"{filename_base}-character-bible.docx\""})
 
 
-@router.get("/{book_id}/export/character-bible/preview", response_model=ObsidianPreviewOut)
-async def preview_character_bible_obsidian(
+@router.get("/{book_id}/export/character-bible/preview", response_model=VaultPreviewOut)
+async def preview_character_bible_vault(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    context = await build_character_bible_obsidian_context(db, book_id)
+    context = await build_character_bible_vault_context(db, book_id)
     book = context.get("book")
     if not book:
         raise HTTPException(404)
@@ -300,8 +300,8 @@ async def preview_character_bible_obsidian(
         require_author_access(current_user)
 
     characters = [char for char in context["characters"] if is_displayable_character(char)]
-    overrides = await load_obsidian_vault_overrides(db, book, current_user.id)
-    return character_bible_obsidian_preview(
+    overrides = await load_vault_note_overrides(db, book, current_user.id)
+    return character_bible_vault_preview(
         book=book,
         characters=characters,
         relationships=context["relationships"],
@@ -315,30 +315,30 @@ async def preview_character_bible_obsidian(
     )
 
 
-@router.get("/{book_id}/export/character-bible/notes", response_model=list[ObsidianVaultNoteOut])
-async def list_character_bible_obsidian_notes(
+@router.get("/{book_id}/export/character-bible/notes", response_model=list[VaultNoteOut])
+async def list_character_bible_vault_notes(
     book_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
-    return await list_obsidian_vault_notes(db, book, current_user.id)
+    return await list_vault_bible_notes(db, book, current_user.id)
 
 
-@router.put("/{book_id}/export/character-bible/notes", response_model=ObsidianVaultNoteSaveOut)
-async def save_character_bible_obsidian_note(
+@router.put("/{book_id}/export/character-bible/notes", response_model=VaultNoteSaveOut)
+async def save_character_bible_vault_note(
     book_id: uuid.UUID,
-    body: ObsidianVaultNoteBody,
+    body: VaultNoteBody,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    return await save_obsidian_vault_note(
+    return await save_vault_note(
         db,
         book=book,
         user_id=current_user.id,
         path=body.path,
         content=body.content,
-        source=ObsidianVaultNoteSource.CHARACTER_BIBLE.value,
+        source=VaultNoteSource.CHARACTER_BIBLE.value,
     )
