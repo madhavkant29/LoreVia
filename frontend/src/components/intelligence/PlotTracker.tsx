@@ -246,10 +246,10 @@ export const PlotTracker = memo(function PlotTracker({ bookId, chapter, mode = "
                         <textarea
                           value={draftNotes[thread.id] ?? ""}
                           onChange={(event) => setDraftNotes((current) => ({ ...current, [thread.id]: event.target.value }))}
-                          placeholder="Resolve this in arc 5."
                           rows={3}
-                          className={`w-full rounded-md border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+                          className={`w-full rounded-md border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
                         />
+                        <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Example: Resolve this in arc 5.</p>
                       </div>
                     </div>
                     <div className="mt-3 flex items-center justify-between gap-3">

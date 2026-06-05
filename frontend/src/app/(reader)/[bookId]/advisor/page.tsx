@@ -947,10 +947,10 @@ export default function AdvisorPage() {
                       value={input}
                       onChange={e => setInput(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder="Ask about plotholes, lore gaps, world rules, arc endings, consistency issues..."
                       rows={2}
                       disabled={loading}
-                      className={`flex-1 resize-none bg-transparent text-sm leading-6 outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-800 placeholder:text-stone-400"}`}
+                      aria-label="Advisor question"
+                      className={`flex-1 resize-none bg-transparent text-sm leading-6 outline-none ${isDark ? "text-slate-100" : "text-stone-800"}`}
                     />
                     <Button
                       id="advisor-send"
@@ -963,6 +963,7 @@ export default function AdvisorPage() {
                       {loading ? "..." : "Send"}
                     </Button>
                     </div>
+                    <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Ask about plotholes, lore gaps, world rules, arc endings, or consistency issues.</p>
                   </div>
                   <p className={`mt-2 text-3xs ${isDark ? "text-slate-600" : "text-stone-400"}`}>
                     Enter to send / Shift+Enter for new line / Contradictions and world gaps flagged automatically

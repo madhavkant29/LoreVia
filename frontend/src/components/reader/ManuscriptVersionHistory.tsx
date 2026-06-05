@@ -31,13 +31,15 @@ export function ManuscriptVersionHistory({
         <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Version history</p>
         <button onClick={onCreateSnapshot} className={`rounded-md px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Save named version</button>
       </div>
-      <input
-        type="text"
-        value={chapterVersionNameDraft}
-        onChange={(event) => onVersionNameChange(event.target.value)}
-        placeholder={`Example: Before rewrite of chapter ${chapterNumber}`}
-        className={`mt-2 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-      />
+      <label className="mt-2 block">
+        <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Name this snapshot, for example: Before rewrite of chapter {chapterNumber}.</span>
+        <input
+          type="text"
+          value={chapterVersionNameDraft}
+          onChange={(event) => onVersionNameChange(event.target.value)}
+          className={`mt-2 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+        />
+      </label>
       <div className="mt-2 space-y-2">
         {chapterVersions.map((version) => (
           <div key={version.id} className={`rounded-sm px-3 py-3 ${isDark ? "bg-white/[0.03]" : "bg-stone-50"}`}>

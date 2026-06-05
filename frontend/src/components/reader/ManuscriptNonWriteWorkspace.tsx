@@ -192,29 +192,36 @@ export function ManuscriptNonWriteWorkspace({
         ) : null}
         {showSearchTools ? (
           <div className="mt-4 space-y-3">
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={recallQuery}
-              onChange={(event) => onRecallQueryChange(event.target.value)}
-              placeholder="Search character, scene detail, clue, or thread"
-              className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-            />
+            <label className="grid gap-1.5">
+              <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Recall search</span>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={recallQuery}
+                onChange={(event) => onRecallQueryChange(event.target.value)}
+                className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+              />
+              <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Search character, scene detail, clue, or thread.</span>
+            </label>
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
-              <input
-                type="text"
-                value={replaceQuery}
-                onChange={(event) => onReplaceQueryChange(event.target.value)}
-                placeholder="Find text"
-                className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-              />
-              <input
-                type="text"
-                value={replaceValue}
-                onChange={(event) => onReplaceValueChange(event.target.value)}
-                placeholder="Replace with"
-                className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-              />
+              <label className="grid gap-1.5">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Find text</span>
+                <input
+                  type="text"
+                  value={replaceQuery}
+                  onChange={(event) => onReplaceQueryChange(event.target.value)}
+                  className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Replace with</span>
+                <input
+                  type="text"
+                  value={replaceValue}
+                  onChange={(event) => onReplaceValueChange(event.target.value)}
+                  className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                />
+              </label>
               <button onClick={onReplaceInCurrentChapter} disabled={!replaceQuery} className={`rounded-sm px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
                 Replace one
               </button>

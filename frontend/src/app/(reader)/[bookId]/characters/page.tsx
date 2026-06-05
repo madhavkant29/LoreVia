@@ -573,8 +573,8 @@ function workspaceActionButtonClasses(
 
 function fieldClasses(isDark: boolean) {
   return isDark
-    ? "w-full rounded-xl border border-white/10 bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
-    : "w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200/70"
+    ? "w-full rounded-xl border border-white/10 bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
+    : "w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-200/70"
 }
 
 function sectionEyebrowClasses(isDark: boolean, tone: "default" | "teal" | "violet" | "amber" = "default") {
@@ -2967,7 +2967,6 @@ export default function CharactersPage() {
                                     value={relationshipDraft.toChapter}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, toChapter: event.target.value }))}
                                     inputMode="numeric"
-                                    placeholder="Optional"
                                     className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   />
                                 </label>

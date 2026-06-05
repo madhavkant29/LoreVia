@@ -586,8 +586,8 @@ export function LibraryClient() {
                     ref={searchInputRef}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search projects..."
-                    className={`w-full bg-transparent text-[0.95rem] outline-none ${isDark ? "placeholder:text-[#6a675f]" : "placeholder:text-stone-400"}`}
+                    aria-label="Search projects"
+                    className="w-full bg-transparent text-[0.95rem] outline-none"
                   />
                   <span
                     className={`hidden items-center rounded-md border px-2 py-1 text-3xs font-medium sm:inline-flex ${

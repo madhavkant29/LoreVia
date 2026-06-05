@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
+import type { ReactNode } from "react"
 import { useParams } from "next/navigation"
 
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
@@ -38,6 +39,26 @@ function StatPill({ label, value, isDark }: { label: string; value: string; isDa
       <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
       <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{value}</p>
     </div>
+  )
+}
+
+function LabeledField({
+  label,
+  detail,
+  isDark,
+  children,
+}: {
+  label: string
+  detail?: string
+  isDark: boolean
+  children: ReactNode
+}) {
+  return (
+    <label className="grid gap-2">
+      <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{label}</span>
+      {children}
+      {detail ? <span className={`text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>{detail}</span> : null}
+    </label>
   )
 }
 
@@ -309,92 +330,113 @@ export default function BetaFeedbackPage() {
               <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
                 <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Create beta read</h2>
                 <div className="mt-5 grid gap-3">
-                  <input
-                    value={readerEmail}
-                    onChange={(event) => setReaderEmail(event.target.value)}
-                    placeholder="reader@example.com"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-amber-400"}`}
-                  />
-                  <input
-                    value={taskLabel}
-                    onChange={(event) => setTaskLabel(event.target.value)}
-                    placeholder="Task label"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-amber-400"}`}
-                  />
-                  <select
-                    value={scopeKind}
-                    onChange={(event) => setScopeKind(event.target.value)}
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                  >
-                    <option value="full_book">Full book</option>
-                    <option value="chapter_range">Chapter range</option>
-                    <option value="section">Section</option>
-                  </select>
+                  <LabeledField label="Reader email" detail="Invite the account that should receive read-only beta access." isDark={isDark}>
+                    <input
+                      value={readerEmail}
+                      onChange={(event) => setReaderEmail(event.target.value)}
+                      aria-label="Reader email"
+                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                    />
+                  </LabeledField>
+                  <LabeledField label="Task label" detail="Name the pass so the reader knows what kind of feedback you want." isDark={isDark}>
+                    <input
+                      value={taskLabel}
+                      onChange={(event) => setTaskLabel(event.target.value)}
+                      aria-label="Task label"
+                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                    />
+                  </LabeledField>
+                  <LabeledField label="Scope" detail="Choose whether this beta read covers the full manuscript or a narrowed packet." isDark={isDark}>
+                    <select
+                      value={scopeKind}
+                      onChange={(event) => setScopeKind(event.target.value)}
+                      aria-label="Scope"
+                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                    >
+                      <option value="full_book">Full book</option>
+                      <option value="chapter_range">Chapter range</option>
+                      <option value="section">Section</option>
+                    </select>
+                  </LabeledField>
                   {scopeKind !== "full_book" ? (
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <input
-                        type="number"
-                        min="1"
-                        value={chapterStart}
-                        onChange={(event) => setChapterStart(event.target.value)}
-                        placeholder="From chapter"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                      />
-                      <input
-                        type="number"
-                        min="1"
-                        value={chapterEnd}
-                        onChange={(event) => setChapterEnd(event.target.value)}
-                        placeholder="Through chapter"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                      />
+                      <LabeledField label="From chapter" isDark={isDark}>
+                        <input
+                          type="number"
+                          min="1"
+                          value={chapterStart}
+                          onChange={(event) => setChapterStart(event.target.value)}
+                          aria-label="From chapter"
+                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                        />
+                      </LabeledField>
+                      <LabeledField label="Through chapter" isDark={isDark}>
+                        <input
+                          type="number"
+                          min="1"
+                          value={chapterEnd}
+                          onChange={(event) => setChapterEnd(event.target.value)}
+                          aria-label="Through chapter"
+                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                        />
+                      </LabeledField>
                     </div>
                   ) : null}
                   <div className="grid gap-3 sm:grid-cols-1">
-                    <input
-                      type="number"
-                      min="3"
-                      max="7"
-                      value={windowDays}
-                      onChange={(event) => setWindowDays(event.target.value)}
-                      placeholder="Window days"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                    />
+                    <LabeledField label="Window days" detail="Beta-read windows must stay between 3 and 7 days." isDark={isDark}>
+                      <input
+                        type="number"
+                        min="3"
+                        max="7"
+                        value={windowDays}
+                        onChange={(event) => setWindowDays(event.target.value)}
+                        aria-label="Window days"
+                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      />
+                    </LabeledField>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
-                      value={requiredProgressPct}
-                      onChange={(event) => setRequiredProgressPct(event.target.value)}
-                      placeholder="Progress %"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      value={requiredCommentCount}
-                      onChange={(event) => setRequiredCommentCount(event.target.value)}
-                      placeholder="Comments"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      value={requiredFeedbackItemCount}
-                      onChange={(event) => setRequiredFeedbackItemCount(event.target.value)}
-                      placeholder="Review items"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                    />
+                    <LabeledField label="Progress %" isDark={isDark}>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={requiredProgressPct}
+                        onChange={(event) => setRequiredProgressPct(event.target.value)}
+                        aria-label="Progress percent"
+                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      />
+                    </LabeledField>
+                    <LabeledField label="Comments" isDark={isDark}>
+                      <input
+                        type="number"
+                        min="0"
+                        value={requiredCommentCount}
+                        onChange={(event) => setRequiredCommentCount(event.target.value)}
+                        aria-label="Required comments"
+                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      />
+                    </LabeledField>
+                    <LabeledField label="Review items" isDark={isDark}>
+                      <input
+                        type="number"
+                        min="1"
+                        value={requiredFeedbackItemCount}
+                        onChange={(event) => setRequiredFeedbackItemCount(event.target.value)}
+                        aria-label="Required review items"
+                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      />
+                    </LabeledField>
                   </div>
-                  <textarea
-                    value={authorQuestionsText}
-                    onChange={(event) => setAuthorQuestionsText(event.target.value)}
-                    rows={5}
-                    placeholder="One question per line"
-                    className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-amber-400"}`}
-                  />
+                  <LabeledField label="Author questions" detail="Add one plain-text prompt per line for this reader." isDark={isDark}>
+                    <textarea
+                      value={authorQuestionsText}
+                      onChange={(event) => setAuthorQuestionsText(event.target.value)}
+                      rows={5}
+                      aria-label="Author questions"
+                      className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                    />
+                  </LabeledField>
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-4">
@@ -488,9 +530,10 @@ export default function BetaFeedbackPage() {
                         value={extraQuestionsText}
                         onChange={(event) => setExtraQuestionsText(event.target.value)}
                         rows={3}
-                        placeholder="Add more questions, one per line"
-                        className={`mt-3 w-full rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-amber-400"}`}
+                        aria-label="Additional author questions"
+                        className={`mt-3 w-full rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                       />
+                      <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Add more questions, one per line.</p>
                       <button
                         type="button"
                         onClick={() => void appendQuestions()}
@@ -562,44 +605,55 @@ export default function BetaFeedbackPage() {
                       ))}
                     </select>
                     <div className="grid gap-3 sm:grid-cols-2">
+                      <LabeledField label="Chapter number" isDark={isDark}>
+                        <input
+                          type="number"
+                          min="1"
+                          value={feedbackChapter}
+                          onChange={(event) => setFeedbackChapter(event.target.value)}
+                          aria-label="Feedback chapter number"
+                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                        />
+                      </LabeledField>
+                      <LabeledField label="Linked question" isDark={isDark}>
+                        <select
+                          value={selectedQuestionId}
+                          onChange={(event) => setSelectedQuestionId(event.target.value)}
+                          aria-label="Linked author question"
+                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                        >
+                          <option value="">No linked author question</option>
+                          {readerDetail.author_questions.map((question) => (
+                            <option key={question.id} value={question.id}>{question.prompt}</option>
+                          ))}
+                        </select>
+                      </LabeledField>
+                    </div>
+                    <LabeledField label="Reaction label" detail="Use this for quick scene reactions, if this item needs one." isDark={isDark}>
                       <input
-                        type="number"
-                        min="1"
-                        value={feedbackChapter}
-                        onChange={(event) => setFeedbackChapter(event.target.value)}
-                        placeholder="Chapter number"
+                        value={feedbackReaction}
+                        onChange={(event) => setFeedbackReaction(event.target.value)}
+                        aria-label="Reaction label"
                         className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
                       />
-                      <select
-                        value={selectedQuestionId}
-                        onChange={(event) => setSelectedQuestionId(event.target.value)}
+                    </LabeledField>
+                    <LabeledField label="Anchor text" detail="Quote the passage or marker this feedback refers to." isDark={isDark}>
+                      <input
+                        value={feedbackAnchor}
+                        onChange={(event) => setFeedbackAnchor(event.target.value)}
+                        aria-label="Anchor text"
                         className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
-                      >
-                        <option value="">No linked author question</option>
-                        {readerDetail.author_questions.map((question) => (
-                          <option key={question.id} value={question.id}>{question.prompt}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <input
-                      value={feedbackReaction}
-                      onChange={(event) => setFeedbackReaction(event.target.value)}
-                      placeholder="Reaction label for scene reactions"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-sky-400"}`}
-                    />
-                    <input
-                      value={feedbackAnchor}
-                      onChange={(event) => setFeedbackAnchor(event.target.value)}
-                      placeholder="Anchor text or marked passage"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-sky-400"}`}
-                    />
-                    <textarea
-                      value={feedbackBody}
-                      onChange={(event) => setFeedbackBody(event.target.value)}
-                      rows={5}
-                      placeholder="What landed, what dragged, what confused you, or your direct answer."
-                      className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-sky-400"}`}
-                    />
+                      />
+                    </LabeledField>
+                    <LabeledField label="Feedback body" detail="Write what landed, dragged, confused you, or directly answers the author." isDark={isDark}>
+                      <textarea
+                        value={feedbackBody}
+                        onChange={(event) => setFeedbackBody(event.target.value)}
+                        rows={5}
+                        aria-label="Feedback body"
+                        className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                      />
+                    </LabeledField>
                     <button
                       type="button"
                       onClick={() => void createFeedbackItem()}
@@ -666,9 +720,10 @@ export default function BetaFeedbackPage() {
                     value={finalReview}
                     onChange={(event) => setFinalReview(event.target.value)}
                     rows={6}
-                    placeholder="Summarize your read, what hooked you, what felt predictable, what confused you, and who you cared about most."
-                    className={`mt-4 w-full rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-emerald-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-emerald-400"}`}
+                    aria-label="Final review"
+                    className={`mt-4 w-full rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-emerald-400" : "border-slate-200 bg-white text-slate-900 focus:border-emerald-400"}`}
                   />
+                  <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Summarize what hooked you, what felt predictable, what confused you, and who you cared about most.</p>
                   <button
                     type="button"
                     onClick={() => void submitReview()}

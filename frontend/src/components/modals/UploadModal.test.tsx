@@ -132,14 +132,13 @@ describe("UploadModal", () => {
     expect(view.textContent).toContain("This name appears on this manuscript only.")
     expect(view.textContent).toContain("different pen name or byline")
 
-    const textInputs = Array.from(view.querySelectorAll('input[type="text"]')) as HTMLInputElement[]
-    const authorInput = textInputs.find((input) => input.placeholder === "Manuscript author or pen name")
+    const authorInput = view.querySelector('input[aria-label="Manuscript author or pen name"]') as HTMLInputElement | null
     expect(authorInput?.value).toBe("author")
   })
 
   it("does not repopulate the manuscript byline after the user clears it", async () => {
     const view = renderUploadModal({ initialMode: "author" })
-    const authorInput = Array.from(view.querySelectorAll('input[type="text"]')).find((input) => (input as HTMLInputElement).placeholder === "Manuscript author or pen name") as HTMLInputElement | undefined
+    const authorInput = view.querySelector('input[aria-label="Manuscript author or pen name"]') as HTMLInputElement | undefined
 
     await act(async () => {
       if (authorInput) {
@@ -154,8 +153,8 @@ describe("UploadModal", () => {
   it("submits an overridden manuscript author without changing the account username", async () => {
     const view = renderUploadModal({ initialMode: "author" })
 
-    const titleInput = view.querySelector('input[placeholder="Title"]') as HTMLInputElement | null
-    const authorInput = Array.from(view.querySelectorAll('input[type="text"]')).find((input) => (input as HTMLInputElement).placeholder === "Manuscript author or pen name") as HTMLInputElement | undefined
+    const titleInput = view.querySelector('input[aria-label="Title"]') as HTMLInputElement | null
+    const authorInput = view.querySelector('input[aria-label="Manuscript author or pen name"]') as HTMLInputElement | undefined
     const fileInput = view.querySelector('input[type="file"]') as HTMLInputElement | null
     const submitButton = view.querySelector('button[type="submit"]') as HTMLButtonElement | null
 

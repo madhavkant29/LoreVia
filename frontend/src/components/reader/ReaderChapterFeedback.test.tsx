@@ -2,6 +2,7 @@ import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { ManuscriptAnnotation } from "@/types/book"
 import type { ChapterBetaFeedback } from "@/types/reader"
 
 const useBookDetailMock = vi.hoisted(() => vi.fn())
@@ -61,7 +62,7 @@ describe("ReaderChapterFeedback", () => {
     root = null
   })
 
-  it("renders beta reader comments for owners at the bottom of the chapter", () => {
+  it("renders beta reader comments and owner comment controls at the bottom of the chapter", () => {
     useBookDetailMock.mockReturnValue({
       data: {
         id: "book-1",
@@ -92,10 +93,55 @@ describe("ReaderChapterFeedback", () => {
 
     const view = renderComponent({ chapterFeedback: feedback })
 
-    expect(view.textContent).toContain("Chapter beta comments")
+    expect(view.textContent).toContain("Leave a chapter comment")
     expect(view.textContent).toContain("Beta Reader")
     expect(view.textContent).toContain("The chapter turn lands, but the reveal wants one more setup line.")
-    expect(view.querySelector("textarea")).toBeNull()
+    expect(view.querySelector("textarea")).not.toBeNull()
+  })
+
+  it("renders shared manuscript annotations below the chapter for author collaborators", () => {
+    useBookDetailMock.mockReturnValue({
+      data: {
+        id: "book-1",
+        access_class: "author_collaborator",
+        workspace_shell: "author",
+        collaboration_permissions: {
+          can_edit_manuscript: true,
+          can_comment: true,
+        },
+      },
+    })
+    const annotation: ManuscriptAnnotation = {
+      id: "annotation-1",
+      book_id: "book-1",
+      book_title: "Sky of Ash",
+      chapter_number: 4,
+      chapter_title: "The Ember Gate",
+      category: "general",
+      visibility: "shared",
+      quote: "The gate flared open",
+      comment: "Keep the gate language consistent for every collaborator.",
+      created_by_user_id: "editor-1",
+      created_by_label: "Editor One",
+      can_edit: true,
+      status: "open",
+      resolved_at: null,
+      created_at: "2026-05-27T09:00:00.000Z",
+      updated_at: "2026-05-27T09:00:00.000Z",
+    }
+    useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
+      if (Array.isArray(queryKey) && String(queryKey[0]).includes("annotations")) {
+        return { data: [annotation], refetch: vi.fn(), isLoading: false }
+      }
+      return { data: [], refetch: vi.fn(), isLoading: false }
+    })
+
+    const view = renderComponent({ chapterFeedback: [] })
+
+    expect(view.textContent).toContain("1 chapter comment visible here")
+    expect(view.textContent).toContain("Editor One")
+    expect(view.textContent).toContain("Keep the gate language consistent for every collaborator.")
+    expect(view.textContent).toContain("The gate flared open")
   })
 
   it("sends chapter comments through beta feedback when an active beta assignment exists", async () => {

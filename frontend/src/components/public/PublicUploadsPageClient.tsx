@@ -224,9 +224,9 @@ export function PublicUploadsPageClient({
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by title, author, genre, or description"
-              className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-950 placeholder:text-stone-400"}`}
+              className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-white" : "border-stone-200 bg-white text-stone-950"}`}
             />
+            <span className={`mt-2 block text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Search by title, author, genre, or description.</span>
           </label>
           <RankingSelect label="Rank by" value={ranking} options={rankingOptions} onChange={setRanking} isDark={isDark} />
           <RankingSelect label="Window" value={timeWindow} options={timeWindowOptions} onChange={setTimeWindow} isDark={isDark} />

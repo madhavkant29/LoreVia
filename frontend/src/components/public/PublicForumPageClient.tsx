@@ -320,8 +320,8 @@ export function PublicForumPageClient({
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={feedTab === "ranked" ? "Search title, genre, author, headline, or body" : "Search headline or body"}
-                  className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-slate-500" : "placeholder:text-slate-400"}`}
+                  aria-label={feedTab === "ranked" ? "Search title, genre, author, headline, or body" : "Search headline or body"}
+                  className="w-full bg-transparent text-sm outline-none"
                 />
               </label>
 
@@ -488,27 +488,27 @@ export function PublicForumPageClient({
                         <input
                           value={novelTitle}
                           onChange={(event) => setNovelTitle(event.target.value)}
-                          placeholder="Novel name"
-                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                          aria-label="Novel name"
+                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
                         <input
                           value={novelGenre}
                           onChange={(event) => setNovelGenre(event.target.value)}
-                          placeholder="Genre"
-                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                          aria-label="Genre"
+                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
                         <textarea
                           value={novelDescription}
                           onChange={(event) => setNovelDescription(event.target.value)}
-                          placeholder="Novel description"
-                          className={`min-h-[7rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                          aria-label="Novel description"
+                          className={`min-h-[7rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
                         <input
                           value={desiredCount}
                           onChange={(event) => setDesiredCount(event.target.value)}
-                          placeholder="Desired readers"
                           inputMode="numeric"
-                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                          aria-label="Desired readers"
+                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
                         <label className={`flex items-center justify-between rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
                           <span>Allow contact</span>
@@ -532,16 +532,19 @@ export function PublicForumPageClient({
                   value={headline}
                   onChange={(event) => setHeadline(event.target.value)}
                   onInput={(event) => setHeadline((event.target as HTMLInputElement).value)}
-                  placeholder={composerThreadType === "novel" ? "Discussion headline" : "General discussion headline"}
-                  className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                  aria-label={composerThreadType === "novel" ? "Discussion headline" : "General discussion headline"}
+                  className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                 />
                 <textarea
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
                   onInput={(event) => setBody((event.target as HTMLTextAreaElement).value)}
-                  placeholder={composerThreadType === "novel" ? "What should readers focus on? Hook, pacing, emotional clarity, worldbuilding..." : "What do you want advice or discussion on?"}
-                  className={`min-h-[8rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                  aria-label={composerThreadType === "novel" ? "Reader focus" : "Discussion body"}
+                  className={`min-h-[8rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                 />
+                <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                  {composerThreadType === "novel" ? "Tell readers what to focus on: hook, pacing, emotional clarity, or worldbuilding." : "Describe what you want advice or discussion on."}
+                </p>
                 {composerStatus ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{composerStatus}</p> : null}
                 <button
                   type="button"

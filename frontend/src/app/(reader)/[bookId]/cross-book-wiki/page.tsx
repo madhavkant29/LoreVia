@@ -96,8 +96,8 @@ export default function CrossBookWikiPage() {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search by name, book title, or type..."
-                className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/5 text-white placeholder:text-stone-500 focus:border-teal-300/40" : "border-slate-200 bg-white text-slate-950 placeholder:text-slate-400 focus:border-teal-700"}`}
+                aria-label="Search matches"
+                className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/5 text-white focus:border-teal-300/40" : "border-slate-200 bg-white text-slate-950 focus:border-teal-700"}`}
               />
               <div className={`mt-4 flex flex-wrap gap-2`}>
                 {(["all", "characters", "wiki"] as MatchMode[]).map((value) => (

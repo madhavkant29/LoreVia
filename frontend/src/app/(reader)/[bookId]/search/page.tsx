@@ -128,13 +128,16 @@ function SearchPageInner() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && runSearch()}
-              placeholder={isAuthor ? 'Find every scene where two characters are alone together' : 'Search for a scene, clue, or character moment'}
-              className={`flex-1 rounded-md border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-950 placeholder:text-stone-400"}`}
+              aria-label={isAuthor ? "Search manuscript" : "Search story"}
+              className={`flex-1 rounded-md border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white" : "border-stone-200 bg-stone-50 text-stone-950"}`}
             />
             <button onClick={() => runSearch()} disabled={loading} className="rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
               {loading ? "Searching..." : isAuthor ? "Search manuscript" : "Search"}
             </button>
           </div>
+          <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+            {isAuthor ? "Example: find every scene where two characters are alone together." : "Search for a scene, clue, or character moment."}
+          </p>
 
           <div className="mt-4 flex flex-wrap gap-2">
             {([

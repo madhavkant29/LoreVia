@@ -683,8 +683,7 @@ function SceneBrowserPanel({
             <input
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Search scenes or folders"
-              className={`min-w-0 flex-1 bg-transparent outline-none ${isDark ? "placeholder:text-slate-500" : "placeholder:text-stone-400"}`}
+              className="min-w-0 flex-1 bg-transparent outline-none"
             />
           </label>
           <button
@@ -868,7 +867,7 @@ function SceneMetadataForm({
 
       <div className="mt-8 grid gap-6 md:grid-cols-2">
         <Field label="Scene title" isDark={isDark}>
-          <input value={title} onChange={(event) => onTitleChange(event.target.value)} className={inputClass(isDark)} placeholder="Scene title" />
+          <input value={title} onChange={(event) => onTitleChange(event.target.value)} className={inputClass(isDark)} />
         </Field>
         <Field label="Chapter" isDark={isDark}>
           <select value={chapterNumber ?? ""} onChange={(event) => onChapterNumberChange(event.target.value ? Number(event.target.value) : null)} className={inputClass(isDark)}>
@@ -881,39 +880,39 @@ function SceneMetadataForm({
       </div>
 
       <div className="mt-7 grid gap-6">
-        <Field label="Folder path" isDark={isDark}>
-          <input value={sceneFolderDraft} onChange={(event) => onSceneFolderDraftChange(event.target.value)} className={inputClass(isDark)} placeholder="scenes/act-1/opening" />
+        <Field label="Folder path" detail="Example: scenes/act-1/opening" isDark={isDark}>
+          <input value={sceneFolderDraft} onChange={(event) => onSceneFolderDraftChange(event.target.value)} className={inputClass(isDark)} />
         </Field>
 
-        <Field label="Description" isDark={isDark}>
-          <textarea value={description} onChange={(event) => onDescriptionChange(event.target.value)} className={`${inputClass(isDark)} min-h-[9rem] resize-y`} placeholder="Optional scene summary" />
+        <Field label="Description" detail="Optional scene summary." isDark={isDark}>
+          <textarea value={description} onChange={(event) => onDescriptionChange(event.target.value)} className={`${inputClass(isDark)} min-h-[9rem] resize-y`} />
         </Field>
       </div>
 
       <div className="mt-7 grid gap-7 lg:grid-cols-2">
-        <Field label="POV character" isDark={isDark}>
-          <input value={sceneMetadata.pov ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, pov: event.target.value || null }))} className={inputClass(isDark)} placeholder="Whose eyes are we in?" />
+        <Field label="POV character" detail="Whose eyes are we in?" isDark={isDark}>
+          <input value={sceneMetadata.pov ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, pov: event.target.value || null }))} className={inputClass(isDark)} />
         </Field>
-        <Field label="Timeline / date" isDark={isDark}>
-          <input value={sceneMetadata.timeline ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, timeline: event.target.value || null }))} className={inputClass(isDark)} placeholder="Day 3, Winter court, 8:12 PM" />
+        <Field label="Timeline / date" detail="Example: Day 3, Winter court, 8:12 PM." isDark={isDark}>
+          <input value={sceneMetadata.timeline ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, timeline: event.target.value || null }))} className={inputClass(isDark)} />
         </Field>
-        <Field label="Location" isDark={isDark}>
-          <input value={sceneMetadata.location ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, location: event.target.value || null }))} className={inputClass(isDark)} placeholder="Blackwater Station" />
+        <Field label="Location" detail="Name the place or set where the scene happens." isDark={isDark}>
+          <input value={sceneMetadata.location ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, location: event.target.value || null }))} className={inputClass(isDark)} />
         </Field>
-        <Field label="Mood / tone" isDark={isDark}>
+        <Field label="Mood / tone" detail="Separate moods with commas, such as tense, intimate, foreboding." isDark={isDark}>
           <div className="space-y-2">
             {selectedMoodList.length > 0 ? <TokenList items={selectedMoodList} isDark={isDark} /> : null}
-            <input value={(sceneMetadata.mood ?? []).join(", ")} onChange={(event) => setSceneMetadata((current) => ({ ...current, mood: metadataTextToList(event.target.value) }))} className={inputClass(isDark)} placeholder="tense, intimate, foreboding" />
+            <input value={(sceneMetadata.mood ?? []).join(", ")} onChange={(event) => setSceneMetadata((current) => ({ ...current, mood: metadataTextToList(event.target.value) }))} className={inputClass(isDark)} />
           </div>
         </Field>
-        <Field label="Tags" isDark={isDark}>
+        <Field label="Tags" detail="Separate tags with commas, such as betrayal, dagger, reveal." isDark={isDark}>
           <div className="space-y-2">
             {selectedTagList.length > 0 ? <TokenList items={selectedTagList} isDark={isDark} /> : null}
-            <input value={(sceneMetadata.tags ?? []).join(", ")} onChange={(event) => setSceneMetadata((current) => ({ ...current, tags: metadataTextToList(event.target.value) }))} className={inputClass(isDark)} placeholder="betrayal, dagger, reveal" />
+            <input value={(sceneMetadata.tags ?? []).join(", ")} onChange={(event) => setSceneMetadata((current) => ({ ...current, tags: metadataTextToList(event.target.value) }))} className={inputClass(isDark)} />
           </div>
         </Field>
-        <Field label="Status note" isDark={isDark}>
-          <input value={sceneMetadata.status_note ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, status_note: event.target.value || null }))} className={inputClass(isDark)} placeholder="Draft, revised, final, waiting on continuity pass" />
+        <Field label="Status note" detail="Example: draft, revised, final, waiting on continuity pass." isDark={isDark}>
+          <input value={sceneMetadata.status_note ?? ""} onChange={(event) => setSceneMetadata((current) => ({ ...current, status_note: event.target.value || null }))} className={inputClass(isDark)} />
         </Field>
       </div>
     </section>
@@ -968,7 +967,6 @@ function SceneEditorPanel({
           editorKey="scene-workspace-editor"
           html={htmlBody}
           onChange={onHtmlChange}
-          placeholder="Start writing your scene..."
           className={`min-h-[24rem] px-5 py-4 font-serif text-base leading-8 outline-none sm:min-h-[30rem] ${isDark ? "text-slate-100" : "text-stone-900"}`}
         />
       </div>
@@ -1211,10 +1209,12 @@ function WorkspaceStateCard({
 
 function Field({
   label,
+  detail,
   isDark,
   children,
 }: {
   label: string
+  detail?: string
   isDark: boolean
   children: ReactNode
 }) {
@@ -1222,6 +1222,7 @@ function Field({
     <label className="block text-sm">
       <span className={labelClass(isDark)}>{label}</span>
       {children}
+      {detail ? <span className={`mt-2 block text-xs leading-5 ${isDark ? "text-slate-500" : "text-stone-500"}`}>{detail}</span> : null}
     </label>
   )
 }
@@ -1426,8 +1427,8 @@ function labelClass(isDark: boolean) {
 function inputClass(isDark: boolean) {
   return `w-full rounded-md border px-4 py-4 text-sm outline-none transition focus-visible:ring-2 ${
     isDark
-      ? "border-white/10 bg-[#040b15] text-slate-100 placeholder:text-slate-500 focus-visible:border-teal-300/30 focus-visible:ring-teal-300/20"
-      : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus-visible:border-teal-400 focus-visible:ring-teal-200"
+      ? "border-white/10 bg-[#040b15] text-slate-100 focus-visible:border-teal-300/30 focus-visible:ring-teal-300/20"
+      : "border-stone-200 bg-white text-stone-900 focus-visible:border-teal-400 focus-visible:ring-teal-200"
   }`
 }
 

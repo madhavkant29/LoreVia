@@ -16,7 +16,9 @@ function invalidateBetaReadCache() {
 
 export const readerApi = {
   getChapter: (bookId: string, chapter: number) =>
-    apiClient.get<ChapterData>(readerPath(bookId, `/chapter/${chapter}`)).then(r => r.data),
+    apiClient.get<ChapterData>(readerPath(bookId, `/chapter/${chapter}`), {
+      params: { include: "characters,media,tags,beta_feedback,text_content,html_content,text_url" },
+    }).then(r => r.data),
   getContext: (bookId: string, q: string, chapter: number) =>
     apiClient.get<ContextResult>(readerPath(bookId, "/context"), { params: { q, chapter } }).then(r => r.data),
   getSummary: (bookId: string, chapter: number, mode: SummaryMode) =>

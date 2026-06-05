@@ -71,7 +71,7 @@ export const ContextPanel = memo(function ContextPanel({
         subCard: "border-white/5 bg-white/[0.03]",
         muted: "text-stone-500",
         body: "text-stone-400",
-        input: "border-white/10 bg-white/5 text-white placeholder:text-stone-600",
+        input: "border-white/10 bg-white/5 text-white",
         button: "bg-white text-black hover:bg-white/90",
         line: "bg-white/10",
         title: "text-white",
@@ -89,7 +89,7 @@ export const ContextPanel = memo(function ContextPanel({
         subCard: "border-stone-200/60 bg-white",
         muted: "text-stone-400",
         body: "text-stone-600",
-        input: "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400",
+        input: "border-stone-200 bg-white text-stone-900",
         button: "bg-stone-900 text-white hover:bg-stone-800",
         line: "bg-stone-200",
         title: "text-stone-900",
@@ -264,10 +264,11 @@ export const ContextPanel = memo(function ContextPanel({
               <textarea
                 value={quoteNote}
                 onChange={(event) => setQuoteNote(event.target.value)}
-                placeholder="Why does this line matter?"
                 rows={3}
+                aria-label="Line bookmark note"
                 className={`w-full rounded-md border px-3 py-2 text-sm ${shell.input}`}
               />
+              <p className={`text-xs ${shell.muted}`}>Why does this line matter?</p>
               <button onClick={saveSelectedQuote} className={`w-full rounded-md px-4 py-3 text-sm font-semibold transition ${shell.button}`}>
                 {savingQuote ? "Saving..." : "Save line bookmark"}
               </button>

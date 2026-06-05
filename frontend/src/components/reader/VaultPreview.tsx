@@ -243,8 +243,8 @@ export function VaultPreview({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search notes or content"
-              className={`w-full bg-transparent text-sm outline-none placeholder:text-slate-400 ${isDark ? "text-slate-100" : "text-stone-900"}`}
+              aria-label="Search notes or content"
+              className={`w-full bg-transparent text-sm outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
             />
           </label>
 
@@ -357,7 +357,8 @@ export function VaultPreview({
                       setStatus(null)
                     }}
                     spellCheck={false}
-                    className={`min-h-[30rem] w-full resize-y rounded-md border px-4 py-4 font-mono text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-[#050816] text-slate-100 placeholder:text-slate-600 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-sky-300"}`}
+                    aria-label="Vault note content"
+                    className={`min-h-[30rem] w-full resize-y rounded-md border px-4 py-4 font-mono text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-[#050816] text-slate-100 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 focus:border-sky-300"}`}
                   />
                 </div>
 

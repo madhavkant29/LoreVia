@@ -293,19 +293,19 @@ function AskQuestionCard({
       <label htmlFor="ask-input" className="sr-only">
         Ask LoreVia a grounded question about the story
       </label>
+      <p className={cn("mb-2 text-xs", isDark ? "text-slate-500" : "text-stone-500")}>Ask anything about your story up to this point.</p>
       <textarea
         ref={inputRef}
         id="ask-input"
         value={currentValue}
         onChange={(event) => onInputChange(event.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="Ask anything about your story up to this point..."
         rows={4}
         disabled={loading}
         aria-label="Ask LoreVia a grounded question about the story"
         className={cn(
           "min-h-[10rem] w-full resize-none bg-transparent text-base leading-7 outline-none",
-          isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"
+          isDark ? "text-slate-100" : "text-stone-900"
         )}
       />
 

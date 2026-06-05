@@ -227,13 +227,9 @@ export function ManuscriptWriteRightRail({
               <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Ask LoreVia</p>
               <span className={`rounded-sm px-2 py-0.5 text-3xs font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-100 text-sky-700"}`}>Beta</span>
             </div>
-            <input
-              type="text"
-              readOnly
-              aria-label="Ask LoreVia about your story"
-              placeholder="Ask anything about your story..."
-              className={`mt-4 w-full rounded-sm border px-3 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black/20 text-slate-300 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-700 placeholder:text-stone-400"}`}
-            />
+            <p className={`mt-4 rounded-sm border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+              Ask LoreVia about continuity, rewrites, or the selected passage using the actions below.
+            </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" onClick={() => onOpenRightPane("context")} className={`rounded-sm border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>Check continuity</button>
               <button type="button" onClick={onTightenSelectedText} className={`rounded-sm border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>Tighten selection</button>

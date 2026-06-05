@@ -265,8 +265,14 @@ function ModerationPanel({
         {publicShares.length === 0 ? <p className="text-sm text-[#617065]">No pending public shares.</p> : null}
       </div>
       <div className="mt-6 grid gap-3">
-        <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Book ID" value={bookId} onChange={(event) => setBookId(event.target.value)} />
-        <textarea className="min-h-20 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Required reason" value={reason} onChange={(event) => setReason(event.target.value)} />
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          Book ID
+          <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={bookId} onChange={(event) => setBookId(event.target.value)} />
+        </label>
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          Required reason
+          <textarea className="min-h-20 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
+        </label>
         <div className="flex flex-wrap gap-2">
           {(["hideBook", "removeBook", "restoreBook"] as const).map((action) => (
             <button key={action} disabled={disabled || !bookId || !reason} className="rounded-md border border-[#d9dfd6] px-3 py-2 text-sm disabled:opacity-50" onClick={() => onBookAction(bookId, action, reason)}>
@@ -358,7 +364,10 @@ function RefundRow({
     <div className="border-t border-[#edf0eb] pt-3">
       <p className="font-medium">{review.paddle_transaction_id}</p>
       <p className="text-sm text-[#617065]">{review.status} / {review.billing_interval} / {formatDate(review.charge_at)}</p>
-      <textarea className="mt-2 min-h-16 w-full rounded-md border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Required decision reason" value={reason} onChange={(event) => setReason(event.target.value)} />
+      <label className="mt-2 grid gap-1.5 text-sm font-medium text-[#46534a]">
+        Required decision reason
+        <textarea className="min-h-16 w-full rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
+      </label>
       <label className="mt-2 flex items-center gap-2 text-sm">
         <input type="checkbox" checked={providerFollowupOnly} onChange={(event) => setProviderFollowupOnly(event.target.checked)} />
         Provider follow-up only
@@ -390,8 +399,14 @@ function AccessPanel({
     <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
       <h2 className="text-xl font-semibold">Admin Access</h2>
       <div className="mt-4 grid gap-3">
-        <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="User ID" value={userId} onChange={(event) => setUserId(event.target.value)} />
-        <textarea className="min-h-16 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Required owner reason" value={reason} onChange={(event) => setReason(event.target.value)} />
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          User ID
+          <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={userId} onChange={(event) => setUserId(event.target.value)} />
+        </label>
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          Required owner reason
+          <textarea className="min-h-16 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
+        </label>
         <div className="flex flex-wrap gap-3 text-sm">
           {SCOPE_OPTIONS.map((scope) => (
             <label key={scope} className="flex items-center gap-2">

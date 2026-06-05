@@ -113,8 +113,6 @@ async def get_manuscript_annotations(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
-    if collaborator and not collaboration_can_comment(collaborator):
-        raise HTTPException(403, "This share cannot view manuscript comments.")
     if collaborator and chapter_number is not None and not collaboration_allows_chapter(collaborator, chapter_number):
         raise HTTPException(403, "This share cannot access that chapter.")
     if collaborator is None:

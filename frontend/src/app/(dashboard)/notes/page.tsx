@@ -57,12 +57,14 @@ export default function NotesPage() {
           />
 
           <div className="mt-6">
+            <label className="app-eyebrow" htmlFor="notes-search">Search notes</label>
             <input
+              id="notes-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search notes, chapter names, or book titles"
               className="app-input"
             />
+            <p className="mt-2 text-xs text-[rgb(var(--muted-foreground))]">Filter by note text, chapter name, or book title.</p>
           </div>
         </WorkspacePanel>
 

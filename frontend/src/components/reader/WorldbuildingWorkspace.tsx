@@ -585,7 +585,6 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                     <input
                       value={uploadTitle}
                       onChange={(event) => setUploadTitle(event.target.value)}
-                      placeholder="Optional shared title"
                       className={inputClass(isDark)}
                     />
                   </LabeledField>
@@ -886,7 +885,6 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                   <input
                     value={canonName}
                     onChange={(event) => setCanonName(event.target.value)}
-                    placeholder="Enter canonical name"
                     className={inputClass(isDark)}
                   />
                 </LabeledField>
@@ -894,7 +892,6 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                   <input
                     value={canonAliases}
                     onChange={(event) => setCanonAliases(event.target.value)}
-                    placeholder="e.g., Altdor, Alt-dore"
                     className={inputClass(isDark)}
                   />
                 </LabeledField>
@@ -1055,7 +1052,6 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                     value={logicQuery}
                     onChange={(event) => setLogicQuery(event.target.value)}
                     rows={6}
-                    placeholder="Ask about a kingdom, faction, culture, or world rule..."
                     className={`${inputClass(isDark)} min-h-[10rem] resize-y leading-6`}
                   />
                 </LabeledField>
@@ -1175,7 +1171,6 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                     setDraftTitle(event.target.value)
                     setDocumentDraftDirty(true)
                   }}
-                  placeholder="e.g., The World of Elaria"
                   className={inputClass(isDark)}
                 />
               </LabeledField>
@@ -1187,7 +1182,6 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                     setDraftText(event.target.value)
                     setDocumentDraftDirty(true)
                   }}
-                  placeholder="Worldbuilding notes, lore rules, places, factions, timeline details, and reference context live here..."
                   rows={18}
                   className={`${inputClass(isDark)} min-h-[26rem] resize-y leading-7`}
                 />
@@ -1551,7 +1545,7 @@ function mutedTextClass(isDark: boolean) {
 }
 
 function inputClass(isDark: boolean) {
-  return `w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-black/25 text-slate-100 placeholder:text-slate-500 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-sky-300"}`
+  return `w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-black/25 text-slate-100 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 focus:border-sky-300"}`
 }
 
 function secondaryButtonClass(isDark: boolean) {

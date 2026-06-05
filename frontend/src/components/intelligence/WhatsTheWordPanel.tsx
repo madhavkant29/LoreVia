@@ -86,16 +86,15 @@ export function WhatsTheWordPanel({
                   setResult(null)
                 }}
                 rows={4}
-                placeholder="For example: a smile that hides contempt behind politeness"
                 className={`mt-3 w-full rounded-md border px-4 py-3 text-sm leading-6 ${
                   isDark
-                    ? "border-white/10 bg-[#020617] text-slate-100 placeholder:text-slate-500"
-                    : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"
+                    ? "border-white/10 bg-[#020617] text-slate-100"
+                    : "border-stone-200 bg-white text-stone-900"
                 }`}
               />
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                 <p className={`text-xs ${descriptionWordCount >= WHATS_THE_WORD_MIN_DESCRIPTION_WORDS ? isDark ? "text-emerald-300" : "text-emerald-700" : isDark ? "text-slate-400" : "text-stone-500"}`}>
-                  Use at least {WHATS_THE_WORD_MIN_DESCRIPTION_WORDS} words for a more accurate result.
+                  Use at least {WHATS_THE_WORD_MIN_DESCRIPTION_WORDS} words for a more accurate result. Example: a smile that hides contempt behind politeness.
                 </p>
                 <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                   {descriptionWordCount} / {WHATS_THE_WORD_MIN_DESCRIPTION_WORDS}+ words

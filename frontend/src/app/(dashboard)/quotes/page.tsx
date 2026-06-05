@@ -75,12 +75,14 @@ export default function QuotesPage() {
           />
 
           <div className="mt-6">
+            <label className="app-eyebrow" htmlFor="quotes-search">Search quotes</label>
             <input
+              id="quotes-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search quotes, character names, chapter titles, notes, or book titles"
               className="app-input"
             />
+            <p className="mt-2 text-xs text-[rgb(var(--muted-foreground))]">Filter by quote text, character, chapter, note, or book title.</p>
           </div>
         </WorkspacePanel>
 

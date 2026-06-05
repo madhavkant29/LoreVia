@@ -111,7 +111,6 @@ export function ManuscriptOverlayDialogs({
                 <input
                   value={sceneTitleDraft}
                   onChange={(event) => onSceneTitleDraftChange(event.target.value)}
-                  placeholder="Scene title"
                   className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
@@ -134,7 +133,6 @@ export function ManuscriptOverlayDialogs({
               <input
                 value={sceneDescriptionDraft}
                 onChange={(event) => onSceneDescriptionDraftChange(event.target.value)}
-                placeholder="Optional context for later"
                 className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
               />
             </label>
@@ -146,7 +144,6 @@ export function ManuscriptOverlayDialogs({
                   editorKey="scene-editor-modal"
                   html={sceneHtmlDraft}
                   onChange={onSceneDraftChange}
-                  placeholder="Write the scene here..."
                   className={`min-h-[18rem] px-4 py-3 text-sm leading-7 outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
                 />
               </div>
@@ -165,8 +162,8 @@ export function ManuscriptOverlayDialogs({
                   type="text"
                   value={sceneVersionNameDraft}
                   onChange={(event) => onSceneVersionNameDraftChange(event.target.value)}
-                  placeholder="Example: Before tightening dialogue"
-                  className={`mt-3 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                  aria-label="Scene version name"
+                  className={`mt-3 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
                 <div className="mt-3 space-y-2">
                   {sceneVersions.map((version) => (

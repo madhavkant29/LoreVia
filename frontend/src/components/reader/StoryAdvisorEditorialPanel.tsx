@@ -153,9 +153,10 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
               min={1}
               value={editChapter}
               onChange={e => setEditChapter(e.target.value)}
-              placeholder="e.g. 42"
-              className={`w-32 rounded-sm border px-3 py-2 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500/50" : "border-stone-200 bg-stone-50 text-stone-800 placeholder:text-stone-400 focus:border-violet-300"}`}
+              aria-label="Chapter number"
+              className={`w-32 rounded-sm border px-3 py-2 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 focus:border-indigo-500/50" : "border-stone-200 bg-stone-50 text-stone-800 focus:border-violet-300"}`}
             />
+            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Use the source chapter number when this passage belongs to one.</p>
           </div>
           <button
             onClick={async () => {
@@ -187,13 +188,16 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
           </button>
         </div>
 
-        <textarea
-          value={editText}
-          onChange={e => setEditText(e.target.value)}
-          placeholder="Paste your passage here: a paragraph, a scene, or a full chapter section."
-          rows={10}
-          className={`w-full resize-y rounded-md border px-4 py-3 text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-white/4 text-slate-200 placeholder:text-slate-600 focus:border-indigo-500/40" : "border-stone-200 bg-stone-50 text-stone-800 placeholder:text-stone-400 focus:border-violet-300"}`}
-        />
+        <label className="block">
+          <span className={`mb-2 block text-3xs font-semibold uppercase tracking-[0.26em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Passage to review</span>
+          <textarea
+            value={editText}
+            onChange={e => setEditText(e.target.value)}
+            rows={10}
+            className={`w-full resize-y rounded-md border px-4 py-3 text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-white/4 text-slate-200 focus:border-indigo-500/40" : "border-stone-200 bg-stone-50 text-stone-800 focus:border-violet-300"}`}
+          />
+          <span className={`mt-2 block text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Paste a paragraph, scene, or full chapter section.</span>
+        </label>
 
         {editError ? (
           <p className={`mt-3 rounded-sm border px-4 py-2 text-sm ${isDark ? "border-red-500/25 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>

@@ -497,23 +497,23 @@ export function PublicForumPostPageClient({
                 <input
                   value={editHeadline}
                   onChange={(event) => setEditHeadline(event.target.value)}
-                  placeholder="Headline"
-                  className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                  aria-label="Discussion headline"
+                  className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                 />
                 <textarea
                   value={editBody}
                   onChange={(event) => setEditBody(event.target.value)}
-                  placeholder="What kind of beta feedback are you looking for?"
-                  className={`min-h-[10rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                  aria-label="Discussion body"
+                  className={`min-h-[10rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                 />
                 {isNovelThread ? (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <input
                       value={editDesiredCount}
                       onChange={(event) => setEditDesiredCount(event.target.value)}
-                      placeholder="Desired beta readers"
+                      aria-label="Desired beta readers"
                       inputMode="numeric"
-                      className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                      className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                     />
                     <label className={`flex items-center justify-between rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
                       <span>Allow collaborator contact requests</span>
@@ -570,8 +570,8 @@ export function PublicForumPostPageClient({
                       onChange={(event) => setDraft(event.target.value)}
                       onInput={(event) => setDraft((event.target as HTMLTextAreaElement).value)}
                       disabled={!interactiveReady}
-                      placeholder="Add a thoughtful public comment about pacing, clarity, emotional payoff, or what you'd want to review."
-                      className={`min-h-[8.5rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                      aria-label="Public comment"
+                      className={`min-h-[8.5rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                     />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -669,8 +669,8 @@ export function PublicForumPostPageClient({
                     onChange={(event) => setInterestDraft(event.target.value)}
                     onInput={(event) => setInterestDraft((event.target as HTMLTextAreaElement).value)}
                     disabled={!interactiveReady}
-                    placeholder="Tell the author what genres you read well, what feedback you can provide, and why you'd be a useful beta reader."
-                    className={`min-h-[8rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                    aria-label="Collaborator note"
+                    className={`min-h-[8rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                   />
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <button
@@ -835,8 +835,8 @@ function CommentRow({
               value={replyDraft}
               onChange={(event) => onReplyDraftChange(event.target.value)}
               onInput={(event) => onReplyDraftChange((event.target as HTMLTextAreaElement).value)}
-              placeholder={`Reply to @${comment.author_username || "commenter"}`}
-              className={`min-h-[6rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#121821] text-slate-100 placeholder:text-slate-600 focus:border-teal-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+              aria-label={`Reply to @${comment.author_username || "commenter"}`}
+              className={`min-h-[6rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#121821] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
             />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button

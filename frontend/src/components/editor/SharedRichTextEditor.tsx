@@ -369,7 +369,6 @@ export function EditorToolbar({
 export function RichTextEditor({
   html,
   onChange,
-  placeholder,
   className,
   style,
   contentClassName,
@@ -383,7 +382,6 @@ export function RichTextEditor({
 }: {
   html: string
   onChange: (html: string, text: string) => void
-  placeholder?: string
   className?: string
   style?: CSSProperties
   contentClassName?: string
@@ -429,7 +427,6 @@ export function RichTextEditor({
       attributes: {
         class: wrapperClassName,
         "data-editor-key": editorKey || "",
-        "data-placeholder": placeholder || "",
       },
       handleClick(_view, _pos, event) {
         const target = event.target as HTMLElement | null

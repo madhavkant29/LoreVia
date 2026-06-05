@@ -370,7 +370,8 @@ export const CharacterCard = memo(function CharacterCard({ character, bookId, co
                   </label>
                   <label className="space-y-1">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Aliases</span>
-                    <input value={draft.aliases} onChange={(event) => setDraft((value) => ({ ...value, aliases: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.aliases} onChange={(event) => setDraft((value) => ({ ...value, aliases: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                   <label className="space-y-1 md:col-span-2">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Description</span>
@@ -382,15 +383,18 @@ export const CharacterCard = memo(function CharacterCard({ character, bookId, co
                   </label>
                   <label className="space-y-1">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Personality</span>
-                    <input value={draft.personalityTags} onChange={(event) => setDraft((value) => ({ ...value, personalityTags: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.personalityTags} onChange={(event) => setDraft((value) => ({ ...value, personalityTags: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                   <label className="space-y-1">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Motivations</span>
-                    <input value={draft.motivations} onChange={(event) => setDraft((value) => ({ ...value, motivations: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.motivations} onChange={(event) => setDraft((value) => ({ ...value, motivations: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                   <label className="space-y-1 md:col-span-2">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fears</span>
-                    <input value={draft.fears} onChange={(event) => setDraft((value) => ({ ...value, fears: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.fears} onChange={(event) => setDraft((value) => ({ ...value, fears: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                 </div>
                 {error ? <p className="mt-3 text-sm text-red-500">{error}</p> : null}

@@ -53,18 +53,18 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await expect(page.getByText("Top Rated Weekly").first()).toBeVisible()
   await expect(page.getByText("Showing 1-12 of 12 threads")).toBeVisible()
   await page.getByRole("button", { name: "General discussion" }).click()
-  await page.getByPlaceholder(/general discussion headline/i).fill("How do you raise tension without chaos?")
-  await page.getByPlaceholder(/what do you want advice or discussion on/i).fill("I want craft advice on building pressure in quiet scenes.")
+  await page.getByLabel(/general discussion headline/i).fill("How do you raise tension without chaos?")
+  await page.getByLabel(/discussion body/i).fill("I want craft advice on building pressure in quiet scenes.")
   await page.getByRole("button", { name: "Open general thread" }).click()
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-\d+$/)
 
   await expect(page.getByRole("heading", { name: /how do you raise tension without chaos/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^library$/i })).toBeVisible()
-  await page.getByPlaceholder(/add a thoughtful public comment/i).fill("Happy to review pacing and clarity.")
+  await page.getByLabel(/public comment/i).fill("Happy to review pacing and clarity.")
   await page.getByRole("button", { name: "Post comment" }).click()
   await expect(page.getByText("Happy to review pacing and clarity.")).toBeVisible()
   await page.getByRole("button", { name: "Reply" }).first().click()
-  await page.getByPlaceholder(/reply to @author/i).fill("That is exactly the section I would start with too.")
+  await page.getByLabel(/reply to @author/i).fill("That is exactly the section I would start with too.")
   await page.getByRole("button", { name: "Post reply" }).click()
   await expect(page.getByText("That is exactly the section I would start with too.")).toBeVisible()
   await expect(page.getByRole("link", { name: "@author" }).first()).toBeVisible()
@@ -122,8 +122,8 @@ test("login surfaces an invalid-credentials error", async ({ page }) => {
   await installMockApi(page, { session: "guest", login: "unauthorized" })
   await page.goto("/login")
 
-  await page.getByPlaceholder("Email").fill("reader@example.com")
-  await page.getByPlaceholder("Password").fill("wrong-password")
+  await page.getByLabel("Email", { exact: true }).fill("reader@example.com")
+  await page.getByLabel("Password", { exact: true }).fill("wrong-password")
   await page.getByRole("button", { name: /^sign in$/i }).click()
 
   await expect(page.getByText("Invalid email or password.")).toBeVisible()
@@ -215,7 +215,7 @@ test("author uploads default the manuscript byline from the public username", as
   await page.getByRole("button", { name: /^new project$/i }).first().click()
   await page.getByRole("button", { name: /^author mode$/i }).click()
 
-  const bylineInput = page.getByPlaceholder("Manuscript author or pen name")
+  const bylineInput = page.getByLabel("Manuscript author or pen name")
   await expect(bylineInput).toHaveValue("author")
   await expect(page.getByText("This name appears on this manuscript only.")).toBeVisible()
   await expect(page.getByText("different pen name or byline")).toBeVisible()
@@ -320,7 +320,7 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await page.goto(`${BOOK_ROUTE}/manuscript`)
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
-  await expect(page.getByPlaceholder("Search chapters")).toBeVisible()
+  await expect(page.getByLabel("Search chapters")).toBeVisible()
   await expect(page.getByRole("link", { name: /open workspace/i })).toBeVisible()
   const workspaceModes = page.getByRole("tablist", { name: "Manuscript workspace modes" })
   await expect(workspaceModes.getByRole("tab", { name: "Write" })).toBeVisible()
@@ -483,14 +483,16 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
   await expect(sceneCards.nth(0)).toHaveAttribute("data-scene-id", "scene-1")
   await expect(sceneCards.nth(1)).toHaveAttribute("data-scene-id", "scene-2")
 
-  await page.locator('[data-scene-id="scene-2"]').scrollIntoViewIfNeeded()
+  const moveSceneUp = page.getByTestId("move-scene-scene-2-up")
+  await moveSceneUp.scrollIntoViewIfNeeded()
+  await expect(moveSceneUp).toBeEnabled()
 
   const reorderResponse = page.waitForResponse((response) =>
     response.request().method() === "PATCH" &&
     response.url().includes("/books/book-1/chapters/2/scenes/order") &&
     response.status() === 200
   )
-  await page.locator('[data-scene-id="scene-2"]').getByRole("button", { name: "Move Market Argument up" }).click()
+  await moveSceneUp.click()
   await reorderResponse
 
   await expect(sceneCards.nth(0)).toHaveAttribute("data-scene-id", "scene-2")
@@ -523,10 +525,10 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
     await dismissCookies.click()
   }
 
-  const emailField = page.getByPlaceholder("reader@example.com")
-  const nameField = page.getByPlaceholder("Display name")
+  const emailField = page.getByLabel("Email", { exact: true })
+  const nameField = page.getByLabel("Display name", { exact: true })
   await nameField.fill("Dev Editor")
-  await page.getByRole("combobox").selectOption("developmental_editor")
+  await page.getByLabel("Role", { exact: true }).selectOption("developmental_editor")
   await expect(page.getByText("Structure, continuity, and arc partner.")).toBeVisible()
   const selectedChaptersOnly = page.getByLabel("Can view selected chapters only")
   await selectedChaptersOnly.uncheck()
@@ -566,6 +568,8 @@ test("reader published layout applies book typography without mobile overflow", 
   await expect(paragraphAfterSceneBreak).toBeVisible()
   await expect(broadcastBlock).toBeVisible()
   await expect(quoteBlock).toBeVisible()
+  await expect(page.getByText("Keep the road language consistent with the later bridge beat.")).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText("Madhav")).toBeVisible()
 
   await expect(normalParagraph).toHaveCSS("font-family", /Georgia|Times New Roman|serif/i)
   await expect(normalParagraph).toHaveCSS("text-align", "justify")

@@ -803,42 +803,46 @@ export const UploadModal = memo(function UploadModal({
 
           {!isManagingExisting ? (
             <div className="grid gap-4 xl:grid-cols-2">
-              <input
-                type="text"
-                placeholder="Title"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                onInput={e => setTitle((e.target as HTMLInputElement).value)}
-                required
-                className={`rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark
-                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-                }`}
-              />
+              <label className="grid gap-2">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Title</span>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  onInput={e => setTitle((e.target as HTMLInputElement).value)}
+                  required
+                  aria-label="Title"
+                  className={`rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark
+                      ? "border-white/10 bg-white/5 text-slate-100"
+                      : "border-gray-300 bg-white text-slate-950"
+                  }`}
+                />
+              </label>
               <div className="space-y-2">
-              <input
-                type="text"
-                placeholder={mode === "author"
-                  ? "Manuscript author or pen name"
-                  : willUseBlankCoverFallback
-                    ? "Author (shown on blank cover if no cover is found)"
-                    : "Author (optional)"}
-                value={author}
-                onChange={(e) => {
-                  setAuthor(e.target.value)
-                  setAuthorManuallyEdited(true)
-                }}
-                onInput={(e) => {
-                  setAuthor((e.target as HTMLInputElement).value)
-                  setAuthorManuallyEdited(true)
-                }}
-                className={`w-full rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark
-                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-                }`}
-              />
+              <label className="grid gap-2">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  {mode === "author" ? "Manuscript author or pen name" : willUseBlankCoverFallback ? "Author for blank cover" : "Author"}
+                </span>
+                <input
+                  type="text"
+                  value={author}
+                  onChange={(e) => {
+                    setAuthor(e.target.value)
+                    setAuthorManuallyEdited(true)
+                  }}
+                  onInput={(e) => {
+                    setAuthor((e.target as HTMLInputElement).value)
+                    setAuthorManuallyEdited(true)
+                  }}
+                  aria-label={mode === "author" ? "Manuscript author or pen name" : willUseBlankCoverFallback ? "Author for blank cover" : "Author"}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark
+                      ? "border-white/10 bg-white/5 text-slate-100"
+                      : "border-gray-300 bg-white text-slate-950"
+                  }`}
+                />
+              </label>
               {willUseBlankCoverFallback ? (
                 <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   If LoreVia cannot find a cover, it will generate a blank cover page using the title and author.
@@ -982,9 +986,9 @@ export const UploadModal = memo(function UploadModal({
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="username"
                     value={usernameInput}
                     onChange={(e) => setUsernameInput(e.target.value)}
+                    aria-label="Username"
                     className={`flex-1 rounded-lg border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
                     minLength={3}
                     maxLength={32}
@@ -1084,8 +1088,8 @@ export const UploadModal = memo(function UploadModal({
                 type="text"
                 value={customTag}
                 onChange={e => setCustomTag(e.target.value)}
-                placeholder="Add genres or moods..."
-                className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-500"
+                aria-label="Add genres or moods"
+                className="flex-1 bg-transparent py-1.5 text-sm outline-none"
               />
               {customTag.trim().length > 0 && (
                 <button
@@ -1235,12 +1239,12 @@ export const UploadModal = memo(function UploadModal({
                     <input
                       type="number"
                       min={1}
-                      placeholder={`${storyUnitLabelTitle} number`}
                       value={chapterNumber}
                       onChange={(e) => {
                         setChapterNumber(e.target.value)
                         setChapterNumberDirty(true)
                       }}
+                      aria-label={`${storyUnitLabelTitle} number`}
                       className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
                     />
                     <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-gray-300 bg-white text-slate-700"}`}>
@@ -1253,20 +1257,23 @@ export const UploadModal = memo(function UploadModal({
                     <>
                       <input
                         type="text"
-                        placeholder={`${storyUnitLabelTitle} title (optional)`}
                         value={chapterTitle}
                         onChange={(e) => setChapterTitle(e.target.value)}
-                        className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"}`}
+                        aria-label={`${storyUnitLabelTitle} title`}
+                        className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
                       />
                       <textarea
                         value={chapterText}
                         onChange={(e) => setChapterText(e.target.value)}
-                        placeholder={isScreenplayWorkspace
+                        rows={14}
+                        aria-label={`${storyUnitLabelTitle} text`}
+                        className={`min-h-[280px] rounded-xl border px-3 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-black/20 text-slate-100 focus:border-indigo-400/50" : "border-gray-300 bg-white text-slate-950 focus:border-indigo-400"}`}
+                      />
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                        {isScreenplayWorkspace
                           ? "Paste screenplay text here. LoreVia will split scenes, refresh character profiles, and immediately run continuity checks."
                           : "Paste one chapter here. LoreVia will save it into the manuscript, refresh character profiles, and immediately run continuity checks."}
-                        rows={14}
-                        className={`min-h-[280px] rounded-xl border px-3 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-500 focus:border-indigo-400/50" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400 focus:border-indigo-400"}`}
-                      />
+                      </p>
                       <div className={`flex items-center justify-between text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                         <span>{chapterText.trim() ? `${chapterText.trim().split(/\s+/).length} words ready` : `No ${storyUnitLabel} text pasted yet`}</span>
                         <span>{replaceExisting ? `Will replace the selected ${storyUnitLabel} number` : `Will append if the ${storyUnitLabel} number is new`}</span>

@@ -320,7 +320,7 @@ export const ManuscriptPlanWorkspace = memo(function ManuscriptPlanWorkspace({
               onChange={(event) => onNewCorkboardTitleChange(event.target.value)}
               aria-label="New corkboard card title"
               title="Short title for a new planning card."
-              className={`w-full rounded-md border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+              className={`w-full rounded-md border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${isDark ? "border-white/10 bg-black/30 text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
             />
           </label>
           <button onClick={onAddCorkboardCard} disabled={!writerWorkspace || !newCorkboardTitle.trim()} title="Add this card to the Ideas lane." className="mt-5 rounded-md bg-[#1f615d] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Add</button>

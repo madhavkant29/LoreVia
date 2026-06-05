@@ -164,12 +164,12 @@ export function ReaderOverview({
         <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
           <label className={cn("flex min-h-[3.2rem] items-center gap-3 rounded-md border px-4", isDark ? "border-white/[0.08] bg-[#090c14] text-slate-200" : "border-slate-200 bg-slate-50 text-slate-800")}>
             <ReaderIcon name="search" className={isDark ? "h-5 w-5 text-slate-500" : "h-5 w-5 text-slate-400"} />
+            <span className="sr-only">Search this book, notes, or summaries</span>
             <input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && submitSearch()}
-              placeholder="Search this book, notes, or summaries..."
-              className={cn("w-full bg-transparent text-sm outline-none", isDark ? "placeholder:text-slate-600" : "placeholder:text-slate-400")}
+              className="w-full bg-transparent text-sm outline-none"
             />
             <button
               type="button"

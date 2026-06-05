@@ -114,55 +114,61 @@ export default function RegisterPage() {
       </div>
 
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
-            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-          }`}
-          required
-          autoComplete="email"
-        />
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={e => setUsername(e.target.value)}
-          className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
-            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-          }`}
-          required
-          minLength={3}
-          maxLength={32}
-          autoComplete="username"
-        />
+        <label className="flex flex-col gap-1.5">
+          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Email</span>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+              isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+            }`}
+            required
+            autoComplete="email"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Username</span>
+          <input
+            type="text"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+              isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+            }`}
+            required
+            minLength={3}
+            maxLength={32}
+            autoComplete="username"
+          />
+        </label>
         <div className="space-y-3">
-          <div className="relative">
-            <input
-              type={showPassword ? "text" : "password"}
-              placeholder="Password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className={`w-full rounded-md border px-3 py-3 pr-20 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
-                isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-              }`}
-              required
-              minLength={12}
-              autoComplete="new-password"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((current) => !current)}
-              className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium transition ${
-                isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-900"
-              }`}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? "Hide" : "Show"}
-            </button>
-          </div>
+          <label className="flex flex-col gap-1.5">
+            <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Password</span>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className={`w-full rounded-md border px-3 py-3 pr-20 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+                  isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+                }`}
+                required
+                minLength={12}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((current) => !current)}
+                className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium transition ${
+                  isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-900"
+                }`}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+          </label>
           <div className="flex justify-end gap-2">
             <button
               type="button"

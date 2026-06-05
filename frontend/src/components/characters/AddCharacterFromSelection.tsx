@@ -101,8 +101,8 @@ export function AddCharacterFromSelection({
 
   const inputClass = `w-full rounded-md border px-3 py-2 text-sm outline-none transition-colors ${
     isDark
-      ? "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500 focus:border-violet-500/50"
-      : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-violet-400"
+      ? "border-white/10 bg-white/[0.04] text-slate-100 focus:border-violet-500/50"
+      : "border-stone-200 bg-white text-stone-900 focus:border-violet-400"
   }`
 
   const selectClass = `w-full rounded-md border px-3 py-2 text-sm outline-none transition-colors ${
@@ -134,7 +134,6 @@ export function AddCharacterFromSelection({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Character name"
               className={inputClass}
               disabled={busy}
               autoFocus
@@ -168,11 +167,11 @@ export function AddCharacterFromSelection({
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Brief character note..."
               className={`${inputClass} min-h-[4.5rem] resize-none`}
               disabled={busy}
               maxLength={300}
             />
+            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Add a brief character note if the selected text needs context.</p>
           </div>
 
           {error ? (

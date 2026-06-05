@@ -183,7 +183,7 @@ async def test_beta_read_flow_requires_review_and_tracks_feedback_completion(cli
 
 
 @pytest.mark.asyncio
-async def test_reader_chapter_payload_surfaces_beta_comments_for_author_and_only_own_comments_for_reader(client, db, monkeypatch):
+async def test_reader_chapter_payload_surfaces_beta_comments_for_author_and_chapter_collaborators(client, db, monkeypatch):
     author = await _create_user(db, email="author-chapter-comments@lorevia.test", tier="author")
     first_reader = await _create_user(db, email="reader-one@lorevia.test", tier="reader")
     second_reader = await _create_user(db, email="reader-two@lorevia.test", tier="reader")
@@ -266,9 +266,11 @@ async def test_reader_chapter_payload_surfaces_beta_comments_for_author_and_only
         "The bridge argument lands, but I wanted one more line before the reveal.",
         "The closing beat is clear, but the turn into it still feels abrupt.",
     }
-    assert len(reader_feedback) == 1
-    assert reader_feedback[0]["body"] == "The bridge argument lands, but I wanted one more line before the reveal."
-    assert reader_feedback[0]["task_label"] == "First pass"
+    assert len(reader_feedback) == 2
+    assert {item["body"] for item in reader_feedback} == {
+        "The bridge argument lands, but I wanted one more line before the reveal.",
+        "The closing beat is clear, but the turn into it still feels abrupt.",
+    }
 
 
 @pytest.mark.asyncio

@@ -101,19 +101,21 @@ export default function CompleteUsernamePage() {
       </div>
 
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-          minLength={3}
-          maxLength={32}
-          required
-          className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
-            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-          }`}
-        />
+        <label className="flex flex-col gap-1.5">
+          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Username</span>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            minLength={3}
+            maxLength={32}
+            required
+            className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+              isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+            }`}
+          />
+        </label>
 
         {checkingSession && !error ? (
           <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>

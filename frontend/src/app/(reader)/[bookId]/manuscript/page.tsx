@@ -2381,8 +2381,8 @@ function ManuscriptPageInner() {
   const inspectorMutedTextClass = isDark ? "text-slate-400" : "text-stone-500"
   const inspectorBodyTextClass = isDark ? "text-slate-200" : "text-stone-700"
   const inspectorInputClass = isDark
-    ? "rounded-sm border border-white/[0.08] bg-black/70 text-slate-100 placeholder:text-slate-500"
-    : "rounded-sm border border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"
+    ? "rounded-sm border border-white/[0.08] bg-black/70 text-slate-100"
+    : "rounded-sm border border-stone-200 bg-white text-stone-900"
   const inspectorSecondaryButtonClass = isDark
     ? "rounded-sm border border-white/[0.1] bg-[#111517] px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/[0.06]"
     : "rounded-sm border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50"
@@ -2634,8 +2634,8 @@ function ManuscriptPageInner() {
               type="text"
               value={chapterSearch}
               onChange={(event) => setChapterSearch(event.target.value)}
-              placeholder="Search chapters"
-              className={`mt-4 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+              aria-label="Search chapters"
+              className={`mt-4 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
             />
             <div className="mt-4">
               <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapters</p>
@@ -2810,6 +2810,7 @@ function ManuscriptPageInner() {
                                           <button
                                             type="button"
                                             disabled={chapterReorderDisabled || index === 0}
+                                            data-testid={`move-scene-${scene.id}-up`}
                                             onClick={() => {
                                               if (chapterSceneNumber === null) return
                                               void reorderScenesInChapter(chapterSceneNumber, scene.id, index - 1)
@@ -2822,6 +2823,7 @@ function ManuscriptPageInner() {
                                           <button
                                             type="button"
                                             disabled={chapterReorderDisabled || index >= chapterSceneCount - 1}
+                                            data-testid={`move-scene-${scene.id}-down`}
                                             onClick={() => {
                                               if (chapterSceneNumber === null) return
                                               void reorderScenesInChapter(chapterSceneNumber, scene.id, index + 2)
@@ -3015,7 +3017,7 @@ function ManuscriptPageInner() {
                           type="text"
                           defaultValue={formatChapterHeading(activeChapterNumber, chapterTitle)}
                           onBlur={(event) => void handleChapterHeadingBlur(event.target.value, activeChapterNumber, chapterTitle)}
-                          className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white placeholder:text-slate-600" : "text-stone-950 placeholder:text-stone-400"}`}
+                          className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}
                         />
                         <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterReadingTime} · {chapterSceneOutline.length} scene{chapterSceneOutline.length === 1 ? "" : "s"}</p>
                         <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
@@ -3080,9 +3082,8 @@ function ManuscriptPageInner() {
                       if (char) openCharCard(char)
                     }}
                     editorKey={`chapter-${activeChapterNumber}`}
-                    placeholder="Write or paste the chapter here..."
                     style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                    className={`relative min-h-[58vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                    className={`relative min-h-[58vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100" : "text-stone-900"}`}
                     contentClassName="mx-auto w-full max-w-[780px]"
                   />
                   <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-400" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
@@ -3159,7 +3160,7 @@ function ManuscriptPageInner() {
                                   }
                                 }
                               }}
-                              className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white placeholder:text-slate-600" : "text-stone-950 placeholder:text-stone-400"}`}
+                              className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}
                             />
                             <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{countWords(draft.text).toLocaleString()} words / ~{Math.max(1, Math.ceil(countWords(draft.text) / 500))} pages</p>
                             <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{formatReadingTimeLabel(countWords(draft.text) > 0 ? Math.max(1, Math.ceil(countWords(draft.text) / 250)) : 0)} · {buildSceneOutline(draft.text).length} scene{buildSceneOutline(draft.text).length === 1 ? "" : "s"}</p>
@@ -3205,9 +3206,8 @@ function ManuscriptPageInner() {
                           if (char) openCharCard(char)
                         }}
                         editorKey={`book-${chapter.number}`}
-                        placeholder="Draft this chapter..."
                         style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                        className={`relative min-h-[54vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                        className={`relative min-h-[54vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100" : "text-stone-900"}`}
                         contentClassName="mx-auto w-full max-w-[780px]"
                       />
                       <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-400" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
@@ -3400,12 +3400,14 @@ function ManuscriptPageInner() {
                       <div>
                         <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality</p>
                         {charCardEditing ? (
-                          <input
-                            value={charCardDraft.personalityTags}
-                            onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
-                            placeholder="Comma-separated traits"
-                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
+                          <>
+                            <input
+                              value={charCardDraft.personalityTags}
+                              onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
+                              className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            />
+                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Separate multiple traits with commas.</p>
+                          </>
                         ) : (
                           <div className="flex flex-wrap gap-1.5">
                             {(selectedCharCard.personality_tags ?? []).length > 0 ? selectedCharCard.personality_tags.map(tag => (
@@ -3419,12 +3421,14 @@ function ManuscriptPageInner() {
                       <div>
                         <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</p>
                         {charCardEditing ? (
-                          <input
-                            value={charCardDraft.motivations}
-                            onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
-                            placeholder="Comma-separated"
-                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
+                          <>
+                            <input
+                              value={charCardDraft.motivations}
+                              onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
+                              className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            />
+                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Separate multiple motivations with commas.</p>
+                          </>
                         ) : (
                           <ul className="space-y-1">
                             {(selectedCharCard.motivations ?? []).length > 0 ? selectedCharCard.motivations.map(m => (
@@ -3438,12 +3442,14 @@ function ManuscriptPageInner() {
                       <div>
                         <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</p>
                         {charCardEditing ? (
-                          <input
-                            value={charCardDraft.fears}
-                            onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
-                            placeholder="Comma-separated"
-                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
+                          <>
+                            <input
+                              value={charCardDraft.fears}
+                              onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
+                              className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            />
+                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Separate multiple fears with commas.</p>
+                          </>
                         ) : (
                           <ul className="space-y-1">
                             {(selectedCharCard.fears ?? []).length > 0 ? selectedCharCard.fears.map(f => (
@@ -3580,8 +3586,8 @@ function ManuscriptPageInner() {
                       max={Math.max(1, fullBookApproxPages)}
                       value={gotoPageInput}
                       onChange={(event) => setGotoPageInput(event.target.value)}
-                      placeholder="Page #"
-                      className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                      aria-label="Page number"
+                      className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                     />
                     <button
                       onClick={() => {
@@ -3789,12 +3795,14 @@ function ManuscriptPageInner() {
                   </div>
 
                   <div className="mt-4 space-y-3">
-                    <input
-                      value={noteTitle}
-                      onChange={(event) => setNoteTitle(event.target.value)}
-                      placeholder="Note title"
-                      className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
-                    />
+                    <label className="grid gap-1.5">
+                      <span className={inspectorLabelClass}>Note title</span>
+                      <input
+                        value={noteTitle}
+                        onChange={(event) => setNoteTitle(event.target.value)}
+                        className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                      />
+                    </label>
                     <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/[0.08] bg-[#0a0d0f]" : "border-stone-200 bg-white"}`}>
                       <EditorToolbar editorKey="note-editor-modal" isDark={isDark} compact characters={characters} />
                       <RichTextEditor
@@ -3808,10 +3816,10 @@ function ManuscriptPageInner() {
                           const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
                           if (char) openCharCard(char)
                         }}
-                        placeholder={noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}` : "Add a book-level note"}
-                        className={`min-h-[11rem] px-4 py-4 text-sm leading-7 outline-none ${isDark ? "bg-black/40 text-slate-100 placeholder:text-slate-500" : "bg-white text-stone-900 placeholder:text-stone-400"}`}
+                        className={`min-h-[11rem] px-4 py-4 text-sm leading-7 outline-none ${isDark ? "bg-black/40 text-slate-100" : "bg-white text-stone-900"}`}
                       />
                     </div>
+                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}.` : "Add a book-level note."}</p>
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={saveNote}
@@ -3888,10 +3896,11 @@ function ManuscriptPageInner() {
                       <textarea
                         value={annotationDraft}
                         onChange={(event) => setAnnotationDraft(event.target.value)}
-                        placeholder="Leave an inline annotation"
                         rows={4}
                         className={`${inspectorInputClass} mt-3 w-full px-3 py-2 text-sm`}
+                        aria-label="Inline annotation"
                       />
+                      <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Leave an inline annotation for the selected passage.</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           onClick={() => void saveAnnotation()}
@@ -3980,19 +3989,24 @@ function ManuscriptPageInner() {
                       <div key={note.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                         {editingNoteId === note.id ? (
                           <div className="space-y-3">
-                            <input
-                              value={editNoteTitle}
-                              onChange={(e) => setEditNoteTitle(e.target.value)}
-                              placeholder="Note title"
-                              className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
-                            />
-                            <textarea
-                              value={editNoteBody}
-                              onChange={(e) => setEditNoteBody(e.target.value)}
-                              placeholder="Note content (markdown supported)"
-                              rows={4}
-                              className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
-                            />
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note title</span>
+                              <input
+                                value={editNoteTitle}
+                                onChange={(e) => setEditNoteTitle(e.target.value)}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note content</span>
+                              <textarea
+                                value={editNoteBody}
+                                onChange={(e) => setEditNoteBody(e.target.value)}
+                                rows={4}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                              <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Markdown is supported.</span>
+                            </label>
                             <div className="flex gap-2">
                               <button
                                 onClick={saveEditedNote}
@@ -4040,19 +4054,24 @@ function ManuscriptPageInner() {
                       <div key={note.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                         {editingNoteId === note.id ? (
                           <div className="space-y-3">
-                            <input
-                              value={editNoteTitle}
-                              onChange={(e) => setEditNoteTitle(e.target.value)}
-                              placeholder="Note title"
-                              className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
-                            />
-                            <textarea
-                              value={editNoteBody}
-                              onChange={(e) => setEditNoteBody(e.target.value)}
-                              placeholder="Note content (markdown supported)"
-                              rows={4}
-                              className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
-                            />
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note title</span>
+                              <input
+                                value={editNoteTitle}
+                                onChange={(e) => setEditNoteTitle(e.target.value)}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note content</span>
+                              <textarea
+                                value={editNoteBody}
+                                onChange={(e) => setEditNoteBody(e.target.value)}
+                                rows={4}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                              <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Markdown is supported.</span>
+                            </label>
                             <div className="flex gap-2">
                               <button
                                 onClick={saveEditedNote}

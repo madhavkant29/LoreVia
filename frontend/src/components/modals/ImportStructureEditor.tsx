@@ -149,10 +149,10 @@ export const ImportStructureEditor = memo(function ImportStructureEditor({
                   onChange={(e) => updateSection(index, { title: e.target.value })}
                   className={`w-full rounded border px-2 py-1 text-sm font-medium transition focus:outline-none focus:ring-1 ${
                     isDark
-                      ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-600 focus:ring-indigo-500"
-                      : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:ring-indigo-500"
+                      ? "border-white/10 bg-white/5 text-slate-100 focus:ring-indigo-500"
+                      : "border-slate-200 bg-white text-slate-900 focus:ring-indigo-500"
                   }`}
-                  placeholder="Section title"
+                  aria-label={`Section ${index + 1} title`}
                 />
 
                 <div className="flex flex-wrap items-center gap-2">

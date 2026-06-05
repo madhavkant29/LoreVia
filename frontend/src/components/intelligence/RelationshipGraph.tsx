@@ -1260,9 +1260,9 @@ export const RelationshipGraph = memo(function RelationshipGraph({
                         min={1}
                         value={edgeDraft.toChapter}
                         onChange={(event) => setEdgeDraft((value) => ({ ...value, toChapter: event.target.value }))}
-                        placeholder="Leave blank if ongoing"
                         className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
                       />
+                      <span className="mt-1 block text-xs text-slate-500">Leave blank if ongoing.</span>
                     </label>
                   </div>
 

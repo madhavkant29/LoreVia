@@ -209,8 +209,8 @@ export default function SeriesAskPage() {
                 <input
                   value={askQuery}
                   onChange={(e) => setAskQuery(e.target.value)}
-                  placeholder={hasStarted ? "Ask a follow-up question..." : "Ask about continuity, characters, or plot across all books..."}
-                  className={`flex-1 bg-transparent border-0 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-transparent ${isDark ? "text-white placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                  aria-label={hasStarted ? "Ask a follow-up question" : "Ask about continuity, characters, or plot across all books"}
+                  className={`flex-1 bg-transparent border-0 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-transparent ${isDark ? "text-white" : "text-stone-900"}`}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSeriesAsk() } }}
                 />
                 <button
@@ -229,6 +229,9 @@ export default function SeriesAskPage() {
                 </button>
               </div>
             </div>
+            <p className={`mt-2 text-center text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+              {hasStarted ? "Ask a follow-up question." : "Ask about continuity, characters, or plot across all books."}
+            </p>
             
             {/* Footer Note */}
             <p className={`text-center text-xs mt-3 ${isDark ? "text-slate-500" : "text-stone-400"}`}>

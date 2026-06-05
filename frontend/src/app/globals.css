@@ -218,10 +218,6 @@ body {
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
   }
 
-  .app-input::placeholder {
-    color: rgb(var(--muted-foreground));
-  }
-
   .app-input:focus {
     outline: none;
     border-color: rgba(var(--ring), 0.75);
@@ -702,12 +698,6 @@ body {
 
 .manuscript-editor p:empty {
   min-height: 1em;
-}
-
-.manuscript-editor[data-placeholder]:empty::before {
-  content: attr(data-placeholder);
-  color: rgba(148, 163, 184, 0.8);
-  pointer-events: none;
 }
 
 .manuscript-editor img,

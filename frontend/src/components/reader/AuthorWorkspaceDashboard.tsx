@@ -2008,8 +2008,8 @@ function GoalCalendarCard({
                   value={draftTitle}
                   onChange={(event) => setDraftTitle(event.target.value)}
                   disabled={!editable || saveState === "saving"}
-                  placeholder={editable ? "Draft chapter, revise outline, finish scene..." : "Loading planner..."}
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                  aria-label="Planning item"
+                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                 />
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
                   <input
@@ -2019,8 +2019,8 @@ function GoalCalendarCard({
                     value={draftQuotaValue}
                     onChange={(event) => setDraftQuotaValue(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    placeholder="Quota"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                    aria-label="Planning quota"
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   />
                   <select
                     value={draftQuotaUnit}

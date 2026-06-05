@@ -358,7 +358,7 @@ export default function VoiceConsistencyPage() {
                   <textarea
                     value={text}
                     onChange={(event) => setText(event.target.value)}
-                    placeholder="Paste dialogue or load a chapter to review its voice consistency."
+                    aria-label="Dialogue or chapter text for voice review"
                     className={`mt-4 min-h-[18rem] w-full rounded-md border px-4 py-3 text-sm leading-7 outline-none ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                   />
                   {reviewError ? (

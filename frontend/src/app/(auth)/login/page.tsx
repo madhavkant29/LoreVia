@@ -93,8 +93,8 @@ function LoginInner() {
     "w-full rounded-md border px-4 py-3 text-sm transition-colors",
     "focus:outline-none focus:ring-2 focus:ring-offset-0",
     isDark
-      ? "border-white/[0.08] bg-white/[0.04] text-slate-100 placeholder:text-slate-600 focus:border-white/20 focus:ring-white/10"
-      : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-stone-300 focus:ring-stone-100",
+      ? "border-white/[0.08] bg-white/[0.04] text-slate-100 focus:border-white/20 focus:ring-white/10"
+      : "border-stone-200 bg-white text-stone-900 focus:border-stone-300 focus:ring-stone-100",
   ].join(" ")
 
   return (
@@ -123,26 +123,30 @@ function LoginInner() {
         </div>
 
         <form onSubmit={submit} className="flex flex-col gap-3">
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className={inputCls}
-            required
-            autoComplete="email"
-          />
-
-          <div className="flex flex-col gap-1.5">
+          <label className="flex flex-col gap-1.5">
+            <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Email</span>
             <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className={inputCls}
               required
-              autoComplete="current-password"
+              autoComplete="email"
             />
+          </label>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="flex flex-col gap-1.5">
+              <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={inputCls}
+                required
+                autoComplete="current-password"
+              />
+            </label>
             <div className="flex justify-end">
               <Link
                 href="/forgot-password"

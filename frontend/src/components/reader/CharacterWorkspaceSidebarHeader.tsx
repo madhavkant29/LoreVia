@@ -44,8 +44,7 @@ export function CharacterWorkspaceSidebarHeader({
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           aria-label={searchLabel}
-          placeholder={characterWorkspaceSearchPlaceholder(mode)}
-          className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+          className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
         />
         <span className={`rounded-md border px-1.5 py-0.5 text-3xs font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-500" : "border-stone-200 bg-white text-stone-400"}`}>
           Ctrl K
@@ -83,13 +82,6 @@ function characterWorkspaceSearchLabel(mode: WorkspaceMode) {
   if (mode === "review") return "Search review candidates"
   if (mode === "repair") return "Search repair preview"
   return "Search characters"
-}
-
-function characterWorkspaceSearchPlaceholder(mode: WorkspaceMode) {
-  if (mode === "duplicates") return "Search merge suggestions..."
-  if (mode === "review") return "Search candidates, reasons, snippets..."
-  if (mode === "repair") return "Search characters, repairs, merges..."
-  return "Search characters, aliases, traits..."
 }
 
 function sectionEyebrowClasses(isDark: boolean, mode: WorkspaceMode) {

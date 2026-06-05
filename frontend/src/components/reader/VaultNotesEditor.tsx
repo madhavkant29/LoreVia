@@ -55,19 +55,19 @@ type FolderNode = WorkspaceFolderNode
 type NotesDragItem = { kind: "note"; path: string }
 
 const TOOLBAR_BUTTON_DEFS = [
-  { key: "bold", label: "B", title: "Bold", kind: "wrap" as const, open: "**", close: "**", placeholder: "bold text" },
-  { key: "italic", label: "I", title: "Italic", className: "italic", kind: "wrap" as const, open: "*", close: "*", placeholder: "italic text" },
-  { key: "strike", label: "S", title: "Strikethrough", className: "line-through", kind: "wrap" as const, open: "~~", close: "~~", placeholder: "crossed text" },
-  { key: "underline", label: "U", title: "Underline helper", className: "underline", kind: "wrap" as const, open: "<u>", close: "</u>", placeholder: "underlined text" },
-  { key: "h1", label: "H1", title: "Heading 1", kind: "prefix" as const, prefix: "# ", placeholder: "Heading" },
-  { key: "h2", label: "H2", title: "Heading 2", kind: "prefix" as const, prefix: "## ", placeholder: "Section heading" },
-  { key: "h3", label: "H3", title: "Heading 3", kind: "prefix" as const, prefix: "### ", placeholder: "Subsection" },
-  { key: "bullets", label: "-", title: "Bullet list", kind: "prefix" as const, prefix: "- ", placeholder: "List item" },
-  { key: "numbers", label: "1.", title: "Numbered list", kind: "prefix" as const, prefix: "1. ", placeholder: "Numbered item" },
-  { key: "check", label: "[ ]", title: "Checklist", kind: "prefix" as const, prefix: "- [ ] ", placeholder: "Checklist item" },
-  { key: "quote", label: '"', title: "Blockquote", kind: "prefix" as const, prefix: "> ", placeholder: "Quoted note" },
-  { key: "code", label: "</>", title: "Code", kind: "wrap" as const, open: "`", close: "`", placeholder: "code" },
-  { key: "link", label: "[[]]", title: "Wiki link", kind: "wrap" as const, open: "[[", close: "]]", placeholder: "Linked note" },
+  { key: "bold", label: "B", title: "Bold", kind: "wrap" as const, open: "**", close: "**", fallbackText: "bold text" },
+  { key: "italic", label: "I", title: "Italic", className: "italic", kind: "wrap" as const, open: "*", close: "*", fallbackText: "italic text" },
+  { key: "strike", label: "S", title: "Strikethrough", className: "line-through", kind: "wrap" as const, open: "~~", close: "~~", fallbackText: "crossed text" },
+  { key: "underline", label: "U", title: "Underline helper", className: "underline", kind: "wrap" as const, open: "<u>", close: "</u>", fallbackText: "underlined text" },
+  { key: "h1", label: "H1", title: "Heading 1", kind: "prefix" as const, prefix: "# ", fallbackText: "Heading" },
+  { key: "h2", label: "H2", title: "Heading 2", kind: "prefix" as const, prefix: "## ", fallbackText: "Section heading" },
+  { key: "h3", label: "H3", title: "Heading 3", kind: "prefix" as const, prefix: "### ", fallbackText: "Subsection" },
+  { key: "bullets", label: "-", title: "Bullet list", kind: "prefix" as const, prefix: "- ", fallbackText: "List item" },
+  { key: "numbers", label: "1.", title: "Numbered list", kind: "prefix" as const, prefix: "1. ", fallbackText: "Numbered item" },
+  { key: "check", label: "[ ]", title: "Checklist", kind: "prefix" as const, prefix: "- [ ] ", fallbackText: "Checklist item" },
+  { key: "quote", label: '"', title: "Blockquote", kind: "prefix" as const, prefix: "> ", fallbackText: "Quoted note" },
+  { key: "code", label: "</>", title: "Code", kind: "wrap" as const, open: "`", close: "`", fallbackText: "code" },
+  { key: "link", label: "[[]]", title: "Wiki link", kind: "wrap" as const, open: "[[", close: "]]", fallbackText: "Linked note" },
   { key: "divider", label: "---", title: "Divider", kind: "snippet" as const, snippet: "\n---\n" },
   { key: "scene-break", label: "***", title: "Scene break", kind: "snippet" as const, snippet: "\n***\n" },
   { key: "bookmark", label: "#", title: "Bookmark / anchor", kind: "snippet" as const, snippet: "\n^anchor-name\n" },
@@ -819,8 +819,8 @@ export function VaultNotesEditor({
         title: def.title,
         className: "className" in def ? def.className : undefined,
         action: () => {
-          if (def.kind === "wrap") replaceSelectedText(def.open, def.close, def.placeholder)
-          else if (def.kind === "prefix") prefixSelectedLines(def.prefix, def.placeholder)
+          if (def.kind === "wrap") replaceSelectedText(def.open, def.close, def.fallbackText)
+          else if (def.kind === "prefix") prefixSelectedLines(def.prefix, def.fallbackText)
           else insertSnippet(def.snippet)
         },
       })),
@@ -989,8 +989,8 @@ export function VaultNotesEditor({
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search notes"
-                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-inherit"
+                  aria-label="Search notes"
+                  className="min-w-0 flex-1 bg-transparent text-sm outline-none"
                 />
               </label>
               <Tooltip content="Show all folders">
@@ -1216,14 +1216,14 @@ export function VaultNotesEditor({
                         <input
                           value={findWithinNote}
                           onChange={(event) => setFindWithinNote(event.target.value)}
-                          placeholder="Find in this note"
-                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                          aria-label="Find in this note"
+                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                         />
                         <input
                           value={replaceWithinNote}
                           onChange={(event) => setReplaceWithinNote(event.target.value)}
-                          placeholder="Replace with"
-                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                          aria-label="Replace with"
+                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                         />
                         <button type="button" onClick={replaceInSelectedNote} disabled={!findWithinNote.trim()} className={`rounded-xl px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
                           Replace all
@@ -1243,8 +1243,8 @@ export function VaultNotesEditor({
                         spellCheck={false}
                         className={`min-h-[42rem] w-full resize-none border-0 px-4 py-5 font-mono text-base leading-8 outline-none ${
                           isDark
-                            ? "bg-[#0a1323] text-slate-100 placeholder:text-slate-500"
-                            : "bg-white text-stone-900 placeholder:text-stone-400"
+                            ? "bg-[#0a1323] text-slate-100"
+                            : "bg-white text-stone-900"
                         } ${mode === "split" ? "xl:min-h-[48rem]" : ""}`}
                       />
                     ) : null}
@@ -1305,7 +1305,6 @@ export function VaultNotesEditor({
                 <input
                   value={editedFolder}
                   onChange={(event) => setEditedFolder(event.target.value)}
-                  placeholder="Characters"
                   className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
@@ -1314,7 +1313,6 @@ export function VaultNotesEditor({
                 <input
                   value={editedTitle}
                   onChange={(event) => setEditedTitle(event.target.value)}
-                  placeholder="Note title"
                   className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>

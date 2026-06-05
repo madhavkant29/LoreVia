@@ -305,8 +305,8 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
             <input
               value={search}
               onChange={(event) => void runSearch(event.target.value)}
-              placeholder="Search usernames"
-              className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-slate-600" : "placeholder:text-slate-400"}`}
+              aria-label="Search usernames"
+              className="w-full bg-transparent text-sm outline-none"
             />
           </label>
 
@@ -410,8 +410,8 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
                 <textarea
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
-                  placeholder="Write a message"
-                  className={`min-h-[6rem] flex-1 rounded-md border px-4 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-[#0c1219] text-slate-100 placeholder:text-slate-600" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400"}`}
+                  aria-label="Message"
+                  className={`min-h-[6rem] flex-1 rounded-md border px-4 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-[#0c1219] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
                 />
                 <button
                   type="button"

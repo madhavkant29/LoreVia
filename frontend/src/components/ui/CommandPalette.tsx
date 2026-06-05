@@ -164,6 +164,7 @@ export function CommandPalette() {
       >
         <div className="border-b border-[rgba(var(--border),0.72)] px-5 py-4">
           <p id="command-palette-title" className="app-eyebrow">Command palette</p>
+          <p className="mt-2 text-xs text-[rgb(var(--muted-foreground))]">Jump to a project, tool, or action.</p>
           <input
             ref={inputRef}
             value={query}
@@ -182,8 +183,7 @@ export function CommandPalette() {
                 runAction(visibleActions[activeIndex])
               }
             }}
-            placeholder="Jump to a project, tool, or action..."
-            className="mt-3 w-full bg-transparent text-lg outline-none placeholder:text-[rgb(var(--muted-foreground))]"
+            className="mt-3 w-full bg-transparent text-lg outline-none"
             aria-label="Search commands"
           />
         </div>

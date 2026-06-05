@@ -305,13 +305,13 @@ export default function EditorialReviewPage() {
                         min={1}
                         value={editChapter}
                         onChange={(event) => setEditChapter(event.target.value)}
-                        placeholder="e.g. 42"
                         className={`mt-3 w-full rounded-md border px-3.5 py-3 text-sm outline-none transition ${
                           isDark
-                            ? "border-white/10 bg-[#08101a] text-slate-100 placeholder:text-slate-500 focus:border-violet-400/60 focus:bg-[#0a1420]"
-                            : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-500 focus:border-violet-400"
+                            ? "border-white/10 bg-[#08101a] text-slate-100 focus:border-violet-400/60 focus:bg-[#0a1420]"
+                            : "border-stone-200 bg-white text-stone-900 focus:border-violet-400"
                         }`}
                       />
+                      <span className={`mt-2 block text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Use the source chapter number when there is one.</span>
                     </label>
 
                     <button
@@ -334,19 +334,18 @@ export default function EditorialReviewPage() {
                 </div>
 
                 <label className="block">
-                  <span className="sr-only">Passage text</span>
+                  <span className={`mb-3 block text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Passage text</span>
                   <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#08101a]" : "border-stone-200 bg-white"}`}>
                     <textarea
                       value={editText}
                       onChange={(event) => setEditText(event.target.value)}
-                      placeholder="Paste your passage here: a paragraph, a scene, or a full chapter section."
                       rows={18}
-                      className={`block min-h-[22rem] w-full resize-y border-0 bg-transparent px-4 py-4 text-sm leading-7 outline-none ring-0 placeholder:text-slate-500 focus:ring-0 ${
-                        isDark ? "text-slate-100" : "text-stone-900 placeholder:text-stone-500"
+                      className={`block min-h-[22rem] w-full resize-y border-0 bg-transparent px-4 py-4 text-sm leading-7 outline-none ring-0 focus:ring-0 ${
+                        isDark ? "text-slate-100" : "text-stone-900"
                       }`}
                     />
                     <div className={`flex items-center justify-between gap-3 border-t px-4 py-3 text-xs ${isDark ? "border-white/8 text-slate-500" : "border-stone-200 text-stone-500"}`}>
-                      <span>{chapterNumber ? `Review target: Chapter ${chapterNumber}` : "Review target: custom passage"}</span>
+                      <span>{chapterNumber ? `Review target: Chapter ${chapterNumber}` : "Review target: custom passage. Paste a paragraph, scene, or full chapter section."}</span>
                       <span>{textCharacterCount} characters</span>
                     </div>
                   </div>
