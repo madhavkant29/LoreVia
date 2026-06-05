@@ -2784,28 +2784,54 @@ function ManuscriptPageInner() {
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="flex min-w-0 flex-1 items-start gap-3">
                                       {isChapterSceneGroup ? (
-                                        <button
-                                          type="button"
-                                          draggable={!chapterReorderDisabled}
-                                          onDragStart={(event) => {
-                                            if (chapterSceneNumber === null || chapterReorderDisabled) return
-                                            event.dataTransfer.effectAllowed = "move"
-                                            event.dataTransfer.setData(SCENE_DRAG_SCENE_ID_MIME, scene.id)
-                                            event.dataTransfer.setData(SCENE_DRAG_CHAPTER_MIME, String(chapterSceneNumber))
-                                            event.dataTransfer.setData("text/plain", scene.id)
-                                            setDraggedScene({ chapterNumber: chapterSceneNumber, sceneId: scene.id })
-                                            setSceneDropTarget({ chapterNumber: chapterSceneNumber, index })
-                                          }}
-                                          onDragEnd={() => {
-                                            window.setTimeout(() => {
-                                              resetSceneDragState()
-                                            }, 0)
-                                          }}
-                                          aria-label={`Drag ${scene.title} to reorder this chapter`}
-                                          className={`shrink-0 rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition ${chapterReorderDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing"} ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
-                                        >
-                                          Drag
-                                        </button>
+                                        <div className="flex shrink-0 items-center gap-1">
+                                          <button
+                                            type="button"
+                                            draggable={!chapterReorderDisabled}
+                                            onDragStart={(event) => {
+                                              if (chapterSceneNumber === null || chapterReorderDisabled) return
+                                              event.dataTransfer.effectAllowed = "move"
+                                              event.dataTransfer.setData(SCENE_DRAG_SCENE_ID_MIME, scene.id)
+                                              event.dataTransfer.setData(SCENE_DRAG_CHAPTER_MIME, String(chapterSceneNumber))
+                                              event.dataTransfer.setData("text/plain", scene.id)
+                                              setDraggedScene({ chapterNumber: chapterSceneNumber, sceneId: scene.id })
+                                              setSceneDropTarget({ chapterNumber: chapterSceneNumber, index })
+                                            }}
+                                            onDragEnd={() => {
+                                              window.setTimeout(() => {
+                                                resetSceneDragState()
+                                              }, 0)
+                                            }}
+                                            aria-label={`Drag ${scene.title} to reorder this chapter`}
+                                            className={`rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition ${chapterReorderDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing"} ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
+                                          >
+                                            Drag
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={chapterReorderDisabled || index === 0}
+                                            onClick={() => {
+                                              if (chapterSceneNumber === null) return
+                                              void reorderScenesInChapter(chapterSceneNumber, scene.id, index - 1)
+                                            }}
+                                            aria-label={`Move ${scene.title} up`}
+                                            className={`rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition disabled:cursor-not-allowed disabled:opacity-40 ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
+                                          >
+                                            Up
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={chapterReorderDisabled || index >= chapterSceneCount - 1}
+                                            onClick={() => {
+                                              if (chapterSceneNumber === null) return
+                                              void reorderScenesInChapter(chapterSceneNumber, scene.id, index + 2)
+                                            }}
+                                            aria-label={`Move ${scene.title} down`}
+                                            className={`rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition disabled:cursor-not-allowed disabled:opacity-40 ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
+                                          >
+                                            Down
+                                          </button>
+                                        </div>
                                       ) : null}
                                       <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2">

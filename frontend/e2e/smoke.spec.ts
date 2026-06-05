@@ -485,8 +485,13 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
 
   await page.locator('[data-scene-id="scene-2"]').scrollIntoViewIfNeeded()
 
-  const dragHandle = page.locator('[data-scene-id="scene-2"]').getByRole("button", { name: /drag/i })
-  await dragHandle.dragTo(page.locator('[data-scene-drop-slot="2:0"]'))
+  const reorderResponse = page.waitForResponse((response) =>
+    response.request().method() === "PATCH" &&
+    response.url().includes("/books/book-1/chapters/2/scenes/order") &&
+    response.status() === 200
+  )
+  await page.locator('[data-scene-id="scene-2"]').getByRole("button", { name: "Move Market Argument up" }).click()
+  await reorderResponse
 
   await expect(sceneCards.nth(0)).toHaveAttribute("data-scene-id", "scene-2")
   await expect(sceneCards.nth(1)).toHaveAttribute("data-scene-id", "scene-1")
