@@ -235,6 +235,10 @@ def test_extract_source_number_from_heading_supports_numeric_suffixes():
     assert _extract_source_number_from_heading("Chapter 14A") == 14
 
 
+def test_extract_source_number_from_heading_supports_french_chapters():
+    assert _extract_source_number_from_heading("Chapitre 34: CHARON") == 34
+
+
 # ── Phase 3: Multilingual heading + TOC + section_type ────────────────────
 
 
@@ -309,6 +313,35 @@ def test_normalize_chapters_skips_toc_sections():
     normalized = _normalize_chapters(chapters, split_large_chapters=False, total_pages=10)
     assert len(normalized) == 1
     assert normalized[0]["section_type"] == "chapter"
+
+
+def test_normalize_chapters_splits_embedded_french_headings_and_drops_toc_entries():
+    chapters = [
+        {
+            "title": "Opening",
+            "text_parts": [
+                "Description de l'auteur. Table des matières "
+                "Chapitre 1: SCYLLA...................... 1 "
+                "Chapitre 2: LE CHANGE-FORME.............. 4 "
+                "Préface Texte de la préface. "
+                "Chapitre 1: SCYLLA Cet Ulysse qui a accosté sur mon île. "
+                "Chapitre 2: LE CHANGE-FORME Le matin se leva sur une brume épaisse."
+            ],
+            "images": [],
+            "section_type": "unknown",
+        }
+    ]
+
+    normalized = _normalize_chapters(chapters, split_large_chapters=False, total_pages=130)
+
+    assert [chapter["title"] for chapter in normalized] == [
+        "Chapitre 1: SCYLLA",
+        "Chapitre 2: LE CHANGE-FORME",
+    ]
+    assert normalized[0]["source_number"] == 1
+    assert normalized[1]["source_number"] == 2
+    assert "Table des matières" not in normalized[0]["text"]
+    assert "Cet Ulysse" in normalized[0]["text"]
 
 
 def test_normalize_chapters_passes_section_type_through():

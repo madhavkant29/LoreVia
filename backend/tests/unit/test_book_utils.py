@@ -389,6 +389,32 @@ def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
     assert len(workspace["templates"]) >= 3
 
 
+def test_build_book_processing_payload_normalizes_postgres_text_timestamps():
+    payload = build_book_processing_payload(
+        type(
+            "DummyBook",
+            (),
+            {
+                "writer_workspace": {
+                    "processing": {
+                        "status": "ready",
+                        "stage": "complete",
+                        "updated_at": "2026-06-06 05:11:51.272085+00",
+                        "pipeline": {
+                            "extraction": {"status": "succeeded", "updated_at": "2026-06-06 05:11:51.272085+00"},
+                            "analysis": {"status": "succeeded", "updated_at": "2026-06-06 05:11:51.272085+00"},
+                        },
+                    }
+                }
+            },
+        )()
+    )
+
+    assert payload["updated_at"] == "2026-06-06T05:11:51.272085Z"
+    assert payload["pipeline"]["extraction"]["updated_at"] == "2026-06-06T05:11:51.272085Z"
+    assert payload["pipeline"]["analysis"]["updated_at"] == "2026-06-06T05:11:51.272085Z"
+
+
 def test_estimate_readability_returns_basic_metrics():
     metrics = estimate_readability("This is a short sentence. This is another one.")
 
