@@ -19,7 +19,7 @@ import { ManuscriptWorkspaceSidebarHeader } from "@/components/reader/Manuscript
 import type { ManuscriptDraftFontFamily } from "@/components/reader/ManuscriptNonWriteWorkspace"
 import type { TemplateDestination } from "@/components/reader/ManuscriptPlanWorkspace"
 import { booksApi } from "@/lib/api/books"
-import { deriveReprocessCta } from "@/lib/utils/editorProjectCta"
+import { deriveReprocessCta, isBookActivelyProcessing } from "@/lib/utils/editorProjectCta"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
@@ -122,6 +122,7 @@ const EMPTY_NOTES: BookNote[] = []
 const EMPTY_CHAPTER_VERSIONS: ChapterVersion[] = []
 const SCENE_DRAG_SCENE_ID_MIME = "application/x-lorevia-scene-id"
 const SCENE_DRAG_CHAPTER_MIME = "application/x-lorevia-chapter-number"
+const MANUSCRIPT_PROCESSING_POLL_INTERVAL_MS = 5_000
 
 function resolveManuscriptDraftFontStack(fontFamily: ManuscriptDraftFontFamily): string {
   if (fontFamily === "georgia") return 'Georgia, "Times New Roman", serif'
@@ -434,6 +435,7 @@ function ManuscriptPageInner() {
     () => deriveReprocessCta(book, hasPendingEdits),
     [book, hasPendingEdits],
   )
+  const isBookProcessing = isBookActivelyProcessing(book)
   const reprocessMetadata = writerWorkspace?.reprocess
   const autoReprocessEnabled = reprocessMetadata?.auto_reprocess_enabled !== false
   const pendingReprocessChapters = useMemo(
@@ -1360,6 +1362,31 @@ function ManuscriptPageInner() {
   useEffect(() => {
     loadBase().finally(() => setLoading(false))
   }, [bookId])
+
+  useEffect(() => {
+    if (!isBookProcessing) return
+
+    const intervalId = window.setInterval(() => {
+      void Promise.all([
+        booksApi.get(bookId),
+        booksApi.getWriterWorkspace(bookId),
+      ]).then(([nextBook, nextWorkspace]) => {
+        startTransition(() => {
+          setBook(nextBook)
+          setWriterWorkspace((current) => {
+            if (!current) return nextWorkspace
+            return {
+              ...current,
+              processing: nextWorkspace.processing,
+              reprocess: nextWorkspace.reprocess,
+            }
+          })
+        })
+      }).catch(() => {})
+    }, MANUSCRIPT_PROCESSING_POLL_INTERVAL_MS)
+
+    return () => window.clearInterval(intervalId)
+  }, [bookId, isBookProcessing])
 
   useEffect(() => {
     setCharacters(charactersData)

@@ -421,6 +421,15 @@ test("manuscript reprocess requires confirmation before consuming an upload", as
   expect(JSON.parse(reprocessRequests[0] ?? "{}")).toEqual({ confirm_upload_charge: true })
 })
 
+test("manuscript processing state refreshes back into a reprocess action", async ({ page }) => {
+  await installMockApi(page, { manuscriptProcessing: "refresh-after-two-book-reads" })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  await expect(page.getByRole("button", { name: "Processing 53% ~3min left" })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Reprocess manuscript" })).toBeEnabled({ timeout: 8000 })
+})
+
 test("manual chapter reprocess marks saved edits pending and starts without upload charge", async ({ page }) => {
   await installMockApi(page)
   const reprocessRequests: string[] = []

@@ -9,6 +9,7 @@ type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
 type CharacterBibleMode = "default" | "review-only"
+type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads"
 
 type MockOptions = {
   session?: SessionMode
@@ -16,6 +17,7 @@ type MockOptions = {
   admin?: AdminMode
   voiceConsistency?: VoiceConsistencyMode
   characterBible?: CharacterBibleMode
+  manuscriptProcessing?: ManuscriptProcessingMode
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
@@ -2185,6 +2187,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const admin = options.admin ?? "none"
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const characterBibleMode = options.characterBible ?? "default"
+  const manuscriptProcessingMode = options.manuscriptProcessing ?? "default"
   const adminCookieMode = admin === "none" ? "guest" : admin
   const cookies = [
     {
@@ -2218,6 +2221,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
   collaborators.splice(0, collaborators.length, ...JSON.parse(JSON.stringify(initialCollaborators)))
+  let mockBook = JSON.parse(JSON.stringify(book))
   let mockWriterWorkspace = JSON.parse(JSON.stringify(writerWorkspace))
   let mockNotifications = JSON.parse(JSON.stringify(notifications))
   let mockWorkspaceTree = JSON.parse(JSON.stringify(workspaceTree))
@@ -2240,6 +2244,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     unsubscribed_all: false,
     unsubscribed_at: null,
   }
+  let bookDetailReadCount = 0
 
   const buildBetaReadDetail = (assignmentId: string) => {
     const assignment = mockBetaReads.find((item: typeof mockBetaReads[number]) => item.id === assignmentId)
@@ -2483,7 +2488,24 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
-      return json(route, book)
+      bookDetailReadCount += 1
+      if (manuscriptProcessingMode === "refresh-after-two-book-reads") {
+        const processingActive = bookDetailReadCount <= 2
+        return json(route, {
+          ...mockBook,
+          status: processingActive ? "processing" : "ready",
+          processing: {
+            ...(mockBook.processing ?? {}),
+            status: processingActive ? "processing" : "ready",
+            stage: processingActive ? "extraction" : "complete",
+            progress_pct: processingActive ? 53 : 100,
+            chapters_completed: processingActive ? 2 : 3,
+            chapters_total: 3,
+            eta_seconds: processingActive ? 180 : 0,
+          },
+        })
+      }
+      return json(route, mockBook)
     }
 
     if (path === "/api/v1/books/book-1/manuscript/reprocess" && method === "POST") {
@@ -2542,25 +2564,25 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         genre?: string
         description?: string
       } | null
-      book.title = payload?.title ?? book.title
-      book.genre = payload?.genre ?? book.genre
-      book.public_description = payload?.description ?? book.public_description
+      mockBook.title = payload?.title ?? mockBook.title
+      mockBook.genre = payload?.genre ?? mockBook.genre
+      mockBook.public_description = payload?.description ?? mockBook.public_description
       publicForumPosts = publicForumPosts.map((post) => (
         post.book_id === "book-1"
           ? {
               ...post,
-              title: book.title,
-              genre: book.genre,
-              description: book.public_description,
+              title: mockBook.title,
+              genre: mockBook.genre,
+              description: mockBook.public_description,
             }
           : post
       ))
-      return json(route, book)
+      return json(route, mockBook)
     }
 
     if (path === "/api/v1/books/book-1/overview" && method === "GET") {
       return json(route, {
-        book,
+        book: mockBook,
         progress: {
           current_chapter: 2,
           scroll_pct: 35,

@@ -1,4 +1,4 @@
-import type { Book } from "@/types/book"
+import type { Book, BookProcessing } from "@/types/book"
 
 export interface ReprocessCta {
   label: string
@@ -7,6 +7,21 @@ export interface ReprocessCta {
   saveLocked: boolean
   isProcessing: boolean
   visible: boolean
+}
+
+export function isBookActivelyProcessing(
+  book: Book | null | undefined,
+): book is Book & { processing: BookProcessing } {
+  const processing = book?.processing
+  return Boolean(
+    processing != null
+    && book?.status === "processing"
+    && (
+      processing.status === "processing"
+      || processing.stage === "extraction"
+      || processing.stage === "analysis"
+    ),
+  )
 }
 
 export function deriveReprocessCta(
@@ -24,15 +39,8 @@ export function deriveReprocessCta(
     }
   }
 
-  const processing = book.processing
-  const hasActiveRebuild =
-    processing != null &&
-    book.status === "processing" &&
-    (processing.status === "processing" ||
-      processing.stage === "extraction" ||
-      processing.stage === "analysis")
-
-  if (hasActiveRebuild) {
+  if (isBookActivelyProcessing(book)) {
+    const processing = book.processing
     const progress = processing.progress_pct != null ? ` ${Math.round(processing.progress_pct)}%` : ""
     const eta =
       processing.eta_seconds != null && processing.eta_seconds > 0
