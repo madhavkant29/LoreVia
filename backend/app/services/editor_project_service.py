@@ -576,6 +576,45 @@ async def complete_rebuild_if_ready(db: AsyncSession, book: Book) -> bool:
     return True
 
 
+async def repair_stale_editor_processing_state(db: AsyncSession, book: Book) -> bool:
+    """Persist a ready state when an editor-project rebuild already completed."""
+    if not getattr(book, "is_editor_project", False) or book.status != "processing":
+        return False
+
+    workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
+    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else None
+    if not processing:
+        return False
+
+    repaired = False
+    if processing.get("rebuild_run_id"):
+        repaired = await complete_rebuild_if_ready(db, book)
+    else:
+        processing = await reconcile_editor_rebuild_processing_state(db, book, processing=processing)
+        if processing.get("is_fully_ready"):
+            now = datetime.now(UTC)
+            reprocess_metadata = dict(workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else {})
+            reprocess_metadata["last_completed_at"] = now.isoformat()
+            processing["status"] = "ready"
+            processing["stage"] = "complete"
+            processing["completed_at"] = now.isoformat()
+            workspace["processing"] = processing
+            workspace["reprocess"] = reprocess_metadata
+            book.writer_workspace = workspace
+            book.status = "ready"
+            await db.flush()
+            repaired = True
+
+    if not repaired:
+        return False
+
+    await db.commit()
+    await db.refresh(book)
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(book.user_id)
+    return True
+
+
 async def reconcile_editor_rebuild_processing_state(
     db: AsyncSession,
     book: Book,

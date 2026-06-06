@@ -184,6 +184,7 @@ from app.services.pipeline_state_service import (
     build_writer_workspace_update,
     requeue_stalled_book_processing_if_needed,
 )
+from app.services.editor_project_service import repair_stale_editor_processing_state
 from app.utils.book_utils import (
     _append_recent_revision_edit,
     as_bool,
@@ -443,8 +444,15 @@ async def list_books(
         if not include_hidden:
             shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
 
-        owned_payloads = await build_book_out_list(db, books=books, user_id=current_user_id)
         shared_books = [book for book, _ in shared_rows]
+        repair_seen_book_ids: set[uuid.UUID] = set()
+        for candidate in [*books, *shared_books]:
+            if candidate.id in repair_seen_book_ids:
+                continue
+            repair_seen_book_ids.add(candidate.id)
+            await repair_stale_editor_processing_state(db, candidate)
+
+        owned_payloads = await build_book_out_list(db, books=books, user_id=current_user_id)
         shared_payloads = await build_book_out_list(
             db,
             books=shared_books,
@@ -555,6 +563,7 @@ async def get_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), curre
             selectinload(Book.plot_threads),
         ),
     )
+    await repair_stale_editor_processing_state(db, book)
     return await book_out(db, book, current_user.id, collaborator)
 
 
@@ -574,6 +583,7 @@ async def get_book_overview(
             selectinload(Book.plot_threads),
         ),
     )
+    await repair_stale_editor_processing_state(db, book)
     use_cache = parse_csv_param(include) is None
     if use_cache:
         cache_version = await get_book_cache_version(str(book.id))
@@ -721,6 +731,7 @@ async def get_writer_workspace(
     if collaborator is None:
         require_author_access(current_user)
     await requeue_stalled_book_processing_if_needed(db, book=book)
+    await repair_stale_editor_processing_state(db, book)
     cache_version = await get_book_cache_version(str(book.id))
     access_key = _book_cache_access_key(current_user.id, collaborator)
     cached = await get_writer_workspace_cache(str(book.id), str(current_user.id), access_key, cache_version)

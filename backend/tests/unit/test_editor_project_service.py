@@ -344,6 +344,66 @@ async def test_complete_rebuild_if_ready_clears_active_run_id(db):
 
 
 @pytest.mark.asyncio
+async def test_repair_stale_editor_processing_state_marks_ready_without_active_run(db):
+    user_id = await _create_user(db)
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Draft",
+        format="manual",
+        s3_key="draft.txt",
+        status="processing",
+        is_editor_project=True,
+        total_chapters=1,
+        writer_workspace={
+            "processing": {
+                "status": "processing",
+                "stage": "analysis",
+                "chapters_completed": 1,
+                "chapters_total": 1,
+                "progress_pct": 100,
+            },
+            "reprocess": {"last_started_at": "2026-06-02T00:00:00+00:00"},
+        },
+    )
+    db.add(book)
+    await db.flush()
+
+    chapter = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        title="Chapter 1",
+        s3_key="ch1.txt",
+        word_count=250,
+        processed=True,
+    )
+    db.add(chapter)
+    await db.flush()
+
+    db.add(
+        ChapterSummary(
+            id=uuid.uuid4(),
+            chapter_id=chapter.id,
+            mode="detailed",
+            content="Done",
+        )
+    )
+    await db.commit()
+
+    from app.services.editor_project_service import repair_stale_editor_processing_state
+
+    repaired = await repair_stale_editor_processing_state(db, book)
+    await db.refresh(book)
+
+    assert repaired is True
+    assert book.status == "ready"
+    assert book.writer_workspace["processing"]["status"] == "ready"
+    assert book.writer_workspace["processing"]["stage"] == "complete"
+    assert book.writer_workspace["reprocess"]["last_completed_at"]
+
+
+@pytest.mark.asyncio
 async def test_fail_rebuild_if_active_clears_only_matching_run(db):
     user_id = await _create_user(db)
     book = Book(
