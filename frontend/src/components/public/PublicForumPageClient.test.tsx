@@ -72,6 +72,7 @@ function renderWithQuery(ui: React.ReactNode) {
       act(() => {
         root.unmount()
       })
+      queryClient.clear()
       container.remove()
     },
   }

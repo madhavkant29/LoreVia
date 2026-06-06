@@ -63,6 +63,7 @@ import VoiceConsistencyPage from "./page"
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
+let queryClient: QueryClient | null = null
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -70,23 +71,24 @@ function renderPage() {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
-  const queryClient = new QueryClient({
+  const client = new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
       },
     },
   })
+  queryClient = client
 
   act(() => {
     root?.render(
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={client}>
         <VoiceConsistencyPage />
       </QueryClientProvider>,
     )
   })
 
-  return queryClient
+  return client
 }
 
 async function flushUi() {
@@ -149,9 +151,11 @@ afterEach(() => {
       root?.unmount()
     })
   }
+  queryClient?.clear()
   container?.remove()
   container = null
   root = null
+  queryClient = null
   document.body.innerHTML = ""
 })
 

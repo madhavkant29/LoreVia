@@ -1164,51 +1164,55 @@ function RevisionHubTab({
   const [chapterFindingsHighlighted, setChapterFindingsHighlighted] = useState(false)
 
   // Compute derived data before early returns to ensure hooks can be used consistently
-  const allItems = revisionIntelligence
-    ? [
-        ...revisionIntelligence.change_impacts,
-        ...revisionIntelligence.scene_advice,
-        ...revisionIntelligence.confusion_map,
-        ...revisionIntelligence.voice_alerts,
-      ]
-    : []
+  const allItems = useMemo(() => (
+    revisionIntelligence
+      ? [
+          ...revisionIntelligence.change_impacts,
+          ...revisionIntelligence.scene_advice,
+          ...revisionIntelligence.confusion_map,
+          ...revisionIntelligence.voice_alerts,
+        ]
+      : []
+  ), [revisionIntelligence])
 
-  const timelineItems = allItems.filter((item) =>
+  const timelineItems = useMemo(() => allItems.filter((item) =>
     [item.title, item.description, item.recommendation, item.source_label]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
       .match(/\btimeline\b|\border\b|\bsequence\b|\btransition\b|\bearlier\b|\blater\b|\bbefore\b|\bafter\b/)
-  )
+  ), [allItems])
 
-  const focusCards: RevisionInsightSelection[] = revisionIntelligence
-    ? [
-        {
-          key: "continuity",
-          title: "Continuity & logic",
-          subtitle: "Downstream logic, contradictions, and dependency breaks LoreVia surfaced.",
-          items: revisionIntelligence.change_impacts,
-        },
-        {
-          key: "character",
-          title: "Character consistency",
-          subtitle: "Voice, behavior, and point-of-view consistency checks LoreVia flagged.",
-          items: revisionIntelligence.voice_alerts,
-        },
-        {
-          key: "world",
-          title: "Worldbuilding gaps",
-          subtitle: "Lore and anchoring issues that may leave the reader under-oriented.",
-          items: revisionIntelligence.confusion_map,
-        },
-        {
-          key: "timeline",
-          title: "Timeline / order",
-          subtitle: "Ordering, transition, and chronology issues surfaced across the current revision set.",
-          items: timelineItems,
-        },
-      ]
-    : []
+  const focusCards = useMemo<RevisionInsightSelection[]>(() => (
+    revisionIntelligence
+      ? [
+          {
+            key: "continuity",
+            title: "Continuity & logic",
+            subtitle: "Downstream logic, contradictions, and dependency breaks LoreVia surfaced.",
+            items: revisionIntelligence.change_impacts,
+          },
+          {
+            key: "character",
+            title: "Character consistency",
+            subtitle: "Voice, behavior, and point-of-view consistency checks LoreVia flagged.",
+            items: revisionIntelligence.voice_alerts,
+          },
+          {
+            key: "world",
+            title: "Worldbuilding gaps",
+            subtitle: "Lore and anchoring issues that may leave the reader under-oriented.",
+            items: revisionIntelligence.confusion_map,
+          },
+          {
+            key: "timeline",
+            title: "Timeline / order",
+            subtitle: "Ordering, transition, and chronology issues surfaced across the current revision set.",
+            items: timelineItems,
+          },
+        ]
+      : []
+  ), [revisionIntelligence, timelineItems])
 
   const filteredChapterItems = allItems.filter((item) =>
     chapterSeverityFilter === "all" ? true : item.severity === chapterSeverityFilter
@@ -1254,8 +1258,8 @@ function RevisionHubTab({
   useEffect(() => {
     if (!selectedInsight || !revisionIntelligence) return
     const nextSelection = [...focusCards].find((card) => card.key === selectedInsight.key) ?? null
-    setSelectedInsight(nextSelection)
-  }, [revisionIntelligence, selectedInsight])
+    setSelectedInsight((current) => current === nextSelection ? current : nextSelection)
+  }, [focusCards, revisionIntelligence, selectedInsight])
 
   useEffect(() => {
     if (selectedChapterKey === null || !revisionIntelligence) return
