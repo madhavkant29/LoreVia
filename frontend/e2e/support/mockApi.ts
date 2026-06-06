@@ -2490,7 +2490,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     if (path === "/api/v1/books/book-1" && method === "GET") {
       bookDetailReadCount += 1
       if (manuscriptProcessingMode === "refresh-after-two-book-reads") {
-        const processingActive = bookDetailReadCount <= 2
+        // The manuscript route performs multiple detail reads while the page is
+        // still settling; keep one poll cycle visible before switching to ready.
+        const processingActive = bookDetailReadCount <= 3
         return json(route, {
           ...mockBook,
           status: processingActive ? "processing" : "ready",

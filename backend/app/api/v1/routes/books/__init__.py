@@ -133,7 +133,10 @@ from app.core.redis import (  # noqa: E402, F401
     set_writer_workspace_cache,
 )
 from app.core.security import create_asset_token, decode_token  # noqa: E402, F401
-from app.services.pipeline_state_service import build_writer_workspace_update  # noqa: E402, F401
+from app.services.pipeline_state_service import (  # noqa: E402, F401
+    build_writer_workspace_update,
+    repair_stale_completed_processing_state,
+)
 from app.services.editor_project_service import repair_stale_editor_processing_state  # noqa: E402, F401
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book  # noqa: E402, F401
 from app.utils.billing_utils import require_author_access  # noqa: E402, F401
