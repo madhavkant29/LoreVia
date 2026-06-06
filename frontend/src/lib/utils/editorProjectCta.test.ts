@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { deriveReprocessCta } from "./editorProjectCta"
+import { deriveReprocessCta, isBookActivelyProcessing } from "./editorProjectCta"
 import type { Book } from "@/types/book"
 
 function makeBook(overrides: Partial<Book> = {}): Book {
@@ -24,6 +24,29 @@ function makeBook(overrides: Partial<Book> = {}): Book {
 }
 
 describe("deriveReprocessCta", () => {
+  it("treats extraction and analysis runs as active processing", () => {
+    const extractionBook = makeBook({
+      status: "processing",
+      processing: { status: "processing", stage: "extraction" },
+    })
+    const analysisBook = makeBook({
+      status: "processing",
+      processing: { status: "ready", stage: "analysis" },
+    })
+
+    expect(isBookActivelyProcessing(extractionBook)).toBe(true)
+    expect(isBookActivelyProcessing(analysisBook)).toBe(true)
+  })
+
+  it("does not treat ready books as active processing", () => {
+    const book = makeBook({
+      status: "ready",
+      processing: { status: "ready", stage: "complete" },
+    })
+
+    expect(isBookActivelyProcessing(book)).toBe(false)
+  })
+
   it("allows uploaded author books", () => {
     const book = makeBook({ is_editor_project: false })
     const cta = deriveReprocessCta(book, false)

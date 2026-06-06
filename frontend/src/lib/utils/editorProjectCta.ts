@@ -9,6 +9,19 @@ export interface ReprocessCta {
   visible: boolean
 }
 
+export function isBookActivelyProcessing(book: Book | null | undefined): boolean {
+  const processing = book?.processing
+  return Boolean(
+    processing != null
+    && book?.status === "processing"
+    && (
+      processing.status === "processing"
+      || processing.stage === "extraction"
+      || processing.stage === "analysis"
+    ),
+  )
+}
+
 export function deriveReprocessCta(
   book: Book | null | undefined,
   hasUnsavedDrafts: boolean,
@@ -25,14 +38,8 @@ export function deriveReprocessCta(
   }
 
   const processing = book.processing
-  const hasActiveRebuild =
-    processing != null &&
-    book.status === "processing" &&
-    (processing.status === "processing" ||
-      processing.stage === "extraction" ||
-      processing.stage === "analysis")
 
-  if (hasActiveRebuild) {
+  if (isBookActivelyProcessing(book)) {
     const progress = processing.progress_pct != null ? ` ${Math.round(processing.progress_pct)}%` : ""
     const eta =
       processing.eta_seconds != null && processing.eta_seconds > 0
