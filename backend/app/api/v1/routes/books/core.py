@@ -445,7 +445,11 @@ async def list_books(
             shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
 
         shared_books = [book for book, _ in shared_rows]
-        for candidate in dict.fromkeys([*books, *shared_books]):
+        repair_seen_book_ids: set[uuid.UUID] = set()
+        for candidate in [*books, *shared_books]:
+            if candidate.id in repair_seen_book_ids:
+                continue
+            repair_seen_book_ids.add(candidate.id)
             await repair_stale_editor_processing_state(db, candidate)
 
         owned_payloads = await build_book_out_list(db, books=books, user_id=current_user_id)

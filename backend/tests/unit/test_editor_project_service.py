@@ -374,7 +374,7 @@ async def test_repair_stale_editor_processing_state_marks_ready_without_active_r
         book_id=book.id,
         number=1,
         title="Chapter 1",
-        content="Ready draft",
+        s3_key="ch1.txt",
         word_count=250,
         processed=True,
     )

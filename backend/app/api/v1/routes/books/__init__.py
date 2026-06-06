@@ -134,6 +134,7 @@ from app.core.redis import (  # noqa: E402, F401
 )
 from app.core.security import create_asset_token, decode_token  # noqa: E402, F401
 from app.services.pipeline_state_service import build_writer_workspace_update  # noqa: E402, F401
+from app.services.editor_project_service import repair_stale_editor_processing_state  # noqa: E402, F401
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book  # noqa: E402, F401
 from app.utils.billing_utils import require_author_access  # noqa: E402, F401
 from app.utils.billing_utils import calculate_upload_usage_summary  # noqa: E402, F401
