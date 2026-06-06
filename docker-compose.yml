@@ -62,9 +62,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    # REDIS_PASSWORD must be set in the env file (backend/.env or LOREVIA_ENV_FILE override)
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured}
+    # Load REDIS_PASSWORD from the same env file used by the app services so
+    # plain `docker compose up` works on a VPS without an extra --env-file flag.
+    env_file:
+      - ${LOREVIA_ENV_FILE:-./backend/.env}
     command:
       [
         "sh",
