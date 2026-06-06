@@ -4,9 +4,13 @@ import type { ReactNode } from "react"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { Book } from "@/types/book"
 
 const mockRefetch = vi.fn()
 const mockPush = vi.fn()
+let mockBooks: Book[] = []
+let mockIsLoading = false
+let mockIsError = true
 
 const localStorageStore: Record<string, string> = {}
 const localStorageMock = {
@@ -26,9 +30,9 @@ vi.stubGlobal("localStorage", localStorageMock)
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
-    data: [] as never[],
-    isLoading: false,
-    isError: true,
+    data: mockBooks,
+    isLoading: mockIsLoading,
+    isError: mockIsError,
     refetch: mockRefetch,
   }),
   useQueryClient: () => ({}),
@@ -85,6 +89,9 @@ let root: Root | null = null
 
 beforeEach(() => {
   localStorageMock.clear()
+  mockBooks = []
+  mockIsLoading = false
+  mockIsError = true
 })
 
 afterEach(() => {
@@ -148,5 +155,48 @@ describe("LibraryPage error state", () => {
 
     const svg = container?.querySelector("svg")
     expect(svg).toBeTruthy()
+  })
+})
+
+describe("LibraryPage shared-book filtering", () => {
+  it("hides reader-collaborator beta shares from the library list", () => {
+    mockIsError = false
+    mockBooks = [
+      {
+        id: "book-owner",
+        title: "Owned project",
+        author: null,
+        genre: null,
+        format: "pdf",
+        work_type: "novel",
+        status: "ready",
+        mode: "author",
+        workspace_shell: "author",
+        access_class: "owner",
+        can_switch_workspace_mode: true,
+        total_chapters: 12,
+        created_at: "2026-06-06T00:00:00Z",
+      },
+      {
+        id: "book-share",
+        title: "Shared beta project",
+        author: null,
+        genre: null,
+        format: "pdf",
+        work_type: "novel",
+        status: "ready",
+        mode: "reader",
+        workspace_shell: "reader",
+        access_class: "reader_collaborator",
+        can_switch_workspace_mode: false,
+        total_chapters: 8,
+        created_at: "2026-06-06T00:00:00Z",
+      },
+    ] as Book[]
+
+    render()
+
+    expect(container?.textContent).toContain("Owned project")
+    expect(container?.textContent).not.toContain("Shared beta project")
   })
 })

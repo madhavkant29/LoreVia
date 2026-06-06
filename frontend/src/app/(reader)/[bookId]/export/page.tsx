@@ -6,30 +6,37 @@ import { useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { strToU8, zipSync } from "fflate"
 
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, ObsidianPreview, ObsidianVaultNote } from "@/types/book"
+import { READER_FONT_OPTIONS } from "@/lib/utils/readerTypography"
+import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
+import type { Book, VaultPreview, VaultNote } from "@/types/book"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 
 const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-lg border border-dashed p-8" />,
+    loading: () => <SidebarSkeleton />,
   }
 )
 
-const ObsidianVaultPreview = dynamic(
-  () => import("@/components/reader/ObsidianVaultPreview").then((module) => module.ObsidianVaultPreview),
+const VaultPreview = dynamic(
+  () => import("@/components/reader/VaultPreview").then((module) => module.VaultPreview),
   {
     loading: () => null,
   }
 )
 
-type ExportFormat = "md" | "pdf" | "docx" | "obsidian_folder"
-type ManuscriptExportFormat = "pdf" | "docx" | "epub" | "obsidian"
+type ExportFormat = "md" | "pdf" | "docx" | "vault_folder"
+type ManuscriptExportFormat = "pdf" | "docx" | "epub" | "vault"
+
+const MANUSCRIPT_EXPORT_FORMATS: ManuscriptExportFormat[] = ["docx", "pdf", "epub", "vault"]
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob)
@@ -44,6 +51,10 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function safeFileBase(value: string | undefined, fallback: string) {
   return (value || fallback).replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-") || fallback
+}
+
+async function blobToBytes(blob: Blob) {
+  return new Uint8Array(await blob.arrayBuffer())
 }
 
 function getApiErrorDetail(error: unknown) {
@@ -61,12 +72,13 @@ export default function ExportStudioPage() {
     queryFn: () => booksApi.get(bookId),
   })
   const [status, setStatus] = useState<string | null>(null)
-  const [bibleFormat, setBibleFormat] = useState<ExportFormat>("obsidian_folder")
+  const [bibleFormat, setBibleFormat] = useState<ExportFormat>("vault_folder")
   const [manuscriptFormat, setManuscriptFormat] = useState<ManuscriptExportFormat>("docx")
+  const [exportFontFamily, setExportFontFamily] = useState<ReaderFontFamily>("serif")
   const [includeSceneMetadata, setIncludeSceneMetadata] = useState(true)
   const [exporting, setExporting] = useState<string | null>(null)
-  const [obsidianPreview, setObsidianPreview] = useState<ObsidianPreview | null>(null)
-  const [bibleNotes, setBibleNotes] = useState<ObsidianVaultNote[]>([])
+  const [vaultPreview, setVaultPreview] = useState<VaultPreview | null>(null)
+  const [bibleNotes, setBibleNotes] = useState<VaultNote[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [manuscriptFiles, setManuscriptFiles] = useState<File[]>([])
   const [notesArchive, setNotesArchive] = useState<File | null>(null)
@@ -78,7 +90,7 @@ export default function ExportStudioPage() {
 
   const formatCards = useMemo(
     () => [
-      { value: "obsidian_folder" as const, label: "Vault ZIP", meta: "Folder structure for note apps" },
+      { value: "vault_folder" as const, label: "Vault ZIP", meta: "Folder structure for note apps" },
       { value: "docx" as const, label: "DOCX", meta: "Word-ready bible" },
       { value: "pdf" as const, label: "PDF", meta: "Shareable reference" },
       { value: "md" as const, label: "Markdown", meta: "Plain text export" },
@@ -86,13 +98,31 @@ export default function ExportStudioPage() {
     []
   )
 
+  const selectedExportFontLabel = useMemo(
+    () => READER_FONT_OPTIONS.find((option) => option.value === exportFontFamily)?.label ?? "Serif",
+    [exportFontFamily]
+  )
+
+  const exportBundleFontNotice = useMemo(
+    () => [
+      "LoreVia Font Notice",
+      "",
+      `Selected export font: ${selectedExportFontLabel}`,
+      "",
+      "DOCX and EPUB exports declare the selected font family. PDF exports use safe built-in PDF mappings unless an open font file is explicitly bundled.",
+      "Old Style Serif is a fallback stack and LoreVia does not redistribute proprietary Apple, Microsoft, Monotype, or other system font files.",
+      "EB Garamond is licensed under the SIL Open Font License, Version 1.1. Copyright 2017 The EB Garamond Project Authors. License: https://openfontlicense.org.",
+    ].join("\n"),
+    [selectedExportFontLabel]
+  )
+
   const exportCharacterBible = async () => {
     if (!book) return
     setExporting("character-bible")
     setStatus(null)
     try {
-      const blob = await booksApi.exportCharacterBible(bookId, bibleFormat)
-      const extension = bibleFormat === "obsidian_folder" ? "zip" : bibleFormat
+      const blob = await booksApi.exportCharacterBible(bookId, bibleFormat, exportFontFamily)
+      const extension = bibleFormat === "vault_folder" ? "zip" : bibleFormat
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-character-bible.${extension}`)
       setStatus(`Downloaded character bible as ${extension.toUpperCase()}.`)
     } catch {
@@ -107,8 +137,8 @@ export default function ExportStudioPage() {
     setExporting("manuscript")
     setStatus(null)
     try {
-      const blob = await booksApi.exportManuscript(bookId, manuscriptFormat, "standard_manuscript", includeSceneMetadata)
-      const extension = manuscriptFormat === "obsidian" ? "zip" : manuscriptFormat
+      const blob = await booksApi.exportManuscript(bookId, manuscriptFormat, "standard_manuscript", includeSceneMetadata, exportFontFamily)
+      const extension = manuscriptFormat === "vault" ? "zip" : manuscriptFormat
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-manuscript.${extension}`)
       setStatus(`Downloaded manuscript as ${extension.toUpperCase()}.`)
     } catch {
@@ -123,11 +153,42 @@ export default function ExportStudioPage() {
     setExporting("notes")
     setStatus(null)
     try {
-      const blob = await booksApi.exportObsidianNotes(bookId)
+      const blob = await booksApi.exportVaultNotes(bookId)
       downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-notes.zip`)
       setStatus("Downloaded notes workspace ZIP.")
     } catch {
       setStatus("Could not export the notes workspace.")
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  const exportAllDocuments = async () => {
+    if (!book) return
+    setExporting("all")
+    setStatus(null)
+    try {
+      const base = safeFileBase(book.title, "lorevia")
+      const files: Record<string, Uint8Array> = {
+        "FONT-NOTICE.txt": strToU8(exportBundleFontNotice),
+      }
+      for (const format of formatCards.map((item) => item.value)) {
+        const blob = await booksApi.exportCharacterBible(bookId, format, exportFontFamily)
+        const extension = format === "vault_folder" ? "zip" : format
+        files[`character-bible/${base}-character-bible.${extension}`] = await blobToBytes(blob)
+      }
+      for (const format of MANUSCRIPT_EXPORT_FORMATS) {
+        const blob = await booksApi.exportManuscript(bookId, format, "standard_manuscript", includeSceneMetadata, exportFontFamily)
+        const extension = format === "vault" ? "zip" : format
+        files[`manuscript/${base}-manuscript.${extension}`] = await blobToBytes(blob)
+      }
+      const notesBlob = await booksApi.exportVaultNotes(bookId)
+      files[`notes/${base}-notes.zip`] = await blobToBytes(notesBlob)
+      const archive = zipSync(files)
+      downloadBlob(new Blob([archive as unknown as BlobPart], { type: "application/zip" }), `${base}-all-exports.zip`)
+      setStatus("Downloaded one ZIP with all manuscript, character bible, and notes export files.")
+    } catch {
+      setStatus("Could not export every document. Try the single export buttons for any failed format.")
     } finally {
       setExporting(null)
     }
@@ -138,10 +199,10 @@ export default function ExportStudioPage() {
     setStatus(null)
     try {
       const [preview, savedNotes] = await Promise.all([
-        booksApi.previewCharacterBibleObsidian(bookId),
-        booksApi.listCharacterBibleObsidianNotes(bookId).catch(() => []),
+        booksApi.previewCharacterBibleVault(bookId),
+        booksApi.listCharacterBibleVaultNotes(bookId).catch(() => []),
       ])
-      setObsidianPreview(preview)
+      setVaultPreview(preview)
       setBibleNotes(savedNotes)
       setStatus("Loaded the character bible file preview.")
     } catch {
@@ -176,7 +237,7 @@ export default function ExportStudioPage() {
     setImporting("notes")
     setStatus(null)
     try {
-      await booksApi.importObsidianNotes(bookId, notesArchive)
+      await booksApi.importVaultNotes(bookId, notesArchive)
       setStatus(`Imported ${notesArchive.name} into the notes workspace.`)
       setNotesArchive(null)
     } catch {
@@ -202,11 +263,11 @@ export default function ExportStudioPage() {
   }
 
   if (loading || !book) {
-    return <div className={`flex min-h-screen items-center justify-center ${isDark ? "bg-[#030711] text-slate-400" : "bg-[#f7f5ef] text-stone-500"}`}>Loading export studio...</div>
+    return <ExportStudioSkeleton isDark={isDark} />
   }
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#030711_0%,#07111c_52%,#0b1521_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f8f4eb_0%,#eef5ef_52%,#edf2f8_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
       <div className="mx-auto max-w-[96rem] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav
@@ -221,25 +282,23 @@ export default function ExportStudioPage() {
           />
 
           <main className="space-y-6">
-            <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-[linear-gradient(180deg,rgba(8,12,24,0.96),rgba(12,20,34,0.9))]" : "border-white/70 bg-white/88"}`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Import & Export</p>
-                  <h1 className={`mt-3 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>{book.title}</h1>
-                  <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    Keep imports and exports separate, keep the vault structure visible, and ship the exact files you want instead of bouncing through modal dialogs.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Link href={`/${bookId}/notes`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}>
+            <WorkspaceFamilyHeader
+              active="export"
+              bookId={bookId}
+              family="publish-export"
+              title={book.title}
+              description="Keep imports and exports separate, keep the vault structure visible, and ship the exact files you intend to use."
+              actions={(
+                <>
+                  <Link href={`/${bookId}/notes`} className={`rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}>
                     Open notes workspace
                   </Link>
-                  <Link href={`/${bookId}/manuscript`} className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/5 text-slate-200" : "bg-white text-stone-700"}`}>
+                  <Link href={`/${bookId}/manuscript`} className={`rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/5 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>
                     Open manuscript
                   </Link>
-                </div>
-              </div>
-            </section>
+                </>
+              )}
+            />
 
             <div className="grid gap-6 2xl:grid-cols-2">
               <section className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
@@ -310,6 +369,38 @@ export default function ExportStudioPage() {
 
                 <div className="mt-6 space-y-5">
                   <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                      <label className="block">
+                        <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Export font</span>
+                        <select
+                          value={exportFontFamily}
+                          onChange={(event) => setExportFontFamily(event.target.value as ReaderFontFamily)}
+                          className={`mt-2 min-h-11 w-full rounded-md border px-3 text-sm outline-none transition focus:ring-2 focus:ring-teal-500/30 ${
+                            isDark ? "border-white/10 bg-black/30 text-slate-100" : "border-stone-200 bg-white text-stone-800"
+                          }`}
+                        >
+                          {READER_FONT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void exportAllDocuments()}
+                        disabled={exporting !== null}
+                        className="inline-flex min-h-11 items-center justify-center rounded-md bg-stone-900 px-5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-60 dark:bg-white dark:text-stone-950 dark:hover:bg-slate-200"
+                      >
+                        {exporting === "all" ? "Preparing all..." : "Export everything"}
+                      </button>
+                    </div>
+                    <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                      DOCX and EPUB declare this font family. PDF exports use safe built-in PDF mappings, and ZIP exports include a font notice. Proprietary system font files are not redistributed.
+                    </p>
+                  </div>
+
+                  <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Character bible export</p>
                     <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       {formatCards.map((item) => (
@@ -337,7 +428,7 @@ export default function ExportStudioPage() {
                         type="button"
                         onClick={() => void exportCharacterBible()}
                         disabled={exporting !== null}
-                        className="rounded-md bg-[linear-gradient(135deg,#6d28d9,#4f46e5)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                        className="rounded-md bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600 disabled:opacity-60"
                       >
                         {exporting === "character-bible" ? "Preparing..." : "Export character bible"}
                       </button>
@@ -355,7 +446,7 @@ export default function ExportStudioPage() {
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Saved bible note overrides</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {bibleNotes.slice(0, 8).map((note) => (
-                            <span key={note.id} className={`rounded-full px-2.5 py-1 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                            <span key={note.id} className={`rounded-md px-2.5 py-1 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
                               {note.path}
                             </span>
                           ))}
@@ -367,12 +458,12 @@ export default function ExportStudioPage() {
                   <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`}>
                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Manuscript export</p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {(["docx", "pdf", "epub", "obsidian"] as ManuscriptExportFormat[]).map((format) => (
+                      {MANUSCRIPT_EXPORT_FORMATS.map((format) => (
                         <button
                           key={format}
                           type="button"
                           onClick={() => setManuscriptFormat(format)}
-                          className={`rounded-full border px-4 py-2 text-sm transition ${
+                          className={`rounded-md border px-4 py-2 text-sm transition ${
                             manuscriptFormat === format
                               ? isDark
                                 ? "border-amber-400/35 bg-amber-500/10 text-amber-100"
@@ -382,7 +473,7 @@ export default function ExportStudioPage() {
                                 : "border-stone-200 bg-white text-stone-700"
                           }`}
                         >
-                          {format === "obsidian" ? "Vault ZIP" : format.toUpperCase()}
+                          {format === "vault" ? "Vault ZIP" : format.toUpperCase()}
                         </button>
                       ))}
                     </div>
@@ -404,7 +495,7 @@ export default function ExportStudioPage() {
                       type="button"
                       onClick={() => void exportManuscript()}
                       disabled={exporting !== null}
-                      className="mt-4 rounded-md bg-[linear-gradient(135deg,#f59e0b,#d97706)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      className="mt-4 rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#25756f] disabled:opacity-60"
                     >
                       {exporting === "manuscript" ? "Preparing..." : "Export manuscript"}
                     </button>
@@ -419,7 +510,7 @@ export default function ExportStudioPage() {
                       type="button"
                       onClick={() => void exportNotesZip()}
                       disabled={exporting !== null}
-                      className="mt-4 rounded-md bg-[linear-gradient(135deg,#0f766e,#2563eb)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      className="mt-4 rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#25756f] disabled:opacity-60"
                     >
                       {exporting === "notes" ? "Preparing..." : "Export notes ZIP"}
                     </button>
@@ -434,9 +525,41 @@ export default function ExportStudioPage() {
               </div>
             ) : null}
 
-            {obsidianPreview ? (
-              <ObsidianVaultPreview bookId={bookId} preview={obsidianPreview} isDark={isDark} />
+            {vaultPreview ? (
+              <VaultPreview bookId={bookId} preview={vaultPreview} isDark={isDark} />
             ) : null}
+          </main>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ExportStudioSkeleton({ isDark }: { isDark: boolean }) {
+  return (
+    <div className={`min-h-screen ${isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
+      <div className="mx-auto max-w-[96rem] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
+        <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
+          <SidebarSkeleton />
+          <main className="space-y-6" role="status" aria-label="Loading export studio" aria-busy="true">
+            <span className="sr-only">Loading export studio</span>
+            <section className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-black/20" : "border-white/70 bg-white/85"}`}>
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="mt-4 h-8 w-64 max-w-full" />
+              <Skeleton className="mt-3 h-4 w-full max-w-2xl" />
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Skeleton className="h-10 w-36 rounded-md" />
+                <Skeleton className="h-10 w-32 rounded-md" />
+              </div>
+            </section>
+            <div className="grid gap-6 2xl:grid-cols-2">
+              <CardSkeleton className="min-h-[28rem]" />
+              <div className="space-y-5">
+                <CardSkeleton />
+                <RowSkeleton />
+                <RowSkeleton />
+              </div>
+            </div>
           </main>
         </div>
       </div>
@@ -474,7 +597,7 @@ function ImportCard({
         <button type="button" onClick={onChoose} className={`rounded-md border px-4 py-2.5 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
           Choose files
         </button>
-        <button type="button" onClick={onRun} disabled={disabled} className="rounded-md bg-[linear-gradient(135deg,#059669,#0f766e)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+        <button type="button" onClick={onRun} disabled={disabled} className="rounded-md bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#25756f] disabled:opacity-60">
           {buttonLabel}
         </button>
       </div>

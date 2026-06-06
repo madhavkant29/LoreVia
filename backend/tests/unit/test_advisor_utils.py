@@ -8,6 +8,7 @@ from app.utils.advisor_utils import (
     advisor_retrieval_settings,
     build_story_context,
     build_advisor_world_context,
+    language_context_hint,
     build_fallback_advisor_suggestions,
     classify_intent_fast,
     classify_response_type,
@@ -349,3 +350,45 @@ async def test_retrieve_series_continuity_passages_returns_empty_when_pgvector_e
         )
 
     assert payload == []
+
+
+# ── language_context_hint ─────────────────────────────────────────────────
+
+def test_language_hint_french():
+    hint = language_context_hint("fr")
+    assert "French" in hint
+    assert "English field names" in hint
+    assert "original language" in hint
+
+
+def test_language_hint_spanish():
+    hint = language_context_hint("es")
+    assert "Spanish" in hint
+
+
+def test_language_hint_german():
+    hint = language_context_hint("de")
+    assert "German" in hint
+
+
+def test_language_hint_italian():
+    hint = language_context_hint("it")
+    assert "Italian" in hint
+
+
+def test_language_hint_portuguese():
+    hint = language_context_hint("pt")
+    assert "Portuguese" in hint
+
+
+def test_language_hint_english_returns_empty():
+    assert language_context_hint("en") == ""
+
+
+def test_language_hint_none_returns_empty():
+    assert language_context_hint(None) == ""
+
+
+def test_language_hint_unsupported_returns_empty():
+    assert language_context_hint("zh") == ""
+    assert language_context_hint("ja") == ""

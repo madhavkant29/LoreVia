@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
@@ -12,6 +12,7 @@ import {
   WorkspacePanel,
   WorkspaceTabButton,
 } from "@/components/ui/Workspace"
+import { betaReadsApi } from "@/lib/api/betaReads"
 import { readerApi } from "@/lib/api/reader"
 import {
   betaReadDeadlineDetail,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/utils/betaReads"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import type { BetaReadAssignment, BetaReadViewBucket } from "@/types/reader"
+import type { BetaReadAssignmentDetail } from "@/types/betaRead"
 
 const TAB_OPTIONS: Array<{ value: BetaReadViewBucket; label: string }> = [
   { value: "active", label: "Active" },
@@ -70,6 +72,27 @@ export default function BetaReadsPage() {
     queryFn: () => readerApi.listBetaReads(bucket),
     staleTime: 12_000,
   })
+  const detailQueries = useQueries({
+    queries: items.map((assignment) => ({
+      queryKey: asQueryKey(`reader:beta-reads:detail:${assignment.id}`),
+      queryFn: () => betaReadsApi.getMineDetail(assignment.id),
+      enabled: assignment.view_bucket !== "completed" && assignment.view_bucket !== "missed",
+      staleTime: 12_000,
+    })),
+  })
+  const detailByAssignmentId = useMemo(
+    () =>
+      new Map<string, { data: BetaReadAssignmentDetail | null; isLoading: boolean }>(
+        items.map((assignment, index) => [
+          assignment.id,
+          {
+            data: (detailQueries[index]?.data as BetaReadAssignmentDetail | undefined) ?? null,
+            isLoading: Boolean(detailQueries[index]?.isLoading),
+          },
+        ])
+      ),
+    [detailQueries, items]
+  )
 
   const headerMeta = useMemo(
     () => (
@@ -104,6 +127,10 @@ export default function BetaReadsPage() {
     const urgent = betaReadIsUrgent(assignment.expires_at)
     const requirementLines = betaReadRequirementLines(assignment)
     const missedWarning = betaReadMissedWarning(assignment)
+    const detailState = detailByAssignmentId.get(assignment.id)
+    const assignmentDetail = detailState?.data ?? null
+    const authorQuestions = assignmentDetail?.author_questions ?? []
+    const authorQuestionsLoading = detailState?.isLoading ?? false
 
     return (
       <article
@@ -227,6 +254,35 @@ export default function BetaReadsPage() {
                     ))}
                   </ul>
                 </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
+                    Completion gate
+                  </p>
+                  <p className="mt-1 text-sm text-[rgb(var(--foreground))]">
+                    {assignment.require_final_feedback
+                      ? "Require final feedback before completion"
+                      : "Final feedback is not required before completion"}
+                  </p>
+                </div>
+                {authorQuestions.length > 0 ? (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
+                      Author questions
+                    </p>
+                    <ul className="mt-2 space-y-2 text-sm text-[rgb(var(--foreground))]">
+                      {authorQuestions.map((question) => (
+                        <li key={question.id}>{question.prompt}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : assignment.question_count > 0 && authorQuestionsLoading ? (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
+                      Author questions
+                    </p>
+                    <p className="mt-1 text-sm text-[rgb(var(--muted-foreground))]">Loading author questions...</p>
+                  </div>
+                ) : null}
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))]">
                     Submission status

@@ -127,4 +127,35 @@ describe("betaReads api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:beta-reads:")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:list:")
   })
+
+  it("normalizes slugged reader route ids for book-scoped beta-read calls", async () => {
+    const routeId = "sky-of-ash--123e4567-e89b-12d3-a456-426614174000"
+
+    await betaReadsApi.listBookAssignments(routeId)
+    await betaReadsApi.getBookAssignmentDetail(routeId, "assignment-2")
+    await betaReadsApi.appendQuestions(routeId, "assignment-2", ["Did the reveal land?"])
+    await betaReadsApi.revokeAssignment(routeId, "assignment-2")
+    await betaReadsApi.updateBookFeedbackItem(routeId, "assignment-2", "feedback-9", {
+      authorStatus: "reviewed",
+    })
+
+    expect(getMock).toHaveBeenNthCalledWith(1, "/books/123e4567-e89b-12d3-a456-426614174000/beta-reads")
+    expect(getMock).toHaveBeenNthCalledWith(2, "/books/123e4567-e89b-12d3-a456-426614174000/beta-reads/assignment-2")
+    expect(postMock).toHaveBeenNthCalledWith(
+      1,
+      "/books/123e4567-e89b-12d3-a456-426614174000/beta-reads/assignment-2/questions",
+      { questions: ["Did the reveal land?"] }
+    )
+    expect(postMock).toHaveBeenNthCalledWith(
+      2,
+      "/books/123e4567-e89b-12d3-a456-426614174000/beta-reads/assignment-2/revoke"
+    )
+    expect(putMock).toHaveBeenCalledWith(
+      "/books/123e4567-e89b-12d3-a456-426614174000/beta-reads/assignment-2/feedback-items/feedback-9",
+      {
+        author_status: "reviewed",
+        author_task_id: null,
+      }
+    )
+  })
 })

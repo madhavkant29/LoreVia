@@ -191,13 +191,17 @@ async def test_qa_endpoint_builds_answer_and_caches(monkeypatch):
     client = _FakeClient("Grounded answer")
     monkeypatch.setattr(intelligence, "get_client", lambda: client)
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
-    db = _FakeDB(get_values=[book])
+    user = SimpleNamespace(id=book.user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+    )
 
     payload = await intelligence.qa_endpoint(
         book.id,
         QARequest(question="Who?", current_chapter=2),
         db=db,
-        current_user=SimpleNamespace(id=book.user_id),
+        current_user=user,
         _=None,
     )
 
@@ -229,13 +233,17 @@ async def test_qa_stream_endpoint_streams_and_caches(monkeypatch):
     client = _FakeStreamingClient(["Grounded", " answer"])
     monkeypatch.setattr(intelligence, "get_client", lambda: client)
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
-    db = _FakeDB(get_values=[book])
+    user = SimpleNamespace(id=book.user_id)
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+    )
 
     response = await intelligence.qa_stream_endpoint(
         book.id,
         QARequest(question="Who?", current_chapter=2),
         db=db,
-        current_user=SimpleNamespace(id=book.user_id),
+        current_user=user,
         _=None,
     )
     chunks = [chunk async for chunk in response.body_iterator]
@@ -260,13 +268,17 @@ async def test_qa_stream_endpoint_hides_internal_errors(monkeypatch):
     client = _ExplodingStreamingClient()
     monkeypatch.setattr(intelligence, "get_client", lambda: client)
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
-    db = _FakeDB(get_values=[book])
+    user = SimpleNamespace(id=book.user_id)
+    db = _FakeDB(
+        get_values=[book],
+        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+    )
 
     response = await intelligence.qa_stream_endpoint(
         book.id,
         QARequest(question="Who?", current_chapter=2),
         db=db,
-        current_user=SimpleNamespace(id=book.user_id),
+        current_user=user,
         _=None,
     )
     body = "".join([chunk async for chunk in response.body_iterator])

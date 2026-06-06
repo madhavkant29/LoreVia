@@ -72,6 +72,7 @@ function renderWithQuery(ui: React.ReactNode) {
       act(() => {
         root.unmount()
       })
+      queryClient.clear()
       container.remove()
     },
   }
@@ -190,6 +191,7 @@ describe("PublicForumPageClient", () => {
     expect(container.textContent).toContain("Most popular this month")
     expect(container.textContent).toContain("Weighted by recent reader activity, views, discussion, and interest.")
     expect(container.textContent).toContain("Need beta readers for Sky Citadel")
+    expect(container.querySelector('a[href="/public"]')?.textContent).toContain("Back to public library")
     unmount()
   })
 

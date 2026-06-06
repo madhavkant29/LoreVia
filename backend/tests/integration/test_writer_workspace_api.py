@@ -439,7 +439,7 @@ async def test_manuscript_annotations_round_trip_and_resolve(client, db):
 
 
 @pytest.mark.asyncio
-async def test_private_manuscript_annotations_stay_hidden_from_collaborators(client, db):
+async def test_shared_manuscript_annotations_visible_to_scoped_collaborators_and_private_hidden(client, db):
     author_headers, author_user_id = await _register_user(client, f"author-ann-{uuid.uuid4().hex[:8]}@lorevia.app")
     collaborator_email = f"reviewer-ann-{uuid.uuid4().hex[:8]}@lorevia.app"
     collaborator_headers, collaborator_user_id = await _register_user(client, collaborator_email)
@@ -453,7 +453,7 @@ async def test_private_manuscript_annotations_stay_hidden_from_collaborators(cli
             book_id=book.id,
             invited_user_id=collaborator_user_id,
             email=collaborator_email,
-            role="commenter",
+            role="viewer",
             scope={
                 "chapter_start": 1,
                 "chapter_end": 3,
@@ -466,7 +466,7 @@ async def test_private_manuscript_annotations_stay_hidden_from_collaborators(cli
                 "can_view_story_bible": False,
                 "can_run_ai_scans": False,
                 "can_export": False,
-                "can_comment": True,
+                "can_comment": False,
                 "can_view_selected_chapters_only": True,
             },
             scope_chapter_start=1,
@@ -478,7 +478,7 @@ async def test_private_manuscript_annotations_stay_hidden_from_collaborators(cli
             permission_can_view_story_bible=False,
             permission_can_run_ai_scans=False,
             permission_can_export=False,
-            permission_can_comment=True,
+            permission_can_comment=False,
             permission_can_view_selected_chapters_only=True,
             invite_status="active",
         )

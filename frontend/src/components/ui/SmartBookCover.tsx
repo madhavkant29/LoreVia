@@ -12,6 +12,7 @@ interface SmartBookCoverProps {
   isDark?: boolean
   className?: string
   imageClassName?: string
+  overlay?: React.ReactNode
 }
 
 export function SmartBookCover({
@@ -20,6 +21,7 @@ export function SmartBookCover({
   isDark = false,
   className,
   imageClassName,
+  overlay,
 }: SmartBookCoverProps) {
   const [failed, setFailed] = useState(false)
 
@@ -45,7 +47,7 @@ export function SmartBookCover({
         <div
           className={cn(
             "relative z-10 flex h-full w-full flex-col justify-between p-5",
-            isDark ? "bg-[#0D0D0D] text-[#E0E0E0]" : "bg-[linear-gradient(150deg,#f4ecda,#ffffff_60%,#ecebff)] text-stone-900",
+            isDark ? "bg-[#0D0D0D] text-[#E0E0E0]" : "bg-stone-100 text-stone-900",
           )}
         >
           <span className={cn("text-[0.65rem] font-semibold uppercase tracking-[0.28em]", isDark ? "text-[#808080]" : "text-violet-600")}>LoreVia</span>
@@ -55,6 +57,7 @@ export function SmartBookCover({
           </div>
         </div>
       )}
+      {overlay}
     </div>
   )
 }

@@ -647,6 +647,7 @@ async def build_chapter_list_payload(
                 {
                     "number": number,
                     "title": f"Chapter {number}",
+                    "chapter_kind": "chapter",
                     "processed": False,
                     "intelligence_available": True,
                     "read": number in read_set,
@@ -678,6 +679,7 @@ async def build_chapter_list_payload(
             {
                 "number": chapter.number,
                 "title": chapter.title,
+                "chapter_kind": getattr(chapter, "chapter_kind", "chapter"),
                 "processed": chapter.processed,
                 "intelligence_available": intelligence_map.get(chapter.number, True),
                 "read": access.workspace_shell == "author" or chapter.number in read_set,
@@ -761,6 +763,7 @@ async def build_summary_collection_payload(
             {
                 "chapter_number": chapter.number,
                 "chapter_title": chapter.title,
+                "chapter_kind": getattr(chapter, "chapter_kind", "chapter"),
                 "read": access.workspace_shell == "author" or chapter.number <= read_upto,
                 "available": str(chapter.id) in summary_by_chapter_id,
                 "status": (

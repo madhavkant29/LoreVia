@@ -1,7 +1,9 @@
 "use client"
-import { useState, type ReactNode } from "react"
+import { memo, useState, type ReactNode } from "react"
 import Link from "next/link"
-import type { ReaderFontFamily } from "@/lib/utils/readerTypography"
+import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
+import { Tooltip } from "@/components/ui/Tooltip"
+import { READER_FONT_OPTIONS, type ReaderFontFamily } from "@/lib/utils/readerTypography"
 import type { ReaderDisplayStyle } from "@/types/reader"
 
 interface Props {
@@ -26,7 +28,7 @@ interface Props {
   onToggleQuoteMode: () => void
 }
 
-export function ReaderToolbar({
+export const ReaderToolbar = memo(function ReaderToolbar({
   bookId,
   chapterNum,
   chapterTitle,
@@ -69,7 +71,7 @@ export function ReaderToolbar({
         primary: "border-white/10 bg-[#151f35] text-white hover:bg-[#1a2741]",
         active: "border-[#7f86ff]/40 bg-[#353f71] text-white",
         progressTrack: "bg-white/8",
-        progressFill: "bg-[linear-gradient(90deg,#7c7ff6_0%,#9ca6ff_100%)]",
+        progressFill: "bg-teal-600",
       }
     : {
         shell: "border-stone-200/80 bg-[#faf7f0]/94 text-stone-950",
@@ -86,7 +88,7 @@ export function ReaderToolbar({
         primary: "border-violet-300/60 bg-white text-stone-950 hover:border-violet-400",
         active: "border-violet-400 bg-violet-50 text-violet-900",
         progressTrack: "bg-stone-200/90",
-        progressFill: "bg-[linear-gradient(90deg,#2dd4bf_0%,#7c3aed_100%)]",
+        progressFill: "bg-teal-700",
       }
 
   const increaseFont = () => onSetFontSize(Math.min(fontSize + 2, 32))
@@ -94,12 +96,12 @@ export function ReaderToolbar({
 
   return (
     <header className="reader-app-chrome sticky top-0 z-20 shrink-0">
-      <div className={`border-b backdrop-blur-xl ${toneClass.shell}`}>
+      <div className={`border-b ${toneClass.shell}`}>
         <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8 xl:px-10">
           <div className="flex items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-4">
               <Link prefetch={false} href="/library" className="shrink-0">
-                <img src="/logoandtext.png" alt="LoreVia" className="h-10 w-[154px] object-contain object-left" fetchPriority="high" />
+                <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-10 w-[154px] object-contain object-left" priority />
               </Link>
               <nav className="hidden items-center gap-6 lg:flex" style={{ fontFamily: "var(--reader-label)" }}>
                 <Link prefetch={false} href="/library" className={`text-base font-medium transition ${toneClass.navLink}`}>
@@ -111,7 +113,7 @@ export function ReaderToolbar({
                 <button
                   type="button"
                   onClick={onToggleTheme}
-                  className={`rounded-2xl border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+                  className={`rounded-md border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
                 >
                   {theme === "dark" ? "Light" : "Dark"}
                 </button>
@@ -159,7 +161,9 @@ export function ReaderToolbar({
             <button
               type="button"
               onClick={() => setMobileToolsOpen((current) => !current)}
-              className={`rounded-2xl border px-4 py-2 text-base font-medium transition md:hidden ${toneClass.ghost}`}
+              aria-expanded={mobileToolsOpen}
+              aria-label="Toggle reader menu"
+              className={`rounded-md border px-4 py-2 text-base font-medium transition md:hidden ${toneClass.ghost}`}
             >
               {mobileToolsOpen ? "Close" : "Menu"}
             </button>
@@ -220,7 +224,7 @@ export function ReaderToolbar({
         </div>
       </div>
 
-      <div className={`border-b backdrop-blur-xl ${toneClass.subShell}`}>
+      <div className={`border-b ${toneClass.subShell}`}>
         <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-3 px-4 py-3 sm:px-6 lg:px-8 xl:px-10" style={{ fontFamily: "var(--reader-label)" }}>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${theme === "dark" ? "text-[#9ba4ff]" : "text-violet-700"}`}>
@@ -234,18 +238,20 @@ export function ReaderToolbar({
 
           <div className="flex flex-wrap items-center gap-2 lg:gap-3">
             <SegmentGroup label="Font size" toneClass={toneClass}>
-              <SegmentButton label="A-" onClick={decreaseFont} toneClass={toneClass} />
+              <SegmentButton label="A-" ariaLabel="Decrease font size" tooltip="Decrease font size" onClick={decreaseFont} toneClass={toneClass} />
               <span className={`min-w-9 text-center text-sm ${toneClass.ui}`}>{fontSize}</span>
-              <SegmentButton label="A+" onClick={increaseFont} toneClass={toneClass} />
+              <SegmentButton label="A+" ariaLabel="Increase font size" tooltip="Increase font size" onClick={increaseFont} toneClass={toneClass} />
             </SegmentGroup>
 
             <SegmentGroup label="Font family" toneClass={toneClass}>
-              {(["serif", "sans", "mono"] as const).map((option) => (
+              {READER_FONT_OPTIONS.map((option) => (
                 <SegmentToggle
-                  key={option}
-                  label={option}
-                  selected={fontFamily === option}
-                  onClick={() => onSetFontFamily(option)}
+                  key={option.value}
+                  label={option.label}
+                  ariaLabel={`Use ${option.label} font`}
+                  tooltip={`Use ${option.label} font`}
+                  selected={fontFamily === option.value}
+                  onClick={() => onSetFontFamily(option.value)}
                   toneClass={toneClass}
                 />
               ))}
@@ -256,6 +262,8 @@ export function ReaderToolbar({
                 <SegmentToggle
                   key={option}
                   label={option === "published" ? "Published" : "Relaxed"}
+                  ariaLabel={option === "published" ? "Use published reading mode" : "Use relaxed reading mode"}
+                  tooltip={option === "published" ? "Use published reading mode" : "Use relaxed reading mode"}
                   selected={displayStyle === option}
                   onClick={() => onSetDisplayStyle(option)}
                   toneClass={toneClass}
@@ -267,6 +275,8 @@ export function ReaderToolbar({
               <SegmentGroup label="Selection" toneClass={toneClass}>
                 <SegmentToggle
                   label={quoteModeEnabled ? "Quote mode" : "Quote select"}
+                  ariaLabel={quoteModeEnabled ? "Turn off quote selection mode" : "Turn on quote selection mode"}
+                  tooltip={quoteModeEnabled ? "Turn off quote selection mode" : "Turn on quote selection mode"}
                   selected={quoteModeEnabled}
                   onClick={onToggleQuoteMode}
                   toneClass={toneClass}
@@ -299,7 +309,7 @@ export function ReaderToolbar({
       </div>
     </header>
   )
-}
+})
 
 type ToneClass = {
   card: string
@@ -320,7 +330,7 @@ function SegmentGroup({
   children: ReactNode
 }) {
   return (
-    <div className={`flex min-h-11 items-center gap-1 rounded-md border px-1.5 py-1 ${toneClass.card}`}>
+    <div role="group" aria-label={label} className={`flex min-h-11 items-center gap-1 rounded-md border px-1.5 py-1 ${toneClass.card}`}>
       <span className={`px-2 text-3xs uppercase tracking-[0.22em] ${toneClass.subtle}`}>{label}</span>
       <div className={`mx-1 h-4 w-px ${toneClass.divider}`} />
       {children}
@@ -330,38 +340,50 @@ function SegmentGroup({
 
 function SegmentButton({
   label,
+  ariaLabel,
+  tooltip,
   onClick,
   toneClass,
 }: {
   label: string
+  ariaLabel: string
+  tooltip: string
   onClick: () => void
   toneClass: ToneClass
 }) {
-  return (
+  const button = (
     <button
       type="button"
+      aria-label={ariaLabel}
       onClick={onClick}
       className={`rounded-md border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
     >
       {label}
     </button>
   )
+
+  return <Tooltip content={tooltip}>{button}</Tooltip>
 }
 
 function SegmentToggle({
   label,
+  ariaLabel,
+  tooltip,
   selected,
   onClick,
   toneClass,
 }: {
   label: string
+  ariaLabel: string
+  tooltip: string
   selected: boolean
   onClick: () => void
   toneClass: ToneClass
 }) {
-  return (
+  const button = (
     <button
       type="button"
+      aria-label={ariaLabel}
       aria-pressed={selected}
       onClick={onClick}
       className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${selected ? toneClass.active : toneClass.ghost}`}
@@ -369,4 +391,6 @@ function SegmentToggle({
       {label}
     </button>
   )
+
+  return <Tooltip content={tooltip}>{button}</Tooltip>
 }

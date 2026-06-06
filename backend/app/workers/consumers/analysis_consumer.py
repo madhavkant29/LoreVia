@@ -58,6 +58,8 @@ async def analyse_chapter(
     chapter_text: str,
     chapter_title: str = "",
     queue_wait_ms: int | None = None,
+    rebuild_run_id: str | None = None,
+    manual_reprocess: bool = False,
 ) -> dict:
     async with AsyncSessionLocal() as db:
         db_load_started = time.perf_counter()
@@ -67,12 +69,15 @@ async def analyse_chapter(
         book = await db.get(Book, chapter.book_id)
         if book is None:
             return {"error": "book not found"}
-        if getattr(book, "is_editor_project", False):
-            from app.services.editor_project_service import get_rebuild_run_id
+        from app.services.editor_project_service import get_rebuild_run_id
 
-            if not get_rebuild_run_id(book):
-                log.info("Skipping stale editor-project analysis chapter_id=%s", chapter_id)
-                return {"error": "stale_editor_project_run"}
+        active_rebuild_run_id = get_rebuild_run_id(book)
+        if rebuild_run_id is not None and active_rebuild_run_id != rebuild_run_id:
+            log.info("Skipping stale rebuild analysis chapter_id=%s", chapter_id)
+            return {"error": "stale_rebuild_run"}
+        if getattr(book, "is_editor_project", False) and not active_rebuild_run_id and not manual_reprocess:
+            log.info("Skipping stale editor-project analysis chapter_id=%s", chapter_id)
+            return {"error": "stale_editor_project_run"}
         log.info(
             "analysis_timing stage=db_load chapter_id=%s elapsed_ms=%s",
             chapter_id,
@@ -242,6 +247,9 @@ async def analyse_chapter(
                 generated_modes=list(results.keys()),
             )
             await _refresh_book_analysis_pipeline(db, book)
+            from app.services.editor_project_service import complete_rebuild_if_ready
+
+            await complete_rebuild_if_ready(db, book)
 
             ready_stats = await collect_book_ready_stats(db, book)
             prior_ready_state = False
@@ -422,7 +430,7 @@ async def _refresh_book_analysis_pipeline(db, book: Book) -> None:
     total_chapters = int(
         (
             await db.execute(
-                select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id)
+                select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id, Chapter.word_count > 0)
             )
         ).scalar_one()
     )
@@ -432,14 +440,14 @@ async def _refresh_book_analysis_pipeline(db, book: Book) -> None:
                 select(func.count(func.distinct(ChapterSummary.chapter_id)))
                 .select_from(ChapterSummary)
                 .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
-                .where(Chapter.book_id == book.id, ChapterSummary.mode == "detailed")
+                .where(Chapter.book_id == book.id, Chapter.word_count > 0, ChapterSummary.mode == "detailed")
             )
         ).scalar_one()
     )
     chapter_rows = (
         await db.execute(
             select(Chapter.number, Chapter.analysis_state)
-            .where(Chapter.book_id == book.id)
+            .where(Chapter.book_id == book.id, Chapter.word_count > 0)
             .order_by(Chapter.number.asc())
         )
     ).all()

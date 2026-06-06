@@ -160,7 +160,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 **What makes it unique:** Profiles combine physical traits, personality, motivations, fears, relationships, growth events, subtype scores, voice data, evidence, and spoiler-aware first/last seen metadata.
 
-**How it is designed:** Backend character endpoints and book utility helpers build card payloads. `CharacterCard.tsx` renders compact and full editable cards. Export helpers generate Markdown, PDF, DOCX, and Obsidian-friendly character artifacts.
+**How it is designed:** Backend character endpoints and book utility helpers build card payloads. `CharacterCard.tsx` renders compact and full editable cards. Export helpers generate Markdown, PDF, DOCX, and vault-friendly character artifacts.
 
 ### 12. Character State And Spoiler Control
 
@@ -262,25 +262,25 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 **What it does:** Users can save and delete notes at book or chapter scope and browse notes globally or per book.
 
-**What makes it unique:** Notes live alongside manuscript, reader, and Obsidian-style notes, giving both simple note-taking and graph-based note workflows.
+**What makes it unique:** Notes live alongside manuscript, reader, and vault-style notes, giving both simple note-taking and graph-based note workflows.
 
 **How it is designed:** `BookNote` rows back basic notes. Dashboard and book notes pages call `booksApi.notes`, `booksApi.saveBookNote`, and delete APIs.
 
-### 25. Obsidian-Style Notes
+### 25. Vault Notes
 
-**What it does:** Users can create, edit, delete, import ZIPs, export ZIPs, view a folder tree, inspect graph relations, and maintain Obsidian-like note vaults per book.
+**What it does:** Users can create, edit, delete, import ZIPs, export ZIPs, view a folder tree, inspect graph relations, and maintain graph-linked note vaults per book.
 
 **What makes it unique:** The app stores note links, backlinks, tags, source metadata, generated/user note distinction, and series links. It supports both user-authored vault notes and generated character-bible vault notes.
 
-**How it is designed:** `ObsidianVaultNote`, `NoteLink`, `NoteBacklink`, `NoteTag`, and `NoteSeriesLink` model the graph. `book_utils.py` imports/exports ZIPs and builds note graphs. Frontend `ObsidianNotesEditor`, `FolderTree`, `GraphViewer`, and `ObsidianVaultPreview` render the workflow.
+**How it is designed:** `VaultNote`, `NoteLink`, `NoteBacklink`, `NoteTag`, and `NoteSeriesLink` model the graph. `book_utils.py` imports/exports ZIPs and builds note graphs. Frontend `VaultNotesEditor`, `FolderTree`, `GraphViewer`, and `VaultPreview` render the workflow.
 
 ### 26. Character Bible
 
-**What it does:** Users can export a whole-book or series character bible in Markdown, PDF, DOCX, or Obsidian folder format, preview generated vault files, save overrides, and list generated notes.
+**What it does:** Users can export a whole-book or series character bible in Markdown, PDF, DOCX, or vault folder format, preview generated vault files, save overrides, and list generated notes.
 
-**What makes it unique:** The bible links characters, relationships, events, plot threads, and story units into a reusable reference system, including Obsidian manifest support.
+**What makes it unique:** The bible links characters, relationships, events, plot threads, and story units into a reusable reference system, including vault manifest support.
 
-**How it is designed:** Export utilities build Markdown/PDF/DOCX/ZIP outputs and Obsidian manifests. Book and series endpoints assemble bible payloads from characters, relationships, summaries, and plot threads.
+**How it is designed:** Export utilities build Markdown/PDF/DOCX/ZIP outputs and vault manifests. Book and series endpoints assemble bible payloads from characters, relationships, summaries, and plot threads.
 
 ### 27. Series Management
 
@@ -318,7 +318,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 **What it does:** Authors can edit manuscript chapters, full-book drafts, standalone scenes, notes, front matter, chapter metadata, and workspace settings.
 
-**What makes it unique:** The editor is connected to intelligence features: chapter reports, continuity flags, advisor suggestions, voice checks, prose tightening, synopsis, emotional arc, pre-writing checks, Obsidian notes, and character side panels.
+**What makes it unique:** The editor is connected to intelligence features: chapter reports, continuity flags, advisor suggestions, voice checks, prose tightening, synopsis, emotional arc, pre-writing checks, vault notes, and character side panels.
 
 **How it is designed:** The large manuscript page manages rich editor state, chapter/book modes, right-pane insights/notes/character panels, versions, scenes, workspace tree, formatting toolbar, import/export controls, compile settings, and review actions. Backend manuscript and book routes persist scenes, snapshots, chapters, and workspace JSON.
 
@@ -500,19 +500,19 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 ### 55. Manuscript Export Studio
 
-**What it does:** Authors can export manuscripts as PDF, DOCX, EPUB, or Obsidian vaults, with presets and front matter.
+**What it does:** Authors can export manuscripts as PDF, DOCX, EPUB, or vault archives, with presets and front matter.
 
-**What makes it unique:** Export supports compiled chapter/scene structures and publishing-style presets such as standard manuscript, trade, and KDP-like layouts.
+**What makes it unique:** Export supports compiled chapter/scene structures and publishing-style presets such as standard manuscript, trade, and print-ready layouts.
 
-**How it is designed:** `export_utils.py` renders DOCX, PDF, EPUB, compiled PDF/EPUB, and Obsidian vault ZIPs. The frontend export page manages format and preset selection.
+**How it is designed:** `export_utils.py` renders DOCX, PDF, EPUB, compiled PDF/EPUB, and vault ZIPs. The frontend export page manages format and preset selection.
 
 ### 56. Character And Bible Export Studio
 
 **What it does:** Users can export individual character cards and whole character bibles.
 
-**What makes it unique:** The export layer produces human-readable docs and graph-friendly Obsidian vaults with backlinks and manifests.
+**What makes it unique:** The export layer produces human-readable docs and graph-friendly vault archives with backlinks and manifests.
 
-**How it is designed:** Export endpoints call `character_card_*`, `character_bible_*`, and Obsidian preview/folder builders. Frontend export and character pages expose the actions.
+**How it is designed:** Export endpoints call `character_card_*`, `character_bible_*`, and vault preview/folder builders. Frontend export and character pages expose the actions.
 
 ### 57. Public Asset And Public Reading Support
 
@@ -749,7 +749,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 - `/:bookId/ask`: Grounded Q&A.
 - `/:bookId/advisor`: Story advisor, suggestions, editorial/voice/prose/review tools.
 - `/:bookId/manuscript`: Author manuscript editor and workspace.
-- `/:bookId/notes`: Book-specific notes and Obsidian notes tools.
+- `/:bookId/notes`: Book-specific notes and vault notes tools.
 - `/:bookId/export`: Character, bible, manuscript, and import/export studio.
 - `/:bookId/cross-book-wiki`: Cross-book character/wiki continuity matches.
 - `/:bookId/compliance`: Copyright/ISBN compliance surface.
@@ -781,7 +781,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 - Reader-safe and author/full-book event APIs.
 - Manuscript import/export.
 - Series CRUD, membership, status, and series bible.
-- Book notes and Obsidian vault notes CRUD/import/export/graph/relations.
+- Book notes and Vault notes CRUD/import/export/graph/relations.
 - Pre-writing check, chapter reports, chapter versions, writer workspace, readability, emotional arc.
 - Cover/public asset URLs and cover processing.
 - Archive/hide.
@@ -854,7 +854,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 - `Chapter`: chapter number/title/text/html/storage/token/word counts, media, versions, summaries, scenes.
 - `ChapterVersion`: manuscript snapshots and restore lineage.
 - `BookNote`: scoped book/chapter notes.
-- `ObsidianVaultNote`, `NoteLink`, `NoteBacklink`, `NoteTag`, `NoteSeriesLink`: note graph and vault model.
+- `VaultNote`, `NoteLink`, `NoteBacklink`, `NoteTag`, `NoteSeriesLink`: note graph and vault model.
 - `ChapterMedia`: inline images/media markers.
 - `Series`, `SeriesBook`: series metadata, position, and completion/status.
 - `Scene`, `Dialogue`: screenplay scene/dialogue model.
@@ -881,13 +881,13 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 - World engine: element extraction, gap detection, integration mapping, dependency graph.
 - Embedding engine: OpenAI embeddings for chunks and characters.
 - Parser layer: PDF, EPUB, chunking, screenplay/Fountain parsing.
-- Book utilities: book serialization, series bible, cover URLs, import parsing, manuscript HTML/text conversion, Obsidian notes, scenes, versions, emotional arc, pre-writing checks, chapter reports.
+- Book utilities: book serialization, series bible, cover URLs, import parsing, manuscript HTML/text conversion, vault notes, scenes, versions, emotional arc, pre-writing checks, chapter reports.
 - Character utilities: display, relationship text, status, and cleaning helpers.
 - Reader utilities: graph/timeline/search/summary serialization and normalization.
 - Advisor utilities: prompts, intent classification, story context, response/report builders.
 - Intelligence utilities: grounded citation and QA context construction.
 - World-building utilities: document CRUD, identity/canon merging, gaps, integrations, wiki, logic responses, notes.
-- Export utilities: character cards, character bibles, manuscript DOCX/PDF/EPUB/Obsidian exports.
+- Export utilities: character cards, character bibles, manuscript DOCX/PDF/EPUB/vault exports.
 - Ingestion utilities: dispatch plans, persistent chapter payloads, progress/ETA, retries, cancellation, grouping.
 - Notification utilities: create and format notifications.
 - Screenplay utilities: screenplay-specific output support.
@@ -897,7 +897,7 @@ The migration layer includes explicit Alembic safety utilities that detect non-l
 
 ## Test Coverage Inventory
 
-Tests cover access control, admin APIs, auth, book cover and merge flows, upload work type, sanitized errors, events API, ingestion pipeline, Obsidian export preview, reader APIs, reader timeline, series bible, world-building API, extraction pipeline, advisor utilities, auth cookies/deps/logging, book utilities, character dedup/extractor/profile builder, chunking, config, cover processing, event linking, export utilities, ingestion helpers, intelligence utilities, logging, migration utilities, Obsidian notes/vault export, PDF parsing, rate limiting, reader utilities, Redis utilities, screenplay parsing, semantic search, storage permissions, and world-building utilities.
+Tests cover access control, admin APIs, auth, book cover and merge flows, upload work type, sanitized errors, events API, ingestion pipeline, vault export preview, reader APIs, reader timeline, series bible, world-building API, extraction pipeline, advisor utilities, auth cookies/deps/logging, book utilities, character dedup/extractor/profile builder, chunking, config, cover processing, event linking, export utilities, ingestion helpers, intelligence utilities, logging, migration utilities, vault notes/vault export, PDF parsing, rate limiting, reader utilities, Redis utilities, screenplay parsing, semantic search, storage permissions, and world-building utilities.
 
 ## Second-Pass Coverage Checklist
 

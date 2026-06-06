@@ -5,11 +5,14 @@ const PUBLIC_PAGE_ROUTES = new Set([
   "/answers",
   "/compliance",
   "/contact",
+  "/copyright",
   "/checkout",
+  "/checkout/success",
   "/demo",
   "/eula",
   "/pricing",
   "/privacy",
+  "/public",
   "/refund",
   "/status",
   "/terms",
@@ -51,6 +54,20 @@ const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
   "verify-email",
 ])
 
+const DASHBOARD_SHELL_TOP_LEVEL_SEGMENTS = new Set([
+  "beta-reads",
+  "chats",
+  "library",
+  "notes",
+  "notifications",
+  "points",
+  "quotes",
+  "series",
+  "settings",
+  "stats",
+  "upgrade",
+])
+
 const AUTH_BOOTSTRAP_EXCLUDED_PREFIXES = [
   "/auth/callback",
   "/answers",
@@ -58,6 +75,21 @@ const AUTH_BOOTSTRAP_EXCLUDED_PREFIXES = [
   "/checkout",
   "/compare",
   "/complete-username",
+  "/demo",
+  "/forgot-password",
+  "/login",
+  "/public",
+  "/register",
+  "/reset-password",
+  "/verify-email",
+]
+
+const AUTH_NEXT_EXCLUDED_PREFIXES = [
+  "/auth/callback",
+  "/answers",
+  "/blog",
+  "/checkout",
+  "/compare",
   "/demo",
   "/forgot-password",
   "/login",
@@ -82,4 +114,38 @@ export function shouldHideSiteFooter(pathname: string | null): boolean {
   if (!topLevelSegment) return false
 
   return !NON_BOOK_TOP_LEVEL_SEGMENTS.has(topLevelSegment)
+}
+
+export function shouldOffsetSiteFooterForDashboardShell(pathname: string | null): boolean {
+  if (!pathname) return false
+
+  const [topLevelSegment] = pathname.split("/").filter(Boolean)
+  if (!topLevelSegment) return false
+
+  return DASHBOARD_SHELL_TOP_LEVEL_SEGMENTS.has(topLevelSegment)
+}
+
+function isPublicOrAuthNextExcludedPath(pathname: string): boolean {
+  if (PUBLIC_PAGE_ROUTES.has(pathname)) return true
+  return AUTH_NEXT_EXCLUDED_PREFIXES.some((prefix) =>
+    pathname === prefix || pathname.startsWith(`${prefix}/`)
+  )
+}
+
+export function resolveSafeAuthNextPath(nextPath: string | null, fallbackPath = "/library"): string {
+  const candidate = nextPath?.trim()
+  if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {
+    return fallbackPath
+  }
+
+  try {
+    const url = new URL(candidate, "https://getlorevia.local")
+    if (url.origin !== "https://getlorevia.local" || isPublicOrAuthNextExcludedPath(url.pathname)) {
+      return fallbackPath
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return fallbackPath
+  }
 }

@@ -277,6 +277,11 @@ async def test_billing_confirmation_allows_public_success_page_lookup(client, db
     assert payload["invoice_pdf_url"] == "https://files.paddle.com/public-invoice.pdf"
     assert payload["customer_email"] == "billing@getlorevia.com"
 
+    replay = await client.get(
+        f"/api/v1/billing/confirmation?transaction_id=txn_public_123&confirmation_token={confirmation_token}"
+    )
+    assert replay.status_code == 401
+
 
 @pytest.mark.asyncio
 async def test_billing_confirmation_rejects_public_lookup_without_token(client, db):

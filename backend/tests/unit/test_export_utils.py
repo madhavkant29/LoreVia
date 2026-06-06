@@ -18,10 +18,11 @@ from app.utils.export_utils import (
     character_bible_markdown,
     character_bible_pdf,
     export_filename_base,
+    export_font_notice,
     manuscript_epub_compiled,
     manuscript_docx,
     manuscript_pdf_compiled,
-    manuscript_obsidian_vault_zip,
+    manuscript_vault_zip,
     _chapter_body_blocks,
 )
 
@@ -97,6 +98,13 @@ def test_character_bible_docx_writes_attribution_to_document_footer():
         for section in doc.sections
         for paragraph in section.footer.paragraphs
     )
+
+
+def test_character_bible_docx_applies_selected_safe_font():
+    raw = character_bible_docx(markdown=b"# Atlas\n\n### Iris\n\n- Lead", title="Atlas - Character Bible", font_family="eb-garamond")
+    doc = Document(BytesIO(raw))
+
+    assert doc.styles["Normal"].font.name == "EB Garamond"
 
 
 def test_character_bible_pdf_draws_footer_on_every_page(monkeypatch):
@@ -256,6 +264,18 @@ def test_manuscript_docx_uses_front_matter_for_title_page():
     assert "A. Writer" in text
     assert "writer@example.com" in text
     assert "Chapter 1" in text
+
+
+def test_manuscript_docx_applies_selected_old_style_font():
+    raw = manuscript_docx(
+        title="Atlas",
+        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph."}],
+        scenes=[],
+        font_family="italian-old-style",
+    )
+    doc = Document(BytesIO(raw))
+
+    assert doc.styles["Normal"].font.name == "Iowan Old Style"
 
 
 def test_chapter_body_blocks_preserve_paragraph_lines_and_scene_break_variants():
@@ -426,8 +446,23 @@ def test_manuscript_epub_compiled_preserves_scene_breaks_and_line_breaks():
     assert "<p>Third paragraph.</p>" in chapter_html
 
 
-def test_manuscript_obsidian_vault_zip_creates_expected_folders():
-    raw = manuscript_obsidian_vault_zip(
+def test_manuscript_epub_compiled_declares_selected_font_stack():
+    raw = manuscript_epub_compiled(
+        title="Atlas",
+        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph."}],
+        scenes=[],
+        font_family="eb-garamond",
+    )
+
+    with ZipFile(BytesIO(raw)) as archive:
+        stylesheet = archive.read("EPUB/styles/main.css").decode("utf-8")
+
+    assert '"EB Garamond", Garamond' in stylesheet
+    assert "SIL Open Font License" in export_font_notice("eb-garamond")
+
+
+def test_manuscript_vault_zip_creates_expected_folders():
+    raw = manuscript_vault_zip(
         title="Atlas",
         chapters=[{"number": 1, "title": "Opening", "text": "Chapter text"}],
         scenes=[{"title": "Forest Ambush", "description": "Setup", "chapter_number": 1, "status": "assigned", "body": "Scene body"}],
@@ -444,3 +479,4 @@ def test_manuscript_obsidian_vault_zip_creates_expected_folders():
     assert any(name.endswith("/scenes/chapter-01/Forest-Ambush.md") for name in names)
     assert any(name.endswith("/notes/story/idea.md") for name in names)
     assert any(name.endswith("/_meta/manuscript-front-matter.md") for name in names)
+    assert any(name.endswith("/_meta/FONT-NOTICE.txt") for name in names)

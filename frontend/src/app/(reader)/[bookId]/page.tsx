@@ -1,6 +1,6 @@
 "use client"
 
-import { startTransition, useEffect, useRef, useState } from "react"
+import { startTransition, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import type { Route } from "next"
@@ -9,7 +9,8 @@ import { useParams, useRouter } from "next/navigation"
 
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ErrorCard } from "@/components/ui/ErrorCard"
-import { Skeleton } from "@/components/ui/Skeleton"
+import { RecentActivityList } from "@/components/ui/RecentActivityList"
+import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
 import { capture } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
@@ -19,6 +20,7 @@ import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { ReadingProgress } from "@/types/reader"
+import type { RecentActivityItem } from "@/types/ux"
 
 const AuthorWorkspaceDashboard = dynamic(
   () => import("@/components/reader/AuthorWorkspaceDashboard").then((module) => module.AuthorWorkspaceDashboard),
@@ -362,6 +364,42 @@ export default function BookOverviewPage() {
   const worldGapCount = preWritingCheck?.alerts.length ?? 0
   const timelineIssueCount = Math.max(0, chaptersLeft > 0 ? Math.min(3, Math.ceil(chaptersLeft / 8)) : 0)
   const greetingName = authHydrated ? user?.username?.trim() || "there" : "there"
+  const overviewActivityItems = useMemo<RecentActivityItem[]>(() => {
+    const items: RecentActivityItem[] = []
+    if (processingSummary) {
+      items.push({
+        id: "processing",
+        label: "Processing status updated",
+        detail: processingSummary,
+        tone: book?.status === "failed" ? "danger" : book?.status === "processing" ? "warning" : "default",
+      })
+    }
+    items.push({
+      id: "progress",
+      label: `${percentComplete}% complete`,
+      detail: `${chaptersLeft} ${storyUnitName(book?.work_type, true)} left from the current reading progress.`,
+      href: `/${bookId}/chapter/${continueChapter}` as Route,
+    })
+    if (revisionIntelligence?.summary?.recent_edit_label) {
+      items.push({
+        id: "revision",
+        label: "Revision digest",
+        detail: revisionIntelligence.summary.recent_edit_label,
+        href: "/notifications" as Route,
+        tone: "warning",
+      })
+    }
+    if (continuityIssueCount > 0) {
+      items.push({
+        id: "continuity",
+        label: `${continuityIssueCount} continuity flags`,
+        detail: "Open Story Advisor to triage the current draft.",
+        href: `/${bookId}/advisor` as Route,
+        tone: "warning",
+      })
+    }
+    return items
+  }, [book?.status, book?.work_type, bookId, chaptersLeft, continuityIssueCount, continueChapter, percentComplete, processingSummary, revisionIntelligence])
 
   const navigateWithMemory = (href: string) => {
     if (typeof window !== "undefined") {
@@ -468,8 +506,15 @@ export default function BookOverviewPage() {
 
   if (!book) {
     return (
-      <div className="min-h-screen bg-background text-muted-foreground">
-        <div className="flex min-h-screen items-center justify-center text-sm font-medium">Loading...</div>
+      <div className="min-h-screen bg-background text-foreground">
+        <div className="mx-auto grid max-w-[100rem] gap-5 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[15.5rem_minmax(0,1fr)] lg:px-8 xl:gap-6">
+          <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
+            <NavPanelLoadingState />
+          </div>
+          <main className="min-w-0">
+            <DashboardSkeleton />
+          </main>
+        </div>
       </div>
     )
   }
@@ -506,6 +551,12 @@ export default function BookOverviewPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
+          <RecentActivityList
+            title="Project signals"
+            items={overviewActivityItems}
+            emptyLabel="No project signals yet. Start writing or reading to see your activity trail here."
+          />
+
           {activeBookMode === "reader" ? (
             <ReaderOverview
               bookId={bookId}
@@ -588,7 +639,7 @@ export default function BookOverviewPage() {
         <CreateFab bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} />
       ) : null}
 
-      <nav className={`fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden border-slate-200 dark:border-white/10 bg-card/95 dark:bg-background/95`}>
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-card px-4 py-3 dark:border-white/10 dark:bg-background lg:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-6 gap-2 text-center text-3xs font-medium text-muted-foreground">
           <Link href={`/${bookId}`} className="rounded-xl px-2 py-2 text-teal-800">Overview</Link>
           <button onClick={continueReading} className="rounded-xl px-2 py-2">Read</button>
@@ -607,61 +658,9 @@ export default function BookOverviewPage() {
 }
 
 function WorkspacePanelLoadingState() {
-  return (
-    <div className="space-y-5">
-      <div className="rounded-md border border-border bg-card/60 p-4 sm:p-5">
-        <Skeleton variant="text" className="mb-4 h-5 w-32" />
-        <div className="grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)_minmax(13rem,0.78fr)]">
-          <Skeleton variant="card" className="aspect-[0.72] min-h-48" />
-          <div className="space-y-4">
-            <Skeleton variant="text" className="h-7 w-3/4" />
-            <Skeleton variant="text" className="h-4 w-1/3" />
-            <Skeleton variant="text" className="mt-6 h-2.5 w-full" />
-            <Skeleton variant="text" className="h-3 w-1/2" />
-          </div>
-          <div className="space-y-3">
-            <Skeleton variant="text" className="h-3 w-1/3" />
-            <Skeleton variant="text" className="h-3 w-full" />
-            <Skeleton variant="text" className="h-3 w-full" />
-            <Skeleton variant="text" className="h-3 w-2/3" />
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-md border border-border bg-card/60 p-4 sm:p-5">
-        <Skeleton variant="text" className="mb-5 h-5 w-28" />
-        <div className="grid gap-4 sm:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i}>
-              <Skeleton variant="text" className="h-3 w-16" />
-              <Skeleton variant="text" className="mt-2 h-7 w-20" />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-md border border-border bg-card/60 p-4 sm:p-5">
-        <Skeleton variant="text" className="mb-4 h-5 w-24" />
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} variant="card" className="min-h-32" />
-          ))}
-        </div>
-      </div>
-    </div>
-  )
+  return <DashboardSkeleton />
 }
 
 function NavPanelLoadingState() {
-  return (
-    <div className="space-y-3 rounded-2xl border border-border bg-card/60 p-4">
-      <Skeleton variant="circle" className="mx-auto h-8 w-8" />
-      <Skeleton variant="text" className="h-3 w-full" />
-      <Skeleton variant="text" className="h-3 w-3/4" />
-      <Skeleton variant="text" className="h-3 w-5/6" />
-      <Skeleton variant="text" className="h-3 w-2/3" />
-      <Skeleton variant="text" className="h-3 w-full" />
-      <Skeleton variant="text" className="h-3 w-1/2" />
-    </div>
-  )
+  return <SidebarSkeleton />
 }

@@ -1,8 +1,11 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import sqlalchemy as sa
+
 from app.utils.migration_utils import (
     CORE_APPLICATION_TABLES,
+    LEGACY_METADATA_BOOTSTRAP_EXCLUDED_TABLES,
     create_policy_if_missing,
     destructive_downgrade_revisions,
     destructive_upgrade_revisions,
@@ -16,6 +19,7 @@ from app.utils.migration_utils import (
     grant_table_privileges,
     is_local_database_url,
     is_safe_test_database_url,
+    legacy_bootstrap_metadata_tables,
     normalized_database_target,
     redact_database_target,
     resolve_alembic_database_url,
@@ -187,6 +191,17 @@ def test_should_reset_local_alembic_state_requires_core_tables() -> None:
 def test_should_reset_local_alembic_state_allows_bootstrapped_schema() -> None:
     assert should_reset_local_alembic_state({"alembic_version", *CORE_APPLICATION_TABLES}) is False
     assert should_reset_local_alembic_state(set(CORE_APPLICATION_TABLES)) is False
+
+
+def test_legacy_bootstrap_metadata_tables_excludes_tables_with_explicit_history() -> None:
+    metadata = sa.MetaData()
+    sa.Table("users", metadata, sa.Column("id", sa.Integer, primary_key=True))
+    for table_name in LEGACY_METADATA_BOOTSTRAP_EXCLUDED_TABLES:
+        sa.Table(table_name, metadata, sa.Column("id", sa.Integer, primary_key=True))
+
+    table_names = {table.name for table in legacy_bootstrap_metadata_tables(metadata)}
+
+    assert table_names == {"users"}
 
 
 def test_grant_table_privileges_executes_expected_sql(monkeypatch) -> None:

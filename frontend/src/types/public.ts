@@ -32,6 +32,9 @@ export interface PublicForumPost {
   work_type: string | null
   headline: string
   body: string
+  image_url?: string | null
+  image_filename?: string | null
+  image_content_type?: string | null
   desired_beta_reader_count: number | null
   allow_contact_requests: boolean
   status: string
@@ -58,6 +61,9 @@ export interface PublicForumComment {
   author_reputation_score: number
   author_trust_level: string
   body: string
+  image_url?: string | null
+  image_filename?: string | null
+  image_content_type?: string | null
   like_count: number
   dislike_count: number
   reaction: "like" | "dislike" | null
@@ -169,6 +175,9 @@ export interface PublicUserActivityPost {
   status: string
   headline: string
   body: string
+  image_url?: string | null
+  image_filename?: string | null
+  image_content_type?: string | null
   title: string | null
   genre: string | null
   work_type: string | null
@@ -190,6 +199,9 @@ export interface PublicUserActivityComment {
   post_title: string | null
   book_id: string | null
   body: string
+  image_url?: string | null
+  image_filename?: string | null
+  image_content_type?: string | null
   like_count: number
   dislike_count: number
   created_at: string

@@ -54,6 +54,7 @@ from app.api.deps.rate_limit import (
 from app.core.config import allowed_hosts, settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
+import app.models
 from app.main import app
 from app.utils.migration_utils import (
     drop_orphan_table_rowtype_if_present_on_connection,
@@ -185,6 +186,12 @@ def mock_redis(monkeypatch, request):
 
         async def get(self, key):
             return self.store.get(key)
+
+        async def getdel(self, key):
+            value = self.store.get(key)
+            if value is not None:
+                del self.store[key]
+            return value
 
         async def set(self, key, value, ex=None, nx=False):
             if nx and key in self.store:
@@ -369,6 +376,7 @@ async def setup_db(setup_engine):
     async with engine_test.begin() as conn:
         # Enable pgvector extension for vector columns
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(_drop_orphan_test_rowtypes)
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(_drop_orphan_test_rowtypes)
         await conn.run_sync(Base.metadata.create_all)

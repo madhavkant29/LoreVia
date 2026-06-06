@@ -41,7 +41,7 @@ describe("ChapterList", () => {
     })
 
     expect(view.textContent).toContain("Chapters")
-    expect(view.textContent).toContain("Chapter 3")
+    expect(view.textContent).toContain("Ch. 3")
     expect(view.textContent).toContain("River of Glass")
     expect(view.textContent).toContain("Processing")
     expect(view.textContent).toContain("Processed")
@@ -80,18 +80,64 @@ describe("ChapterList", () => {
       ],
     })
 
-    expect(view.textContent).toContain("Chapter 8")
+    expect(view.textContent).toContain("Ch. 8")
     expect(view.textContent).toContain("Queued")
     expect(view.textContent).toContain("Unread")
     expect(view.textContent).toContain("Intel Locked")
     expect(view.textContent).toContain("Mark read")
   })
+
+  it("renders optional chapter removal actions", () => {
+    const onDeleteChapter = vi.fn()
+
+    const view = renderChapterList({
+      chapters: [
+        {
+          number: 4,
+          title: "Broken Road",
+          processed: true,
+          read: true,
+          intelligence_available: true,
+        },
+      ],
+      onDeleteChapter,
+    })
+
+    const removeButton = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Remove")
+    act(() => {
+      removeButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(onDeleteChapter).toHaveBeenCalledWith(4)
+  })
+
+  it("disables the chapter removal action while the chapter is being removed", () => {
+    const view = renderChapterList({
+      chapters: [
+        {
+          number: 4,
+          title: "Broken Road",
+          processed: true,
+          read: true,
+          intelligence_available: true,
+        },
+      ],
+      deleteBusyKey: "chapter:4",
+      onDeleteChapter: vi.fn(),
+    })
+
+    const removeButton = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Removing...")
+    expect(removeButton).toBeTruthy()
+    expect(removeButton?.disabled).toBe(true)
+  })
 })
 
 function renderChapterList({
   chapters,
+  deleteBusyKey = null,
   onOpenChapter = vi.fn(),
   onToggleChapterRead = vi.fn(),
+  onDeleteChapter,
 }: {
   chapters: Array<{
     number: number
@@ -101,8 +147,10 @@ function renderChapterList({
     intelligence_available?: boolean
     tags?: string[]
   }>
+  deleteBusyKey?: string | null
   onOpenChapter?: (chapterNumber: number) => void
   onToggleChapterRead?: (chapterNumber: number, nextRead: boolean) => void
+  onDeleteChapter?: (chapterNumber: number) => void
 }) {
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -115,8 +163,10 @@ function renderChapterList({
         unitLabel="Chapter"
         isDark={true}
         readBusyKey={null}
+        deleteBusyKey={deleteBusyKey}
         onOpenChapter={onOpenChapter}
         onToggleChapterRead={onToggleChapterRead}
+        onDeleteChapter={onDeleteChapter}
       />
     )
   })

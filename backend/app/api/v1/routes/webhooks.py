@@ -15,7 +15,10 @@ async def paddle_webhook(request: Request, paddle_signature: str | None = Header
     if not verify_webhook_signature(payload, paddle_signature):
         raise HTTPException(400, "Invalid request.")
 
-    event = await request.json()
+    try:
+        event = await request.json()
+    except (UnicodeDecodeError, ValueError):
+        raise HTTPException(400, "Invalid request.")
     event_id = event_id_from_paddle_payload(event)
     if not event_id:
         raise HTTPException(400, "Missing Paddle event ID")

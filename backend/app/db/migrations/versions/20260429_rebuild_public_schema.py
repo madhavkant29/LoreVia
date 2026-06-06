@@ -13,7 +13,10 @@ from sqlalchemy.schema import CreateIndex, CreateTable
 
 from app.core.database import Base
 from app.db import base  # noqa: F401
-from app.utils.migration_utils import drop_orphan_table_rowtype_if_present
+from app.utils.migration_utils import (
+    drop_orphan_table_rowtype_if_present,
+    legacy_bootstrap_metadata_tables,
+)
 
 revision: str = "20260429_rebuild_public_schema"
 down_revision: str | None = "20260429_merge_all_heads"
@@ -26,7 +29,7 @@ def _create_missing_metadata_schema() -> None:
     inspector = sa.inspect(bind)
 
     existing_tables = set(inspector.get_table_names())
-    tables = [table for table in Base.metadata.sorted_tables if table.schema in (None, "public")]
+    tables = legacy_bootstrap_metadata_tables(Base.metadata)
 
     for table in tables:
         if table.name in existing_tables:

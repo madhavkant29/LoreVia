@@ -16,7 +16,7 @@ export function MarketingHeader() {
   const ctaHref: Route = "/register"
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/8 bg-[#08110f]/90 backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b border-white/8 bg-[#08110f]">
       <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 md:px-8">
         <Link href="/" aria-label="LoreVia home" className="shrink-0">
           <BrandLockup size="md" tone="dark" />
@@ -43,7 +43,7 @@ export function MarketingHeader() {
           </Link>
           <Link
             href={ctaHref}
-            className="inline-flex items-center justify-center rounded-xl bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#25756f]"
+            className="inline-flex items-center justify-center rounded-md bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#25756f]"
           >
             Start free
           </Link>

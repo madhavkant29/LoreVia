@@ -158,7 +158,7 @@ Before every prod migration:
 3. Confirm critical app tables exist in `public`:
    - `users`
    - `books`
-   - `book_obsidian_notes`
+   - `book_vault_notes`
 4. Confirm you have a fresh database dump saved outside Supabase.
 5. Confirm you have already tested the same Alembic sequence on a full prod clone.
 

@@ -11,8 +11,6 @@ from app.core.database import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        Index("ix_users_beta_read_penalty_required_at", "beta_read_penalty_required_at"),
-        Index("ix_users_username", "username", unique=True),
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),
         UniqueConstraint("supabase_auth_id", name="uq_users_supabase_auth_id"),
@@ -259,6 +257,13 @@ class UserRateLimitOverride(Base):
     summary_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
     chat_per_day: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
     api_per_minute: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    advisor_per_day: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    uploads_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    public_publish_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    public_unpublish_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    manuscript_imports_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    world_building_uploads_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
+    world_building_ai_per_hour: Mapped[int | None] = mapped_column(__import__("sqlalchemy").Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -267,6 +272,9 @@ class UserRateLimitOverride(Base):
 
 class DeviceTrial(Base):
     __tablename__ = "device_trials"
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_id_hash", name="uq_device_trials_user_device"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), __import__("sqlalchemy").ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

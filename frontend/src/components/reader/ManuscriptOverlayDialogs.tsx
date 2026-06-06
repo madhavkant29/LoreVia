@@ -17,7 +17,7 @@ type ManuscriptOverlayDialogsProps = {
   isDark: boolean
   sceneEditorOpen: boolean
   editingScene: NovelScene | null
-  onCloseSceneEditor: () => void
+  onCloseSceneEditor: () => void | Promise<void>
   sceneTitleDraft: string
   onSceneTitleDraftChange: (value: string) => void
   sceneChapterDraft: number | null
@@ -43,12 +43,12 @@ type ManuscriptOverlayDialogsProps = {
   writerWorkspace: WriterWorkspace | null
   manuscriptFrontMatter: ManuscriptFrontMatter | null
   onCloseCompileDialog: () => void
-  compileFormat: "pdf" | "docx" | "epub" | "obsidian"
+  compileFormat: "pdf" | "docx" | "epub" | "vault"
   fullBookWordCount: number
   includeSceneMetadataOnExport: boolean
   onIncludeSceneMetadataOnExportChange: (checked: boolean) => void
   onUpdateFrontMatter: (field: keyof ManuscriptFrontMatter, value: string | boolean) => void
-  exporting: "pdf" | "docx" | "epub" | "obsidian" | null
+  exporting: "pdf" | "docx" | "epub" | "vault" | null
   workspaceSaving: boolean
   onCompileManuscript: () => void
 }
@@ -96,7 +96,7 @@ export function ManuscriptOverlayDialogs({
     <>
       {sceneEditorOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8">
-          <div className={`max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border p-5 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
+          <div className={`max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border p-5 ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>Scene workspace</p>
@@ -111,7 +111,6 @@ export function ManuscriptOverlayDialogs({
                 <input
                   value={sceneTitleDraft}
                   onChange={(event) => onSceneTitleDraftChange(event.target.value)}
-                  placeholder="Scene title"
                   className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
@@ -134,7 +133,6 @@ export function ManuscriptOverlayDialogs({
               <input
                 value={sceneDescriptionDraft}
                 onChange={(event) => onSceneDescriptionDraftChange(event.target.value)}
-                placeholder="Optional context for later"
                 className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
               />
             </label>
@@ -146,7 +144,6 @@ export function ManuscriptOverlayDialogs({
                   editorKey="scene-editor-modal"
                   html={sceneHtmlDraft}
                   onChange={onSceneDraftChange}
-                  placeholder="Write the scene here..."
                   className={`min-h-[18rem] px-4 py-3 text-sm leading-7 outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
                 />
               </div>
@@ -165,8 +162,8 @@ export function ManuscriptOverlayDialogs({
                   type="text"
                   value={sceneVersionNameDraft}
                   onChange={(event) => onSceneVersionNameDraftChange(event.target.value)}
-                  placeholder="Example: Before tightening dialogue"
-                  className={`mt-3 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                  aria-label="Scene version name"
+                  className={`mt-3 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
                 <div className="mt-3 space-y-2">
                   {sceneVersions.map((version) => (
@@ -175,7 +172,7 @@ export function ManuscriptOverlayDialogs({
                         <div>
                           <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{version.note || version.scene_title}</p>
                           <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                            {new Date(version.created_at).toLocaleString()} {version.word_count ? `· ${version.word_count} words` : ""}
+                            {new Date(version.created_at).toLocaleString()} {version.word_count ? `- ${version.word_count} words` : ""}
                           </p>
                           <p className={`mt-1 text-3xs uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
                         </div>
@@ -214,8 +211,8 @@ export function ManuscriptOverlayDialogs({
               </div>
             ) : null}
             <div className="mt-5 flex flex-wrap justify-end gap-3">
-              <button onClick={onCloseSceneEditor} className={`rounded-full px-4 py-2 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Cancel</button>
-              <button onClick={onSaveScene} disabled={sceneSaving || !sceneTitleDraft.trim() || !sceneBodyDraft.trim()} className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              <button onClick={onCloseSceneEditor} className={`rounded-md px-4 py-2 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Cancel</button>
+              <button onClick={onSaveScene} disabled={sceneSaving || !sceneTitleDraft.trim() || !sceneBodyDraft.trim()} className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                 {sceneSaving ? "Saving..." : editingScene ? "Save scene" : "Create scene"}
               </button>
             </div>
@@ -225,14 +222,14 @@ export function ManuscriptOverlayDialogs({
 
       {showCompileDialog && writerWorkspace && manuscriptFrontMatter ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
-          <div className={`max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg border p-6 shadow-2xl ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
+          <div className={`max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg border p-6 ${isDark ? "border-white/10 bg-[#0b0f17] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Compile manuscript</p>
                 <h3 className="mt-2 text-2xl font-semibold">Front page and submission metadata</h3>
                 <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>This template feeds the title page, headers, word count line, and export packaging before the manuscript compiles.</p>
               </div>
-              <button onClick={onCloseCompileDialog} className={`rounded-full px-3 py-1.5 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Close</button>
+              <button onClick={onCloseCompileDialog} className={`rounded-md px-3 py-1.5 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Close</button>
             </div>
 
             <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
@@ -317,8 +314,8 @@ export function ManuscriptOverlayDialogs({
             </div>
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <button onClick={onCloseCompileDialog} className={`rounded-full px-4 py-2 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Cancel</button>
-              <button onClick={onCompileManuscript} disabled={!!exporting || workspaceSaving} className="rounded-full bg-[linear-gradient(135deg,#1d4ed8,#1e40af)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              <button onClick={onCloseCompileDialog} className={`rounded-md px-4 py-2 text-sm ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Cancel</button>
+              <button onClick={onCompileManuscript} disabled={!!exporting || workspaceSaving} className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                 {exporting ? "Compiling..." : `Compile ${compileFormat.toUpperCase()}`}
               </button>
             </div>

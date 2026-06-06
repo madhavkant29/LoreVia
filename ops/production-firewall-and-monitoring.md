@@ -11,50 +11,17 @@ Recommended baseline:
 - Allow `80/tcp` and `443/tcp` from the public internet if the VPS is the TLS terminator
 - If Cloudflare still proxies the site, keep `80/tcp` and `443/tcp` restricted to Cloudflare IP ranges instead
 - Deny all other inbound traffic
+- If you already enforce those rules in Hetzner Cloud Firewall, that is sufficient
+- Treat host-level `ufw` as optional defense in depth, not a second required source of truth
 
-Example UFW shape:
-
-```bash
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow from <YOUR_ADMIN_IP>/32 to any port 22 proto tcp
-```
-
-Then allow Cloudflare ranges for `80` and `443`:
+Recommended operator verification when Cloudflare proxies the site:
 
 ```bash
-sudo ufw allow from 173.245.48.0/20 to any port 80 proto tcp
-sudo ufw allow from 173.245.48.0/20 to any port 443 proto tcp
-sudo ufw allow from 103.21.244.0/22 to any port 80 proto tcp
-sudo ufw allow from 103.21.244.0/22 to any port 443 proto tcp
-sudo ufw allow from 103.22.200.0/22 to any port 80 proto tcp
-sudo ufw allow from 103.22.200.0/22 to any port 443 proto tcp
-sudo ufw allow from 103.31.4.0/22 to any port 80 proto tcp
-sudo ufw allow from 103.31.4.0/22 to any port 443 proto tcp
-sudo ufw allow from 141.101.64.0/18 to any port 80 proto tcp
-sudo ufw allow from 141.101.64.0/18 to any port 443 proto tcp
-sudo ufw allow from 108.162.192.0/18 to any port 80 proto tcp
-sudo ufw allow from 108.162.192.0/18 to any port 443 proto tcp
-sudo ufw allow from 190.93.240.0/20 to any port 80 proto tcp
-sudo ufw allow from 190.93.240.0/20 to any port 443 proto tcp
-sudo ufw allow from 188.114.96.0/20 to any port 80 proto tcp
-sudo ufw allow from 188.114.96.0/20 to any port 443 proto tcp
-sudo ufw allow from 197.234.240.0/22 to any port 80 proto tcp
-sudo ufw allow from 197.234.240.0/22 to any port 443 proto tcp
-sudo ufw allow from 198.41.128.0/17 to any port 80 proto tcp
-sudo ufw allow from 198.41.128.0/17 to any port 443 proto tcp
-sudo ufw allow from 162.158.0.0/15 to any port 80 proto tcp
-sudo ufw allow from 162.158.0.0/15 to any port 443 proto tcp
-sudo ufw allow from 104.16.0.0/13 to any port 80 proto tcp
-sudo ufw allow from 104.16.0.0/13 to any port 443 proto tcp
-sudo ufw allow from 104.24.0.0/14 to any port 80 proto tcp
-sudo ufw allow from 104.24.0.0/14 to any port 443 proto tcp
-sudo ufw allow from 172.64.0.0/13 to any port 80 proto tcp
-sudo ufw allow from 172.64.0.0/13 to any port 443 proto tcp
-sudo ufw allow from 131.0.72.0/22 to any port 80 proto tcp
-sudo ufw allow from 131.0.72.0/22 to any port 443 proto tcp
-sudo ufw enable
+curl -I https://api.getlorevia.com/ready
 ```
+
+Then, from a non-Cloudflare network, confirm direct requests to the VPS public IP
+on `80` and `443` fail.
 
 Do not expose:
 

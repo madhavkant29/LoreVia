@@ -1,4 +1,4 @@
-import type { ManuscriptWorkspaceTree, WorkspaceChapterNode } from "@/types/book"
+import type { ManuscriptWorkspaceTree, WorkspaceChapterNode, WorkspaceStructureNode } from "@/types/book"
 import { normalizeWorkspaceFolderPath } from "./workspacePaths"
 
 const CHAPTER_FOLDER_PATTERN = /(?:^|\/)chapter[-_\s]?(\d+)(?:\/|$)/i
@@ -104,11 +104,42 @@ export function reorderWorkspaceSceneTree(
 
 export function parseStoredSceneFolders(raw: string | null | undefined) {
   try {
-    const parsed = raw ? JSON.parse(raw) : []
+    const parsed = raw && typeof raw === "string" ? JSON.parse(raw) : []
     if (!Array.isArray(parsed)) return []
 
     return parsed.map((value) => normalizeWorkspaceFolderPath(String(value))).filter(Boolean)
   } catch {
     return []
   }
+}
+
+export function findWorkspaceStructurePath(
+  nodes: WorkspaceStructureNode[],
+  selectedSceneId: string | null,
+  sceneTitle: string
+): WorkspaceStructureNode[] {
+  for (const node of nodes) {
+    const path = findWorkspaceStructurePathFromNode(node, selectedSceneId, sceneTitle, [])
+    if (path.length) return path
+  }
+  return []
+}
+
+function findWorkspaceStructurePathFromNode(
+  node: WorkspaceStructureNode,
+  selectedSceneId: string | null,
+  sceneTitle: string,
+  parents: WorkspaceStructureNode[]
+): WorkspaceStructureNode[] {
+  const nextPath = [...parents, node]
+  const matchesSceneId = selectedSceneId && (node.scene_id === selectedSceneId || node.id === selectedSceneId)
+  const matchesTitle = !selectedSceneId && node.kind === "scene" && node.label === sceneTitle
+  if (matchesSceneId || matchesTitle) return nextPath
+
+  for (const child of node.children ?? []) {
+    const childPath = findWorkspaceStructurePathFromNode(child, selectedSceneId, sceneTitle, nextPath)
+    if (childPath.length) return childPath
+  }
+
+  return []
 }

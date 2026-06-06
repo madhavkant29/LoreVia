@@ -38,7 +38,7 @@ function readerBookPath(bookId: string, suffix: string) {
 export const serverApi = {
   getChapter(bookId: string, chapterNum: number, cookieHeader: string | null) {
     return fetchAuthenticatedJson<ChapterData>(
-      readerBookPath(bookId, `/chapter/${chapterNum}`),
+      `${readerBookPath(bookId, `/chapter/${chapterNum}`)}?include=characters,media,tags,beta_feedback,text_content,html_content,text_url`,
       cookieHeader,
     )
   },

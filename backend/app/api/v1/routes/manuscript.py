@@ -34,6 +34,7 @@ from app.utils.book_utils import (
     collaboration_allows_chapter,
     collaboration_can_comment,
     collaboration_can_edit,
+    delete_chapter,
     delete_manuscript_annotation,
     delete_novel_scene,
     get_chapter_version_content,
@@ -100,6 +101,7 @@ async def search_workspace(
         whole_word=body.whole_word,
         regex=body.regex,
         filters=body.filters.model_dump(),
+        collaborator=collaborator,
     )
 
 
@@ -111,8 +113,6 @@ async def get_manuscript_annotations(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
-    if collaborator and not collaboration_can_comment(collaborator):
-        raise HTTPException(403, "This share cannot view manuscript comments.")
     if collaborator and chapter_number is not None and not collaboration_allows_chapter(collaborator, chapter_number):
         raise HTTPException(403, "This share cannot access that chapter.")
     if collaborator is None:
@@ -278,6 +278,8 @@ async def update_novel_scene(
         ).scalar_one_or_none()
         if current_scene is None:
             raise HTTPException(404, "Scene not found")
+        if current_scene.chapter_number is not None and not collaboration_allows_chapter(collaborator, current_scene.chapter_number):
+            raise HTTPException(403, "This share cannot edit scenes from that chapter.")
         target_chapter_number = body.chapter_number if body.chapter_number is not None else current_scene.chapter_number
         if target_chapter_number is not None and not collaboration_allows_chapter(collaborator, target_chapter_number):
             raise HTTPException(403, "This share cannot move scenes into that chapter.")
@@ -324,6 +326,24 @@ async def remove_novel_scene(
         require_author_access(current_user)
     assert_editor_project_not_rebuilding(book)
     await delete_novel_scene(db, book=book, scene_id=scene_id)
+    return Response(status_code=204)
+
+
+@router.delete("/{book_id}/chapters/{chapter_number}", status_code=204)
+async def remove_chapter(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot edit the manuscript.")
+    if collaborator and not collaboration_allows_chapter(collaborator, chapter_number):
+        raise HTTPException(403, "This share cannot remove that chapter.")
+    if collaborator is None:
+        require_author_access(current_user)
+    await delete_chapter(db, book=book, chapter_number=chapter_number)
     return Response(status_code=204)
 
 
@@ -433,6 +453,15 @@ async def restore_saved_scene_version(
         version_payload = await get_scene_version_content(db, book=book, version_id=version_id)
         if version_payload["chapter_number"] is not None and not collaboration_allows_chapter(collaborator, version_payload["chapter_number"]):
             raise HTTPException(403, "This share cannot restore that scene.")
+        if version_payload["scene_id"]:
+            current_scene = await db.get(NovelScene, uuid.UUID(version_payload["scene_id"]))
+            if (
+                current_scene is not None
+                and current_scene.book_id == book.id
+                and current_scene.chapter_number is not None
+                and not collaboration_allows_chapter(collaborator, current_scene.chapter_number)
+            ):
+                raise HTTPException(403, "This share cannot restore scenes from that chapter.")
     restored = await restore_scene_version(db, book=book, version_id=version_id)
     return SceneVersionRestoreOut(**restored)
 

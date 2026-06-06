@@ -13,6 +13,8 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { Button } from "@/components/ui/Button"
+import { Skeleton } from "@/components/ui/Skeleton"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import type {
   AdvisorMessage,
   AdvisorPassage,
@@ -22,7 +24,7 @@ import type {
   AdvisorWorldAnalysis,
 } from "@/types/intelligence"
 
-// ─── Response type visual config (4 variants) ────────────────────────────────
+// Response type visual config (4 variants)
 type ResponseType = "standard" | "warning" | "opportunity" | "tradeoff"
 type AdvisorPanel = "checker" | "suggestions"
 
@@ -60,8 +62,14 @@ const StoryAdvisorEditorialPanel = dynamic(
   () => import("@/components/reader/StoryAdvisorEditorialPanel").then(mod => mod.StoryAdvisorEditorialPanel),
   {
     loading: () => (
-      <div className="rounded-lg border border-white/10 bg-[#0b1220]/88 p-6 text-sm text-slate-400">
-        Loading editorial review...
+      <div className="rounded-lg border border-white/10 bg-[#0b1220]/88 p-6" role="status" aria-label="Loading editorial review" aria-busy="true">
+        <span className="sr-only">Loading editorial review</span>
+        <Skeleton className="h-4 w-40 bg-white/10" />
+        <Skeleton className="mt-4 h-24 rounded-md bg-white/10" />
+        <div className="mt-4 flex gap-2">
+          <Skeleton className="h-9 w-32 rounded-sm bg-white/10" />
+          <Skeleton className="h-9 w-28 rounded-sm bg-white/10" />
+        </div>
       </div>
     ),
   },
@@ -79,7 +87,6 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         bg: isDark ? "bg-amber-500/8" : "bg-amber-50",
         badge: isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700",
         label: "Contradiction",
-        glow: isDark ? "shadow-[0_0_20px_-8px_rgba(245,158,11,0.4)]" : "",
       }
     case "opportunity":
       return {
@@ -87,7 +94,6 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         bg: isDark ? "bg-teal-500/8" : "bg-teal-50",
         badge: isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700",
         label: "Opportunity",
-        glow: isDark ? "shadow-[0_0_20px_-8px_rgba(20,184,166,0.4)]" : "",
       }
     case "tradeoff":
       return {
@@ -95,7 +101,6 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         bg: isDark ? "bg-violet-500/8" : "bg-violet-50",
         badge: isDark ? "bg-violet-500/20 text-violet-300" : "bg-violet-100 text-violet-700",
         label: "Tradeoff",
-        glow: isDark ? "shadow-[0_0_20px_-8px_rgba(139,92,246,0.4)]" : "",
       }
     default:
       return {
@@ -103,12 +108,11 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
         bg: isDark ? "bg-white/4" : "bg-white",
         badge: isDark ? "bg-white/12 text-slate-300" : "bg-stone-100 text-stone-500",
         label: "Response",
-        glow: "",
       }
   }
 }
 
-// ─── Severity config (Suggestions) ───────────────────────────────────────────
+// Severity config (Suggestions)
 function severityConfig(severity: string) {
   switch (severity) {
     case "warning":
@@ -216,7 +220,7 @@ function renderFormattedTextBlock(text: string) {
   ))
 }
 
-// ─── Rich message renderer ────────────────────────────────────────────────────
+// Rich message renderer
 // Parses structured contradiction, opportunity, and option blocks out of plain text.
 // and renders them with distinct visual treatment.
 function RichMessage({ content, isDark }: { content: string; isDark: boolean }) {
@@ -285,7 +289,7 @@ function RichMessage({ content, isDark }: { content: string; isDark: boolean }) 
   )
 }
 
-// ─── Suggestion group ─────────────────────────────────────────────────────────
+// Suggestion group
 type StatKind = "characters" | "plot_threads" | "chapters" | "states" | "open_threads" | "clues" | "relationships" | "world_elements"
 
 function StoryAdvisorIcon({ kind, className = "h-5 w-5" }: { kind: StatKind; className?: string }) {
@@ -423,9 +427,9 @@ function SuggestionGroup({
                     <button
                       onClick={() => onAsk(s.ask_prompt)}
                       className={`rounded-sm px-3.5 py-2 text-xs font-semibold transition ${s.severity === "opportunity"
-                        ? "bg-[linear-gradient(135deg,rgba(45,212,191,0.24),rgba(56,189,248,0.28))] text-teal-50 hover:brightness-110"
+                        ? "bg-teal-700 text-white hover:bg-teal-600"
                         : s.severity === "info" || s.severity === "direction"
-                          ? "bg-[linear-gradient(135deg,rgba(124,58,237,0.8),rgba(99,102,241,0.9))] text-white hover:brightness-110"
+                          ? "bg-violet-600 text-white hover:bg-violet-500"
                           : isDark
                             ? "bg-white/12 text-slate-100 hover:bg-white/16"
                             : "bg-stone-900 text-white hover:bg-stone-800"}`}
@@ -472,7 +476,7 @@ function SuggestionGroup({
 }
 
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// Main page
 export default function AdvisorPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { theme } = usePreferencesStore()
@@ -747,7 +751,7 @@ export default function AdvisorPage() {
         }
       `}</style>
 
-      <div className={`min-h-screen ${isDark ? "bg-[radial-gradient(circle_at_top,#152238_0%,#09101c_32%,#050912_72%,#04070d_100%)] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
+      <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
 
         {noteToast ? (
           <div className="fixed bottom-5 left-1/2 z-50 w-[min(92vw,32rem)] -translate-x-1/2">
@@ -757,60 +761,27 @@ export default function AdvisorPage() {
           </div>
         ) : null}
 
-        {/* ── Header ─────────────────────────────────────────────────────────── */}
-        <header className={`sticky top-0 z-30 border-b px-4 py-4 backdrop-blur-xl sm:px-6 ${isDark ? "border-white/8 bg-[#050912]/88" : "border-stone-200 bg-white/85"}`}>
-          <div className="mx-auto flex w-full max-w-[84rem] flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <Link
-                href={`/${bookId}`}
-                className={`text-sm font-medium transition ${isDark ? "text-teal-200 hover:text-teal-100" : "text-violet-700 hover:text-violet-800"}`}
-              >
-                ← Overview
-              </Link>
-              <span className={`text-sm ${isDark ? "text-slate-600" : "text-stone-300"}`}>/</span>
-              <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                Story Advisor
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-end gap-2 md:gap-3">
-              {greeting && (
-                <>
-                  <StatPill kind="characters" label="Characters" value={String(greeting.stats.characters)} isDark={isDark} />
-                  <StatPill kind="plot_threads" label="Plot Threads" value={String(greeting.stats.plot_threads)} isDark={isDark} />
-                  {greeting.stats.total_chapters && (
-                    <StatPill kind="chapters" label="Chapters" value={String(greeting.stats.total_chapters)} isDark={isDark} />
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        </header>
-
         <div className="mx-auto max-w-[84rem] px-4 py-8 sm:px-6 lg:px-8 lg:pb-12">
 
-          {/* ── Title ─────────────────────────────────────────────────────────── */}
-          <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <StoryAdvisorSectionLabel tone="violet">Author Intelligence</StoryAdvisorSectionLabel>
-              <h1 className={`mt-3 font-serif text-5xl leading-none sm:text-6xl ${isDark ? "text-white" : "text-stone-950"}`}>
-                Story Advisor
-              </h1>
-              <p className={`mt-4 max-w-2xl text-base leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                Ask anything about your manuscript, including lore, canon, world gaps, and story logic. The advisor will counter contradictions,
-                surface foreshadowing, and walk you through the tradeoffs of every story decision.
-              </p>
-            </div>
-            <Link
-              href={`/${bookId}/notes`}
-              className={`inline-flex items-center justify-center rounded-md border px-4 py-3 text-sm font-medium transition ${isDark ? "border-teal-500/35 bg-teal-500/8 text-teal-100 hover:bg-teal-500/12" : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50"}`}
-            >
-              Open notes workspace
-            </Link>
-          </div>
+          {/* Title */}
+          <WorkspaceFamilyHeader
+            active="advisor"
+            bookId={bookId}
+            family="review-center"
+            title="Story advisor"
+            description="Ask about lore, canon, world gaps, and story logic. The advisor counters contradictions, surfaces foreshadowing, and explains the tradeoffs behind story decisions."
+            actions={
+              <Link
+                href={`/${bookId}/notes`}
+                className={`inline-flex items-center justify-center rounded-md border px-4 py-3 text-sm font-medium transition ${isDark ? "border-teal-500/35 bg-teal-500/8 text-teal-100 hover:bg-teal-500/12" : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50"}`}
+              >
+                Open notes workspace
+              </Link>
+            }
+          />
 
-          {/* ── Tab switcher ──────────────────────────────────────────────────── */}
-          <div role="tablist" aria-label="Story Advisor mode" className={`mb-8 inline-flex flex-wrap overflow-hidden rounded-md border p-1 ${isDark ? "border-white/10 bg-white/5 shadow-[0_20px_40px_-34px_rgba(15,23,42,0.95)]" : "border-stone-200 bg-white"}`}>
+          {/* Tab switcher */}
+          <div role="tablist" aria-label="Story Advisor mode" className={`mb-8 inline-flex flex-wrap overflow-hidden rounded-md border p-1 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
             <Button
               variant={tab === "checker" ? "primary" : "ghost"}
               size="md"
@@ -842,12 +813,12 @@ export default function AdvisorPage() {
             </Button>
           </div>
 
-          {/* ══ CHAT TAB ════════════════════════════════════════════════════════ */}
+          {/* Chat tab */}
           {tab === "checker" && (
             <div id="advisor-checker-panel" role="tabpanel" aria-labelledby="advisor-tab-chat" className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
 
               {/* Chat area */}
-              <StoryAdvisorSurface isDark={isDark} className="flex min-h-[62vh] flex-col overflow-hidden shadow-[0_36px_90px_-54px_rgba(2,6,23,0.95)]">
+              <StoryAdvisorSurface isDark={isDark} className="flex min-h-[62vh] flex-col overflow-hidden">
                 <div className={`border-b px-5 py-4 ${isDark ? "border-white/8 bg-[#0d1524]/72" : "border-stone-100"}`}>
                   <StoryAdvisorSectionLabel tone="slate">Continuity Checker</StoryAdvisorSectionLabel>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -859,7 +830,7 @@ export default function AdvisorPage() {
 
                   {/* Opening question */}
                   {messages.length === 0 && (
-                    <div className={`rounded-lg border px-5 py-5 ${isDark ? "border-violet-500/20 bg-violet-500/8 shadow-[0_18px_40px_-30px_rgba(139,92,246,0.7)]" : "border-violet-100 bg-violet-50"}`}>
+                    <div className={`rounded-lg border px-5 py-5 ${isDark ? "border-violet-500/20 bg-violet-500/8" : "border-violet-100 bg-violet-50"}`}>
                       <StoryAdvisorSectionLabel tone="violet">Story Advisor</StoryAdvisorSectionLabel>
                       <p className={`text-base leading-7 ${isDark ? "text-slate-200" : "text-stone-700"}`}>
                         {greeting?.message ?? "What aspect of your story feels unsolved right now?"}
@@ -894,8 +865,8 @@ export default function AdvisorPage() {
                         key={i}
                         style={{ animationName: "fadeSlideIn", animationDuration: "0.25s", animationFillMode: "both" }}
                         className={isAssistant
-                          ? `rounded-md border p-5 ${style!.border} ${style!.bg} ${style!.glow}`
-                          : `ml-auto max-w-[36rem] rounded-md border px-5 py-4 ${isDark ? "border-violet-500/30 bg-violet-500/18 shadow-[0_18px_38px_-28px_rgba(124,58,237,0.85)]" : "border-violet-200 bg-violet-600/12"}`
+                          ? `rounded-md border p-5 ${style!.border} ${style!.bg}`
+                          : `ml-auto max-w-[36rem] rounded-md border px-5 py-4 ${isDark ? "border-violet-500/30 bg-violet-500/18" : "border-violet-200 bg-violet-600/12"}`
                         }
                       >
                         {isAssistant && (
@@ -946,11 +917,12 @@ export default function AdvisorPage() {
 
                   {/* Loading */}
                   {loading && (
-                    <div className={`rounded-md border p-5 animate-pulse ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`}>
-                      <div className={`h-2.5 w-24 rounded-full mb-3 ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
-                      <div className={`h-2.5 w-full rounded-full mb-2 ${isDark ? "bg-white/8" : "bg-stone-100"}`} />
-                      <div className={`h-2.5 w-3/4 rounded-full mb-2 ${isDark ? "bg-white/8" : "bg-stone-100"}`} />
-                      <div className={`h-2.5 w-1/2 rounded-full ${isDark ? "bg-white/6" : "bg-stone-100"}`} />
+                    <div className={`rounded-md border p-5 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} role="status" aria-label="Loading advisor response" aria-busy="true">
+                      <span className="sr-only">Loading advisor response</span>
+                      <Skeleton className="mb-3 h-2.5 w-24 rounded-full" />
+                      <Skeleton className="mb-2 h-2.5 w-full rounded-full" />
+                      <Skeleton className="mb-2 h-2.5 w-3/4 rounded-full" />
+                      <Skeleton className="h-2.5 w-1/2 rounded-full" />
                     </div>
                   )}
 
@@ -967,7 +939,7 @@ export default function AdvisorPage() {
                 {/* Input bar */}
                 <div className={`border-t px-4 py-4 ${isDark ? "border-white/8 bg-[#09101b]" : "border-stone-100"}`}>
                   <div className="mx-auto w-full max-w-[52rem]">
-                    <div className={`rounded-md border px-4 py-3 ${isDark ? "border-white/10 bg-[#0b1322] shadow-[0_16px_40px_-32px_rgba(15,23,42,0.95)]" : "border-stone-200 bg-stone-50"} transition`}>
+                    <div className={`rounded-md border px-4 py-3 ${isDark ? "border-white/10 bg-[#0b1322]" : "border-stone-200 bg-stone-50"} transition`}>
                       <div className="flex items-end gap-3">
                     <textarea
                       ref={inputRef}
@@ -975,10 +947,10 @@ export default function AdvisorPage() {
                       value={input}
                       onChange={e => setInput(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder="Ask about plotholes, lore gaps, world rules, arc endings, consistency issues..."
                       rows={2}
                       disabled={loading}
-                      className={`flex-1 resize-none bg-transparent text-sm leading-6 outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-800 placeholder:text-stone-400"}`}
+                      aria-label="Advisor question"
+                      className={`flex-1 resize-none bg-transparent text-sm leading-6 outline-none ${isDark ? "text-slate-100" : "text-stone-800"}`}
                     />
                     <Button
                       id="advisor-send"
@@ -986,14 +958,15 @@ export default function AdvisorPage() {
                       size="md"
                       onClick={() => void sendMessage(input)}
                       disabled={!input.trim() || loading}
-                      className="shrink-0 rounded-sm bg-[linear-gradient(135deg,#7c3aed,#4f46e5)] shadow-[0_10px_24px_-14px_rgba(99,102,241,0.72)] hover:-translate-y-[1px]"
+                      className="shrink-0 rounded-sm bg-violet-600 hover:bg-violet-500"
                     >
                       {loading ? "..." : "Send"}
                     </Button>
                     </div>
+                    <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Ask about plotholes, lore gaps, world rules, arc endings, or consistency issues.</p>
                   </div>
                   <p className={`mt-2 text-3xs ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-                    Enter to send · Shift+Enter for new line · Contradictions and world gaps flagged automatically
+                    Enter to send / Shift+Enter for new line / Contradictions and world gaps flagged automatically
                   </p>
                 </div>
                 </div>
@@ -1102,7 +1075,7 @@ export default function AdvisorPage() {
             </div>
           )}
 
-          {/* ══ SUGGESTIONS TAB ═════════════════════════════════════════════════ */}
+          {/* Suggestions tab */}
           {tab === "suggestions" && (
             <div id="advisor-scan-panel" role="tabpanel" aria-labelledby="advisor-tab-scan">
 
@@ -1126,7 +1099,7 @@ export default function AdvisorPage() {
                 </button>
               </div>
 
-              {/* ── Continuity Scan ─────────────────────────────────────────── */}
+              {/* Continuity scan */}
               {sugTab === "scan" && (
                 <div>
                   <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -1196,17 +1169,14 @@ export default function AdvisorPage() {
                   {suggestionsLoading || scanStatus === "scanning" ? (
                     <div className="space-y-3">
                       {scanStatus === "scanning" && (
-                        <div className={`mb-3 rounded-md border px-4 py-3 animate-pulse ${isDark ? "border-violet-500/30 bg-violet-500/10" : "border-violet-200 bg-violet-50"}`}>
-                          <p className={`text-sm font-medium ${isDark ? "text-violet-200" : "text-violet-800"}`}>
-                            Running continuity scan across extracted story data...
-                          </p>
-                          <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                            This may take a moment if an LLM audit is needed.
-                          </p>
+                        <div className={`mb-3 rounded-md border px-4 py-3 ${isDark ? "border-violet-500/30 bg-violet-500/10" : "border-violet-200 bg-violet-50"}`} role="status" aria-label="Running continuity scan" aria-busy="true">
+                          <span className="sr-only">Running continuity scan across extracted story data</span>
+                          <Skeleton className="h-4 w-72 max-w-full" />
+                          <Skeleton className="mt-2 h-3 w-96 max-w-full" />
                         </div>
                       )}
                       {[1, 2, 3].map(i => (
-                        <div key={i} className={`h-28 animate-pulse rounded-lg border ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} />
+                        <Skeleton key={i} variant="card" className={`h-28 rounded-lg border ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} />
                       ))}
                     </div>
                   ) : scanStatus === "failed" && scanError ? (
@@ -1248,7 +1218,7 @@ export default function AdvisorPage() {
                 </div>
               )}
 
-              {/* ── Editorial Review ─────────────────────────────────────────── */}
+              {/* Editorial review */}
               {sugTab === "editorial" && (
                 <StoryAdvisorEditorialPanel
                   bookId={bookId}

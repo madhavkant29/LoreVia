@@ -589,8 +589,9 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
     monkeypatch.setattr(advisor.settings, "OPENAI_API_KEY", "test-key", raising=False)
     monkeypatch.setattr(advisor.settings, "OPENAI_INTEL_MODEL", "gpt-test", raising=False)
 
+    user = SimpleNamespace(id=user_id)
     db = _FakeDB(
-        get_values=[book],
+        get_values=[book, user],
         execute_values=[
             _Result(scalars=[]),
             _Result(scalars=[]),
@@ -603,10 +604,13 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
             _Result(scalars=[]),
             _Result(all_rows=[(["River token"], 8, "The Bargain")]),
             _Result(all_rows=[(8, "The Bargain", "Nora reaches the ferryman.", [{"event_title": "Deal struck"}])]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
         ],
     )
 
-    payload = await advisor.advisor_suggestions(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+    payload = await advisor.advisor_suggestions(book_id, db=db, current_user=user)
 
     assert payload["meta"]["proactive_audit_applied"] is True
     assert payload["meta"]["fallback_applied"] is False
@@ -663,13 +667,17 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
     monkeypatch.setattr(advisor, "build_story_context", _fake_story_context)
     monkeypatch.setattr(advisor, "normalize_editorial_review_result", lambda raw: {"overall_verdict": raw})
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
-    db = _FakeDB(get_values=[book])
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+    )
 
     payload = await advisor.editorial_review(
         book_id,
         body=EditorialReviewRequest(text="Scene", chapter_num=2),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=user,
         _=None,
     )
 
@@ -704,13 +712,17 @@ async def test_prose_tighten_requires_text_and_normalizes(monkeypatch):
         "normalize_prose_tighten_result",
         lambda raw, _text: {"tightened_text": "Trimmed", "changed": True, "rationale": [raw]},
     )
-    db = _FakeDB(get_values=[book])
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+    )
 
     payload = await advisor.prose_tighten(
         book_id,
         body=ProseTightenRequest(text="Long text", chapter_num=4),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=user,
         _=None,
     )
 
@@ -766,15 +778,21 @@ async def test_manuscript_synopsis_requires_chapters_and_returns_coverage(monkey
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=6)
+    user = SimpleNamespace(id=user_id)
     db = _FakeDB(get_values=[book], execute_values=[_Result(all_rows=[])])
 
     with pytest.raises(HTTPException) as exc:
-        await advisor.manuscript_synopsis(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+        await advisor.manuscript_synopsis(book_id, db=db, current_user=user)
     assert exc.value.detail == "No chapters available for synopsis generation."
 
     db = _FakeDB(
-        get_values=[book],
-        execute_values=[_Result(all_rows=[(1, "Start", "s3://one", 1), (2, None, None, 1)])],
+        get_values=[book, user],
+        execute_values=[
+            _Result(all_rows=[(1, "Start", "s3://one", 1), (2, None, None, 1)]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
+        ],
     )
     client = _FakeClient('{"synopsis":"Short"}')
     monkeypatch.setattr(advisor, "download_book", lambda _key: b"Chapter text")
@@ -785,7 +803,7 @@ async def test_manuscript_synopsis_requires_chapters_and_returns_coverage(monkey
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
     monkeypatch.setattr(advisor, "normalize_synopsis_result", lambda raw, _spoiler: {"spoiler_level": "minimal", "synopsis": raw, "focus_points": []})
 
-    payload = await advisor.manuscript_synopsis(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+    payload = await advisor.manuscript_synopsis(book_id, db=db, current_user=user)
 
     assert payload.synopsis.startswith("{")
     assert payload.coverage_chapters == [1, 2]
@@ -798,11 +816,15 @@ async def test_manuscript_synopsis_caching(monkeypatch):
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=6)
+    user = SimpleNamespace(id=user_id)
 
     db = _FakeDB(
-        get_values=[book],
+        get_values=[book, user],
         execute_values=[
             _Result(all_rows=[(1, "Start", "s3://one", 1), (2, "Next", "s3://two", 1)]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
         ],
     )
     client = _FakeClient('{"synopsis":"A short synopsis."}', '{"synopsis":"Should not be called"}')
@@ -827,7 +849,7 @@ async def test_manuscript_synopsis_caching(monkeypatch):
 
     monkeypatch.setattr(advisor, "set_synopsis_cache", _fake_set_synopsis_cache)
 
-    payload1 = await advisor.manuscript_synopsis(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+    payload1 = await advisor.manuscript_synopsis(book_id, db=db, current_user=user)
     assert payload1.cached is False
     assert len(client.calls) == 1
 
@@ -916,11 +938,23 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
     monkeypatch.setattr(advisor, "score_voice_match", lambda _profile, metrics: (0.87 if metrics["sample_dialogue_count"] else 0.52, ["cadence"]))
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
 
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[
+            _Result(mappings=[{"id": char_id, "name": "Iris"}, {"id": other_id, "name": "Milo"}]),
+            _Result(scalars=[profile, other_profile]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
+        ],
+    )
+
     payload = await advisor.voice_consistency_review(
         book_id,
         body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=user,
         _=None,
     )
 
@@ -1001,11 +1035,28 @@ async def test_voice_consistency_review_respects_selected_character(monkeypatch)
     monkeypatch.setattr(advisor, "score_voice_match", lambda _profile, metrics: (87 if metrics["sample_dialogue_count"] else 52, ["cadence"]))
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
 
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[
+            _Result(
+                mappings=[
+                    {"id": char_id, "name": "Iris"},
+                    {"id": other_id, "name": "Milo"},
+                ]
+            ),
+            _Result(scalars=[profile, other_profile]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
+        ],
+    )
+
     payload = await advisor.voice_consistency_review(
         book_id,
         body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=char_id),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=user,
         _=None,
     )
 
@@ -1119,11 +1170,28 @@ async def test_voice_consistency_review_warns_when_selected_character_needs_full
     monkeypatch.setattr(advisor, "score_voice_match", lambda _profile, metrics: (71 if metrics["sample_dialogue_count"] else 52, ["cadence"]))
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
 
+    user = SimpleNamespace(id=user_id)
+    db = _FakeDB(
+        get_values=[book, user],
+        execute_values=[
+            _Result(
+                mappings=[
+                    {"id": char_id, "name": "Iris"},
+                    {"id": other_id, "name": "Milo"},
+                ]
+            ),
+            _Result(scalars=[profile, other_profile]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
+        ],
+    )
+
     payload = await advisor.voice_consistency_review(
         book_id,
         body=VoiceConsistencyRequest(text="Iris says hello.", chapter_num=3, character_id=char_id),
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=user,
         _=None,
     )
 
@@ -1305,11 +1373,15 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
     monkeypatch.setattr(advisor, "retrieve_series_continuity_passages", _fake_series_hits)
     monkeypatch.setattr(advisor, "normalize_series_continuity_result", lambda raw: {"overall_verdict": raw})
     monkeypatch.setattr(advisor, "AsyncOpenAI", lambda api_key: client)
+    user = SimpleNamespace(id=user_id)
     db = _FakeDB(
-        get_values=[series, current_book],
+        get_values=[series, current_book, user],
         execute_values=[
             _Result(all_rows=[SimpleNamespace(book_id=prior_id, position=1), SimpleNamespace(book_id=book_id, position=2)]),
             _Result(all_rows=[SimpleNamespace(id=prior_id, title="Book One")]),
+            _Result(scalar=0),
+            _Result(scalar=0),
+            _Result(scalar=0),
         ],
     )
 
@@ -1317,7 +1389,7 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
         series_id,
         body=body,
         db=db,
-        current_user=SimpleNamespace(id=user_id),
+        current_user=user,
         _=None,
     )
 

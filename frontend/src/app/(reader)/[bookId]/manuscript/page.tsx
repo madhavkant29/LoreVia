@@ -9,9 +9,17 @@ import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { ManuscriptExportMenu } from "@/components/reader/ManuscriptExportMenu"
+import { ManuscriptModeSwitch } from "@/components/reader/ManuscriptModeSwitch"
+import { ManuscriptSceneOrderStatus, type SceneOrderSaveState } from "@/components/reader/ManuscriptSceneOrderStatus"
+import { ManuscriptVersionHistory } from "@/components/reader/ManuscriptVersionHistory"
+import { ManuscriptWorkspaceSidebarHeader } from "@/components/reader/ManuscriptWorkspaceSidebarHeader"
+import type { ManuscriptDraftFontFamily } from "@/components/reader/ManuscriptNonWriteWorkspace"
+import type { TemplateDestination } from "@/components/reader/ManuscriptPlanWorkspace"
 import { booksApi } from "@/lib/api/books"
-import { deriveEditorProjectCta } from "@/lib/utils/editorProjectCta"
+import { deriveReprocessCta } from "@/lib/utils/editorProjectCta"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
@@ -40,8 +48,9 @@ import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "@/lib
 import { moveSceneIdToIndex, reorderWorkspaceSceneTree } from "@/lib/utils/sceneWorkspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCard, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptAnnotationCategory, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, SceneVersion, SceneVersionDetail, WriterWorkspace, WritingTemplate } from "@/types/book"
+import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCard, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptAnnotationCategory, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, SceneVersion, SceneVersionDetail, VaultNote, WriterWorkspace, WritingTemplate } from "@/types/book"
 import type { Character } from "@/types/character"
+import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, InlineContinuityResponse, ManuscriptSynopsis } from "@/types/intelligence"
 import type { ChapterListResponse, PlotThread, SearchResult } from "@/types/reader"
 
@@ -98,11 +107,15 @@ const ManuscriptWriteRightRail = dynamic(
 type EditorMode = "chapter" | "book"
 type DraftSurfaceMode = "edit" | "paged"
 type BookDraftMap = Record<number, { title: string; text: string; html: string }>
-type WorkspaceTab = "write" | "plan" | "analyze" | "characters"
+type WorkspaceTab = "write" | "plan" | "analysis"
 type RightPane = "context" | "advisor" | "notes" | "arcs" | "insights" | "character"
-type SceneOrderSaveState = "idle" | "saving" | "saved" | "failed"
 type DraggedSceneState = { chapterNumber: number; sceneId: string }
 type SceneDropTarget = { chapterNumber: number; index: number }
+const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string; title: string }> = [
+  { id: "write", label: "Write", title: "Write manuscript" },
+  { id: "plan", label: "Plan", title: "Plan story structure" },
+  { id: "analysis", label: "Analysis", title: "Review manuscript and characters" },
+]
 const EMPTY_CHARACTERS: Character[] = []
 const EMPTY_ANNOTATIONS: ManuscriptAnnotation[] = []
 const EMPTY_NOTES: BookNote[] = []
@@ -110,25 +123,14 @@ const EMPTY_CHAPTER_VERSIONS: ChapterVersion[] = []
 const SCENE_DRAG_SCENE_ID_MIME = "application/x-lorevia-scene-id"
 const SCENE_DRAG_CHAPTER_MIME = "application/x-lorevia-chapter-number"
 
-function getSceneOrderStatusLabel(state: SceneOrderSaveState, isDraggingWithinChapter: boolean) {
-  if (state === "saving") return "Saving order..."
-  if (state === "saved") return "Order saved"
-  if (state === "failed") return "Could not save order"
-  if (isDraggingWithinChapter) return "Drop between scenes to place it"
-  return "Drag the handle to reorder scenes"
-}
-
-function getSceneOrderStatusTone(state: SceneOrderSaveState, isDark: boolean) {
-  if (state === "failed") {
-    return isDark ? "border-rose-400/20 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+function resolveManuscriptDraftFontStack(fontFamily: ManuscriptDraftFontFamily): string {
+  if (fontFamily === "georgia") return 'Georgia, "Times New Roman", serif'
+  if (fontFamily === "sans") return '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif'
+  if (fontFamily === "italian-old-style") {
+    return '"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif'
   }
-  if (state === "saved") {
-    return isDark ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-  }
-  if (state === "saving") {
-    return isDark ? "border-sky-400/20 bg-sky-500/10 text-sky-200" : "border-sky-200 bg-sky-50 text-sky-700"
-  }
-  return isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"
+  if (fontFamily === "eb-garamond") return '"EB Garamond", Garamond, "Times New Roman", Georgia, serif'
+  return '"Times New Roman", Georgia, serif'
 }
 
 function getSceneDropSlotLabel(index: number, totalScenes: number) {
@@ -139,6 +141,26 @@ function getSceneDropSlotLabel(index: number, totalScenes: number) {
 
 function buildSceneDraftStorageKey(bookId: string, scene?: NovelScene | null, chapterNumber?: number | null) {
   return buildSceneAutosaveKey(bookId, scene?.id ?? `new:${chapterNumber ?? "unassigned"}`)
+}
+
+function buildTemplateNoteBody(template: WritingTemplate) {
+  return [
+    `# ${template.title}`,
+    "",
+    template.description.trim(),
+    "",
+    template.content.trim(),
+  ].filter((line) => line !== undefined && line !== null).join("\n")
+}
+
+function buildTemplateOutlineBlock(template: WritingTemplate) {
+  return [
+    `## Draft outline: ${template.title}`,
+    "",
+    template.description.trim() ? `Purpose: ${template.description.trim()}` : "",
+    "",
+    template.content.trim(),
+  ].filter((line) => line !== undefined && line !== null).join("\n")
 }
 
 export default function ManuscriptPage() {
@@ -153,6 +175,7 @@ function ManuscriptPageInner() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
@@ -171,6 +194,7 @@ function ManuscriptPageInner() {
   const [replaceExisting, setReplaceExisting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deletingChapterNumber, setDeletingChapterNumber] = useState<number | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [review, setReview] = useState<EditorialReview | null>(null)
   const [reviewPassages, setReviewPassages] = useState<EditorialReviewPassage[]>([])
@@ -219,7 +243,7 @@ function ManuscriptPageInner() {
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("write")
   const [fontSize, setFontSize] = useState(12)
   const [fontSizeLocked, setFontSizeLocked] = useState(false)
-  const [fontFamily, setFontFamily] = useState<"times" | "georgia" | "sans">("times")
+  const [fontFamily, setFontFamily] = useState<ManuscriptDraftFontFamily>("times")
   const [lineHeight, setLineHeight] = useState(1.8)
   const [showPageGuides, setShowPageGuides] = useState(true)
   const [chapterPreviewPageCount, setChapterPreviewPageCount] = useState(1)
@@ -241,7 +265,8 @@ function ManuscriptPageInner() {
   }>({ arcSummary: "", description: "", personalityTags: "", motivations: "", fears: "" })
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showCompileDialog, setShowCompileDialog] = useState(false)
-  const [compileFormat, setCompileFormat] = useState<"pdf" | "docx" | "epub" | "obsidian">("docx")
+  const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
+  const [compileFormat, setCompileFormat] = useState<"pdf" | "docx" | "epub" | "vault">("docx")
   const [includeSceneMetadataOnImport, setIncludeSceneMetadataOnImport] = useState(true)
   const [includeSceneMetadataOnExport, setIncludeSceneMetadataOnExport] = useState(true)
   const [showEditorSettings, setShowEditorSettings] = useState(false)
@@ -249,8 +274,9 @@ function ManuscriptPageInner() {
   const [fullBookLoading, setFullBookLoading] = useState(false)
   const [bookDrafts, setBookDrafts] = useState<BookDraftMap>({})
   const [contentVersionByChapter, setContentVersionByChapter] = useState<Record<number, number>>({})
-  const [exporting, setExporting] = useState<"pdf" | "docx" | "epub" | "obsidian" | null>(null)
+  const [exporting, setExporting] = useState<"pdf" | "docx" | "epub" | "vault" | null>(null)
   const [reprocessing, setReprocessing] = useState(false)
+  const [reprocessingChapterNumber, setReprocessingChapterNumber] = useState<number | null>(null)
   const [jumpTarget, setJumpTarget] = useState<number | null>(null)
   const [activeFindIndex, setActiveFindIndex] = useState(0)
   const [replaceQuery, setReplaceQuery] = useState("")
@@ -287,6 +313,8 @@ function ManuscriptPageInner() {
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null)
   const [newCorkboardTitle, setNewCorkboardTitle] = useState("")
   const [selectionMenu, setSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
+  const [addCharacterOpen, setAddCharacterOpen] = useState(false)
+  const [addCharacterText, setAddCharacterText] = useState("")
 
   useEffect(() => {
     if (loading || manuscriptReadyCapturedRef.current) return
@@ -312,6 +340,7 @@ function ManuscriptPageInner() {
   const manuscriptReadyCapturedRef = useRef(false)
   const manuscriptLoadStartedAtRef = useRef<number | null>(typeof performance !== "undefined" ? performance.now() : null)
   const deferredChecksSeedRef = useRef<{ chapterNumber: number; text: string } | null>(null)
+  const lastAutoChecksRef = useRef<Record<number, number>>({})
 
   const { data: charactersData = EMPTY_CHARACTERS } = useQuery<Character[]>({
     queryKey: [`manuscript:${bookId}:characters`],
@@ -332,7 +361,7 @@ function ManuscriptPageInner() {
   const { data: synopsisData = null, refetch: refetchSynopsis } = useQuery<ManuscriptSynopsis | null>({
     queryKey: [`manuscript:${bookId}:synopsis:minimal`],
     queryFn: () => intelligenceApi.synopsis(bookId, "minimal"),
-    enabled: workspaceTab === "analyze" || activeRightPane === "insights",
+    enabled: activeRightPane === "insights",
     staleTime: 60_000,
   })
   const { data: workspaceTreeData = null, refetch: refetchWorkspaceTree } = useQuery<ManuscriptWorkspaceTree | null>({
@@ -353,9 +382,16 @@ function ManuscriptPageInner() {
   const {
     data: notesData = EMPTY_NOTES,
     isFetching: notesQueryLoading,
+    refetch: refetchNotes,
   } = useQuery<BookNote[]>({
     queryKey: [`manuscript:${bookId}:notes`],
     queryFn: () => booksApi.getBookNotes(bookId),
+    enabled: showRightRail && activeRightPane === "notes",
+    staleTime: 30_000,
+  })
+  const { data: vaultNotesData = [], refetch: refetchVaultNotes } = useQuery<VaultNote[]>({
+    queryKey: [bookCacheKey(bookId, "vault-notes")],
+    queryFn: () => booksApi.listVaultNotes(bookId),
     enabled: showRightRail && activeRightPane === "notes",
     staleTime: 30_000,
   })
@@ -394,15 +430,22 @@ function ManuscriptPageInner() {
     )
   }, [editingScene, sceneBodyDraft, sceneChapterDraft, sceneDescriptionDraft, sceneEditorOpen, sceneTitleDraft, selectedChapter])
   const hasPendingEdits = dirtyDrafts.length > 0 || sceneDraftDirty
-  const editorProjectCta = useMemo(
-    () => deriveEditorProjectCta(book, hasPendingEdits),
+  const reprocessCta = useMemo(
+    () => deriveReprocessCta(book, hasPendingEdits),
     [book, hasPendingEdits],
   )
+  const reprocessMetadata = writerWorkspace?.reprocess
+  const autoReprocessEnabled = reprocessMetadata?.auto_reprocess_enabled !== false
+  const pendingReprocessChapters = useMemo(
+    () => new Set((reprocessMetadata?.pending_chapters ?? []).filter((chapterNumber) => Number.isFinite(chapterNumber) && chapterNumber > 0)),
+    [reprocessMetadata?.pending_chapters],
+  )
+  const activeChapterNeedsReprocess = pendingReprocessChapters.has(activeChapterNumber)
 
   const sheetStyle = {
     fontSize: `${fontSize}pt`,
     lineHeight: String(lineHeight),
-    fontFamily: fontFamily === "times" ? '"Times New Roman", Georgia, serif' : fontFamily === "georgia" ? 'Georgia, "Times New Roman", serif' : '"Space Grotesk", "Avenir Next", "Segoe UI Variable Text", sans-serif',
+    fontFamily: resolveManuscriptDraftFontStack(fontFamily),
   } as const
 
   const chapterWordCount = useMemo(() => countWords(text), [text])
@@ -425,13 +468,13 @@ function ManuscriptPageInner() {
   const deferredChapterSearch = useDeferredValue(chapterSearch)
   const deferredSceneSearch = useDeferredValue(sceneSearch)
   const leftRailVisible = workspaceTab === "write" && !focusMode && showLeftRail
-  const rightRailVisible = workspaceTab === "write" && !focusMode && showRightRail
+  const rightRailVisible = workspaceTab !== "plan" && !focusMode && showRightRail
   const desktopLayoutClass = leftRailVisible && rightRailVisible
-    ? "xl:grid-cols-[18.5rem_minmax(0,1fr)_22rem]"
+    ? "xl:grid-cols-[22rem_minmax(0,1fr)_23.5rem]"
     : leftRailVisible
-      ? "xl:grid-cols-[18.5rem_minmax(0,1fr)]"
+      ? "xl:grid-cols-[22rem_minmax(0,1fr)]"
       : rightRailVisible
-        ? "xl:grid-cols-[minmax(0,1fr)_22rem]"
+        ? "xl:grid-cols-[minmax(0,1fr)_23.5rem]"
         : "xl:grid-cols-1"
   const chapterListItems = chapterList?.chapters ?? []
   const fullBookPageMap = useMemo(() => {
@@ -591,12 +634,6 @@ function ManuscriptPageInner() {
     }
     return next
   }, [workspaceTree])
-  const filteredNotePaths = useMemo(() => {
-    const paths = workspaceTree?.note_paths ?? []
-    const query = deferredSceneSearch.trim().toLowerCase()
-    if (!query) return paths
-    return paths.filter((path) => path.toLowerCase().includes(query))
-  }, [deferredSceneSearch, workspaceTree])
   const manuscriptFrontMatter = writerWorkspace?.manuscript_front_matter
   const openRightPane = (pane: RightPane) => {
     setActiveRightPane(pane)
@@ -786,9 +823,15 @@ function ManuscriptPageInner() {
     }
   }
 
-  const closeSceneEditor = () => {
-    if (sceneDraftDirty && typeof window !== "undefined" && !window.confirm("You have unsaved scene changes. Close the editor anyway?")) {
-      return
+  const closeSceneEditor = async () => {
+    if (sceneDraftDirty) {
+      const confirmed = await confirm({
+        title: "Close scene editor?",
+        body: "You have unsaved scene changes. Close the editor anyway?",
+        confirmLabel: "Close editor",
+        tone: "danger",
+      })
+      if (!confirmed) return
     }
     setSceneEditorOpen(false)
     setEditingScene(null)
@@ -832,10 +875,8 @@ function ManuscriptPageInner() {
       }
       await loadWorkspaceTree()
       const chaptersToRefresh = [...new Set([previousChapterNumber, sceneChapterDraft].filter((value): value is number => typeof value === "number" && value > 0))]
-      for (const chapterNumber of chaptersToRefresh) {
-        await syncLocalChapterFromServer(chapterNumber)
-      }
-      closeSceneEditor()
+      await Promise.all(chaptersToRefresh.map(syncLocalChapterFromServer))
+      await closeSceneEditor()
       setStatusMessage(editingScene ? "Scene updated." : "Scene saved.")
     } finally {
       setSceneSaving(false)
@@ -849,6 +890,100 @@ function ManuscriptPageInner() {
       await syncLocalChapterFromServer(scene.chapter_number)
     }
     setStatusMessage(`Deleted scene "${scene.title}".`)
+  }
+
+  const removeChapter = async (chapterNumber: number) => {
+    const confirmed = await confirm({
+      title: `Remove Chapter ${chapterNumber}?`,
+      body: `Remove Chapter ${chapterNumber}? This deletes its manuscript text, scenes, notes, comments, and chapter intelligence. This cannot be undone.`,
+      confirmLabel: "Remove chapter",
+      tone: "danger",
+    })
+    if (!confirmed) return
+
+    setDeletingChapterNumber(chapterNumber)
+    try {
+      try {
+        await booksApi.deleteChapter(bookId, chapterNumber)
+      } catch (error) {
+        const detail = axios.isAxiosError(error) ? (error.response?.data as { detail?: unknown } | undefined)?.detail : null
+        setStatusMessage(
+          typeof detail === "string" && detail.trim()
+            ? `Could not remove Chapter ${chapterNumber}: ${detail}`
+            : `Could not remove Chapter ${chapterNumber}.`
+        )
+        return
+      }
+
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(buildManuscriptAutosaveKey(bookId, chapterNumber))
+      }
+
+      let bookData: Book
+      let chapters: ChapterListResponse
+      let workspace: ManuscriptWorkspaceTree | null
+      try {
+        ;[bookData, chapters, workspace] = await Promise.all([
+          booksApi.get(bookId),
+          readerApi.getChapterList(bookId),
+          booksApi.getWorkspaceTree(bookId).catch(() => null),
+        ])
+      } catch {
+        setStatusMessage(`Chapter ${chapterNumber} removed. Reload the editor to refresh the chapter list.`)
+        return
+      }
+
+      const nextChapterNumber =
+        chapters.chapters.find((chapter) => chapter.number > chapterNumber)?.number ??
+        chapters.chapters[chapters.chapters.length - 1]?.number ??
+        null
+
+      setBook(bookData)
+      setChapterList(chapters)
+      setWorkspaceTree(workspace)
+      if (workspace) {
+        setCollapsedSceneGroups((current) => {
+          const next = { ...current }
+          for (const group of workspace.scene_groups) {
+            if (!(group.id in next)) next[group.id] = !!group.collapsed_by_default
+          }
+          return next
+        })
+      }
+      setBookDrafts((current) => {
+        const next = { ...current }
+        delete next[chapterNumber]
+        return next
+      })
+      setContentVersionByChapter((current) => {
+        const next = { ...current }
+        delete next[chapterNumber]
+        return next
+      })
+      setAutosaveState((current) => {
+        const next = { ...current }
+        delete next[chapterNumber]
+        return next
+      })
+      setDirtyDrafts((current) => current.filter((item) => item !== chapterNumber))
+
+      if (selectedChapter === chapterNumber || draftChapterNumber === chapterNumber) {
+        setSelectedChapter(nextChapterNumber)
+        setDraftChapterNumber(null)
+        setReplaceExisting(nextChapterNumber !== null)
+        setReview(null)
+        setReviewPassages([])
+        if (nextChapterNumber === null) {
+          setChapterTitle("")
+          setText("")
+          setHtml(textToHtml(""))
+        }
+      }
+
+      setStatusMessage(`Chapter ${chapterNumber} removed.`)
+    } finally {
+      setDeletingChapterNumber(null)
+    }
   }
 
   const insertSceneIntoDraft = async (scene: NovelScene) => {
@@ -952,9 +1087,7 @@ function ManuscriptPageInner() {
       setSceneVersionDetail(null)
       await loadWorkspaceTree()
       const chaptersToRefresh = [...new Set([previousChapterNumber, restored.scene.chapter_number].filter((value): value is number => typeof value === "number" && value > 0))]
-      for (const chapterNumber of chaptersToRefresh) {
-        await syncLocalChapterFromServer(chapterNumber)
-      }
+      await Promise.all(chaptersToRefresh.map(syncLocalChapterFromServer))
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(buildSceneDraftStorageKey(bookId, restored.scene, restored.scene.chapter_number ?? previousChapterNumber))
       }
@@ -988,8 +1121,38 @@ function ManuscriptPageInner() {
     }, { silent: true })
   }
 
-  const applyTemplateToChapter = (template: WritingTemplate) => {
-    const nextText = text.trim() ? `${text.trim()}\n\n${template.content}` : template.content
+  const applyTemplateToChapter = async (template: WritingTemplate, destination: TemplateDestination) => {
+    if (destination === "chapter_note") {
+      const saved = await booksApi.saveBookNote(bookId, {
+        chapterNumber: activeChapterNumber,
+        title: `Template: ${template.title}`,
+        body: buildTemplateNoteBody(template),
+      })
+      setNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id)])
+      setStatusMessage(`Saved ${template.title} as a chapter note.`)
+      return
+    }
+
+    if (destination === "corkboard") {
+      if (!writerWorkspace) return
+      const card: CorkboardCard = {
+        id: `card-${Date.now()}`,
+        title: template.title,
+        description: buildTemplateNoteBody(template),
+        lane: "ideas",
+        status: "planned",
+        chapter_number: activeChapterNumber,
+        template_id: template.id,
+      }
+      await saveWorkspace({
+        corkboard_cards: [...writerWorkspace.corkboard_cards, card],
+      })
+      setStatusMessage(`Added ${template.title} to the corkboard.`)
+      return
+    }
+
+    const outlineBlock = buildTemplateOutlineBlock(template)
+    const nextText = text.trim() ? `${text.trim()}\n\n${outlineBlock}` : outlineBlock
     const nextHtml = textToHtml(nextText)
     setText(nextText)
     setHtml(nextHtml)
@@ -998,7 +1161,13 @@ function ManuscriptPageInner() {
       ...current,
       [activeChapterNumber]: { title: chapterTitle, text: nextText, html: nextHtml },
     }))
-    setStatusMessage(`Inserted ${template.title} into chapter ${activeChapterNumber}.`)
+    setStatusMessage(`Added ${template.title} as a draft outline block in chapter ${activeChapterNumber}.`)
+  }
+
+  const saveTemplates = async (templates: WritingTemplate[]) => {
+    if (!writerWorkspace) return
+    await saveWorkspace({ templates })
+    setStatusMessage("Template saved.")
   }
 
   const tightenSelectedText = async () => {
@@ -1411,9 +1580,28 @@ function ManuscriptPageInner() {
       event.returnValue = ""
     }
 
+    const handlePageHide = () => {
+      const draft = bookDrafts[activeChapterNumber]
+      if (!draft?.text?.trim()) return
+      const formData = new FormData()
+      formData.append("text", draft.text)
+      formData.append("html", draft.html ?? "")
+      formData.append("title", (draft.title ?? "").trim() || "")
+      formData.append("chapter_number", String(activeChapterNumber))
+      formData.append("replace_existing", "true")
+      navigator.sendBeacon(
+        `/api/v1/books/${bookId}/manuscript/import`,
+        formData,
+      )
+    }
+
     window.addEventListener("beforeunload", handleBeforeUnload)
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [hasPendingEdits])
+    window.addEventListener("pagehide", handlePageHide)
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+      window.removeEventListener("pagehide", handlePageHide)
+    }
+  }, [hasPendingEdits, bookDrafts, activeChapterNumber, bookId])
 
   useEffect(() => {
     if (!showLeftRail || selectedChapter === null) {
@@ -1574,16 +1762,10 @@ function ManuscriptPageInner() {
       setShowRightRail(false)
       return
     }
-    if (workspaceTab === "analyze") {
+    if (workspaceTab === "analysis") {
       setShowLeftRail(false)
       setShowRightRail(true)
-      setActiveRightPane("insights")
-      return
-    }
-    if (workspaceTab === "characters") {
-      setShowLeftRail(false)
-      setShowRightRail(true)
-      setActiveRightPane("character")
+      setActiveRightPane((current) => current === "character" ? "character" : "insights")
     }
   }, [focusMode, workspaceTab])
 
@@ -1698,11 +1880,16 @@ function ManuscriptPageInner() {
         .then(setInlineContinuity)
         .catch(() => setInlineContinuity(null))
         .finally(() => setContinuityLoading(false))
-    }, 500)
+    }, 3000)
     return () => window.clearTimeout(handle)
   }, [activeChapterNumber, bookId, text])
 
   const runAutomaticChecks = async (chapterNum: number, content: string) => {
+    const now = Date.now()
+    const last = lastAutoChecksRef.current[chapterNum] ?? 0
+    if (now - last < 300_000) return
+    lastAutoChecksRef.current[chapterNum] = now
+
     const [editorial, suggestionResult, threads, synopsisResult, emotionalArcResult] = await Promise.all([
       intelligenceApi.editorialReview(bookId, content, chapterNum),
       intelligenceApi.advisorSuggestions(bookId),
@@ -1743,8 +1930,13 @@ function ManuscriptPageInner() {
       clearDraftDirty(chapterNumber)
       clearDraftDirty(importedChapter)
       await loadWorkspaceTree()
-      await runAutomaticChecks(importedChapter, currentDraft.text)
-      setStatusMessage(`Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`)
+      if (!autoReprocessEnabled) await refetchWriterWorkspace()
+      if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, currentDraft.text)
+      setStatusMessage(
+        autoReprocessEnabled
+          ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
+          : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
+      )
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 409) {
         await refreshChapterVersionToken(chapterNumber).catch(() => undefined)
@@ -1784,8 +1976,13 @@ function ManuscriptPageInner() {
         }))
       }
       await loadWorkspaceTree()
-      await runAutomaticChecks(importedChapter, text)
-      setStatusMessage(`Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`)
+      if (!autoReprocessEnabled) await refetchWriterWorkspace()
+      if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, text)
+      setStatusMessage(
+        autoReprocessEnabled
+          ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
+          : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
+      )
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 409 && selectedChapter !== null) {
         await refreshChapterVersionToken(activeChapterNumber).catch(() => undefined)
@@ -1795,6 +1992,69 @@ function ManuscriptPageInner() {
       }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const confirmReprocessManuscript = async () => {
+    if (!book || reprocessing) return
+    setReprocessing(true)
+    setStatusMessage(null)
+    try {
+      const result = await booksApi.reprocessManuscript(book.id)
+      setShowReprocessConfirm(false)
+      setStatusMessage(`Reprocessing started for ${result.chapters_queued} chapter${result.chapters_queued === 1 ? "" : "s"}. This consumed 1 book upload.`)
+      await loadBase()
+    } catch {
+      setStatusMessage("Reprocess failed. Check your upload quota and try again.")
+    } finally {
+      setReprocessing(false)
+    }
+  }
+
+  const toggleAutoReprocess = async (enabled: boolean) => {
+    const currentReprocess = writerWorkspace?.reprocess ?? {
+      auto_reprocess_enabled: true,
+      pending_chapters: [],
+    }
+    await saveWorkspace({
+      reprocess: {
+        ...currentReprocess,
+        auto_reprocess_enabled: enabled,
+      },
+    }, { silent: true })
+    setStatusMessage(
+      enabled
+        ? "Auto reprocess edits is on."
+        : "Auto reprocess edits is off. Open each edited chapter and click Reprocess to update story memory.",
+    )
+  }
+
+  const reprocessChapter = async (chapterNumber: number) => {
+    if (!book || reprocessingChapterNumber !== null) return
+    setReprocessingChapterNumber(chapterNumber)
+    setStatusMessage(null)
+    try {
+      await booksApi.reprocessChapter(book.id, chapterNumber)
+      setWriterWorkspace((current) => current ? {
+        ...current,
+        reprocess: {
+          ...(current.reprocess ?? { auto_reprocess_enabled: true, pending_chapters: [] }),
+          pending_chapters: (current.reprocess?.pending_chapters ?? []).filter((item) => item !== chapterNumber),
+          last_manual_chapter_number: chapterNumber,
+          last_manual_chapter_started_at: new Date().toISOString(),
+        },
+      } : current)
+      await refetchWriterWorkspace()
+      await loadBase()
+      setStatusMessage(`Chapter ${chapterNumber} reprocessing started. This uses tokens, not a book upload.`)
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 429) {
+        setStatusMessage("Manual chapter reprocess token limit reached. Try again after your rolling window refreshes.")
+      } else {
+        setStatusMessage(`Chapter ${chapterNumber} reprocess failed. Try again later.`)
+      }
+    } finally {
+      setReprocessingChapterNumber(null)
     }
   }
 
@@ -1840,6 +2100,8 @@ function ManuscriptPageInner() {
     setSaving(true)
     setStatusMessage(null)
     try {
+      // Sequential saves are intentional: each saveChapterDraft calls setSelectedChapter,
+      // loadWorkspaceTree, and runAutomaticChecks which must not overlap.
       for (const [chapterNumber, draft] of draftEntries) {
         await saveChapterDraft(chapterNumber, draft)
       }
@@ -1865,7 +2127,7 @@ function ManuscriptPageInner() {
     jumpToChapter(result.chapter_num)
   }
 
-  const exportManuscript = async (format: "pdf" | "docx" | "epub" | "obsidian") => {
+  const exportManuscript = async (format: "pdf" | "docx" | "epub" | "vault") => {
     setExporting(format)
     try {
       const preset = writerWorkspace?.publishing.active_preset ?? "standard_manuscript"
@@ -1873,7 +2135,7 @@ function ManuscriptPageInner() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      const extension = format === "obsidian" ? "zip" : format
+      const extension = format === "vault" ? "zip" : format
       link.download = `${(book?.title || "lorevia").replace(/\s+/g, "-").toLowerCase()}-manuscript.${extension}`
       link.click()
       URL.revokeObjectURL(url)
@@ -1964,6 +2226,21 @@ function ManuscriptPageInner() {
     setAnnotationCategory("general")
     setAnnotationVisibility("shared")
     openRightPane("notes")
+  }
+
+  const openAddCharacterFromSelection = () => {
+    if (!selectionMenu?.text) {
+      setStatusMessage("Select a character name in the manuscript first.")
+      return
+    }
+    setAddCharacterText(selectionMenu.text)
+    setAddCharacterOpen(true)
+    setSelectionMenu(null)
+  }
+
+  const handleCharacterCreated = (character: Character) => {
+    setCharacters((current) => [...current, character])
+    setStatusMessage(`Character "${character.name}" added to the story bible.`)
   }
 
   const saveAnnotation = async () => {
@@ -2160,12 +2437,39 @@ function ManuscriptPageInner() {
     return `Local autosave at ${new Date(chapterAutosave.updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
   }
 
+  const activeSaveLabel = saving ? "Saving..." : dirtyDrafts.includes(activeChapterNumber) ? "Unsaved" : "Saved"
+  const inspectorRailClass = isDark
+    ? "border-l border-white/[0.08] bg-[#0b0f11] text-slate-100"
+    : "border-l border-stone-200 bg-white text-stone-950"
+  const inspectorSectionClass = isDark
+    ? "border-t border-white/[0.08] px-4 py-4 first:border-t-0"
+    : "border-t border-stone-200 px-4 py-4 first:border-t-0"
+  const inspectorRecordClass = isDark
+    ? "rounded-md border border-white/[0.08] bg-[#111517] px-3 py-3"
+    : "rounded-md border border-stone-200 bg-stone-50 px-3 py-3"
+  const inspectorLabelClass = isDark
+    ? "text-3xs font-semibold uppercase tracking-[0.22em] text-slate-400"
+    : "text-3xs font-semibold uppercase tracking-[0.22em] text-stone-500"
+  const inspectorMutedTextClass = isDark ? "text-slate-400" : "text-stone-500"
+  const inspectorBodyTextClass = isDark ? "text-slate-200" : "text-stone-700"
+  const inspectorInputClass = isDark
+    ? "rounded-sm border border-white/[0.08] bg-black/70 text-slate-100"
+    : "rounded-sm border border-stone-200 bg-white text-stone-900"
+  const inspectorSecondaryButtonClass = isDark
+    ? "rounded-sm border border-white/[0.1] bg-[#111517] px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/[0.06]"
+    : "rounded-sm border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+  const inspectorPrimaryButtonClass = "rounded-sm bg-[#1f615d] px-3 py-2 text-xs font-semibold text-white hover:bg-[#276f6a] disabled:opacity-40"
+  const inspectorDangerButtonClass = isDark ? "text-xs font-semibold text-rose-300" : "text-xs font-semibold text-rose-700"
+  const inspectorChipClass = isDark
+    ? "rounded-sm border border-white/[0.08] bg-white/[0.05] px-2 py-0.5 text-3xs font-medium text-slate-300"
+    : "rounded-sm border border-stone-200 bg-white px-2 py-0.5 text-3xs font-medium text-stone-600"
+
   if (loading) {
-    return <div className={`min-h-screen px-6 py-20 ${isDark ? "bg-black text-slate-400" : "bg-stone-50 text-stone-500"}`}>Loading manuscript workspace...</div>
+    return <ManuscriptEditorSkeleton isDark={isDark} />
   }
 
   return (
-    <div className={`min-h-screen overflow-x-hidden ${isDark ? "bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_32rem),linear-gradient(180deg,#07090d_0%,#050609_100%)] text-slate-100" : "bg-[#f3eee6] text-stone-950"}`}>
+    <div className={`min-h-screen overflow-x-hidden ${isDark ? "bg-[#101416] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
       <style jsx global>{`
         ::highlight(lorevia-annotation-open) {
           background: ${isDark ? "rgba(251, 191, 36, 0.18)" : "rgba(245, 158, 11, 0.22)"};
@@ -2185,13 +2489,13 @@ function ManuscriptPageInner() {
           className="pointer-events-none fixed z-50 hidden -translate-x-1/2 xl:block"
           style={{ top: selectionMenu.top, left: selectionMenu.left }}
         >
-          <div className={`pointer-events-auto flex items-center gap-2 rounded-full border px-2 py-2 shadow-dropdown ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
+          <div className={`pointer-events-auto flex items-center gap-2 rounded-sm border px-2 py-2 ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
             <button
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => void tightenSelectedText()}
               disabled={tighteningSelection}
-              className="rounded-full bg-[linear-gradient(135deg,#0f766e,#115e59)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="rounded-sm bg-[#1f615d] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
             >
               {tighteningSelection ? "Tightening..." : "Tighten"}
             </button>
@@ -2199,7 +2503,7 @@ function ManuscriptPageInner() {
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => openRightPane("context")}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
             >
               Check consistency
             </button>
@@ -2207,157 +2511,159 @@ function ManuscriptPageInner() {
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => openAnnotationComposer()}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
             >
               Annotate
             </button>
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => openAddCharacterFromSelection()}
+              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-violet-700/30 text-violet-200" : "bg-violet-100 text-violet-800"}`}
+            >
+              Add as character
+            </button>
             <Link
               href={`/${bookId}/advisor`}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
             >
               Ask advisor
             </Link>
           </div>
         </div>
       ) : null}
-      <div className="mx-auto max-w-[1620px] px-3 pb-10 pt-3 sm:px-5 lg:px-6">
-        <div className={`rounded-lg border px-4 py-4 shadow-card sm:px-5 ${isDark ? "border-white/10 bg-[#0b0f15]/90" : "border-white/80 bg-white/92"}`}>
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0">
-                <p className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-600"}`}>{book?.title}</p>
-                <h1 className={`mt-2 font-serif text-3xl leading-tight sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>{activeChapterHeading}</h1>
+      <div className="pb-10">
+        <header className={`sticky top-0 z-40 border-b ${isDark ? "border-white/10 bg-[#111416]/95" : "border-stone-200 bg-white/95"}`}>
+          <div className="flex flex-col">
+            <div className="flex min-h-[4.25rem] flex-col gap-4 px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center ${isDark ? "text-slate-200" : "text-stone-700"}`} aria-hidden>
+                  <BookOpenIcon />
+                </span>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/${bookId}` as Route)}
+                  className={`flex min-w-0 items-center gap-2 text-left text-base font-semibold ${isDark ? "text-white hover:text-teal-200" : "text-stone-950 hover:text-teal-700"}`}
+                  title="Open project overview"
+                >
+                  <span className="truncate">{book?.title || "Manuscript"}</span>
+                  <span className="text-xs" aria-hidden>v</span>
+                </button>
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                  <div>
-                    <p className={`text-sm font-semibold ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>{saving ? "Saving..." : dirtyDrafts.includes(activeChapterNumber) ? "Unsaved" : "Saved"}</p>
-                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{statusMessage ? statusMessage : "Just now"}</p>
-                  </div>
+                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${activeSaveLabel === "Unsaved" ? "bg-teal-400" : "bg-emerald-400"}`} />
+                  <p className={`text-sm font-medium ${activeSaveLabel === "Unsaved" ? isDark ? "text-teal-300" : "text-teal-700" : isDark ? "text-emerald-300" : "text-emerald-700"}`}>{activeSaveLabel}</p>
                 </div>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowExportMenu((value) => !value)}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
-                  >
-                    Export
-                  </button>
-                  {showExportMenu ? (
-                    <div className={`absolute right-0 top-full z-20 mt-2 w-64 rounded-2xl border p-1.5 shadow-dropdown ${isDark ? "border-white/10 bg-[#0f1117]" : "border-stone-200 bg-white"}`}>
-                      <div className="px-3 py-2">
-                        <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Publishing preset</p>
-                        <select
-                          value={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
-                          onChange={(event) => {
-                            const nextPreset = event.target.value as WriterWorkspace["publishing"]["active_preset"]
-                            void saveWorkspace({
-                              publishing: {
-                                ...(writerWorkspace?.publishing ?? { trim_size: "6x9", include_title_page: true, mirror_margins: true }),
-                                active_preset: nextPreset,
-                              },
-                            }, { silent: true })
-                          }}
-                          className={`mt-2 w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
-                        >
-                          <option value="standard_manuscript">Standard manuscript</option>
-                          <option value="trade_paperback">Trade paperback</option>
-                          <option value="kdp_paperback">Amazon KDP paperback</option>
-                        </select>
-                      </div>
-                      <button onClick={() => { setShowExportMenu(false); printManuscript() }} className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>Print</button>
-                      <button onClick={() => { setCompileFormat("docx"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Compile Word / DOCX"}</button>
-                      <button onClick={() => { setCompileFormat("pdf"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Compile submission PDF"}</button>
-                      <button onClick={() => { setCompileFormat("epub"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "epub" ? "Exporting EPUB..." : "Compile EPUB"}</button>
-                      <button onClick={() => { setCompileFormat("obsidian"); setShowExportMenu(false); setShowCompileDialog(true) }} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "obsidian" ? "Exporting vault..." : "Export Obsidian vault"}</button>
-                    </div>
-                  ) : null}
-                </div>
-                <button onClick={() => setFocusMode((value) => !value)} className={`rounded-full border px-4 py-2 text-sm font-medium ${focusMode ? isDark ? "border-emerald-300/40 bg-emerald-400/15 text-white" : "border-emerald-300 bg-emerald-50 text-stone-900" : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                <ManuscriptExportMenu
+                  isDark={isDark}
+                  open={showExportMenu}
+                  activePreset={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
+                  exporting={exporting}
+                  onToggle={() => setShowExportMenu((value) => !value)}
+                  onPresetChange={(nextPreset) => {
+                    void saveWorkspace({
+                      publishing: {
+                        ...(writerWorkspace?.publishing ?? { trim_size: "6x9", include_title_page: true, mirror_margins: true }),
+                        active_preset: nextPreset,
+                      },
+                    }, { silent: true })
+                  }}
+                  onPrint={() => {
+                    setShowExportMenu(false)
+                    printManuscript()
+                  }}
+                  onCompile={(format) => {
+                    setCompileFormat(format)
+                    setShowExportMenu(false)
+                    setShowCompileDialog(true)
+                  }}
+                />
+                <button onClick={() => setFocusMode((value) => !value)} className={`min-h-10 rounded-sm border px-4 text-sm font-medium ${focusMode ? isDark ? "border-emerald-300/40 bg-emerald-400/15 text-white" : "border-emerald-300 bg-emerald-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]" : "border-stone-200 bg-white text-stone-700"}`}>
                   {focusMode ? "Exit focus" : "Focus mode"}
                 </button>
-                {book?.is_editor_project ? (
+                <label
+                  className={`flex min-h-10 items-center gap-2 rounded-sm border px-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                  title="Turning this off stops LoreVia from reprocessing saved edits automatically."
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoReprocessEnabled}
+                    disabled={workspaceSaving}
+                    onChange={(event) => void toggleAutoReprocess(event.target.checked)}
+                    className="h-4 w-4 rounded border-stone-300"
+                  />
+                  Auto reprocess edits
+                </label>
+                {reprocessCta.visible ? (
                   <button
                     type="button"
-                    disabled={editorProjectCta.disabled || reprocessing}
-                    title={editorProjectCta.disabledReason ?? undefined}
-                    onClick={async () => {
-                      if (reprocessing) return
-                      setReprocessing(true)
-                      try {
-                        await booksApi.reprocessManuscript(book.id)
-                      } catch {
-                        // error shown by global handler
-                      } finally {
-                        setReprocessing(false)
-                      }
+                    disabled={reprocessCta.disabled || reprocessing}
+                    title={reprocessCta.disabledReason ?? undefined}
+                    onClick={() => {
+                      if (reprocessing || !book) return
+                      setShowReprocessConfirm(true)
                     }}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium disabled:opacity-40 ${
-                      editorProjectCta.isProcessing
+                    className={`min-h-10 rounded-sm border px-4 text-sm font-medium disabled:opacity-40 ${
+                      reprocessCta.isProcessing
                         ? isDark ? "border-sky-400/30 bg-sky-500/15 text-sky-200" : "border-sky-300 bg-sky-50 text-sky-700"
-                        : isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"
+                        : isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]" : "border-stone-200 bg-white text-stone-700"
                     }`}
                   >
-                    {editorProjectCta.label}
+                    {reprocessCta.label}
                   </button>
                 ) : null}
                 <button
                   type="button"
                   onClick={() => setShowEditorSettings((value) => !value)}
-                  className={`rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-sm border text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]" : "border-stone-200 bg-white text-stone-700"}`}
                   aria-label="Editor settings"
+                  title="Editor settings"
                 >
                   •••
                 </button>
               </div>
             </div>
-            <div className={`flex flex-wrap items-center gap-5 border-t pt-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
-              <div className="flex flex-wrap items-center gap-5" role="tablist" aria-label="Manuscript workspace modes">
-                {(["write", "plan", "analyze", "characters"] as const).map((tab) => (
+            {!autoReprocessEnabled ? (
+              <div className={`border-t px-4 py-2 text-sm lg:px-6 ${isDark ? "border-white/10 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                Turning this off stops LoreVia from reprocessing saved edits automatically. To update story memory, open each edited chapter and click Reprocess. This adds extra steps, but can reduce token usage.
+              </div>
+            ) : null}
+            <div className={`flex flex-col gap-3 border-t px-4 py-2 lg:flex-row lg:items-center lg:justify-between lg:px-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+              <div className="flex flex-wrap items-center gap-8" role="tablist" aria-label="Manuscript workspace modes">
+                {WORKSPACE_TABS.map((tab) => (
                   <button
-                    key={tab}
+                    key={tab.id}
                     type="button"
                     role="tab"
-                    aria-selected={workspaceTab === tab}
-                    onClick={() => setWorkspaceTab(tab)}
-                    className={`border-b-2 pb-2 text-sm font-medium transition ${workspaceTab === tab ? isDark ? "border-sky-400 text-white" : "border-sky-500 text-stone-950" : isDark ? "border-transparent text-slate-400 hover:text-slate-200" : "border-transparent text-stone-500 hover:text-stone-800"}`}
+                    aria-selected={workspaceTab === tab.id}
+                    onClick={() => setWorkspaceTab(tab.id)}
+                    title={tab.title}
+                    className={`border-b-2 py-3 text-sm font-medium transition ${workspaceTab === tab.id ? isDark ? "border-teal-300 text-white" : "border-teal-600 text-stone-950" : isDark ? "border-transparent text-slate-400 hover:text-slate-200" : "border-transparent text-stone-500 hover:text-stone-800"}`}
                   >
-                    {tab === "write" ? "Write" : tab === "plan" ? "Plan" : tab === "analyze" ? "Analyze" : "Characters"}
+                    {tab.label}
                   </button>
                 ))}
               </div>
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-100/80"}`}>
-                  {(["edit", "paged"] as const).map((mode) => (
-                    <button
-                      key={`header-surface-${mode}`}
-                      type="button"
-                      aria-pressed={draftSurfaceMode === mode}
-                      onClick={() => setDraftSurfaceMode(mode)}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${draftSurfaceMode === mode ? isDark ? "bg-sky-300 text-slate-950" : "bg-sky-700 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                    >
-                      {mode === "edit" ? "Draft" : "Paged preview"}
-                    </button>
-                  ))}
-                </div>
-                <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30" : "border border-stone-200 bg-stone-100/80"}`}>
-                  {(["chapter", "book"] as const).map((mode) => (
-                    <button
-                      key={`header-mode-${mode}`}
-                      type="button"
-                      aria-pressed={editorMode === mode}
-                      onClick={() => setEditorMode(mode)}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                    >
-                      {mode === "chapter" ? "Chapter" : "Full book"}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex flex-wrap items-center gap-3 lg:ml-auto">
+                <ManuscriptModeSwitch
+                  isDark={isDark}
+                  options={["edit", "paged"] as const}
+                  selected={draftSurfaceMode}
+                  onSelect={setDraftSurfaceMode}
+                  renderLabel={(mode) => mode === "edit" ? "Draft" : "Paged preview"}
+                />
+                <ManuscriptModeSwitch
+                  isDark={isDark}
+                  options={["chapter", "book"] as const}
+                  selected={editorMode}
+                  onSelect={setEditorMode}
+                  renderLabel={(mode) => mode === "chapter" ? "Chapter" : "Full book"}
+                />
               </div>
             </div>
           </div>
-        </div>
+        </header>
 
         {workspaceTab === "plan" ? (
           <ManuscriptPlanWorkspace
@@ -2385,6 +2691,7 @@ function ManuscriptPageInner() {
               }
             }}
             onApplyTemplate={applyTemplateToChapter}
+            onSaveTemplates={saveTemplates}
             newCorkboardTitle={newCorkboardTitle}
             onNewCorkboardTitleChange={setNewCorkboardTitle}
             onAddCorkboardCard={() => void addCorkboardCard()}
@@ -2392,79 +2699,90 @@ function ManuscriptPageInner() {
             emotionalArc={emotionalArc}
           />
         ) : null}
-        {(workspaceTab === "write" || workspaceTab === "analyze" || workspaceTab === "characters") ? (
-        <div className={`mt-4 grid min-w-0 gap-4 ${desktopLayoutClass}`}>
+        {workspaceTab !== "plan" ? (
+        <div className={`grid min-w-0 ${desktopLayoutClass}`}>
           {leftRailVisible ? (
-          <aside className={`min-w-0 rounded-lg border p-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto ${isDark ? "border-white/10 bg-[#0c1118]/92" : "border-stone-200 bg-white/90"}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Workspace</p>
-                <p className={`mt-1 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{book?.title || "Current project"}</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setSelectedChapter(null)
-                    setDraftChapterNumber(nextChapterNumber)
-                    setReplaceExisting(false)
-                    setChapterTitle(`Chapter ${nextChapterNumber}`)
-                    setText("")
-                    setHtml(textToHtml(""))
-                    setReview(null)
-                    setReviewPassages([])
-                  }}
-                  className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
-                >
-                  New
-                </button>
-                <button
-                  onClick={() => openSceneEditor(null)}
-                  className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}
-                >
-                  Scene
-                </button>
-              </div>
-            </div>
-            <div className={`mt-4 rounded-md border p-4 shadow-[0_18px_50px_-45px_rgba(14,165,233,0.45)] ${isDark ? "border-white/10 bg-[linear-gradient(145deg,rgba(14,165,233,0.09),rgba(255,255,255,0.025))]" : "border-stone-200 bg-white"}`}>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Manuscript</p>
-              <h2 className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{book?.title}</h2>
-              <p className={`mt-2 text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>Story manuscript</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{fullBookWordCount.toLocaleString()} words across the working draft · {fullBookReadingTime}</p>
-            </div>
+          <aside className={`min-w-0 border-r p-5 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:overflow-y-auto ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
+            <ManuscriptWorkspaceSidebarHeader
+              bookTitle={book?.title}
+              fullBookReadingTime={fullBookReadingTime}
+              fullBookWordCount={fullBookWordCount}
+              isDark={isDark}
+              onCreateChapter={() => {
+                setSelectedChapter(null)
+                setDraftChapterNumber(nextChapterNumber)
+                setReplaceExisting(false)
+                setChapterTitle(`Chapter ${nextChapterNumber}`)
+                setText("")
+                setHtml(textToHtml(""))
+                setReview(null)
+                setReviewPassages([])
+              }}
+              onCreateScene={() => openSceneEditor(null)}
+            />
             <input
               type="text"
               value={chapterSearch}
               onChange={(event) => setChapterSearch(event.target.value)}
-              placeholder="Search chapters"
-              className={`mt-4 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+              aria-label="Search chapters"
+              className={`mt-4 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
             />
             <div className="mt-4">
               <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapters</p>
               <div className="mt-2 space-y-2">
               {filteredChapterItems.map((chapter) => {
                 const active = selectedChapter === chapter.number || (selectedChapter === null && draftChapterNumber === chapter.number)
+                const needsReprocess = pendingReprocessChapters.has(chapter.number)
                 const rowStats = chapterRowStats[chapter.number] ?? { wordCount: 0, sceneCount: 0, readingTime: "0 min read" }
                 const rowScenes = { length: rowStats.sceneCount }
                 const rowReadingTime = rowStats.readingTime
                 const rowWordCount = rowStats.wordCount
                 return (
-                  <button
+                  <div
                     key={chapter.number}
-                    onClick={() => {
-                      setSelectedChapter(chapter.number)
-                      setDraftChapterNumber(null)
-                      setReplaceExisting(true)
-                    }}
-                    className={`w-full rounded-md border px-3 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${active ? isDark ? "border-sky-400/60 bg-sky-400/15 text-white shadow-[inset_3px_0_0_rgba(56,189,248,0.75)]" : "border-sky-300 bg-sky-50 text-stone-900 shadow-[inset_3px_0_0_rgba(14,165,233,0.75)]" : isDark ? "border-white/10 bg-white/[0.035] text-slate-300 hover:border-white/15 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
+                    className={`rounded-sm border px-3 py-3 text-sm transition ${active ? isDark ? "border-teal-300 bg-teal-400/10 text-white" : "border-teal-300 bg-teal-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.035] text-slate-300 hover:border-white/15 hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 text-stone-700 hover:bg-white"}`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-semibold">Chapter {chapter.number}</p>
-                      <span className={`h-2.5 w-2.5 rounded-full ${active ? "bg-sky-400" : chapter.processed ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-stone-300"}`} />
+                    <div className="flex items-start justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedChapter(chapter.number)
+                          setDraftChapterNumber(null)
+                          setReplaceExisting(true)
+                        }}
+                        className="min-w-0 flex-1 text-left focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold">Chapter {chapter.number}</p>
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${active ? "bg-teal-300" : chapter.processed ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-stone-300"}`} />
+                        </div>
+                        <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${chapter.number}`}</p>
+                        <p className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowScenes.length} scene{rowScenes.length === 1 ? "" : "s"} - {rowReadingTime}</p>
+                        <p className={`mt-2 text-3xs ${needsReprocess ? isDark ? "text-amber-200" : "text-amber-700" : isDark ? "text-slate-500" : "text-stone-500"}`}>
+                          {rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} - {needsReprocess ? "Needs reprocess" : dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}
+                        </p>
+                      </button>
+                      {needsReprocess ? (
+                        <button
+                          type="button"
+                          disabled={reprocessingChapterNumber === chapter.number}
+                          onClick={() => void reprocessChapter(chapter.number)}
+                          className={`shrink-0 rounded-sm px-2.5 py-1 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-amber-400/40 disabled:cursor-wait disabled:opacity-60 ${isDark ? "bg-amber-400/10 text-amber-100 hover:bg-amber-400/20" : "bg-amber-50 text-amber-700 hover:bg-amber-100"}`}
+                        >
+                          {reprocessingChapterNumber === chapter.number ? "Starting" : "Reprocess"}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={`Remove Chapter ${chapter.number}`}
+                        disabled={deletingChapterNumber === chapter.number}
+                        onClick={() => void removeChapter(chapter.number)}
+                        className={`shrink-0 rounded-sm px-2.5 py-1 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-rose-400/40 disabled:cursor-wait disabled:opacity-60 ${isDark ? "bg-rose-500/10 text-rose-200 hover:bg-rose-500/20" : "bg-rose-50 text-rose-700 hover:bg-rose-100"}`}
+                      >
+                        {deletingChapterNumber === chapter.number ? "Removing" : "Remove"}
+                      </button>
                     </div>
-                    <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${chapter.number}`}</p>
-                    <p className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowScenes.length} scene{rowScenes.length === 1 ? "" : "s"} · {rowReadingTime}</p>
-                    <p className={`mt-2 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} · {dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}</p>
-                  </button>
+                  </div>
                 )
               })}
               </div>
@@ -2474,7 +2792,7 @@ function ManuscriptPageInner() {
                 <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Scenes / reorder</p>
                 <Link
                   href={`/${bookId}/scenes`}
-                  className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}
+                  className={`rounded-sm border px-2.5 py-1 text-3xs font-semibold ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
                 >
                   Open workspace
                 </Link>
@@ -2501,7 +2819,7 @@ function ManuscriptPageInner() {
                     <div
                       key={group.id}
                       style={{ contentVisibility: "auto", containIntrinsicSize: "240px" }}
-                      className={`rounded-md border p-2 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}
+                    className={`rounded-sm border p-2 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}
                     >
                       <button
                         onClick={() => setCollapsedSceneGroups((current) => ({ ...current, [group.id]: !collapsed }))}
@@ -2512,12 +2830,10 @@ function ManuscriptPageInner() {
                       </button>
                       {isChapterSceneGroup ? (
                         <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
-                          <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
+                          <span className={`rounded-sm border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
                             Reorder scenes
                           </span>
-                          <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${getSceneOrderStatusTone(chapterOrderState, isDark)}`}>
-                            {getSceneOrderStatusLabel(chapterOrderState, isDraggingWithinChapter)}
-                          </span>
+                          <ManuscriptSceneOrderStatus isDark={isDark} isDragging={isDraggingWithinChapter} state={chapterOrderState} />
                         </div>
                       ) : null}
                       {!collapsed ? (
@@ -2559,7 +2875,7 @@ function ManuscriptPageInner() {
                                       resetSceneDragState()
                                       void reorderScenesInChapter(chapterSceneNumber, sourceSceneId, index)
                                     }}
-                                    className={`overflow-hidden rounded-full border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${isBeforeDropTarget ? isDark ? "border-sky-400/40 bg-sky-500/15 text-sky-100" : "border-sky-300 bg-sky-50 text-sky-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
+                                    className={`overflow-hidden rounded-sm border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${isBeforeDropTarget ? isDark ? "border-teal-400/40 bg-teal-500/15 text-teal-100" : "border-teal-300 bg-teal-50 text-teal-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
                                   >
                                     <span className="inline-flex h-full items-center">{getSceneDropSlotLabel(index, chapterSceneCount)}</span>
                                   </div>
@@ -2568,46 +2884,74 @@ function ManuscriptPageInner() {
                                   data-scene-id={scene.id}
                                   className={`rounded-sm border px-3 py-3 transition ${isDraggedScene ? "scale-[0.99] opacity-70" : ""} ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}
                                 >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="min-w-0">
                                       {isChapterSceneGroup ? (
-                                        <button
-                                          type="button"
-                                          draggable={!chapterReorderDisabled}
-                                          onDragStart={(event) => {
-                                            if (chapterSceneNumber === null || chapterReorderDisabled) return
-                                            event.dataTransfer.effectAllowed = "move"
-                                            event.dataTransfer.setData(SCENE_DRAG_SCENE_ID_MIME, scene.id)
-                                            event.dataTransfer.setData(SCENE_DRAG_CHAPTER_MIME, String(chapterSceneNumber))
-                                            event.dataTransfer.setData("text/plain", scene.id)
-                                            setDraggedScene({ chapterNumber: chapterSceneNumber, sceneId: scene.id })
-                                            setSceneDropTarget({ chapterNumber: chapterSceneNumber, index })
-                                          }}
-                                          onDragEnd={() => {
-                                            window.setTimeout(() => {
-                                              resetSceneDragState()
-                                            }, 0)
-                                          }}
-                                          aria-label={`Drag ${scene.title} to reorder this chapter`}
-                                          className={`shrink-0 rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition ${chapterReorderDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing"} ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
-                                        >
-                                          Drag
-                                        </button>
-                                      ) : null}
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2">
-                                          {isChapterSceneGroup ? <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene {scene.sort_order}</span> : null}
-                                          <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{scene.title}</p>
+                                        <div className="flex flex-wrap items-center gap-1">
+                                          <button
+                                            type="button"
+                                            draggable={!chapterReorderDisabled}
+                                            onDragStart={(event) => {
+                                              if (chapterSceneNumber === null || chapterReorderDisabled) return
+                                              event.dataTransfer.effectAllowed = "move"
+                                              event.dataTransfer.setData(SCENE_DRAG_SCENE_ID_MIME, scene.id)
+                                              event.dataTransfer.setData(SCENE_DRAG_CHAPTER_MIME, String(chapterSceneNumber))
+                                              event.dataTransfer.setData("text/plain", scene.id)
+                                              setDraggedScene({ chapterNumber: chapterSceneNumber, sceneId: scene.id })
+                                              setSceneDropTarget({ chapterNumber: chapterSceneNumber, index })
+                                            }}
+                                            onDragEnd={() => {
+                                              window.setTimeout(() => {
+                                                resetSceneDragState()
+                                              }, 0)
+                                            }}
+                                            aria-label={`Drag ${scene.title} to reorder this chapter`}
+                                            className={`rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition ${chapterReorderDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing"} ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
+                                          >
+                                            Drag
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={chapterReorderDisabled || index === 0}
+                                            data-testid={`move-scene-${scene.id}-up`}
+                                            onClick={() => {
+                                              if (chapterSceneNumber === null) return
+                                              void reorderScenesInChapter(chapterSceneNumber, scene.id, index - 1)
+                                            }}
+                                            aria-label={`Move ${scene.title} up`}
+                                            className={`rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition disabled:cursor-not-allowed disabled:opacity-40 ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
+                                          >
+                                            Up
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={chapterReorderDisabled || index >= chapterSceneCount - 1}
+                                            data-testid={`move-scene-${scene.id}-down`}
+                                            onClick={() => {
+                                              if (chapterSceneNumber === null) return
+                                              void reorderScenesInChapter(chapterSceneNumber, scene.id, index + 2)
+                                            }}
+                                            aria-label={`Move ${scene.title} down`}
+                                            className={`rounded-sm border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] transition disabled:cursor-not-allowed disabled:opacity-40 ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
+                                          >
+                                            Down
+                                          </button>
                                         </div>
-                                        <p className={`mt-1 text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
-                                        {scene.description ? <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
-                                      </div>
+                                      ) : null}
                                     </div>
-                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`shrink-0 rounded-sm px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                                  </div>
+                                  <div data-testid={`scene-copy-${scene.id}`} className="mt-3 min-w-0">
+                                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                      {isChapterSceneGroup ? <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene {scene.sort_order}</span> : null}
+                                      <p className={`min-w-0 break-words text-sm font-semibold leading-5 ${isDark ? "text-white" : "text-stone-900"}`}>{scene.title}</p>
+                                    </div>
+                                    <p className={`mt-1 break-words text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
+                                    {scene.description ? <p className={`mt-2 break-words text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
                                   </div>
                                   <div className="mt-3 flex flex-wrap gap-2">
-                                    <button onClick={() => openSceneEditor(scene)} className={`rounded-full px-2.5 py-1 text-3xs ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
-                                    <button onClick={() => void removeScene(scene)} className={`rounded-full px-2.5 py-1 text-3xs ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
+                                    <button onClick={() => openSceneEditor(scene)} className={`rounded-sm px-2.5 py-1 text-3xs ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
+                                    <button onClick={() => void removeScene(scene)} className={`rounded-sm px-2.5 py-1 text-3xs ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
                                   </div>
                                 </div>
                               </div>
@@ -2644,7 +2988,7 @@ function ManuscriptPageInner() {
                                 resetSceneDragState()
                                 void reorderScenesInChapter(chapterSceneNumber, sourceSceneId, chapterSceneCount)
                               }}
-                              className={`overflow-hidden rounded-full border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${sceneDropTarget?.chapterNumber === chapterSceneNumber && sceneDropTarget.index === chapterSceneCount ? isDark ? "border-sky-400/40 bg-sky-500/15 text-sky-100" : "border-sky-300 bg-sky-50 text-sky-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
+                              className={`overflow-hidden rounded-sm border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${sceneDropTarget?.chapterNumber === chapterSceneNumber && sceneDropTarget.index === chapterSceneCount ? isDark ? "border-teal-400/40 bg-teal-500/15 text-teal-100" : "border-teal-300 bg-teal-50 text-teal-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
                             >
                               <span className="inline-flex h-full items-center">{getSceneDropSlotLabel(chapterSceneCount, chapterSceneCount)}</span>
                             </div>
@@ -2657,98 +3001,37 @@ function ManuscriptPageInner() {
                 {filteredSceneGroups.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No scenes match this search yet.</p> : null}
               </div>
             </div>
-            <div className="mt-4 hidden">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>notes/</p>
-              <div className={`mt-2 rounded-md border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white"}`}>
-                <div className="space-y-2">
-                  {filteredNotePaths.slice(0, 12).map((path) => (
-                    <p key={path} className={`text-xs ${isDark ? "text-slate-300" : "text-stone-700"}`}>{path}</p>
-                  ))}
-                  {filteredNotePaths.length === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No note files match this search.</p> : null}
-                </div>
-              </div>
-            </div>
-            <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
+            <div className={`mt-4 rounded-sm border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
               <div className="flex items-center justify-between gap-3">
                 <p className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Manuscript progress</p>
                 <span className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{bookGoalProgress ?? 0}%</span>
               </div>
               <div className={`mt-3 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-100"}`}>
-                <div className="h-full rounded-full bg-[linear-gradient(135deg,#0ea5e9,#2563eb)]" style={{ width: `${Math.max(12, bookGoalProgress ?? 18)}%` }} />
+                <div className="h-full rounded-full bg-[#1f615d]" style={{ width: `${Math.max(12, bookGoalProgress ?? 18)}%` }} />
               </div>
               <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
                 {fullBookWordCount.toLocaleString()} / {(writerWorkspace?.word_count_goals.book_target ?? fullBookWordCount).toLocaleString()} words
               </p>
             </div>
             {selectedChapter !== null ? (
-              <div className="mt-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Version history</p>
-                  <button onClick={() => void createSnapshot()} className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Save named version</button>
-                </div>
-                <input
-                  type="text"
-                  value={chapterVersionNameDraft}
-                  onChange={(event) => setChapterVersionNameDraft(event.target.value)}
-                  placeholder={`Example: Before rewrite of chapter ${selectedChapter}`}
-                  className={`mt-2 w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                />
-                <div className="mt-2 space-y-2">
-                  {chapterVersions.map((version) => (
-                    <div key={version.id} className={`rounded-sm px-3 py-3 ${isDark ? "bg-white/[0.03]" : "bg-stone-50"}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className={`text-sm font-medium ${isDark ? "text-white" : "text-stone-900"}`}>{version.note || "Previous draft"}</p>
-                          <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                        {new Date(version.created_at).toLocaleString()} {version.word_count ? `· ${version.word_count} words` : ""}
-                      </p>
-                          <p className={`mt-1 text-3xs uppercase tracking-[0.12em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{(version.snapshot_kind || "manual").replaceAll("_", " ")}</p>
-                        </div>
-                        <button
-                          onClick={() => void restoreSnapshot(version.id)}
-                          disabled={restoringVersionId === version.id}
-                          className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
-                        >
-                          {restoringVersionId === version.id ? "Restoring..." : "Restore"}
-                        </button>
-                        <button
-                          onClick={() => void previewSnapshot(version.id)}
-                          className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
-                        >
-                          Compare
-                        </button>
-                      </div>
-                      {chapterVersionDetail?.id === version.id ? (
-                        <div className="mt-3 grid gap-3">
-                          <p className={`text-3xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                            {chapterVersionDetail.text === text ? "Matches the current draft." : "Compared with the current draft below."}
-                          </p>
-                          <div className="grid gap-3 xl:grid-cols-2">
-                            <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
-                              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
-                              <div className={`mt-2 max-h-44 overflow-y-auto text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
-                                {chapterVersionDetail.text || "No text stored in this snapshot."}
-                              </div>
-                            </div>
-                            <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
-                              <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
-                              <div className={`mt-2 max-h-44 overflow-y-auto text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
-                                {text || "No draft text yet."}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                  {chapterVersions.length === 0 ? <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>No snapshots saved for this chapter yet.</p> : null}
-                </div>
-              </div>
+              <ManuscriptVersionHistory
+                chapterNumber={selectedChapter}
+                chapterVersionDetail={chapterVersionDetail}
+                chapterVersionNameDraft={chapterVersionNameDraft}
+                chapterVersions={chapterVersions}
+                currentText={text}
+                isDark={isDark}
+                restoringVersionId={restoringVersionId}
+                onCreateSnapshot={() => void createSnapshot()}
+                onPreviewSnapshot={(versionId) => void previewSnapshot(versionId)}
+                onRestoreSnapshot={(versionId) => void restoreSnapshot(versionId)}
+                onVersionNameChange={setChapterVersionNameDraft}
+              />
             ) : null}
           </aside>
           ) : null}
 
-          <section ref={manuscriptSectionRef} className={`min-w-0 rounded-lg border p-3 sm:p-4 ${!leftRailVisible && !rightRailVisible ? "xl:mx-auto xl:max-w-[1040px]" : ""} ${isDark ? "border-white/10 bg-[#070b10]/88" : "border-stone-200 bg-[#faf8f4]"}`}>
+          <section ref={manuscriptSectionRef} className={`min-w-0 border-r p-0 ${!leftRailVisible && !rightRailVisible ? "xl:mx-auto xl:max-w-[1040px]" : ""} ${isDark ? "border-white/10 bg-[#0b1114]" : "border-stone-200 bg-[#faf8f4]"}`}>
             {workspaceTab !== "write" ? (
               <Suspense fallback={<Skeleton variant="card" className="min-h-64" />}>
               <ManuscriptNonWriteWorkspace
@@ -2818,11 +3101,11 @@ function ManuscriptPageInner() {
                 />
               ) : (
               <div className="space-y-4">
-                <div className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border shadow-card ${isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full overflow-hidden border ${isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
-                      className={`pointer-events-none absolute inset-0 rounded-lg ${isDark ? "opacity-20" : "opacity-35"}`}
+                      className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
                       style={{
                         backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                       }}
@@ -2837,27 +3120,37 @@ function ManuscriptPageInner() {
                           type="text"
                           defaultValue={formatChapterHeading(activeChapterNumber, chapterTitle)}
                           onBlur={(event) => void handleChapterHeadingBlur(event.target.value, activeChapterNumber, chapterTitle)}
-                          className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white placeholder:text-slate-600" : "text-stone-950 placeholder:text-stone-400"}`}
+                          className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}
                         />
                         <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterReadingTime} · {chapterSceneOutline.length} scene{chapterSceneOutline.length === 1 ? "" : "s"}</p>
                         <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${saveStateTone(activeChapterNumber)}`}>
+                        <span className={`rounded-sm px-3 py-1.5 text-3xs font-semibold ${saveStateTone(activeChapterNumber)}`}>
                           {saveStateLabel(activeChapterNumber)}
                         </span>
                         <button
                           type="button"
                           onClick={() => setShowEditorSettings((value) => !value)}
-                          className={`hidden rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                          className={`hidden rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
                           aria-label="Editor settings"
                         >
                           ⚙
                         </button>
+                        {activeChapterNeedsReprocess ? (
+                          <button
+                            type="button"
+                            onClick={() => void reprocessChapter(activeChapterNumber)}
+                            disabled={reprocessingChapterNumber === activeChapterNumber}
+                            className={`rounded-sm border px-3 py-2 text-sm font-semibold disabled:opacity-60 ${isDark ? "border-amber-300/30 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-700"}`}
+                          >
+                            {reprocessingChapterNumber === activeChapterNumber ? "Starting..." : "Reprocess chapter"}
+                          </button>
+                        ) : null}
                         <button
                           onClick={saveCurrentChapter}
                           disabled={saving || !text.trim()}
-                          className={`rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
+                          className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
                           aria-label="Save now"
                         >
                           Save
@@ -2865,12 +3158,12 @@ function ManuscriptPageInner() {
                       </div>
                     </div>
                     {showEditorSettings ? (
-                      <div className={`mt-4 inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                      <div className={`mt-4 inline-flex items-center gap-2 rounded-sm border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                         <span>Replace existing chapter</span>
                         <button
                           type="button"
                           onClick={() => setReplaceExisting((value) => !value)}
-                          className={`rounded-full px-2.5 py-1 font-semibold ${replaceExisting || selectedChapter !== null ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                          className={`rounded-sm px-2.5 py-1 font-semibold ${replaceExisting || selectedChapter !== null ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                         >
                           {replaceExisting || selectedChapter !== null ? "On" : "Off"}
                         </button>
@@ -2878,7 +3171,7 @@ function ManuscriptPageInner() {
                     ) : null}
                     {autosaveMetaLabel(activeChapterNumber) ? <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{autosaveMetaLabel(activeChapterNumber)}</p> : null}
                   </div>
-                  <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                  <div className={`sticky top-[8.25rem] z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                     <EditorToolbar editorKey={`chapter-${activeChapterNumber}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                   </div>
                   <RichTextEditor
@@ -2902,9 +3195,8 @@ function ManuscriptPageInner() {
                       if (char) openCharCard(char)
                     }}
                     editorKey={`chapter-${activeChapterNumber}`}
-                    placeholder="Write or paste the chapter here..."
                     style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                    className={`relative min-h-[58vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                    className={`relative min-h-[58vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100" : "text-stone-900"}`}
                     contentClassName="mx-auto w-full max-w-[780px]"
                   />
                   <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-400" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
@@ -2916,7 +3208,7 @@ function ManuscriptPageInner() {
               )
             ) : draftSurfaceMode === "paged" ? (
               <div className="space-y-5">
-                {fullBookLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading the full manuscript...</p> : null}
+                {fullBookLoading ? <InlineLoadingRows label="Loading full manuscript" isDark={isDark} rows={2} /> : null}
                 {fullBookPreviewSections.length > 0 ? (
                   <ManuscriptPagedPreview
                     sections={fullBookPreviewSections}
@@ -2932,7 +3224,7 @@ function ManuscriptPageInner() {
               </div>
             ) : (
               <div className="space-y-5">
-                {fullBookLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading the full manuscript...</p> : null}
+                {fullBookLoading ? <InlineLoadingRows label="Loading full manuscript" isDark={isDark} rows={2} /> : null}
                 {(chapterList?.chapters ?? []).map((chapter) => {
                   const draft = bookDrafts[chapter.number] ?? { title: chapter.title || `Chapter ${chapter.number}`, text: "", html: textToHtml("") }
                   return (
@@ -2942,12 +3234,12 @@ function ManuscriptPageInner() {
                         chapterRefs.current[chapter.number] = node
                       }}
                       style={{ contentVisibility: "auto", containIntrinsicSize: "820px" }}
-                      className={`relative mx-auto w-full max-w-full overflow-hidden rounded-md border shadow-card ${jumpTarget === chapter.number ? isDark ? "border-teal-400/50 bg-[#0e1218]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      className={`relative mx-auto w-full max-w-full overflow-hidden border ${jumpTarget === chapter.number ? isDark ? "border-teal-400/50 bg-[#0e1218]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
                           aria-hidden
-                          className={`pointer-events-none absolute inset-0 rounded-lg ${isDark ? "opacity-20" : "opacity-35"}`}
+                          className={`pointer-events-none absolute inset-0 ${isDark ? "opacity-20" : "opacity-35"}`}
                           style={{
                             backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} calc(297mm - 1px), ${isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"} 297mm)`,
                           }}
@@ -2981,19 +3273,19 @@ function ManuscriptPageInner() {
                                   }
                                 }
                               }}
-                              className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white placeholder:text-slate-600" : "text-stone-950 placeholder:text-stone-400"}`}
+                              className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}
                             />
                             <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{countWords(draft.text).toLocaleString()} words / ~{Math.max(1, Math.ceil(countWords(draft.text) / 500))} pages</p>
                             <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{formatReadingTimeLabel(countWords(draft.text) > 0 ? Math.max(1, Math.ceil(countWords(draft.text) / 250)) : 0)} · {buildSceneOutline(draft.text).length} scene{buildSceneOutline(draft.text).length === 1 ? "" : "s"}</p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${saveStateTone(chapter.number)}`}>
+                            <span className={`rounded-sm px-3 py-1.5 text-3xs font-semibold ${saveStateTone(chapter.number)}`}>
                               {saveStateLabel(chapter.number)}
                             </span>
                             <button
                               onClick={() => void saveChapterDraft(chapter.number, draft)}
                               disabled={saving || !draft.text.trim()}
-                              className={`rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
+                              className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
                               aria-label={`Save chapter ${chapter.number}`}
                             >
                               Save
@@ -3001,7 +3293,7 @@ function ManuscriptPageInner() {
                           </div>
                         </div>
                       </div>
-                      <div className={`sticky top-3 z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]/95 backdrop-blur" : "border-[#e6dfd4] bg-[#f7f3ed]/95 backdrop-blur"}`}>
+                      <div className={`sticky top-[8.25rem] z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                         <EditorToolbar editorKey={`book-${chapter.number}`} isDark={isDark} compact characters={characters} onAddComment={() => openAnnotationComposer()} onOpenNotes={() => openRightPane("notes")} />
                       </div>
                       <RichTextEditor
@@ -3027,9 +3319,8 @@ function ManuscriptPageInner() {
                           if (char) openCharCard(char)
                         }}
                         editorKey={`book-${chapter.number}`}
-                        placeholder="Draft this chapter..."
                         style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-                        className={`relative min-h-[54vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
+                        className={`relative min-h-[54vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100" : "text-stone-900"}`}
                         contentClassName="mx-auto w-full max-w-[780px]"
                       />
                       <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-400" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
@@ -3054,13 +3345,13 @@ function ManuscriptPageInner() {
                 <button
                   onClick={saveFullBook}
                   disabled={saving || Object.values(bookDrafts).every((draft) => !draft.text.trim())}
-                  className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
+                  className={`rounded-sm border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-100 disabled:opacity-40" : "border-stone-200 bg-white text-stone-700 disabled:opacity-40"}`}
                 >
                   {saving ? "Saving..." : "Save all chapters"}
                 </button>
               ) : null}
             </div>
-            {statusMessage ? <p className={`mt-3 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{statusMessage}</p> : null}
+            {statusMessage ? <p role="status" className={`mt-3 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{statusMessage}</p> : null}
           </section>
 
           {workspaceTab === "write" && rightRailVisible ? (
@@ -3068,6 +3359,7 @@ function ManuscriptPageInner() {
             <ManuscriptWriteRightRail
               isDark={isDark}
               bookId={bookId}
+              totalChapters={book?.total_chapters ?? chapterListItems.length}
               activeRightPane={activeRightPane}
               onOpenRightPane={openRightPane}
               selectedCharCard={selectedCharCard}
@@ -3088,26 +3380,61 @@ function ManuscriptPageInner() {
               chapterAnnotationsCount={chapterAnnotations.length}
               chapterManualNotes={chapterManualNotes}
               generalNotes={generalNotes}
+              vaultNotes={vaultNotesData}
               activeChapterNumber={activeChapterNumber}
               arcSummaryCharacter={arcSummaryCharacter}
+              onBookNoteSaved={(note) => {
+                setNotes((current) => [note, ...current.filter((item) => item.id !== note.id)])
+                void refetchNotes()
+              }}
+              onVaultNoteSaved={() => {
+                void refetchVaultNotes()
+              }}
             />
             </Suspense>
           ) : null}
 
           {workspaceTab !== "write" && rightRailVisible ? (
-          <aside className="space-y-4">
+          <aside className={inspectorRailClass}>
+            <div className={`border-b p-2 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+              <div className="grid grid-cols-2 gap-1" role="tablist" aria-label="Analysis workspace panels">
+                {([
+                  ["insights", "Insights"],
+                  ["character", "Characters"],
+                ] as const).map(([pane, label]) => (
+                  <button
+                    key={pane}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeRightPane === pane}
+                    onClick={() => setActiveRightPane(pane)}
+                    className={`rounded-sm border-b-2 px-3 py-2.5 text-sm font-semibold transition ${
+                      activeRightPane === pane
+                        ? isDark
+                          ? "border-teal-300 bg-white/[0.04] text-white"
+                          : "border-teal-600 bg-stone-100 text-stone-950"
+                        : isDark
+                          ? "border-transparent text-slate-300 hover:bg-white/[0.04]"
+                          : "border-transparent text-stone-600 hover:bg-stone-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* ── Character Card pane ──────────────────────────── */}
             {activeRightPane === "character" ? (
-              <div className={`rounded-lg border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+              <div className={inspectorSectionClass}>
                 {/* Header: browse list or card header */}
                 {selectedCharCard ? (
                   <>
-                    <div className={`flex items-center justify-between gap-3 border-b p-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+                    <div className="flex items-center justify-between gap-3">
                       <div>
                         <button
                           onClick={() => setSelectedCharCard(null)}
-                          className={`mb-1 text-3xs font-semibold uppercase tracking-[0.18em] transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-600"}`}
+                          className={`mb-1 ${inspectorLabelClass} transition hover:text-teal-300`}
                         >
                           ← All characters
                         </button>
@@ -3122,13 +3449,13 @@ function ManuscriptPageInner() {
                             <button
                               onClick={saveCharCard}
                               disabled={charCardSaving}
-                              className="rounded-full bg-[linear-gradient(135deg,#4f46e5,#4338ca)] px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                              className={inspectorPrimaryButtonClass}
                             >
                               {charCardSaving ? "Saving…" : "Save"}
                             </button>
                             <button
                               onClick={() => setCharCardEditing(false)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-600"}`}
+                              className={inspectorSecondaryButtonClass}
                             >
                               Cancel
                             </button>
@@ -3136,7 +3463,7 @@ function ManuscriptPageInner() {
                         ) : (
                           <button
                             onClick={() => setCharCardEditing(true)}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                            className={inspectorSecondaryButtonClass}
                           >
                             Edit card
                           </button>
@@ -3144,24 +3471,20 @@ function ManuscriptPageInner() {
                       </div>
                     </div>
 
-                    <div className="space-y-4 p-4">
+                    <div className="mt-4 space-y-4">
                       {/* Role + First chapter badges */}
                       <div className="flex flex-wrap gap-2">
                         {selectedCharCard.role && (
-                          <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${
-                            selectedCharCard.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-200" : "bg-indigo-100 text-indigo-700"
-                            : selectedCharCard.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-200" : "bg-teal-100 text-teal-700"
-                            : isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-600"
-                          }`}>{selectedCharCard.role === "mc" ? "Main" : selectedCharCard.role === "sc" ? "Supporting" : "Background"}</span>
+                          <span className={inspectorChipClass}>{selectedCharCard.role === "mc" ? "Main" : selectedCharCard.role === "sc" ? "Supporting" : "Background"}</span>
                         )}
-                        <span className={`rounded-full px-2.5 py-1 text-3xs font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>
+                        <span className={inspectorChipClass}>
                           Ch. {selectedCharCard.first_chapter}{selectedCharCard.last_seen_chapter ? ` to ${selectedCharCard.last_seen_chapter}` : ""}
                         </span>
                         {selectedCharCard.archetype && (
-                          <span className={`rounded-full px-2.5 py-1 text-3xs font-medium ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{selectedCharCard.archetype}</span>
+                          <span className={inspectorChipClass}>{selectedCharCard.archetype}</span>
                         )}
                         {selectedCharCard.character_type === "gag" && (
-                          <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700"}`}>🎭 Gag</span>
+                          <span className={`rounded-sm border px-2 py-0.5 text-3xs font-semibold ${isDark ? "border-amber-400/20 bg-amber-500/10 text-amber-300" : "border-amber-200 bg-amber-50 text-amber-700"}`}>🎭 Gag</span>
                         )}
                       </div>
 
@@ -3199,16 +3522,18 @@ function ManuscriptPageInner() {
                       <div>
                         <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality</p>
                         {charCardEditing ? (
-                          <input
-                            value={charCardDraft.personalityTags}
-                            onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
-                            placeholder="Comma-separated traits"
-                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
+                          <>
+                            <input
+                              value={charCardDraft.personalityTags}
+                              onChange={e => setCharCardDraft(d => ({ ...d, personalityTags: e.target.value }))}
+                              className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            />
+                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Separate multiple traits with commas.</p>
+                          </>
                         ) : (
                           <div className="flex flex-wrap gap-1.5">
                             {(selectedCharCard.personality_tags ?? []).length > 0 ? selectedCharCard.personality_tags.map(tag => (
-                              <span key={tag} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${isDark ? "bg-violet-500/15 text-violet-200" : "bg-violet-100 text-violet-700"}`}>{tag}</span>
+                              <span key={tag} className={inspectorChipClass}>{tag}</span>
                             )) : <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>None recorded.</span>}
                           </div>
                         )}
@@ -3218,12 +3543,14 @@ function ManuscriptPageInner() {
                       <div>
                         <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</p>
                         {charCardEditing ? (
-                          <input
-                            value={charCardDraft.motivations}
-                            onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
-                            placeholder="Comma-separated"
-                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
+                          <>
+                            <input
+                              value={charCardDraft.motivations}
+                              onChange={e => setCharCardDraft(d => ({ ...d, motivations: e.target.value }))}
+                              className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            />
+                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Separate multiple motivations with commas.</p>
+                          </>
                         ) : (
                           <ul className="space-y-1">
                             {(selectedCharCard.motivations ?? []).length > 0 ? selectedCharCard.motivations.map(m => (
@@ -3237,12 +3564,14 @@ function ManuscriptPageInner() {
                       <div>
                         <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</p>
                         {charCardEditing ? (
-                          <input
-                            value={charCardDraft.fears}
-                            onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
-                            placeholder="Comma-separated"
-                            className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200 placeholder:text-slate-600" : "border-stone-200 bg-stone-50 text-stone-800"}`}
-                          />
+                          <>
+                            <input
+                              value={charCardDraft.fears}
+                              onChange={e => setCharCardDraft(d => ({ ...d, fears: e.target.value }))}
+                              className={`w-full rounded-sm border px-3 py-2 text-sm outline-none ${isDark ? "border-white/10 bg-black/30 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-800"}`}
+                            />
+                            <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Separate multiple fears with commas.</p>
+                          </>
                         ) : (
                           <ul className="space-y-1">
                             {(selectedCharCard.fears ?? []).length > 0 ? selectedCharCard.fears.map(f => (
@@ -3263,7 +3592,7 @@ function ManuscriptPageInner() {
                               .map((ev, i) => (
                               <div key={i} className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                                 {(ev.chapter_number ?? ev.chapter) ? (
-                                  <span className={`font-semibold ${isDark ? "text-indigo-300" : "text-violet-600"}`}>
+                                  <span className={`font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>
                                     Ch. {ev.chapter_number ?? ev.chapter} ·{" "}
                                   </span>
                                 ) : null}
@@ -3273,22 +3602,22 @@ function ManuscriptPageInner() {
                                 ) : null}
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                   {typeof ev.impact_score === "number" ? (
-                                    <span className={`rounded-full px-2 py-0.5 ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-600"}`}>
+                                    <span className={inspectorChipClass}>
                                       impact {ev.impact_score}/10
                                     </span>
                                   ) : null}
                                   {ev.growth_direction ? (
-                                    <span className={`rounded-full px-2 py-0.5 capitalize ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-600"}`}>
+                                    <span className={`${inspectorChipClass} capitalize`}>
                                       {ev.growth_direction}
                                     </span>
                                   ) : null}
                                   {typeof ev.growth_magnitude === "number" ? (
-                                    <span className={`rounded-full px-2 py-0.5 ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-600"}`}>
+                                    <span className={inspectorChipClass}>
                                       growth {ev.growth_magnitude}/10
                                     </span>
                                   ) : null}
                                   {ev.is_major ? (
-                                    <span className={`rounded-full px-2 py-0.5 ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-100 text-amber-700"}`}>
+                                    <span className={`rounded-sm border px-2 py-0.5 ${isDark ? "border-amber-400/20 bg-amber-500/10 text-amber-300" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
                                       major
                                     </span>
                                   ) : null}
@@ -3318,7 +3647,7 @@ function ManuscriptPageInner() {
                             folderSegments: ["Characters", selectedCharCard.name],
                           }).catch(() => setStatusMessage("Could not save note."))
                         }}
-                        className={`w-full rounded-full border px-4 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                        className={`${inspectorSecondaryButtonClass} w-full`}
                       >
                         Save as note
                       </button>
@@ -3326,37 +3655,31 @@ function ManuscriptPageInner() {
                   </>
                 ) : (
                   /* Browse list */
-                  <div className="p-4">
-                    <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Characters</p>
-                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Click a name to open their card.</p>
+                  <div>
+                    <p className={inspectorLabelClass}>Characters</p>
+                    <p className={`mt-1 text-xs ${inspectorMutedTextClass}`}>Click a name to open their card.</p>
                     <div className="mt-3 space-y-2">
                       {characters.length === 0 ? (
-                        <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No characters extracted yet.</p>
+                        <p className={`text-sm ${inspectorMutedTextClass}`}>No characters extracted yet.</p>
                       ) : characters.map(char => (
                         <button
                           key={char.id}
                           onClick={() => openCharCard(char)}
-                          className={`w-full rounded-md border px-3 py-3 text-left transition ${
-                            isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.07]" : "border-stone-200 bg-stone-50 hover:bg-white"
-                          }`}
+                          className={`${inspectorRecordClass} w-full text-left transition hover:border-teal-400/40`}
                         >
                           <div className="flex items-center justify-between gap-2">
                             <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{char.name}</p>
                             {char.role && (
-                              <span className={`text-3xs font-semibold uppercase px-2 py-0.5 rounded-full ${
-                                char.role === "mc" ? isDark ? "bg-indigo-500/20 text-indigo-300" : "bg-indigo-100 text-indigo-700"
-                                : char.role === "sc" ? isDark ? "bg-teal-500/20 text-teal-300" : "bg-teal-100 text-teal-700"
-                                : isDark ? "bg-white/10 text-slate-400" : "bg-stone-100 text-stone-500"
-                              }`}>{char.role}</span>
+                              <span className={inspectorChipClass}>{char.role}</span>
                             )}
                           </div>
                           {char.arc_summary && (
-                            <p className={`mt-1 text-xs line-clamp-2 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{char.arc_summary}</p>
+                            <p className={`mt-1 line-clamp-2 text-xs ${inspectorMutedTextClass}`}>{char.arc_summary}</p>
                           )}
                           {char.personality_tags && char.personality_tags.length > 0 && (
-                            <div className="mt-1.5 flex flex-wrap gap-1">
+                            <div className="mt-2 flex flex-wrap gap-1">
                               {char.personality_tags.slice(0, 3).map(t => (
-                                <span key={t} className={`text-3xs rounded-full px-2 py-0.5 ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{t}</span>
+                                <span key={t} className={inspectorChipClass}>{t}</span>
                               ))}
                             </div>
                           )}
@@ -3372,7 +3695,7 @@ function ManuscriptPageInner() {
               <>
             {editorMode === "book" ? (
               <>
-                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={inspectorSectionClass}>
                   <div className="flex items-center justify-between gap-3">
                     <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Page navigator</p>
                     <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{fullBookPageSummaryLabel}</span>
@@ -3385,8 +3708,8 @@ function ManuscriptPageInner() {
                       max={Math.max(1, fullBookApproxPages)}
                       value={gotoPageInput}
                       onChange={(event) => setGotoPageInput(event.target.value)}
-                      placeholder="Page #"
-                      className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                      aria-label="Page number"
+                      className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                     />
                     <button
                       onClick={() => {
@@ -3412,7 +3735,7 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={inspectorSectionClass}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>References</p>
                   <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
                     {fullBookReferenceItems.length > 0 ? fullBookReferenceItems.map((item) => {
@@ -3438,23 +3761,23 @@ function ManuscriptPageInner() {
             ) : null}
 
             {synopsis ? (
-              <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
-                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Synopsis generator</p>
+              <div className={inspectorSectionClass}>
+                  <p className={inspectorLabelClass}>Synopsis generator</p>
                 <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{synopsis.synopsis}</p>
                 {synopsis.focus_points.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {synopsis.focus_points.map((point) => (
-                      <span key={point} className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-100 text-stone-700"}`}>{point}</span>
+                      <span key={point} className={inspectorChipClass}>{point}</span>
                     ))}
                   </div>
                 ) : null}
               </div>
             ) : null}
 
-            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+            <div className={inspectorSectionClass}>
               <div className="flex items-center justify-between gap-3">
-                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Continuity check</p>
-                <Link href={`/${bookId}/reports`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Report history</Link>
+                <p className={inspectorLabelClass}>Continuity check</p>
+                <Link href={`/${bookId}/reports`} className={inspectorSecondaryButtonClass}>Report history</Link>
               </div>
               {review ? (
                 <div className="mt-3 space-y-3">
@@ -3469,7 +3792,7 @@ function ManuscriptPageInner() {
                         </div>
                         <button
                           onClick={() => void saveContinuityIssueAsNote(issue)}
-                          className={`shrink-0 rounded-full px-3 py-1.5 text-3xs font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/20" : "bg-white text-stone-700 hover:bg-stone-100"}`}
+                          className={`${inspectorSecondaryButtonClass} shrink-0 px-2 py-1 text-3xs`}
                         >
                           Save as note
                         </button>
@@ -3480,15 +3803,15 @@ function ManuscriptPageInner() {
                   )}
                   {review.insertion_opportunities.length > 0 ? (
                     <div className="space-y-2">
-                      <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Insertion opportunities</p>
+                      <p className={inspectorLabelClass}>Insertion opportunities</p>
                       {review.insertion_opportunities.map((item, index) => (
-                        <div key={`${item.title}-${index}`} className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-teal-500/20 bg-teal-500/10 text-slate-200" : "border-teal-200 bg-teal-50 text-stone-700"}`}>
+                        <div key={`${item.title}-${index}`} className={`${inspectorRecordClass} text-sm`}>
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="font-semibold">{item.title}</p>
                               <p className="mt-1 text-xs opacity-75">Chapter {item.target_chapter}{item.target_chapter_title ? ` - ${item.target_chapter_title}` : ""}</p>
                             </div>
-                            <button onClick={() => jumpToChapter(item.target_chapter)} className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}>
+                            <button onClick={() => jumpToChapter(item.target_chapter)} className={`${inspectorSecondaryButtonClass} px-2 py-1 text-3xs`}>
                               Jump there
                             </button>
                           </div>
@@ -3510,7 +3833,7 @@ function ManuscriptPageInner() {
                       link.click()
                       URL.revokeObjectURL(url)
                     }}
-                    className={`rounded-full border px-4 py-2 text-xs font-semibold ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
+                    className={inspectorSecondaryButtonClass}
                   >
                     Download continuity report
                   </button>
@@ -3520,22 +3843,22 @@ function ManuscriptPageInner() {
               )}
             </div>
 
-            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+            <div className={inspectorSectionClass}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Character voice consistency</p>
+                  <p className={inspectorLabelClass}>Character voice consistency</p>
                   <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Voice checks moved into a dedicated workspace so notes and scene snapshots stay shared across the app.</p>
                 </div>
-                <Link href={`/${bookId}/voice` as Route} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                <Link href={`/${bookId}/voice` as Route} className={inspectorSecondaryButtonClass}>
                   Open voice workspace
                 </Link>
               </div>
             </div>
 
-            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+            <div className={inspectorSectionClass}>
               <div className="flex items-center justify-between gap-3">
-                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Open threads</p>
-                <Link href={`/${bookId}/plot-threads`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>Dashboard</Link>
+                <p className={inspectorLabelClass}>Open threads</p>
+                <Link href={`/${bookId}/plot-threads`} className={inspectorSecondaryButtonClass}>Dashboard</Link>
               </div>
               <div className="mt-3 space-y-2">
                 {plotThreads.length > 0 ? plotThreads.map((thread) => (
@@ -3548,7 +3871,7 @@ function ManuscriptPageInner() {
             </div>
 
             {reviewPassages.length > 0 ? (
-              <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+              <div className={inspectorSectionClass}>
                 <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Cross-referenced passages</p>
                 <div className="mt-3 space-y-2">
                   {reviewPassages.map((passage, index) => (
@@ -3567,40 +3890,42 @@ function ManuscriptPageInner() {
               </>
             ) : (
               <>
-                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={inspectorSectionClass}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Notes</p>
+                      <p className={inspectorLabelClass}>Notes</p>
                       <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                         Save quick author notes for this chapter or for the whole book.
                       </p>
                     </div>
-                    <Link href={`/${bookId}/notes`} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>All notes</Link>
+                    <Link href={`/${bookId}/notes`} className={inspectorSecondaryButtonClass}>All notes</Link>
                   </div>
 
-                  <div className="mt-4 inline-flex rounded-full p-1 border border-white/10 bg-black/20">
+                  <div className={`mt-4 inline-flex rounded-sm border p-1 ${isDark ? "border-white/[0.08] bg-[#080b0c]" : "border-stone-200 bg-stone-100"}`}>
                     <button
                       onClick={() => setNoteScope("chapter")}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium ${noteScope === "chapter" ? "bg-white text-slate-950" : isDark ? "text-slate-300" : "text-stone-600"}`}
+                      className={`rounded-sm border-b-2 px-3 py-1.5 text-xs font-semibold ${noteScope === "chapter" ? isDark ? "border-teal-300 bg-white/[0.04] text-white" : "border-teal-600 bg-white text-stone-950" : isDark ? "border-transparent text-slate-300" : "border-transparent text-stone-600"}`}
                     >
                       Chapter {activeChapterNumber}
                     </button>
                     <button
                       onClick={() => setNoteScope("book")}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium ${noteScope === "book" ? "bg-white text-slate-950" : isDark ? "text-slate-300" : "text-stone-600"}`}
+                      className={`rounded-sm border-b-2 px-3 py-1.5 text-xs font-semibold ${noteScope === "book" ? isDark ? "border-teal-300 bg-white/[0.04] text-white" : "border-teal-600 bg-white text-stone-950" : isDark ? "border-transparent text-slate-300" : "border-transparent text-stone-600"}`}
                     >
                       Whole book
                     </button>
                   </div>
 
                   <div className="mt-4 space-y-3">
-                    <input
-                      value={noteTitle}
-                      onChange={(event) => setNoteTitle(event.target.value)}
-                      placeholder="Note title"
-                      className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-                    />
-                    <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/10 bg-[#0b0f17]" : "border-stone-200 bg-white"}`}>
+                    <label className="grid gap-1.5">
+                      <span className={inspectorLabelClass}>Note title</span>
+                      <input
+                        value={noteTitle}
+                        onChange={(event) => setNoteTitle(event.target.value)}
+                        className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                      />
+                    </label>
+                    <div className={`overflow-hidden rounded-md border ${isDark ? "border-white/[0.08] bg-[#0a0d0f]" : "border-stone-200 bg-white"}`}>
                       <EditorToolbar editorKey="note-editor-modal" isDark={isDark} compact characters={characters} />
                       <RichTextEditor
                         editorKey="note-editor-modal"
@@ -3613,15 +3938,15 @@ function ManuscriptPageInner() {
                           const char = characters.find((c) => c.name === characterName || c.aliases?.includes(characterName))
                           if (char) openCharCard(char)
                         }}
-                        placeholder={noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}` : "Add a book-level note"}
-                        className={`min-h-[11rem] px-4 py-4 text-sm leading-7 outline-none ${isDark ? "bg-black/40 text-slate-100 placeholder:text-slate-500" : "bg-white text-stone-900 placeholder:text-stone-400"}`}
+                        className={`min-h-[11rem] px-4 py-4 text-sm leading-7 outline-none ${isDark ? "bg-black/40 text-slate-100" : "bg-white text-stone-900"}`}
                       />
                     </div>
+                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{noteScope === "chapter" ? `Add a note for chapter ${activeChapterNumber}.` : "Add a book-level note."}</p>
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={saveNote}
                         disabled={savingNote || !noteBodyText.trim()}
-                        className="rounded-md bg-[linear-gradient(135deg,#d97706,#b45309)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-40"
+                        className={`${inspectorPrimaryButtonClass} px-4 py-3 text-sm`}
                       >
                         {savingNote ? "Saving..." : `Save ${noteScope === "chapter" ? "chapter" : "book"} note`}
                       </button>
@@ -3629,13 +3954,13 @@ function ManuscriptPageInner() {
                         type="button"
                         onClick={() => void saveWorkspaceVaultNote()}
                         disabled={!noteBodyText.trim()}
-                        className={`rounded-md px-4 py-3 text-sm font-semibold transition disabled:opacity-40 ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-100 text-stone-700"}`}
+                        className={`${inspectorSecondaryButtonClass} px-4 py-3 text-sm disabled:opacity-40`}
                       >
                         Save to workspace notes
                       </button>
                       <Link
                         href={`/${bookId}/notes`}
-                        className={`inline-flex items-center justify-center rounded-md px-4 py-3 text-sm font-semibold ${isDark ? "bg-white/6 text-slate-200" : "bg-white text-stone-700 border border-stone-200"}`}
+                        className={`${inspectorSecondaryButtonClass} inline-flex items-center justify-center px-4 py-3 text-sm`}
                       >
                         Open notes workspace
                       </Link>
@@ -3643,16 +3968,16 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
+                <div className={inspectorSectionClass}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Annotations</p>
+                      <p className={inspectorLabelClass}>Annotations</p>
                       <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Anchor comments, private notes, and review categories directly to manuscript passages.</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => openAnnotationComposer()}
-                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                      className={inspectorSecondaryButtonClass}
                     >
                       Use selection
                     </button>
@@ -3665,7 +3990,7 @@ function ManuscriptPageInner() {
                         <select
                           value={annotationCategory}
                           onChange={(event) => setAnnotationCategory(event.target.value as ManuscriptAnnotationCategory)}
-                          className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                          className={`${inspectorInputClass} px-3 py-2 text-sm`}
                         >
                           {MANUSCRIPT_ANNOTATION_CATEGORIES.map((category) => (
                             <option key={category} value={category}>
@@ -3673,18 +3998,18 @@ function ManuscriptPageInner() {
                             </option>
                           ))}
                         </select>
-                        <div className={`inline-flex rounded-full p-1 ${isDark ? "bg-black/30" : "bg-white/80"}`}>
+                        <div className={`inline-flex rounded-sm border p-1 ${isDark ? "border-white/[0.08] bg-[#080b0c]" : "border-stone-200 bg-white"}`}>
                           <button
                             type="button"
                             onClick={() => setAnnotationVisibility("shared")}
-                            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${annotationVisibility === "shared" ? "bg-white text-slate-950" : isDark ? "text-slate-300" : "text-stone-600"}`}
+                            className={`rounded-sm border-b-2 px-3 py-1.5 text-xs font-semibold ${annotationVisibility === "shared" ? isDark ? "border-teal-300 bg-white/[0.04] text-white" : "border-teal-600 bg-stone-100 text-stone-950" : isDark ? "border-transparent text-slate-300" : "border-transparent text-stone-600"}`}
                           >
                             Shared
                           </button>
                           <button
                             type="button"
                             onClick={() => setAnnotationVisibility("private")}
-                            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${annotationVisibility === "private" ? "bg-white text-slate-950" : isDark ? "text-slate-300" : "text-stone-600"}`}
+                            className={`rounded-sm border-b-2 px-3 py-1.5 text-xs font-semibold ${annotationVisibility === "private" ? isDark ? "border-teal-300 bg-white/[0.04] text-white" : "border-teal-600 bg-stone-100 text-stone-950" : isDark ? "border-transparent text-slate-300" : "border-transparent text-stone-600"}`}
                           >
                             Private
                           </button>
@@ -3693,15 +4018,16 @@ function ManuscriptPageInner() {
                       <textarea
                         value={annotationDraft}
                         onChange={(event) => setAnnotationDraft(event.target.value)}
-                        placeholder="Leave an inline annotation"
                         rows={4}
-                        className={`mt-3 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+                        className={`${inspectorInputClass} mt-3 w-full px-3 py-2 text-sm`}
+                        aria-label="Inline annotation"
                       />
+                      <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Leave an inline annotation for the selected passage.</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           onClick={() => void saveAnnotation()}
                           disabled={annotationActionId === "new" || !annotationDraft.trim()}
-                          className="rounded-md bg-[linear-gradient(135deg,#0f766e,#115e59)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                          className={`${inspectorPrimaryButtonClass} px-4 py-2 text-sm`}
                         >
                           {annotationActionId === "new" ? "Saving..." : "Save annotation"}
                         </button>
@@ -3711,7 +4037,7 @@ function ManuscriptPageInner() {
                             setAnnotationAnchor(null)
                             setAnnotationDraft("")
                           }}
-                          className={`rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                          className={`${inspectorSecondaryButtonClass} px-4 py-2 text-sm`}
                         >
                           Cancel
                         </button>
@@ -3722,10 +4048,10 @@ function ManuscriptPageInner() {
                   )}
                 </div>
 
-                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
-                  <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Chapter annotations</p>
+                <div className={inspectorSectionClass}>
+                  <p className={inspectorLabelClass}>Chapter annotations</p>
                   <div className="mt-3 space-y-2">
-                    {annotationsLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading annotations...</p> : null}
+                    {annotationsLoading ? <InlineLoadingRows label="Loading annotations" isDark={isDark} rows={3} /> : null}
                     {!annotationsLoading && chapterAnnotations.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No annotations saved for this chapter yet.</p> : null}
                     {[...openChapterAnnotations, ...resolvedChapterAnnotations].map((annotation) => (
                       <div
@@ -3736,10 +4062,10 @@ function ManuscriptPageInner() {
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
                               <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{annotationCategoryLabel(annotation.category)}</p>
-                              <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] ${annotation.status === "resolved" ? isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-700" : isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-100 text-emerald-800"}`}>
+                              <span className={`rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] ${annotation.status === "resolved" ? isDark ? "border-white/[0.08] bg-white/[0.05] text-slate-300" : "border-stone-200 bg-stone-100 text-stone-700" : isDark ? "border-teal-400/20 bg-teal-500/10 text-teal-200" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
                                 {annotation.status}
                               </span>
-                              <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-white/10 text-slate-300" : "bg-stone-200 text-stone-700"}`}>
+                              <span className={`${inspectorChipClass} uppercase tracking-[0.14em]`}>
                                 {annotation.visibility}
                               </span>
                             </div>
@@ -3760,7 +4086,7 @@ function ManuscriptPageInner() {
                               <button
                                 onClick={() => void removeAnnotation(annotation.id)}
                                 disabled={annotationActionId === annotation.id}
-                                className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}
+                                className={inspectorDangerButtonClass}
                               >
                                 Delete
                               </button>
@@ -3776,39 +4102,44 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
-                  <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Chapter-linked notes</p>
+                <div className={inspectorSectionClass}>
+                  <p className={inspectorLabelClass}>Chapter-linked notes</p>
                   <div className="mt-3 space-y-2">
-                    {notesLoading ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading notes...</p> : null}
+                    {notesLoading ? <InlineLoadingRows label="Loading notes" isDark={isDark} rows={3} /> : null}
                     {!notesLoading && chapterManualNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No notes saved for this chapter yet.</p> : null}
                     {chapterManualNotes.map((note) => (
                       <div key={note.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                         {editingNoteId === note.id ? (
                           <div className="space-y-3">
-                            <input
-                              value={editNoteTitle}
-                              onChange={(e) => setEditNoteTitle(e.target.value)}
-                              placeholder="Note title"
-                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
-                            />
-                            <textarea
-                              value={editNoteBody}
-                              onChange={(e) => setEditNoteBody(e.target.value)}
-                              placeholder="Note content (markdown supported)"
-                              rows={4}
-                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
-                            />
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note title</span>
+                              <input
+                                value={editNoteTitle}
+                                onChange={(e) => setEditNoteTitle(e.target.value)}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note content</span>
+                              <textarea
+                                value={editNoteBody}
+                                onChange={(e) => setEditNoteBody(e.target.value)}
+                                rows={4}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                              <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Markdown is supported.</span>
+                            </label>
                             <div className="flex gap-2">
                               <button
                                 onClick={saveEditedNote}
                                 disabled={editingNoteSaving}
-                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-emerald-600 text-white disabled:opacity-40" : "bg-emerald-600 text-white disabled:opacity-40"}`}
+                                className={inspectorPrimaryButtonClass}
                               >
                                 {editingNoteSaving ? "Saving..." : "Save"}
                               </button>
                               <button
                                 onClick={cancelEditingNote}
-                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "border border-slate-600 text-slate-300" : "border border-stone-300 text-stone-700"}`}
+                                className={inspectorSecondaryButtonClass}
                               >
                                 Cancel
                               </button>
@@ -3823,7 +4154,7 @@ function ManuscriptPageInner() {
                               </div>
                               <div className="flex gap-2">
                                 <button onClick={() => startEditingNote(note)} className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-stone-600"}`}>Edit</button>
-                                <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
+                                <button onClick={() => removeNote(note.id)} className={inspectorDangerButtonClass}>Delete</button>
                               </div>
                             </div>
                             <div
@@ -3837,38 +4168,43 @@ function ManuscriptPageInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white/80"}`}>
-                  <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Whole-book notes</p>
+                <div className={inspectorSectionClass}>
+                  <p className={inspectorLabelClass}>Whole-book notes</p>
                   <div className="mt-3 space-y-2">
                     {!notesLoading && generalNotes.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No general notes saved yet.</p> : null}
                     {generalNotes.map((note) => (
                       <div key={note.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                         {editingNoteId === note.id ? (
                           <div className="space-y-3">
-                            <input
-                              value={editNoteTitle}
-                              onChange={(e) => setEditNoteTitle(e.target.value)}
-                              placeholder="Note title"
-                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
-                            />
-                            <textarea
-                              value={editNoteBody}
-                              onChange={(e) => setEditNoteBody(e.target.value)}
-                              placeholder="Note content (markdown supported)"
-                              rows={4}
-                              className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-stone-300 bg-white text-stone-900"}`}
-                            />
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note title</span>
+                              <input
+                                value={editNoteTitle}
+                                onChange={(e) => setEditNoteTitle(e.target.value)}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                            </label>
+                            <label className="grid gap-1.5">
+                              <span className={inspectorLabelClass}>Note content</span>
+                              <textarea
+                                value={editNoteBody}
+                                onChange={(e) => setEditNoteBody(e.target.value)}
+                                rows={4}
+                                className={`${inspectorInputClass} w-full px-3 py-2 text-sm`}
+                              />
+                              <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Markdown is supported.</span>
+                            </label>
                             <div className="flex gap-2">
                               <button
                                 onClick={saveEditedNote}
                                 disabled={editingNoteSaving}
-                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-emerald-600 text-white disabled:opacity-40" : "bg-emerald-600 text-white disabled:opacity-40"}`}
+                                className={inspectorPrimaryButtonClass}
                               >
                                 {editingNoteSaving ? "Saving..." : "Save"}
                               </button>
                               <button
                                 onClick={cancelEditingNote}
-                                className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "border border-slate-600 text-slate-300" : "border border-stone-300 text-stone-700"}`}
+                                className={inspectorSecondaryButtonClass}
                               >
                                 Cancel
                               </button>
@@ -3883,7 +4219,7 @@ function ManuscriptPageInner() {
                               </div>
                               <div className="flex gap-2">
                                 <button onClick={() => startEditingNote(note)} className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-stone-600"}`}>Edit</button>
-                                <button onClick={() => removeNote(note.id)} className={`text-xs font-medium ${isDark ? "text-rose-300" : "text-rose-700"}`}>Delete</button>
+                                <button onClick={() => removeNote(note.id)} className={inspectorDangerButtonClass}>Delete</button>
                               </div>
                             </div>
                             <div
@@ -3901,6 +4237,35 @@ function ManuscriptPageInner() {
           </aside>
           ) : null}
         </div>
+        ) : null}
+
+        {showReprocessConfirm ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className={`w-full max-w-md rounded-lg border p-5 ${isDark ? "border-white/10 bg-[#0f1117] text-slate-100" : "border-stone-200 bg-white text-stone-950"}`}>
+              <h2 className="text-lg font-semibold">Reprocess manuscript?</h2>
+              <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                Reprocessing rebuilds the Character Bible, relationships, plot threads, summaries, world/lore data, and continuity signals from the saved manuscript. This will consume 1 book upload. Continue?
+              </p>
+              <div className="mt-5 flex flex-wrap justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowReprocessConfirm(false)}
+                  disabled={reprocessing}
+                  className={`rounded-md border px-4 py-2 text-sm font-medium disabled:opacity-50 ${isDark ? "border-white/10 text-slate-200" : "border-stone-200 text-stone-700"}`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmReprocessManuscript()}
+                  disabled={reprocessing}
+                  className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {reprocessing ? "Starting..." : "Reprocess and use 1 upload"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         <ManuscriptOverlayDialogs
@@ -3945,15 +4310,139 @@ function ManuscriptPageInner() {
           workspaceSaving={workspaceSaving}
           onCompileManuscript={() => void compileManuscript()}
         />
+
+        <AddCharacterFromSelection
+          bookId={bookId}
+          selectedText={addCharacterText}
+          isDark={isDark}
+          firstChapter={activeChapterNumber ?? undefined}
+          open={addCharacterOpen}
+          onClose={() => setAddCharacterOpen(false)}
+          onCreated={handleCharacterCreated}
+        />
       </div>
     </div>
   )
 }
+
+function BookOpenIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 5.5c0-1 0-1.5.3-1.8.3-.2.8-.2 1.8-.2h3.1c1.5 0 2.4.4 2.8 1.2.4-.8 1.3-1.2 2.8-1.2h3.1c1 0 1.5 0 1.8.2.3.3.3.8.3 1.8v12c0 1 0 1.5-.3 1.8-.3.2-.8.2-1.8.2h-3.3c-1.4 0-2.2.3-2.6 1-.4-.7-1.2-1-2.6-1H6.1c-1 0-1.5 0-1.8-.2-.3-.3-.3-.8-.3-1.8v-12Z" />
+      <path d="M12 5v15" />
+    </svg>
+  )
+}
+
+function ManuscriptEditorSkeleton({ isDark }: { isDark: boolean }) {
+  const shellClass = isDark ? "bg-[#101416] text-slate-100" : "bg-[#f4f5f3] text-stone-950"
+  const panelClass = isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"
+  const canvasClass = isDark ? "border-white/10 bg-[#0b1114]" : "border-stone-200 bg-[#faf8f4]"
+
+  return (
+    <div className={`min-h-screen ${shellClass}`}>
+      <header className={`sticky top-0 z-40 border-b ${panelClass}`}>
+        <div className="flex min-h-[4.25rem] items-center justify-between px-6">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-7 w-7 rounded-sm" />
+            <Skeleton className="h-5 w-52" />
+          </div>
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-10 w-20 rounded-sm" />
+            <Skeleton className="h-10 w-28 rounded-sm" />
+            <Skeleton className="h-10 w-10 rounded-sm" />
+          </div>
+        </div>
+        <div className={`flex items-center justify-between border-t px-6 py-2 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+          <div className="flex gap-8">
+            <Skeleton className="h-8 w-12" />
+            <Skeleton className="h-8 w-10" />
+            <Skeleton className="h-8 w-16" />
+            <Skeleton className="h-8 w-20" />
+          </div>
+          <div className="flex gap-4">
+            <Skeleton className="h-10 w-44 rounded-sm" />
+            <Skeleton className="h-10 w-44 rounded-sm" />
+          </div>
+        </div>
+      </header>
+
+      <div className="grid min-w-0 xl:grid-cols-[22rem_minmax(0,1fr)_23.5rem]">
+        <aside className={`hidden min-h-[calc(100vh-8.25rem)] border-r p-5 xl:block ${panelClass}`}>
+          <Skeleton className="h-4 w-24" />
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <Skeleton className="h-10 rounded-sm" />
+            <Skeleton className="h-10 rounded-sm" />
+          </div>
+          <Skeleton variant="card" className="mt-5 h-32 rounded-sm" />
+          <Skeleton className="mt-4 h-10 rounded-sm" />
+          <div className="mt-6 space-y-3">
+            <Skeleton className="h-24 rounded-sm" />
+            <Skeleton className="h-24 rounded-sm" />
+            <Skeleton className="h-24 rounded-sm" />
+          </div>
+        </aside>
+
+        <main className={`min-h-[calc(100vh-8.25rem)] border-r ${canvasClass}`}>
+          <div className={`border-b px-7 py-6 ${isDark ? "border-white/10 bg-[#111721]" : "border-stone-200 bg-white"}`}>
+            <Skeleton className="h-3 w-44" />
+            <Skeleton className="mt-4 h-11 w-96" />
+            <div className="mt-4 flex gap-4">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-24" />
+            </div>
+          </div>
+          <div className={`border-b px-3 py-3 ${isDark ? "border-white/10 bg-[#0c1118]" : "border-stone-200 bg-white"}`}>
+            <Skeleton className="h-11 w-full rounded-sm" />
+          </div>
+          <div className="px-8 py-10">
+            <div className="mx-auto max-w-[780px] space-y-5">
+              <Skeleton className="h-5 w-5/6" />
+              <Skeleton className="h-5 w-4/6" />
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-11/12" />
+              <Skeleton className="h-5 w-3/4" />
+            </div>
+          </div>
+        </main>
+
+        <aside className={`hidden min-h-[calc(100vh-8.25rem)] xl:block ${panelClass}`}>
+          <div className={`border-b px-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+            <Skeleton className="h-12 w-full" />
+          </div>
+          <div className="space-y-0">
+            <Skeleton className="h-40 rounded-none" />
+            <Skeleton className="h-36 rounded-none" />
+            <Skeleton className="h-36 rounded-none" />
+            <Skeleton className="h-44 rounded-none" />
+          </div>
+        </aside>
+      </div>
+    </div>
+  )
+}
+
 function DeferredPanelLoadingState({ label }: { label: string }) {
   return (
     <div className="flex min-h-[12rem] flex-col items-center justify-center gap-3 rounded-md border border-border bg-card/60 p-6">
       <Skeleton variant="card" className="w-full min-h-44" />
       <p className="text-sm text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
+function InlineLoadingRows({ isDark, label, rows = 3 }: { isDark: boolean; label: string; rows?: number }) {
+  return (
+    <div className="space-y-2" role="status" aria-label={label} aria-busy="true">
+      <span className="sr-only">{label}</span>
+      {Array.from({ length: rows }).map((_, index) => (
+        <Skeleton
+          key={`${label}-${index}`}
+          className={`${index === rows - 1 ? "w-2/3" : "w-full"} h-3 ${isDark ? "bg-white/8" : "bg-stone-200/80"}`}
+        />
+      ))}
     </div>
   )
 }

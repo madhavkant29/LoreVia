@@ -56,26 +56,33 @@ if [[ "${RUN_TESTS:-0}" == "1" ]]; then
   docker compose -f docker-compose-local.yml exec -T api pytest tests/integration/test_beta_reads_api.py tests/unit/test_trial_email_service.py -v
 fi
 
-if [[ ! -f "./backend/.env" ]]; then
-  echo "Missing ./backend/.env"
-  exit 1
-fi
-
 if [[ ! -f "${COMPOSE_ENV_FILE}" ]]; then
   echo "Missing Compose env file: ${COMPOSE_ENV_FILE}"
   exit 1
 fi
 
-set -a
-source ./backend/.env
-set +a
+# Source env vars from the compose env file for variable substitution in docker-compose.yml.
+# systemd supplies these via EnvironmentFile; manual runs source from here as a fallback.
+if [[ -z "${REDIS_PASSWORD:-}" ]] || [[ -z "${LOREVIA_ENV_FILE:-}" ]]; then
+  set -a
+  source "${COMPOSE_ENV_FILE}"
+  set +a
+fi
+
+if [[ -z "${REDIS_PASSWORD:-}" ]]; then
+  echo "REDIS_PASSWORD must be set in ${COMPOSE_ENV_FILE}"
+  exit 1
+fi
 
 if [[ -z "${ALEMBIC_DATABASE_URL:-}" ]]; then
   echo "ALEMBIC_DATABASE_URL must be exported before deploy."
   exit 1
 fi
 
-export ALEMBIC_CONFIRM_REMOTE="${ALEMBIC_CONFIRM_REMOTE:-YES_I_AM_SURE}"
+if [[ "${ALEMBIC_CONFIRM_REMOTE:-}" != "YES_I_AM_SURE" ]]; then
+  echo "ALEMBIC_CONFIRM_REMOTE must be explicitly exported as YES_I_AM_SURE before deploy."
+  exit 1
+fi
 
 mkdir -p "${BACKUP_DIR}"
 

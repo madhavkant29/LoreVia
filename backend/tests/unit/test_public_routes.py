@@ -79,6 +79,17 @@ async def _async_empty_book_analytics(*_args, **_kwargs):
     return public.PublicBookAnalyticsOut()
 
 
+def _request():
+    return SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={"user-agent": "pytest"})
+
+
+def _allow_public_share(monkeypatch):
+    async def _allow(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.public_publish_service.enforce_daily_public_publish_limit", _allow)
+
+
 @pytest.fixture(autouse=True)
 def _enable_public_mode(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
@@ -819,6 +830,7 @@ async def test_publish_user_shared_book_requires_explicit_confirmation():
             await public.publish_user_shared_book(
                 book_id,
                 PublicBookShareBody(confirm_public_share=False, description="Share me"),
+                _request(),
                 db=_FakeDB(get_values=[book]),
                 current_user=SimpleNamespace(id=user_id, tier="author"),
             )
@@ -840,22 +852,22 @@ async def test_publish_user_shared_book_creates_pending_approval_request(monkeyp
         public_description=None,
     )
     db = _FakeDB(get_values=[book])
+    _allow_public_share(monkeypatch)
 
     payload = await public.publish_user_shared_book(
         book_id,
         PublicBookShareBody(confirm_public_share=True, description="Public draft"),
+        _request(),
         db=db,
         current_user=SimpleNamespace(id=user_id, tier="author"),
     )
 
-    assert payload == {
-        "book_id": str(book_id),
-        "status": "ready",
-        "visibility": "private",
-        "public_kind": "user_public_share",
-        "approval_status": "pending",
-        "message": "Public sample request submitted for manual approval.",
-    }
+    assert payload.book_id == str(book_id)
+    assert payload.status == "ready"
+    assert payload.visibility == "private"
+    assert payload.public_kind == "user_public_share"
+    assert payload.approval_status == "pending"
+    assert payload.message == "Public sample is pending review."
     assert book.is_public is False
     assert book.source_kind == "user_public_share"
     assert book.public_description == "Public draft"
@@ -881,8 +893,9 @@ async def test_publish_user_shared_book_refreshes_copyright_signals_before_reque
         copyright_warning=False,
     )
     db = _FakeDB(get_values=[book])
+    _allow_public_share(monkeypatch)
 
-    monkeypatch.setattr(public, "download_book", lambda _key: b"%PDF-1.4 sample")
+    monkeypatch.setattr("app.services.public_publish_service.download_book", lambda _key: b"%PDF-1.4 sample")
 
     async def _fake_evaluate_document_copyright(*, format_name, raw, existing_isbn=None):
         assert format_name == "pdf"
@@ -890,22 +903,23 @@ async def test_publish_user_shared_book_refreshes_copyright_signals_before_reque
         assert existing_isbn is None
         return {"isbn": "9780306406157", "copyright_warning": True}
 
-    monkeypatch.setattr(public, "evaluate_document_copyright", _fake_evaluate_document_copyright)
+    monkeypatch.setattr("app.services.public_publish_service.evaluate_document_copyright", _fake_evaluate_document_copyright)
 
     payload = await public.publish_user_shared_book(
         book_id,
         PublicBookShareBody(confirm_public_share=True, description="Public draft"),
+        _request(),
         db=db,
         current_user=SimpleNamespace(id=user_id, tier="author"),
     )
 
-    assert payload["approval_status"] == "pending"
+    assert payload.approval_status == "pending"
     assert book.isbn == "9780306406157"
     assert book.copyright_warning is True
 
 
 @pytest.mark.asyncio
-async def test_publish_user_shared_book_resubmits_approved_book_for_fresh_review():
+async def test_publish_user_shared_book_resubmits_approved_book_for_fresh_review(monkeypatch):
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
     book = SimpleNamespace(
@@ -920,22 +934,22 @@ async def test_publish_user_shared_book_resubmits_approved_book_for_fresh_review
         public_share_status="approved",
     )
     db = _FakeDB(get_values=[book])
+    _allow_public_share(monkeypatch)
 
     payload = await public.publish_user_shared_book(
         book_id,
         PublicBookShareBody(confirm_public_share=True, description="Approved draft"),
+        _request(),
         db=db,
         current_user=SimpleNamespace(id=user_id, tier="author"),
     )
 
-    assert payload == {
-        "book_id": str(book_id),
-        "status": "ready",
-        "visibility": "private",
-        "public_kind": "user_public_share",
-        "approval_status": "pending",
-        "message": "Public sample request submitted for manual approval.",
-    }
+    assert payload.book_id == str(book_id)
+    assert payload.status == "ready"
+    assert payload.visibility == "private"
+    assert payload.public_kind == "user_public_share"
+    assert payload.approval_status == "pending"
+    assert payload.message == "Public sample is pending review."
     assert book.is_public is False
     assert book.public_share_status == "pending"
     assert book.public_description == "Approved draft"

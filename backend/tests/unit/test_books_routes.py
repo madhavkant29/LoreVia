@@ -25,7 +25,7 @@ from app.schemas.books import (
     CharacterEventOut,
     ChapterConsistencyReport,
     MajorEventOut,
-    ObsidianVaultNoteBody,
+    VaultNoteBody,
     ReadabilityRequestBody,
     RelationshipCreateBody,
     RelationshipUpdateBody,
@@ -970,12 +970,12 @@ async def test_series_routes_and_user_stats(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_book_notes_obsidian_and_workspace_routes(monkeypatch):
+async def test_book_notes_vault_and_workspace_routes(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, writer_workspace={"goal_calendar": []})
     chapter_version = {"id": "v1", "chapter_number": 1, "created_at": datetime.now(UTC)}
     note = {"id": "n1", "book_id": str(book.id), "body": "note"}
-    obsidian_note = {"path": "Lore/Scene.md", "source": "user_notes", "content": "text", "persisted": True}
+    vault_note = {"path": "Lore/Scene.md", "source": "user_notes", "content": "text", "persisted": True}
 
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "list_user_notes", _async_value([note]))
@@ -983,13 +983,13 @@ async def test_book_notes_obsidian_and_workspace_routes(monkeypatch):
     monkeypatch.setattr(books, "list_book_notes", _async_value([note]))
     monkeypatch.setattr(books, "save_book_note", _async_value(note))
     monkeypatch.setattr(books, "delete_book_note", _async_value(None))
-    monkeypatch.setattr(books, "list_obsidian_notes", _async_value([obsidian_note]))
-    monkeypatch.setattr(books, "save_obsidian_vault_note", _async_value(obsidian_note))
-    monkeypatch.setattr(books, "delete_obsidian_note", _async_value(None))
-    monkeypatch.setattr(books, "import_obsidian_notes_zip", _async_value([obsidian_note]))
-    monkeypatch.setattr(books, "export_obsidian_notes_zip", lambda notes: b"zip")
-    monkeypatch.setattr(books, "build_obsidian_graph", lambda notes: {"node_count": len(notes), "edge_count": 0, "nodes": [], "edges": []})
-    monkeypatch.setattr(books, "list_obsidian_note_relations", _async_value({"path": "Lore/Scene.md", "outgoing": [], "incoming": []}))
+    monkeypatch.setattr(books, "list_vault_notes", _async_value([vault_note]))
+    monkeypatch.setattr(books, "save_vault_note", _async_value(vault_note))
+    monkeypatch.setattr(books, "delete_vault_note", _async_value(None))
+    monkeypatch.setattr(books, "import_vault_notes_zip", _async_value([vault_note]))
+    monkeypatch.setattr(books, "export_vault_notes_zip", lambda notes: b"zip")
+    monkeypatch.setattr(books, "build_vault_graph", lambda notes: {"node_count": len(notes), "edge_count": 0, "nodes": [], "edges": []})
+    monkeypatch.setattr(books, "list_vault_note_relations", _async_value({"path": "Lore/Scene.md", "outgoing": [], "incoming": []}))
     monkeypatch.setattr(books, "build_prewriting_check", _async_value({"upcoming_chapter": 4, "active_characters": [], "unresolved_threads": [], "recent_events": [], "alerts": []}))
     monkeypatch.setattr(books, "build_story_health_payload", _async_value({"score": 82, "status": "healthy", "summary": "Good", "metrics": []}))
     monkeypatch.setattr(books, "list_chapter_consistency_reports", _async_value([]))
@@ -1014,18 +1014,18 @@ async def test_book_notes_obsidian_and_workspace_routes(monkeypatch):
     response = await books.remove_book_note(book.id, uuid.uuid4(), db=_FakeDB(), current_user=user)
     assert response.status_code == 204
 
-    assert await books.list_book_obsidian_notes(book.id, db=_FakeDB(), current_user=user) == [obsidian_note]
-    assert await books.save_book_obsidian_note(book.id, ObsidianVaultNoteBody(path="Lore/Scene.md", content="text"), db=_FakeDB(), current_user=user) == obsidian_note
-    response = await books.delete_book_obsidian_note(book.id, "Lore/Scene.md", db=_FakeDB(), current_user=user)
+    assert await books.list_book_vault_notes(book.id, db=_FakeDB(), current_user=user) == [vault_note]
+    assert await books.save_book_vault_note(book.id, VaultNoteBody(path="Lore/Scene.md", content="text"), db=_FakeDB(), current_user=user) == vault_note
+    response = await books.delete_book_vault_note(book.id, "Lore/Scene.md", db=_FakeDB(), current_user=user)
     assert response.status_code == 204
-    assert await books.import_book_obsidian_notes(book.id, _upload("notes.zip", b"zipdata"), db=_FakeDB(), current_user=user, _=None) == [obsidian_note]
+    assert await books.import_book_vault_notes(book.id, _upload("notes.zip", b"zipdata"), db=_FakeDB(), current_user=user, _=None) == [vault_note]
 
-    response = await books.export_book_obsidian_notes(book.id, db=_FakeDB(), current_user=user)
+    response = await books.export_book_vault_notes(book.id, db=_FakeDB(), current_user=user)
     assert response.media_type == "application/zip"
 
-    graph = await books.get_book_obsidian_graph(book.id, db=_FakeDB(), current_user=user)
+    graph = await books.get_book_vault_graph(book.id, db=_FakeDB(), current_user=user)
     assert graph["node_count"] == 1
-    relations = await books.get_book_obsidian_note_relations(book.id, path="Lore/Scene.md", db=_FakeDB(), current_user=user)
+    relations = await books.get_book_vault_note_relations(book.id, path="Lore/Scene.md", db=_FakeDB(), current_user=user)
     assert relations["path"] == "Lore/Scene.md"
     prewriting = await books.get_prewriting_check(book.id, upcoming_chapter=None, db=_FakeDB(), current_user=user)
     assert prewriting["upcoming_chapter"] == 4
@@ -1183,11 +1183,11 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     monkeypatch.setattr(books, "strip_scene_metadata_from_manuscript_text", lambda text: text.replace("SCENE\n", ""))
     monkeypatch.setattr(books, "build_writer_workspace_payload", lambda _book: {"manuscript_front_matter": {"title": "Atlas Draft"}})
     monkeypatch.setattr(books, "list_novel_scenes", _async_value([{"source": "manual", "status": "active"}]))
-    monkeypatch.setattr(books, "list_obsidian_notes", _async_value([{"path": "Lore/Scene.md"}]))
+    monkeypatch.setattr(books, "list_vault_notes", _async_value([{"path": "Lore/Scene.md"}]))
     monkeypatch.setattr(books, "get_book_with_collaboration_access", _async_value((book, None)))
     monkeypatch.setattr(books, "manuscript_pdf_compiled", lambda **kwargs: compiled_calls.append({"format": "pdf", **kwargs}) or b"pdf")
     monkeypatch.setattr(books, "manuscript_epub_compiled", lambda **kwargs: compiled_calls.append({"format": "epub", **kwargs}) or b"epub")
-    monkeypatch.setattr(books, "manuscript_obsidian_vault_zip", lambda **_kwargs: b"zip")
+    monkeypatch.setattr(books, "manuscript_vault_zip", lambda **_kwargs: b"zip")
     monkeypatch.setattr(books, "manuscript_docx", lambda **_kwargs: b"docx")
 
     db = _FakeDB(execute_values=[_Result(all_rows=[])])
@@ -1198,7 +1198,7 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     for fmt, media_type in (
         ("pdf", "application/pdf"),
         ("epub", "application/epub+zip"),
-        ("obsidian", "application/zip"),
+        ("vault", "application/zip"),
         ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
     ):
         db = _FakeDB(execute_values=[_Result(all_rows=[(1, "One", "chapters/1.json")])])
@@ -1210,11 +1210,12 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
             current_user=user,
         )
         assert response.media_type == media_type
-        expected_name = "Atlas-Draft-manuscript-vault.zip" if fmt == "obsidian" else f"Atlas-Draft-manuscript.{fmt}"
+        expected_name = "Atlas-Draft-manuscript-vault.zip" if fmt == "vault" else f"Atlas-Draft-manuscript.{fmt}"
         assert response.headers["Content-Disposition"] == f'attachment; filename="{expected_name}"'
 
     assert [call["format"] for call in compiled_calls] == ["pdf", "epub"]
     assert all(call["chapters"] == [{"number": 1, "title": "One", "text": "Body", "html": None}] for call in compiled_calls)
+    assert all(call["font_family"] == "serif" for call in compiled_calls)
 
     cover_book = _book(user_id=user.id, cover_s3_key="covers/atlas.png")
     monkeypatch.setattr(books, "ensure_book_cover", _async_value(None))
@@ -1412,15 +1413,15 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         "rel_summaries": {str(character.id): ["ally summary"]},
         "thread_summaries": {str(character.id): ["Thread [ongoing]"]},
     }
-    monkeypatch.setattr(books, "build_character_bible_obsidian_context", _async_value(context))
-    monkeypatch.setattr(books, "load_obsidian_vault_overrides", _async_value({"Character/Iris.md": "override"}))
-    monkeypatch.setattr(books, "character_bible_obsidian_folder", lambda **_kwargs: (b"zip", "atlas"))
+    monkeypatch.setattr(books, "build_character_bible_vault_context", _async_value(context))
+    monkeypatch.setattr(books, "load_vault_note_overrides", _async_value({"Character/Iris.md": "override"}))
+    monkeypatch.setattr(books, "character_bible_vault_folder", lambda **_kwargs: (b"zip", "atlas"))
     monkeypatch.setattr(books, "character_bible_markdown", lambda **_kwargs: ("# Bible", "atlas"))
     monkeypatch.setattr(books, "character_bible_pdf", lambda **_kwargs: b"pdf")
     monkeypatch.setattr(books, "character_bible_docx", lambda **_kwargs: b"docx")
-    monkeypatch.setattr(books, "character_bible_obsidian_preview", lambda **_kwargs: {"root_folder": "Atlas", "files": []})
-    monkeypatch.setattr(books, "list_obsidian_vault_notes", _async_value([{"path": "Characters/Iris.md", "source": "character_bible", "content": "bio"}]))
-    monkeypatch.setattr(books, "save_obsidian_vault_note", _async_value({"path": "Characters/Iris.md", "source": "character_bible", "content": "bio", "persisted": True}))
+    monkeypatch.setattr(books, "character_bible_vault_preview", lambda **_kwargs: {"root_folder": "Atlas", "files": []})
+    monkeypatch.setattr(books, "list_vault_bible_notes", _async_value([{"path": "Characters/Iris.md", "source": "character_bible", "content": "bio"}]))
+    monkeypatch.setattr(books, "save_vault_note", _async_value({"path": "Characters/Iris.md", "source": "character_bible", "content": "bio", "persisted": True}))
 
     db = _FakeDB(
         get_values=[book],
@@ -1724,20 +1725,20 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         ("md", "text/markdown; charset=utf-8"),
         ("pdf", "application/pdf"),
         ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-        ("obsidian_folder", "application/zip"),
+        ("vault_folder", "application/zip"),
     ):
         response = await books.export_character_bible(book.id, format=fmt, db=_FakeDB(), current_user=user)
         assert response.media_type == media_type
-        extension = "zip" if fmt == "obsidian_folder" else fmt
+        extension = "zip" if fmt == "vault_folder" else fmt
         assert response.headers["Content-Disposition"] == f'attachment; filename="atlas-character-bible.{extension}"'
 
-    preview = await books.preview_character_bible_obsidian(book.id, db=_FakeDB(), current_user=user)
+    preview = await books.preview_character_bible_vault(book.id, db=_FakeDB(), current_user=user)
     assert preview["root_folder"] == "Atlas"
-    notes = await books.list_character_bible_obsidian_notes(book.id, db=_FakeDB(), current_user=user)
+    notes = await books.list_character_bible_vault_notes(book.id, db=_FakeDB(), current_user=user)
     assert notes[0]["path"] == "Characters/Iris.md"
-    saved = await books.save_character_bible_obsidian_note(
+    saved = await books.save_character_bible_vault_note(
         book.id,
-        ObsidianVaultNoteBody(path="Characters/Iris.md", content="bio"),
+        VaultNoteBody(path="Characters/Iris.md", content="bio"),
         db=_FakeDB(),
         current_user=user,
     )

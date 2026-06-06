@@ -705,14 +705,6 @@ async def list_chapter_beta_feedback(
         )
         .order_by(BetaReadFeedbackItem.created_at.asc())
     )
-    if collaborator is not None:
-        normalized_email = normalize_collaboration_email(current_user.email)
-        query = query.where(
-            or_(
-                BetaReadFeedbackItem.reader_user_id == current_user.id,
-                BetaReadAssignment.reader_email == normalized_email,
-            )
-        )
     rows = (await db.execute(query)).all()
     if not rows:
         return []

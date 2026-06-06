@@ -538,7 +538,9 @@ async def memory_recall(
         ) not in {"resolved", "abandoned"}
     ][:3]
 
+    # Release the request-scoped connection before the external LLM call.
     await db.rollback()
+
     recall_text = await generate_recall(
         title=book_title,
         last_chapter=last_chapter,
@@ -547,9 +549,8 @@ async def memory_recall(
         open_threads=list(open_threads),
         user_id=current_user.id,
         book_id=book_id,
-        usage_db=db,
+        usage_db=None,
     )
-    await db.commit()
 
     await cache_set(cache_key, recall_text, settings.REDIS_TTL_RECALL)
     return {"recall": recall_text, "last_chapter": last_chapter}

@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 
 import { authApi } from "@/lib/api/auth"
@@ -12,9 +12,20 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import type { EmailPreferences } from "@/types/email"
 
 const MODES = [
-  { value: "casual", label: "Casual", desc: "Quick summaries and light-touch guidance." },
+  { value: "casual", label: "Casual", desc: "Quick summaries and light guidance." },
   { value: "analyst", label: "Analyst", desc: "Deeper context and richer breakdowns." },
-  { value: "speed", label: "Speed", desc: "Minimal output for fast reading sessions." },
+  { value: "speed", label: "Speed", desc: "Minimal output for fast sessions." },
+]
+
+const SETTINGS_NAV = [
+  { id: "account", label: "Account", icon: <IdentityIcon /> },
+  { id: "identity", label: "Public identity", icon: <IdentityIcon /> },
+  { id: "appearance", label: "Appearance", icon: <AppearanceIcon /> },
+  { id: "reading", label: "Reading behavior", icon: <ReadingIcon /> },
+  { id: "privacy", label: "Privacy", icon: <PrivacyIcon /> },
+  { id: "emails", label: "Emails", icon: <MailIcon /> },
+  { id: "goals", label: "Writing goals", icon: <GoalIcon /> },
+  { id: "session", label: "Session", icon: <SignOutIcon /> },
 ]
 
 export default function SettingsPage() {
@@ -198,334 +209,832 @@ export default function SettingsPage() {
   const dailyGoal = stableUser?.daily_word_goal ?? 1000
   const todayWords = stableUser?.today_word_count ?? 0
   const goalProgress = Math.max(0, Math.min(100, Math.round((todayWords / Math.max(dailyGoal, 1)) * 100)))
+  const currentReadingMode = stableUser?.reading_mode ?? "casual"
+  const currentPermission = stableUser?.messaging_permission ?? "anyone"
+  const [activeSectionId, setActiveSectionId] = useState(SETTINGS_NAV[0].id)
 
-  const summaryCards = [
-    {
-      label: "Plan",
-      value: displayTier,
-      note: stableUser?.trial_active ? "Temporary Author access during trial" : "Current workspace access level",
-      icon: <PlanIcon />,
-    },
-    {
-      label: "Reading mode",
-      value: modeLabel(stableUser?.reading_mode ?? "casual"),
-      note: "Default answer depth",
-      icon: <ReadingIcon />,
-    },
-    {
-      label: "Theme",
-      value: theme === "dark" ? "Dark" : "Light",
-      note: "Synced with workspace",
-      icon: <ThemeIcon dark={isDark} />,
-    },
-  ]
+  const summaryCards = useMemo(
+    () => [
+      { label: "Plan", value: displayTier, icon: <PlanIcon /> },
+      { label: "Reading mode", value: modeLabel(currentReadingMode), icon: <ReadingIcon /> },
+      { label: "Theme", value: theme === "dark" ? "Dark" : "Light", icon: <ThemeIcon dark={isDark} /> },
+    ],
+    [currentReadingMode, displayTier, isDark, theme],
+  )
+
+  useEffect(() => {
+    let frameId: number | null = null
+
+    const updateActiveSection = () => {
+      const anchorY = Math.min(window.innerHeight * 0.34, 260)
+      const sections = SETTINGS_NAV
+        .map((item) => {
+          const element = document.getElementById(item.id)
+          return element ? { id: item.id, rect: element.getBoundingClientRect() } : null
+        })
+        .filter((item): item is { id: string; rect: DOMRect } => Boolean(item))
+
+      if (!sections.length) return
+
+      const documentHeight = document.documentElement.scrollHeight
+      const nearDocumentEnd =
+        documentHeight > window.innerHeight &&
+        window.innerHeight + window.scrollY >= documentHeight - 80
+      if (nearDocumentEnd) {
+        setActiveSectionId(sections.at(-1)?.id ?? SETTINGS_NAV[0].id)
+        return
+      }
+
+      const visibleSections = sections.filter((section) => section.rect.bottom > 0 && section.rect.top < window.innerHeight)
+      const candidates = visibleSections.length ? visibleSections : sections
+      const activeSection = candidates.sort(
+        (first, second) => Math.abs(first.rect.top - anchorY) - Math.abs(second.rect.top - anchorY),
+      )[0]
+
+      setActiveSectionId(activeSection.id)
+    }
+
+    const scheduleUpdate = () => {
+      if (frameId !== null) return
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null
+        updateActiveSection()
+      })
+    }
+
+    updateActiveSection()
+    window.addEventListener("scroll", scheduleUpdate, { passive: true })
+    window.addEventListener("resize", scheduleUpdate)
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId)
+      }
+      window.removeEventListener("scroll", scheduleUpdate)
+      window.removeEventListener("resize", scheduleUpdate)
+    }
+  }, [])
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#0d1318] text-slate-100" : "bg-[#f4f5f7] text-stone-950"}`}>
-      <div className="mx-auto max-w-[1220px] px-4 py-8 sm:px-6 lg:px-8">
-        <div className="space-y-5 pb-12">
-          <section className={`overflow-hidden rounded-lg border-2 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-[#fcfcfb]"}`}>
-            <div className="px-6 py-8 sm:px-8 sm:py-10 lg:px-12 lg:py-12">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-[#6fc7b3]" : "text-[#1f615d]"}`}>Settings</p>
-              <h1 className={`mt-4 max-w-[780px] font-display text-[2.85rem] leading-[0.96] tracking-[-0.06em] ${isDark ? "text-[#f2ece3]" : "text-stone-950"} sm:text-[4.1rem]`}>
-                Make LoreVia feel stable,
-                <br className="hidden sm:block" />
-                personal, and low-friction.
-              </h1>
-              <p className={`mt-5 max-w-[720px] text-[1.02rem] leading-8 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                A professional settings hub for the controls that matter: account, reading, appearance, privacy, and daily writing goals.
-              </p>
-            </div>
-          </section>
-
-          <section className="grid gap-4 lg:grid-cols-3">
+    <div className={`settings-surface ${isDark ? "settings-surface--dark" : "settings-surface--light"}`}>
+      <div className="mx-auto max-w-[1040px] pb-10">
+        <header className="settings-hero">
+          <div>
+            <p className="settings-kicker">Settings</p>
+            <h1 className="settings-title">Settings</h1>
+            <p className="settings-intro">Manage your account, workspace preferences, privacy, and writing goals.</p>
+          </div>
+          <div className="settings-summary-grid">
             {summaryCards.map((card) => (
-              <SummaryCard key={card.label} isDark={isDark} icon={card.icon} label={card.label} value={card.value} note={card.note} />
+              <SummaryCard key={card.label} icon={card.icon} label={card.label} value={card.value} />
             ))}
-          </section>
+          </div>
+        </header>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <SettingsCard
-              isDark={isDark}
-              icon={<BillingIcon />}
-              eyebrow="Account"
-              title="Billing and account details"
-              description="Manage your payment details, invoices, and subscription."
-              stacked
-            >
-              <div className="min-w-0 space-y-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <InfoItem isDark={isDark} label="Email" value={stableUser?.email ?? "No email available"} />
-                  <InfoItem isDark={isDark} label="Plan status" value={displayTier} />
-                </div>
-                <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                  {stableUser?.trial_active ? (
-                    <p className={`max-w-2xl break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-emerald-100" : "text-emerald-900"}`}>
-                      You are currently seeing Author (free trial). Your purchased plan is {purchasedTier}, so access will revert when the trial ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""} unless you upgrade.
-                    </p>
-                  ) : (
-                    <p className={`max-w-2xl break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-slate-300" : "text-stone-700"}`}>
-                      Purchased plan: {purchasedTier}. cancel renewal, payment method changes, and invoice access live in the billing portal.
-                    </p>
-                  )}
-                  <p className={`mt-4 max-w-2xl break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-                    Open the billing portal to manage your subscription, invoices, payment method, or cancellation.
-                  </p>
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <button onClick={openBillingPortal} disabled={billingBusy} className={`${primaryActionClass(isDark, true)} shrink-0`}>
-                      {billingBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
-                    </button>
-                  </div>
-                  {billingMessage ? <InlineMessage isDark={isDark} message={billingMessage} tone="warning" className="mt-4" /> : null}
-                </div>
+        <div className="settings-layout">
+          <nav className="settings-section-nav" aria-label="Settings sections">
+            {SETTINGS_NAV.map((item) => {
+              const active = activeSectionId === item.id
+              return (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  aria-current={active ? "location" : undefined}
+                  className={active ? "settings-section-nav__item settings-section-nav__item--active" : "settings-section-nav__item"}
+                  onClick={() => setActiveSectionId(item.id)}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </a>
+              )
+            })}
+          </nav>
+
+          <div className="settings-stack">
+            <SettingsPanel id="account" title="Billing and account details">
+              <div className="settings-info-grid">
+                {stableUser?.email ? <InfoItem label="Email" value={stableUser.email} /> : null}
+                <InfoItem label="Plan status" value={displayTier} />
               </div>
-            </SettingsCard>
+              {stableUser?.trial_active ? (
+                <p className="settings-copy mt-5">
+                  You are currently seeing Author free trial access. Your purchased plan is {purchasedTier}, so access will revert when the trial ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""} unless you upgrade.
+                </p>
+              ) : (
+                <p className="settings-copy mt-5">
+                  Purchased plan: {purchasedTier}. cancel renewal, payment method changes, and invoice access live in the billing portal.
+                </p>
+              )}
+              <p className="settings-copy mt-3">Manage your payment details, invoices, and subscription access in the billing portal.</p>
+              <button onClick={openBillingPortal} disabled={billingBusy} className="settings-primary-button mt-5">
+                {billingBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
+              </button>
+              {billingMessage ? <InlineMessage message={billingMessage} tone="warning" className="mt-4" /> : null}
+            </SettingsPanel>
 
-            <SettingsCard
-              isDark={isDark}
-              icon={<IdentityIcon />}
-              eyebrow="Public identity"
-              title="Choose the username people see on LoreVia"
-              stacked
-              description={
-                <>
-                  This is your public <span className="font-semibold">@username</span> for profiles, forum posts, and chats. It is separate from the author or pen name you put on each manuscript.
-                </>
-              }
-            >
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
-                <div className="min-w-0 space-y-3">
-                  <label className="block">
-                    <span className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Public username</span>
-                    <div className={`mt-3 flex min-w-0 items-center gap-3 overflow-hidden rounded-md border-2 px-4 py-3 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-white"}`}>
-                      <input
-                        type="text"
-                        minLength={3}
-                        maxLength={32}
-                        autoComplete="username"
-                        value={usernameDraft}
-                        onChange={(event) => setUsernameDraft(event.target.value)}
-                        onInput={(event) => setUsernameDraft((event.target as HTMLInputElement).value)}
-                        className={`min-w-0 w-full bg-transparent text-base font-semibold outline-none ${isDark ? "text-white placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
-                        placeholder="Choose a public username"
-                      />
-                      <span className={`${usernameDraft.trim().length >= 3 ? (isDark ? "text-[#6fc7b3]" : "text-[#1f615d]") : "text-slate-400"}`}>
-                        <CheckCircleIcon />
-                      </span>
-                    </div>
+            <SettingsPanel id="identity" title="Public identity">
+              <div className="settings-identity-grid">
+                <div>
+                  <label className="settings-label" htmlFor="public-username">
+                    Public username
                   </label>
-                  {usernameMessage ? <InlineMessage isDark={isDark} message={usernameMessage} tone="neutral" /> : null}
+                  <div className="settings-input-shell mt-2">
+                    <input
+                      id="public-username"
+                      type="text"
+                      minLength={3}
+                      maxLength={32}
+                      autoComplete="username"
+                      value={usernameDraft}
+                      onChange={(event) => setUsernameDraft(event.target.value)}
+                      onInput={(event) => setUsernameDraft((event.target as HTMLInputElement).value)}
+                      className="settings-input"
+                    />
+                    <span className={usernameDraft.trim().length >= 3 ? "settings-check settings-check--valid" : "settings-check"}>
+                      <CheckCircleIcon />
+                    </span>
+                  </div>
+                  <p className="settings-copy mt-3">
+                    This is your public username people see on LoreVia. Your manuscript author or pen name can be changed per book.
+                  </p>
+                  {usernameMessage ? <InlineMessage message={usernameMessage} tone="neutral" className="mt-3" /> : null}
                 </div>
 
-                <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Current public handle</p>
-                  <p className={`mt-4 truncate text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
-                    {stableUser?.username ? `@${stableUser.username}` : "No username set yet"}
+                <div>
+                  <p className="settings-label">Current public handle</p>
+                  {stableUser?.username ? <p className="settings-handle">@{stableUser.username}</p> : null}
+                  <p className="settings-copy mt-3">
+                    New author uploads default to this username, but you can change the manuscript author or pen name for any individual book.
                   </p>
-                  <p className={`mt-3 break-words text-sm leading-6 [overflow-wrap:anywhere] ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-                    New author uploads default to this username, but you can change the manuscript author or pen name for any individual book without changing your account handle.
-                  </p>
-                  <button
-                    onClick={saveUsername}
-                    disabled={usernameSaving || usernameDraft.trim().length < 3}
-                    className={`${primaryActionClass(isDark, false)} mt-5 w-full sm:w-auto`}
-                  >
+                  <button onClick={saveUsername} disabled={usernameSaving || usernameDraft.trim().length < 3} className="settings-primary-button mt-5">
                     {usernameSaving ? "Saving..." : stableUser?.username ? "Change username" : "Save username"}
                   </button>
                 </div>
               </div>
-            </SettingsCard>
-          </div>
+            </SettingsPanel>
 
-          <SettingsCard
-            isDark={isDark}
-            icon={<AppearanceIcon />}
-            eyebrow="Appearance"
-            title="Choose the workspace tone"
-            description="Theme selection is synced automatically across the dashboard and the reading workspace."
-          >
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {[
-                { value: "light", label: "Light", desc: "Warm paper surfaces and bright working cards.", icon: <SunIcon /> },
-                { value: "dark", label: "Dark", desc: "Low-glare contrast for long sessions and deep reading.", icon: <MoonIcon /> },
-              ].map((option) => {
-                const active = theme === option.value
-                return (
+            <SettingsPanel id="appearance" title="Workspace theme">
+              <div className="settings-choice-grid settings-choice-grid--two">
+                {[
+                  { value: "light", label: "Light", desc: "Clean and bright for daytime writing sessions.", icon: <SunIcon /> },
+                  { value: "dark", label: "Dark", desc: "Low-glare and easier on the eyes for long writing sessions.", icon: <MoonIcon /> },
+                ].map((option) => (
                   <SelectableCard
                     key={option.value}
-                    isDark={isDark}
-                    active={active}
+                    active={theme === option.value}
                     title={option.label}
                     description={option.desc}
                     icon={option.icon}
                     onClick={() => setTheme(option.value as "light" | "dark")}
                   />
-                )
-              })}
-            </div>
-          </SettingsCard>
+                ))}
+              </div>
+            </SettingsPanel>
 
-          <SettingsCard
-            isDark={isDark}
-            icon={<AnswerStyleIcon />}
-            eyebrow="Answer style"
-            title="Set the default reading mode"
-            description="Set the default reading mode for answers and insights."
-            sideNote="This controls how much context LoreVia gives you by default, so the decision should feel explicit and easy to compare."
-          >
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-              {MODES.map((mode) => {
-                const active = stableUser?.reading_mode === mode.value
-                return (
+            <SettingsPanel id="reading" title="Default reading mode">
+              <div className="settings-choice-grid settings-choice-grid--three">
+                {MODES.map((mode) => (
                   <SelectableCard
                     key={mode.value}
-                    isDark={isDark}
-                    active={active}
+                    active={currentReadingMode === mode.value}
                     title={mode.label}
                     description={mode.desc}
-                    icon={mode.value === "casual" ? <ChatIcon /> : mode.value === "analyst" ? <BarsIcon /> : <BoltIcon />}
+                    icon={mode.value === "casual" ? <ReadingIcon /> : mode.value === "analyst" ? <BarsIcon /> : <BoltIcon />}
                     onClick={() => changeMode(mode.value)}
                   />
-                )
-              })}
-            </div>
-          </SettingsCard>
+                ))}
+              </div>
+            </SettingsPanel>
 
-          <SettingsCard
-            isDark={isDark}
-            icon={<PrivacyIcon />}
-            eyebrow="Messaging privacy"
-            title="Control who can start a direct message"
-            description="Control who can start a direct message."
-            sideNote="Choose whether anyone can message you, or whether new chats should unlock only after a friend request is accepted."
-          >
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {[
-                { value: "anyone" as const, label: "Anyone can message me", desc: "People can open a chat immediately from search, forum, or profile entrypoints." },
-                { value: "friends_only" as const, label: "Friends only", desc: "People must send a friend request first, and you accept it from notifications." },
-              ].map((option) => {
-                const active = (stableUser?.messaging_permission ?? "anyone") === option.value
-                return (
+            <SettingsPanel id="privacy" title="Direct messages">
+              <div className="settings-choice-grid settings-choice-grid--two">
+                {[
+                  { value: "anyone" as const, label: "Anyone can message me", desc: "People can open a chat immediately from search, forum, or profile entrypoints.", icon: <GlobeIcon /> },
+                  { value: "friends_only" as const, label: "Friends only", desc: "People must send a friend request first, and you accept it from notifications.", icon: <FriendsIcon /> },
+                ].map((option) => (
                   <SelectableCard
                     key={option.value}
-                    isDark={isDark}
-                    active={active}
+                    active={currentPermission === option.value}
                     title={option.label}
                     description={option.desc}
-                    icon={option.value === "anyone" ? <GlobeIcon /> : <FriendsIcon />}
+                    icon={option.icon}
                     disabled={permissionSaving}
                     onClick={() => void changeMessagingPermission(option.value)}
                   />
-                )
-              })}
-            </div>
-            {permissionMessage ? <InlineMessage isDark={isDark} message={permissionMessage} tone="neutral" className="mt-4" /> : null}
-          </SettingsCard>
+                ))}
+              </div>
+              {permissionMessage ? <InlineMessage message={permissionMessage} tone="neutral" className="mt-4" /> : null}
+            </SettingsPanel>
 
-          <SettingsCard
-            isDark={isDark}
-            icon={<MailIcon />}
-            eyebrow="Email preferences"
-            title="Control promotional LoreVia emails"
-            description="Choose which non-critical product and marketing emails reach this inbox."
-            sideNote="Security, password reset, verification, and billing emails still send even when promotional emails are turned off."
-          >
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {[
-                {
-                  value: "product_updates" as const,
-                  label: "Product updates",
-                  desc: "Feature launches, onboarding guidance, and product news.",
-                },
-                {
-                  value: "marketing" as const,
-                  label: "Marketing emails",
-                  desc: "Offers, discounts, and future promotional campaigns.",
-                },
-              ].map((option) => {
-                const active = emailPreferences ? emailPreferences[option.value] : false
-                return (
-                  <SelectableCard
-                    key={option.value}
-                    isDark={isDark}
-                    active={active}
-                    title={option.label}
-                    description={option.desc}
-                    icon={<MailIcon />}
-                    disabled={emailPreferencesLoading || emailPreferencesSaving || !emailPreferences}
-                    onClick={() => changeEmailPreference(option.value)}
+            <SettingsPanel id="emails" title="LoreVia emails">
+              {emailPreferences ? (
+                <div className="settings-choice-grid settings-choice-grid--two">
+                  {[
+                    {
+                      value: "product_updates" as const,
+                      label: "Product updates",
+                      desc: "Feature launches, onboarding guidance, and product news.",
+                      icon: <MailIcon />,
+                    },
+                    {
+                      value: "marketing" as const,
+                      label: "Marketing emails",
+                      desc: "Offers, discounts, and future promotional campaigns.",
+                      icon: <ShieldIcon />,
+                    },
+                  ].map((option) => (
+                    <SelectableCard
+                      key={option.value}
+                      active={emailPreferences[option.value]}
+                      title={option.label}
+                      description={option.desc}
+                      icon={option.icon}
+                      disabled={emailPreferencesSaving}
+                      onClick={() => changeEmailPreference(option.value)}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {emailPreferencesLoading ? <InlineMessage message="Loading email preferences..." tone="neutral" className="mt-4" /> : null}
+              {emailPreferencesMessage ? <InlineMessage message={emailPreferencesMessage} tone="neutral" className="mt-4" /> : null}
+              <p className="settings-security-note mt-4">
+                <ShieldIcon /> Security, password reset, verification, and billing emails will always be sent even when promotional emails are turned off.
+              </p>
+            </SettingsPanel>
+
+            <SettingsPanel id="goals" title="Daily writing target">
+              <div className="settings-goal-grid">
+                <label>
+                  <span className="settings-label">Words per day</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={goalDraft}
+                    onChange={(event) => setGoalDraft(event.target.value)}
+                    className="settings-number-input mt-2"
                   />
-                )
-              })}
-            </div>
-            {emailPreferencesLoading ? <InlineMessage isDark={isDark} message="Loading email preferences..." tone="neutral" className="mt-4" /> : null}
-            {emailPreferencesMessage ? <InlineMessage isDark={isDark} message={emailPreferencesMessage} tone="neutral" className="mt-4" /> : null}
-          </SettingsCard>
+                  <button onClick={saveDailyGoal} disabled={goalSaving} className="settings-primary-button mt-4">
+                    {goalSaving ? "Saving..." : "Save daily goal"}
+                  </button>
+                </label>
 
-          <SettingsCard
-            isDark={isDark}
-            icon={<GoalIcon />}
-            eyebrow="Daily goal"
-            title="Set your personal writing target"
-            description="Set your personal writing target."
-            sideNote="This goal feeds the overview page and tracks progress from manuscript saves across your workspace."
-          >
-            <div className="grid grid-cols-1 gap-3 2xl:grid-cols-[240px_minmax(0,1fr)_180px]">
-              <label className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                <span className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Words per day</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={goalDraft}
-                  onChange={(event) => setGoalDraft(event.target.value)}
-                  className={`mt-3 w-full rounded-md border px-4 py-3 text-base font-semibold outline-none ${isDark ? "border-white/[0.12] bg-[#0f151c] text-white" : "border-[#d6dce3] bg-white text-stone-900"}`}
-                />
-                <button onClick={saveDailyGoal} disabled={goalSaving} className={`${primaryActionClass(isDark, false)} mt-4`}>
-                  {goalSaving ? "Saving..." : "Save daily goal"}
+                <div className="settings-goal-today">
+                  <p className="settings-label">Today</p>
+                  <p className="settings-goal-count">
+                    {todayWords.toLocaleString()} / {dailyGoal.toLocaleString()} words
+                  </p>
+                  <p className="settings-copy mt-3">Progress updates when you save manuscript edits, and your streak is based on daily sign-ins.</p>
+                  {goalMessage ? <InlineMessage message={goalMessage} tone="neutral" className="mt-4" /> : null}
+                </div>
+
+                <div className="settings-progress-cell">
+                  <p className="settings-label">Progress</p>
+                  <GoalRing progress={goalProgress} />
+                </div>
+              </div>
+            </SettingsPanel>
+
+            <SettingsPanel id="session" title="Sign out" compact>
+              <div className="settings-session-row">
+                <p className="settings-copy">You&apos;ll be signed out of this workspace on this device.</p>
+                <button onClick={handleLogout} className="settings-danger-button">
+                  Sign out
                 </button>
-              </label>
-
-              <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Today</p>
-                <p className={`mt-3 text-[1.8rem] font-semibold tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>
-                  {todayWords.toLocaleString()} / {dailyGoal.toLocaleString()} words
-                </p>
-                <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-                  Progress updates when you save manuscript edits, and your streak is based on daily sign-ins.
-                </p>
-                {goalMessage ? <InlineMessage isDark={isDark} message={goalMessage} tone="neutral" className="mt-4" /> : null}
               </div>
-
-              <div className={`min-w-0 overflow-hidden flex flex-col items-center justify-center rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-                <GoalRing progress={goalProgress} isDark={isDark} />
-              </div>
-            </div>
-          </SettingsCard>
-
-          <section className={`rounded-lg border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#111820]" : "border-slate-200 bg-white"}`}>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border ${isDark ? "border-rose-400/20 bg-rose-400/8 text-rose-300" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
-                  <SignOutIcon />
-                </div>
-                <div>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Sign out</p>
-                  <h2 className={`mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] ${isDark ? "text-[#f3ede4]" : "text-stone-950"}`}>Sign out</h2>
-                  <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>You&apos;ll be signed out of this workspace on this device.</p>
-                </div>
-              </div>
-              <button
-                onClick={handleLogout}
-                className={`inline-flex items-center justify-center rounded-md border px-5 py-2.5 text-sm font-semibold transition ${
-                  isDark ? "border-rose-400/30 text-rose-300 hover:bg-rose-500/10" : "border-rose-200 text-rose-600 hover:bg-rose-50"
-                }`}
-              >
-                Sign out
-              </button>
-            </div>
-          </section>
+            </SettingsPanel>
+          </div>
         </div>
       </div>
+
+      <SettingsStyles css={`
+        .settings-surface {
+          margin: -2rem -1rem -2rem;
+          min-height: calc(100vh - 4.25rem);
+          padding: 2.5rem 1rem 4rem;
+          background:
+            radial-gradient(circle at 85% 0%, rgba(18, 112, 103, 0.16), transparent 30rem),
+            linear-gradient(180deg, #0a131a 0%, #071017 100%);
+          color: #eef6f4;
+        }
+
+        .settings-surface--light {
+          background:
+            radial-gradient(circle at 86% 0%, rgba(28, 111, 101, 0.08), transparent 30rem),
+            linear-gradient(180deg, #f6f8f9 0%, #edf2f3 100%);
+          color: #0f1720;
+        }
+
+        .settings-hero {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 1.25rem;
+          margin-bottom: 1.75rem;
+        }
+
+        .settings-kicker,
+        .settings-label {
+          color: #63e0cb;
+          font-size: 0.68rem;
+          font-weight: 700;
+          letter-spacing: 0.24em;
+          text-transform: uppercase;
+        }
+
+        .settings-surface--light .settings-kicker,
+        .settings-surface--light .settings-label {
+          color: #17695f;
+        }
+
+        .settings-title {
+          margin-top: 0.85rem;
+          font-family: var(--font-newsreader), "Iowan Old Style", Georgia, serif;
+          font-size: clamp(2.45rem, 5vw, 3.35rem);
+          font-weight: 500;
+          line-height: 1;
+          color: #fbf4ea;
+        }
+
+        .settings-surface--light .settings-title {
+          color: #111827;
+        }
+
+        .settings-intro,
+        .settings-copy {
+          color: #b9c6d2;
+          font-size: 0.92rem;
+          line-height: 1.78;
+        }
+
+        .settings-intro {
+          margin-top: 0.8rem;
+          max-width: 32rem;
+          font-size: 1rem;
+        }
+
+        .settings-surface--light .settings-intro,
+        .settings-surface--light .settings-copy {
+          color: #52616f;
+        }
+
+        .settings-summary-grid {
+          display: grid;
+          grid-template-columns: repeat(1, minmax(0, 1fr));
+          gap: 0.75rem;
+        }
+
+        .settings-layout {
+          display: grid;
+          gap: 1.25rem;
+        }
+
+        .settings-section-nav {
+          overflow: hidden;
+          border: 1px solid rgba(135, 164, 184, 0.32);
+          border-radius: 8px;
+          background: rgba(13, 24, 32, 0.62);
+          backdrop-filter: blur(18px);
+        }
+
+        .settings-surface--light .settings-section-nav {
+          background: rgba(255, 255, 255, 0.82);
+          border-color: rgba(148, 163, 184, 0.42);
+        }
+
+        .settings-section-nav__item {
+          display: flex;
+          min-height: 3.75rem;
+          align-items: center;
+          gap: 0.8rem;
+          border-bottom: 1px solid rgba(135, 164, 184, 0.22);
+          padding: 0 1rem;
+          color: #b9c6d2;
+          font-size: 0.9rem;
+          font-weight: 500;
+          transition: background-color 0.16s ease, color 0.16s ease;
+        }
+
+        .settings-section-nav__item:last-child {
+          border-bottom: 0;
+        }
+
+        .settings-section-nav__item:hover,
+        .settings-section-nav__item--active {
+          background: rgba(84, 231, 206, 0.08);
+          color: #fff;
+        }
+
+        .settings-section-nav__item--active {
+          box-shadow: inset 2px 0 0 #48d9c2;
+        }
+
+        .settings-surface--light .settings-section-nav__item {
+          color: #4b5c67;
+        }
+
+        .settings-surface--light .settings-section-nav__item:hover,
+        .settings-surface--light .settings-section-nav__item--active {
+          color: #0f1720;
+          background: rgba(26, 113, 102, 0.08);
+        }
+
+        .settings-section-nav__item svg {
+          height: 1.1rem;
+          width: 1.1rem;
+          color: currentColor;
+        }
+
+        .settings-stack {
+          display: grid;
+          gap: 1rem;
+        }
+
+        .settings-panel {
+          scroll-margin-top: 6rem;
+          border: 1px solid rgba(135, 164, 184, 0.32);
+          border-radius: 8px;
+          background: rgba(11, 21, 29, 0.72);
+          padding: 1.35rem;
+          box-shadow: 0 20px 44px rgba(0, 0, 0, 0.14);
+          backdrop-filter: blur(18px);
+        }
+
+        .settings-panel--compact {
+          padding: 1.15rem 1.35rem;
+        }
+
+        .settings-surface--light .settings-panel {
+          background: rgba(255, 255, 255, 0.82);
+          border-color: rgba(148, 163, 184, 0.42);
+          box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+        }
+
+        .settings-panel__title {
+          color: #f7fbfa;
+          font-size: 1.02rem;
+          font-weight: 700;
+          line-height: 1.2;
+        }
+
+        .settings-surface--light .settings-panel__title {
+          color: #111827;
+        }
+
+        .settings-info-grid,
+        .settings-choice-grid,
+        .settings-identity-grid,
+        .settings-goal-grid {
+          display: grid;
+          gap: 0.75rem;
+        }
+
+        .settings-info-grid {
+          grid-template-columns: repeat(1, minmax(0, 1fr));
+        }
+
+        .settings-info-value {
+          margin-top: 0.65rem;
+          overflow-wrap: anywhere;
+          color: #f8fcfb;
+          font-size: 1rem;
+          font-weight: 700;
+        }
+
+        .settings-surface--light .settings-info-value {
+          color: #111827;
+        }
+
+        .settings-input-shell {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          min-height: 3.1rem;
+          border: 1px solid rgba(135, 164, 184, 0.36);
+          border-radius: 7px;
+          background: rgba(8, 16, 24, 0.5);
+          padding: 0 0.85rem;
+        }
+
+        .settings-surface--light .settings-input-shell {
+          background: rgba(255, 255, 255, 0.86);
+          border-color: rgba(148, 163, 184, 0.42);
+        }
+
+        .settings-input,
+        .settings-number-input {
+          width: 100%;
+          min-width: 0;
+          border: 0;
+          background: transparent;
+          color: #fff;
+          font-size: 0.95rem;
+          font-weight: 650;
+          outline: none;
+        }
+
+        .settings-number-input {
+          height: 3.1rem;
+          border: 1px solid rgba(135, 164, 184, 0.36);
+          border-radius: 7px;
+          background: rgba(8, 16, 24, 0.5);
+          padding: 0 0.9rem;
+        }
+
+        .settings-surface--light .settings-input,
+        .settings-surface--light .settings-number-input {
+          color: #111827;
+        }
+
+        .settings-surface--light .settings-number-input {
+          background: rgba(255, 255, 255, 0.86);
+          border-color: rgba(148, 163, 184, 0.42);
+        }
+
+        .settings-check {
+          color: rgba(148, 163, 184, 0.62);
+        }
+
+        .settings-check--valid {
+          color: #4ee0c8;
+        }
+
+        .settings-handle {
+          display: inline-flex;
+          margin-top: 0.85rem;
+          border-radius: 6px;
+          background: rgba(255, 255, 255, 0.07);
+          padding: 0.45rem 0.65rem;
+          color: #fff;
+          font-size: 1.12rem;
+          font-weight: 750;
+        }
+
+        .settings-surface--light .settings-handle {
+          background: rgba(15, 23, 42, 0.08);
+          color: #111827;
+        }
+
+        .settings-primary-button,
+        .settings-danger-button {
+          display: inline-flex;
+          min-height: 2.75rem;
+          align-items: center;
+          justify-content: center;
+          border-radius: 5px;
+          padding: 0 1.05rem;
+          font-size: 0.82rem;
+          font-weight: 800;
+          transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, opacity 0.16s ease;
+        }
+
+        .settings-primary-button {
+          background: linear-gradient(135deg, #1a9a87 0%, #1a6c63 100%);
+          color: #fff;
+        }
+
+        .settings-primary-button:hover {
+          background: linear-gradient(135deg, #21b5a0 0%, #1b7a6f 100%);
+        }
+
+        .settings-primary-button:disabled,
+        .settings-danger-button:disabled {
+          cursor: not-allowed;
+          opacity: 0.58;
+        }
+
+        .settings-danger-button {
+          border: 1px solid rgba(255, 92, 108, 0.72);
+          color: #ff8c96;
+        }
+
+        .settings-danger-button:hover {
+          background: rgba(255, 92, 108, 0.08);
+        }
+
+        .settings-choice {
+          min-height: 5.45rem;
+          border: 1px solid rgba(135, 164, 184, 0.32);
+          border-radius: 8px;
+          background: rgba(7, 15, 23, 0.42);
+          padding: 1rem;
+          text-align: left;
+          transition: background-color 0.16s ease, border-color 0.16s ease;
+        }
+
+        .settings-choice:hover {
+          background: rgba(18, 33, 45, 0.58);
+        }
+
+        .settings-choice--active {
+          border-color: #42d6bf;
+          background: rgba(42, 190, 167, 0.08);
+        }
+
+        .settings-choice:disabled {
+          cursor: not-allowed;
+          opacity: 0.62;
+        }
+
+        .settings-surface--light .settings-choice {
+          background: rgba(255, 255, 255, 0.76);
+          border-color: rgba(148, 163, 184, 0.42);
+        }
+
+        .settings-surface--light .settings-choice:hover {
+          background: #fff;
+        }
+
+        .settings-surface--light .settings-choice--active {
+          background: rgba(26, 113, 102, 0.08);
+          border-color: #248677;
+        }
+
+        .settings-choice__row {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 0.8rem;
+        }
+
+        .settings-choice__content {
+          display: flex;
+          min-width: 0;
+          gap: 0.8rem;
+        }
+
+        .settings-choice__icon {
+          color: #55dcc6;
+        }
+
+        .settings-surface--light .settings-choice__icon {
+          color: #17695f;
+        }
+
+        .settings-choice__title {
+          display: block;
+          color: #fff;
+          font-size: 0.9rem;
+          font-weight: 800;
+          line-height: 1.2;
+        }
+
+        .settings-choice__description {
+          display: block;
+          margin-top: 0.45rem;
+          color: #aebdca;
+          font-size: 0.8rem;
+          line-height: 1.55;
+        }
+
+        .settings-surface--light .settings-choice__title {
+          color: #111827;
+        }
+
+        .settings-surface--light .settings-choice__description {
+          color: #52616f;
+        }
+
+        .settings-radio {
+          display: flex;
+          flex-shrink: 0;
+          height: 1.1rem;
+          width: 1.1rem;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid rgba(135, 164, 184, 0.5);
+          border-radius: 999px;
+        }
+
+        .settings-radio__dot {
+          height: 0.55rem;
+          width: 0.55rem;
+          border-radius: 999px;
+          background: #54dfc8;
+        }
+
+        .settings-goal-grid {
+          align-items: stretch;
+        }
+
+        .settings-goal-count {
+          margin-top: 0.8rem;
+          color: #fff;
+          font-size: clamp(1.35rem, 3vw, 1.65rem);
+          font-weight: 650;
+        }
+
+        .settings-surface--light .settings-goal-count {
+          color: #111827;
+        }
+
+        .settings-ring-number {
+          color: #fff;
+          font-size: 1.35rem;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+        }
+
+        .settings-surface--light .settings-ring-number {
+          color: #111827;
+        }
+
+        .settings-progress-cell {
+          display: flex;
+          min-height: 8.5rem;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          border-left: 1px solid rgba(135, 164, 184, 0.2);
+        }
+
+        .settings-session-row {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .settings-message {
+          border: 1px solid rgba(135, 164, 184, 0.28);
+          border-radius: 7px;
+          padding: 0.75rem 0.85rem;
+          color: #c9d6df;
+          font-size: 0.85rem;
+          line-height: 1.5;
+        }
+
+        .settings-message--warning {
+          border-color: rgba(245, 158, 11, 0.34);
+          background: rgba(245, 158, 11, 0.08);
+          color: #f8d18a;
+        }
+
+        .settings-security-note {
+          display: flex;
+          gap: 0.45rem;
+          align-items: flex-start;
+          color: #aebdca;
+          font-size: 0.72rem;
+          line-height: 1.55;
+        }
+
+        .settings-security-note svg {
+          margin-top: 0.05rem;
+          height: 0.95rem;
+          width: 0.95rem;
+          flex-shrink: 0;
+        }
+
+        .settings-surface--light .settings-security-note {
+          color: #52616f;
+        }
+
+        @media (min-width: 640px) {
+          .settings-summary-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+
+          .settings-info-grid,
+          .settings-choice-grid--two,
+          .settings-identity-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .settings-choice-grid--three {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+
+          .settings-session-row {
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .settings-surface {
+            margin: -2rem -2.5rem -2rem;
+            padding: 2.6rem 2.5rem 4rem;
+          }
+
+          .settings-hero {
+            grid-template-columns: minmax(0, 1fr) minmax(26rem, 31rem);
+            align-items: end;
+          }
+
+          .settings-layout {
+            grid-template-columns: 15.5rem minmax(0, 1fr);
+            align-items: start;
+          }
+
+          .settings-section-nav {
+            position: sticky;
+            top: 6.25rem;
+          }
+
+          .settings-goal-grid {
+            grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) 9.5rem;
+          }
+        }
+      `} />
     </div>
   )
 }
@@ -534,83 +1043,55 @@ function modeLabel(mode: string) {
   return MODES.find((item) => item.value === mode)?.label ?? "Casual"
 }
 
-function primaryActionClass(isDark: boolean, wide = false) {
-  return `inline-flex items-center justify-center rounded-sm px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${
-    wide ? "sm:px-5" : ""
-  } ${isDark ? "bg-[#165c52] text-white hover:bg-[#1a695e]" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`
+function SettingsStyles({ css }: { css: string }) {
+  useEffect(() => {
+    const styleId = "lorevia-settings-page-styles"
+    if (document.getElementById(styleId)) return
+    const style = document.createElement("style")
+    style.id = styleId
+    style.textContent = css
+    document.head.appendChild(style)
+    return () => {
+      style.remove()
+    }
+  }, [css])
+
+  return null
 }
 
-function SettingsCard({
-  isDark,
-  icon,
-  eyebrow,
-  title,
-  description,
-  sideNote,
-  stacked = false,
-  children,
-}: {
-  isDark: boolean
-  icon: ReactNode
-  eyebrow: string
-  title: string
-  description: ReactNode
-  sideNote?: string
-  stacked?: boolean
-  children: ReactNode
-}) {
+function SettingsPanel({ id, title, compact = false, children }: { id: string; title: string; compact?: boolean; children: ReactNode }) {
   return (
-    <section className={`min-w-0 rounded-md border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-white"}`}>
-      <div className={stacked ? "grid gap-5" : "grid gap-5 xl:grid-cols-[180px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(0,1fr)]"}>
-        <div className="min-w-0 flex items-start gap-4">
-          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 ${isDark ? "border-slate-700/70 bg-[#182028] text-[#7fd2bf]" : "border-slate-200 bg-[#edf6f4] text-[#1f615d]"}`}>
-            {icon}
-          </div>
-          <div>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{eyebrow}</p>
-            <h2 className={`mt-2 text-[1.3rem] font-semibold tracking-[-0.025em] ${isDark ? "text-[#f3ede4]" : "text-stone-950"}`}>{title}</h2>
-            <div className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{description}</div>
-          </div>
-        </div>
-
-        <div className="min-w-0">
-          {sideNote ? <p className={`mb-4 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{sideNote}</p> : null}
-          {children}
-        </div>
-      </div>
+    <section id={id} className={compact ? "settings-panel settings-panel--compact" : "settings-panel"}>
+      <h2 className="settings-panel__title">{title}</h2>
+      <div className={compact ? "mt-3" : "mt-5"}>{children}</div>
     </section>
   )
 }
 
-function SummaryCard({ isDark, icon, label, value, note }: { isDark: boolean; icon: ReactNode; label: string; value: string; note: string }) {
+function SummaryCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className={`min-w-0 overflow-hidden rounded-md border-2 p-5 ${isDark ? "border-slate-700/70 bg-[#11171d]" : "border-slate-200 bg-white"}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className={`flex h-12 w-12 items-center justify-center rounded-full border-2 ${isDark ? "border-slate-700/70 bg-[#172029] text-[#7fd2bf]" : "border-slate-200 bg-[#edf6f4] text-[#1f615d]"}`}>
-          {icon}
+    <div className="settings-panel settings-panel--compact">
+      <div className="flex items-center gap-3">
+        <span className="settings-choice__icon">{icon}</span>
+        <div>
+          <p className="settings-label">{label}</p>
+          <p className="settings-info-value">{value}</p>
         </div>
-        <span className={`${isDark ? "text-slate-500" : "text-stone-400"}`}>
-          <ChevronRightIcon />
-        </span>
       </div>
-      <p className={`mt-4 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
-      <p className={`mt-2 text-[1.55rem] font-semibold tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
-      <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{note}</p>
     </div>
   )
 }
 
-function InfoItem({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
+function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className={`min-w-0 overflow-hidden rounded-md border-2 p-4 ${isDark ? "border-slate-700/70 bg-[#121921]" : "border-slate-200 bg-[#fbfcfd]"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
-      <p className={`mt-3 truncate text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
+    <div>
+      <p className="settings-label">{label}</p>
+      <p className="settings-info-value">{value}</p>
     </div>
   )
 }
 
 function SelectableCard({
-  isDark,
   active,
   title,
   description,
@@ -618,7 +1099,6 @@ function SelectableCard({
   disabled = false,
   onClick,
 }: {
-  isDark: boolean
   active: boolean
   title: string
   description: string
@@ -627,62 +1107,39 @@ function SelectableCard({
   onClick: () => void
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`min-w-0 rounded-md border-2 p-4 text-left transition disabled:opacity-60 ${
-        active
-          ? isDark
-            ? "border-[#3a9d89] bg-[#14211f]"
-            : "border-[#5ca79b] bg-[#f4faf8]"
-          : isDark
-            ? "border-slate-700/70 bg-[#121921] hover:bg-[#15202a]"
-            : "border-slate-200 bg-[#fbfcfd] hover:bg-white"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className={`${active ? (isDark ? "text-[#7fd2bf]" : "text-[#1f615d]") : isDark ? "text-slate-400" : "text-stone-500"}`}>{icon}</div>
-          <div>
-            <p className={`text-lg font-semibold tracking-[-0.02em] ${isDark ? "text-white" : "text-stone-950"}`}>{title}</p>
-            <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{description}</p>
-          </div>
-        </div>
-        <span className={`mt-1 flex h-5 w-5 items-center justify-center rounded-full border ${active ? (isDark ? "border-[#2f8a78]" : "border-[#76b4aa]") : isDark ? "border-slate-600" : "border-stone-300"}`}>
-          {active ? <span className={`h-2.5 w-2.5 rounded-full ${isDark ? "bg-[#59c3ad]" : "bg-[#1f615d]"}`} /> : null}
+    <button type="button" aria-pressed={active} onClick={onClick} disabled={disabled} className={active ? "settings-choice settings-choice--active" : "settings-choice"}>
+      <span className="settings-choice__row">
+        <span className="settings-choice__content">
+          <span className="settings-choice__icon">{icon}</span>
+          <span>
+            <span className="settings-choice__title">{title}</span>
+            <span className="settings-choice__description">{description}</span>
+          </span>
         </span>
-      </div>
+        <span className="settings-radio">{active ? <span className="settings-radio__dot" /> : null}</span>
+      </span>
     </button>
   )
 }
 
-function InlineMessage({ isDark, message, tone, className = "" }: { isDark: boolean; message: string; tone: "warning" | "neutral"; className?: string }) {
-  const classes =
-    tone === "warning"
-      ? isDark
-        ? "border-amber-400/20 bg-amber-300/10 text-amber-100"
-        : "border-amber-300/40 bg-amber-100/70 text-amber-900"
-      : isDark
-        ? "border-white/[0.08] bg-white/[0.03] text-slate-300"
-        : "border-[#dde2e8] bg-[#f8fafb] text-stone-700"
-
-  return <div className={`rounded-md border px-4 py-3 text-sm ${classes} ${className}`.trim()}>{message}</div>
+function InlineMessage({ message, tone, className = "" }: { message: string; tone: "warning" | "neutral"; className?: string }) {
+  return <div className={`settings-message ${tone === "warning" ? "settings-message--warning" : ""} ${className}`.trim()}>{message}</div>
 }
 
-function GoalRing({ progress, isDark }: { progress: number; isDark: boolean }) {
+function GoalRing({ progress }: { progress: number }) {
   const circumference = 2 * Math.PI * 34
   const dashOffset = circumference - (progress / 100) * circumference
 
   return (
-    <div className="relative flex h-28 w-28 items-center justify-center">
+    <div className="relative mt-3 flex h-28 w-28 items-center justify-center">
       <svg className="h-28 w-28 -rotate-90" viewBox="0 0 84 84" aria-hidden="true">
-        <circle cx="42" cy="42" r="34" fill="none" stroke={isDark ? "rgba(255,255,255,0.08)" : "rgba(148,163,184,0.22)"} strokeWidth="8" />
+        <circle cx="42" cy="42" r="34" fill="none" stroke="rgba(148, 163, 184, 0.22)" strokeWidth="8" />
         <circle
           cx="42"
           cy="42"
           r="34"
           fill="none"
-          stroke={isDark ? "#59c3ad" : "#1f615d"}
+          stroke="#54dfc8"
           strokeWidth="8"
           strokeLinecap="round"
           strokeDasharray={circumference}
@@ -690,8 +1147,8 @@ function GoalRing({ progress, isDark }: { progress: number; isDark: boolean }) {
         />
       </svg>
       <div className="absolute text-center">
-        <p className={`text-[1.4rem] font-semibold tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>{progress}%</p>
-        <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>of goal</p>
+        <p className="settings-ring-number">{progress}%</p>
+        <p className="text-xs text-slate-400">of goal</p>
       </div>
     </div>
   )
@@ -713,15 +1170,6 @@ function ThemeIcon({ dark }: { dark: boolean }) {
   return dark ? <MoonIcon /> : <SunIcon />
 }
 
-function BillingIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <rect x="4" y="6" width="16" height="12" rx="2.5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 10h16" />
-    </svg>
-  )
-}
-
 function IdentityIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -734,14 +1182,6 @@ function AppearanceIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M5 19l14-14M9 5l10 10M5 15l4 4" />
-    </svg>
-  )
-}
-
-function AnswerStyleIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" />
     </svg>
   )
 }
@@ -807,14 +1247,6 @@ function MoonIcon() {
   )
 }
 
-function ChatIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 7.5h12A2.5 2.5 0 0120.5 10v4A2.5 2.5 0 0118 16.5h-6L7 20v-3.5H6A2.5 2.5 0 013.5 14v-4A2.5 2.5 0 016 7.5z" />
-    </svg>
-  )
-}
-
 function BarsIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -848,10 +1280,10 @@ function FriendsIcon() {
   )
 }
 
-function ChevronRightIcon() {
+function ShieldIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l7 3v5c0 4.5-2.7 7.5-7 9-4.3-1.5-7-4.5-7-9V7l7-3z" />
     </svg>
   )
 }

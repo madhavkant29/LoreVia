@@ -8,6 +8,8 @@ import type { Character } from "@/types/character"
 import type { InlineContinuityResponse } from "@/types/intelligence"
 import type { SearchResult } from "@/types/reader"
 
+export type ManuscriptDraftFontFamily = "times" | "georgia" | "sans" | "italian-old-style" | "eb-garamond"
+
 type ManuscriptNonWriteWorkspaceProps = {
   isDark: boolean
   bookId: string
@@ -28,8 +30,8 @@ type ManuscriptNonWriteWorkspaceProps = {
   onTogglePageSetup: () => void
   showSearchTools: boolean
   onToggleSearchTools: () => void
-  fontFamily: "times" | "georgia" | "sans"
-  onFontFamilyChange: (value: "times" | "georgia" | "sans") => void
+  fontFamily: ManuscriptDraftFontFamily
+  onFontFamilyChange: (value: ManuscriptDraftFontFamily) => void
   fontSize: number
   onFontSizeChange: (value: number) => void
   lineHeight: number
@@ -63,16 +65,9 @@ export function ManuscriptNonWriteWorkspace({
   activeChapterNumber,
   preWritingCheck,
   editorMode,
-  onEditorModeChange,
   draftSurfaceMode,
-  onDraftSurfaceModeChange,
   leftRailVisible,
   onToggleLeftRail,
-  chapterWordCount,
-  fullBookWordCount,
-  chapterPageSummaryLabel,
-  fullBookPageSummaryLabel,
-  draftSurfaceSummaryLabel,
   showPageSetup,
   onTogglePageSetup,
   showSearchTools,
@@ -129,33 +124,7 @@ export function ManuscriptNonWriteWorkspace({
       ) : null}
 
       <div className={`mb-8 rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/40 shadow-inner" : "border border-stone-200 bg-stone-100 shadow-inner"}`}>
-              {(["chapter", "book"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => onEditorModeChange(mode)}
-                  className={`rounded-full px-5 py-2 text-sm font-medium transition ${editorMode === mode ? isDark ? "bg-white text-slate-950 shadow-sm" : "bg-stone-900 text-white shadow-sm" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                >
-                  {mode === "chapter" ? "Chapter" : "Full book"}
-                </button>
-              ))}
-            </div>
-            <div className={`inline-flex rounded-full p-1 ${isDark ? "border border-white/10 bg-black/30 shadow-inner" : "border border-stone-200 bg-stone-50 shadow-inner"}`}>
-              {(["edit", "paged"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={draftSurfaceMode === mode}
-                  onClick={() => onDraftSurfaceModeChange(mode)}
-                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${draftSurfaceMode === mode ? isDark ? "bg-sky-300 text-slate-950 shadow-sm" : "bg-sky-700 text-white shadow-sm" : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white"}`}
-                >
-                  {mode === "edit" ? "Draft" : "Paged preview"}
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={onTogglePageSetup} className={`rounded-full px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
               {showPageSetup ? "Hide page setup" : "Page setup"}
@@ -168,24 +137,21 @@ export function ManuscriptNonWriteWorkspace({
             </button>
           </div>
         </div>
-        <div className={`mt-3 flex flex-wrap items-center gap-4 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-          <span>{editorMode === "chapter" ? `${chapterWordCount.toLocaleString()} words` : `${fullBookWordCount.toLocaleString()} words`}</span>
-          <span>{editorMode === "chapter" ? chapterPageSummaryLabel : fullBookPageSummaryLabel}</span>
-          <span>{draftSurfaceSummaryLabel}</span>
-        </div>
         {showPageSetup ? (
           <div className="mt-4 grid gap-3 md:grid-cols-[auto_auto_auto_1fr]">
             <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
               Font
               <select
                 value={fontFamily}
-                onChange={(event) => onFontFamilyChange(event.target.value as "times" | "georgia" | "sans")}
+                onChange={(event) => onFontFamilyChange(event.target.value as ManuscriptDraftFontFamily)}
                 disabled={draftSurfaceMode === "paged"}
                 className={`ml-2 rounded-lg border px-2 py-1 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 disabled:opacity-50" : "border-stone-200 bg-white text-stone-900 disabled:opacity-50"}`}
               >
                 <option value="times">Times</option>
                 <option value="georgia">Georgia</option>
                 <option value="sans">Sans</option>
+                <option value="italian-old-style">Italian Old Style</option>
+                <option value="eb-garamond">EB Garamond</option>
               </select>
             </label>
             <label className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -226,29 +192,36 @@ export function ManuscriptNonWriteWorkspace({
         ) : null}
         {showSearchTools ? (
           <div className="mt-4 space-y-3">
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={recallQuery}
-              onChange={(event) => onRecallQueryChange(event.target.value)}
-              placeholder="Search character, scene detail, clue, or thread"
-              className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-            />
+            <label className="grid gap-1.5">
+              <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Recall search</span>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={recallQuery}
+                onChange={(event) => onRecallQueryChange(event.target.value)}
+                className={`w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+              />
+              <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Search character, scene detail, clue, or thread.</span>
+            </label>
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
-              <input
-                type="text"
-                value={replaceQuery}
-                onChange={(event) => onReplaceQueryChange(event.target.value)}
-                placeholder="Find text"
-                className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-              />
-              <input
-                type="text"
-                value={replaceValue}
-                onChange={(event) => onReplaceValueChange(event.target.value)}
-                placeholder="Replace with"
-                className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
-              />
+              <label className="grid gap-1.5">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Find text</span>
+                <input
+                  type="text"
+                  value={replaceQuery}
+                  onChange={(event) => onReplaceQueryChange(event.target.value)}
+                  className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Replace with</span>
+                <input
+                  type="text"
+                  value={replaceValue}
+                  onChange={(event) => onReplaceValueChange(event.target.value)}
+                  className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                />
+              </label>
               <button onClick={onReplaceInCurrentChapter} disabled={!replaceQuery} className={`rounded-sm px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
                 Replace one
               </button>

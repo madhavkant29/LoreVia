@@ -239,7 +239,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
@@ -347,7 +347,7 @@ async def test_process_book_persists_isbn_and_copyright_warning(client, db, auth
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": 1}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": 1}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
 
@@ -469,7 +469,7 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
@@ -597,7 +597,7 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
@@ -699,7 +699,7 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(client, db
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
@@ -905,7 +905,7 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
@@ -1013,7 +1013,7 @@ async def test_unresolved_relationships_become_relationship_review_records(clien
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
@@ -1088,7 +1088,7 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(client, db, aut
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: (b"cover-bytes", "image/png"))
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.upload_binary", _raise_permission_error)
@@ -1162,7 +1162,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _raise_extract)
@@ -1248,7 +1248,7 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
 
-    def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True):
+    def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True, language: str | None = None):
         parse_calls.append(split_large_chapters)
         return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
 
@@ -1308,7 +1308,7 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
 
-    def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True):
+    def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True, language: str | None = None):
         parse_calls.append(split_large_chapters)
         return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
 
@@ -1371,7 +1371,7 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(client, 
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.is_book_hidden", _fake_is_book_hidden)

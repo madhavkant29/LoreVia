@@ -62,6 +62,21 @@ describe("AuthorWorkspaceDashboard", () => {
     expect(view.textContent).toContain("Daily goal")
   })
 
+  it("renders all workspace stat metrics in the stats tab", async () => {
+    const view = renderDashboard()
+
+    await clickButton(view, "Workspace Stats")
+
+    expect(view.textContent).toContain("Total words")
+    expect(view.textContent).toContain("62,000")
+    expect(view.textContent).toContain("Chapters")
+    expect(view.textContent).toContain("8")
+    expect(view.textContent).toContain("Characters")
+    expect(view.textContent).toContain("3")
+    expect(view.textContent).toContain("World items")
+    expect(view.textContent).toContain("1")
+  })
+
   it("keeps the full report link and hero CTAs wired to existing handlers", async () => {
     const onOpenManuscript = vi.fn()
     const onNavigate = vi.fn()
@@ -79,6 +94,59 @@ describe("AuthorWorkspaceDashboard", () => {
 
     await clickButton(view, "Open summaries")
     expect(onNavigate).toHaveBeenCalledWith("/book-1/summaries")
+  })
+
+  it("opens revision focus findings when a focus card is clicked", async () => {
+    const view = renderDashboard()
+
+    await clickButton(view, "Revision")
+    await clickButton(view, "Continuity & logic")
+
+    expect(view.textContent).toContain("Selected findings")
+    expect(view.textContent).toContain("Fix archive key sequence")
+
+    await clickButton(view, "Fix archive key sequence")
+    expect(view.textContent).toContain("What LoreVia found")
+    expect(view.textContent).toContain("Status: pending")
+    expect(view.textContent).toContain("Category: continuity")
+  })
+
+  it("opens chapter findings and respects the severity filter", async () => {
+    const view = renderDashboard()
+
+    await clickButton(view, "Revision")
+    await clickButton(view, "High")
+    await act(async () => {
+      const chapterButtons = Array.from(view.querySelectorAll("button")).filter((node) => node.textContent?.includes("Chapter 8"))
+      chapterButtons.at(-1)?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(view.textContent).toContain("Chapter findings")
+    expect(view.textContent).toContain("Archive key timing")
+    expect(view.textContent).not.toContain("Lore terms need re-anchoring")
+  })
+
+  it("makes story pulse metrics and readiness severity rows clickable", async () => {
+    const onNavigate = vi.fn()
+    const view = renderDashboard({ onNavigate })
+
+    await clickButton(view, "Continuity")
+    expect(view.textContent).toContain("Continuity: 82%")
+    expect(view.textContent).toContain("Good continuity")
+    expect(onNavigate).not.toHaveBeenCalled()
+
+    await clickButton(view, "Revision")
+    await clickButton(view, "Medium severity")
+
+    const chapterButtons = Array.from(view.querySelectorAll("button"))
+    const chapterEightButton = chapterButtons.filter((node) => node.textContent?.includes("Chapter 8")).at(-1)
+    const chapterSevenButton = chapterButtons.filter((node) => node.textContent?.includes("Chapter 7")).at(-1)
+    const bookWideButton = chapterButtons.filter((node) => node.textContent?.includes("Book-wide findings")).at(-1)
+
+    expect(chapterEightButton?.textContent).toContain("0 issues")
+    expect(chapterSevenButton?.textContent).toContain("1 issue")
+    expect(bookWideButton?.textContent).toContain("1 issue")
   })
 })
 
@@ -222,10 +290,34 @@ function buildRevisionIntelligence(): RevisionIntelligence {
       recent_edit_label: "Last edit touched Chapters 7 and 8.",
     },
     change_impacts: [
-      { id: "r1", category: "continuity", title: "Fix archive key sequence", description: "Align the handoff with Chapter 8.", severity: "high", status: "pending" },
+      {
+        id: "r1",
+        category: "continuity",
+        title: "Fix archive key sequence",
+        description: "Align the handoff with Chapter 8.",
+        severity: "high",
+        chapter_ref: 8,
+        source_label: "Archive key timing",
+        status: "pending",
+      },
     ],
     genre_checks: [
-      { genre: "fantasy", label: "Fantasy promises", checks: ["Lore clarity"], rationale: "Readers need clear stakes." },
+      {
+        genre: "fantasy",
+        label: "Fantasy promises",
+        checks: ["Lore clarity"],
+        rationale: "Readers need clear stakes.",
+        findings: [
+          {
+            id: "genre-1",
+            category: "confusion",
+            title: "Lore terms need re-anchoring",
+            description: "Too many archive terms arrive at once.",
+            severity: "medium",
+            status: "pending",
+          },
+        ],
+      },
     ],
     revision_plan: [
       { title: "Pass 1", summary: "Repair contradictions first.", items: [] },
@@ -241,8 +333,29 @@ function buildRevisionIntelligence(): RevisionIntelligence {
       },
     ],
     scene_advice: [],
-    confusion_map: [],
-    voice_alerts: [],
+    confusion_map: [
+      {
+        id: "r3",
+        category: "confusion",
+        title: "Magic terms need a glossary pass",
+        description: "The terminology warning applies across the current draft.",
+        severity: "medium",
+        source_label: "Reader confusion map",
+        status: "pending",
+      },
+    ],
+    voice_alerts: [
+      {
+        id: "r2",
+        category: "voice",
+        title: "Nora sounds too detached",
+        description: "The internal narration flattens her fear response.",
+        severity: "medium",
+        chapter_ref: 7,
+        source_label: "Voice consistency checker",
+        status: "pending",
+      },
+    ],
   } as RevisionIntelligence
 }
 

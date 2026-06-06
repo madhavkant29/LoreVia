@@ -47,14 +47,14 @@ export default function ForgotPasswordPage() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             autoComplete="email"
-            className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white" : "border-stone-200 bg-stone-50 text-stone-950"}`}
+            className={`w-full rounded-md border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white" : "border-stone-200 bg-stone-50 text-stone-950"}`}
           />
         </label>
 
         {message ? <p className="mt-4 text-sm text-emerald-500">{message}</p> : null}
         {error ? <p className="mt-4 text-sm text-red-500">{error}</p> : null}
 
-        <button type="submit" disabled={loading || !email.trim()} className="mt-6 w-full rounded-xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
+        <button type="submit" disabled={loading || !email.trim()} className="mt-6 w-full rounded-md bg-stone-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
           {loading ? "Sending..." : "Send reset link"}
         </button>
         <Link href="/login" className={`mt-4 block text-center text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>

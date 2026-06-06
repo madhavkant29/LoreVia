@@ -35,7 +35,7 @@ function AddChapterPageInner() {
       className={`min-h-screen transition-colors ${
         isDark
           ? "bg-black text-[#E0E0E0]"
-          : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3eb_42%,#f4f0ea_100%)] text-stone-950"
+          : "bg-stone-50 text-stone-950"
       }`}
     >
       <div className="mx-auto w-full px-3 pb-16 pt-6 sm:px-6 lg:px-8 xl:max-w-7xl">
@@ -43,7 +43,7 @@ function AddChapterPageInner() {
           className={`overflow-hidden rounded-lg border ${
             isDark
               ? "border-white/10 bg-[#0D0D0D]"
-              : "border-white/70 bg-[radial-gradient(circle_at_top,#eef2ff,transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(255,255,255,0.76))]"
+              : "border-stone-200 bg-white"
           }`}
         >
           <div className="flex flex-col gap-6 px-6 py-7 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-10 lg:py-10">

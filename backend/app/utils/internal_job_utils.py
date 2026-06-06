@@ -6,10 +6,12 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 
+_PLACEHOLDER_SECRETS = {"changeme", "change-me", "placeholder", "secret", "test", "todo"}
+
 
 def verify_internal_job_secret(provided_secret: str | None) -> None:
     configured_secret = (settings.INTERNAL_JOB_SECRET or "").strip()
-    if not configured_secret:
+    if not configured_secret or configured_secret.lower() in _PLACEHOLDER_SECRETS:
         raise HTTPException(503, "Internal jobs are not configured.")
     if not provided_secret or not compare_digest(provided_secret, configured_secret):
         raise HTTPException(403, "Forbidden")

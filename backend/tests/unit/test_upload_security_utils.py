@@ -98,3 +98,15 @@ def test_validate_zip_archive_safety_rejects_zip_bomb_characteristics():
         )
 
     assert exc_info.value.status_code == 400
+
+
+def test_validate_document_upload_bytes_applies_archive_safety_to_docx(monkeypatch):
+    monkeypatch.setattr("app.utils.upload_security_utils.settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO", 2, raising=False)
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", b"A" * 5000)
+
+    with pytest.raises(HTTPException) as exc_info:
+        validate_document_upload_bytes("story.docx", archive_buffer.getvalue(), "docx")
+
+    assert exc_info.value.status_code == 400

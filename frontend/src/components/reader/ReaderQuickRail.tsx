@@ -1,4 +1,6 @@
 "use client"
+import { memo } from "react"
+import type { Route } from "next"
 import Link from "next/link"
 
 type ReaderQuickRailProps = {
@@ -13,7 +15,7 @@ const actions = [
     key: "overview",
     label: "Overview",
     shortLabel: "Book",
-    href: (bookId: string) => `/${bookId}`,
+    href: (bookId: string) => `/${bookId}` as Route,
     icon: (
       <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M3.75 5.5a2 2 0 0 1 2-2h10.5v12.25H5.75a2 2 0 0 0-2 2V5.5Z" />
@@ -25,7 +27,7 @@ const actions = [
     key: "graph",
     label: "Graph",
     shortLabel: "Graph",
-    href: (bookId: string) => `/${bookId}/graph`,
+    href: (bookId: string) => `/${bookId}/graph` as Route,
     icon: (
       <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
         <circle cx="4.5" cy="10.5" r="1.4" />
@@ -39,7 +41,7 @@ const actions = [
     key: "ask",
     label: "Ask with citations",
     shortLabel: "Ask",
-    href: (bookId: string) => `/${bookId}/ask`,
+    href: (bookId: string) => `/${bookId}/ask` as Route,
     icon: (
       <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M5.25 7.5a4.75 4.75 0 1 1 7.8 3.64L14 15.5l-3.4-2.1A4.75 4.75 0 0 1 5.25 7.5Z" />
@@ -50,7 +52,7 @@ const actions = [
     key: "search",
     label: "Search passages",
     shortLabel: "Search",
-    href: (bookId: string) => `/${bookId}/search`,
+    href: (bookId: string) => `/${bookId}/search` as Route,
     icon: (
       <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
         <circle cx="8.5" cy="8.5" r="4.5" />
@@ -60,7 +62,7 @@ const actions = [
   },
 ] as const
 
-export function ReaderQuickRail({ bookId, chapterNum, theme, onSummary }: ReaderQuickRailProps) {
+export const ReaderQuickRail = memo(function ReaderQuickRail({ bookId, chapterNum, theme, onSummary }: ReaderQuickRailProps) {
   const shellClass = theme === "dark"
     ? "border-white/10 bg-[#0d1422]/72 text-slate-300"
     : "border-stone-200/80 bg-white/80 text-stone-600"
@@ -71,12 +73,12 @@ export function ReaderQuickRail({ bookId, chapterNum, theme, onSummary }: Reader
   return (
     <aside className="reader-nonprint hidden xl:block">
       <div className="sticky top-28">
-        <div className={`flex flex-col gap-3 rounded-lg border p-3 shadow-[0_24px_70px_-56px_rgba(8,15,31,0.9)] backdrop-blur ${shellClass}`}>
+        <div className={`flex flex-col gap-3 rounded-lg border p-3 ${shellClass}`}>
           {actions.map((action) => (
             <Link
               key={action.key}
               prefetch={false}
-              href={action.href(bookId) as any}
+              href={action.href(bookId)}
               aria-label={action.label}
               className={`flex h-10 w-10 items-center justify-center rounded-md border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${buttonClass}`}
               title={action.label}
@@ -102,4 +104,4 @@ export function ReaderQuickRail({ bookId, chapterNum, theme, onSummary }: Reader
       </div>
     </aside>
   )
-}
+})

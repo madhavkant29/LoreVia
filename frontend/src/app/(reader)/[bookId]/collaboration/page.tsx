@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { Tooltip } from "@/components/ui/Tooltip"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -354,40 +356,53 @@ export default function CollaborationPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
-          <section className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Collaboration</p>
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h1 className={`text-3xl font-semibold tracking-normal ${isDark ? "text-white" : "text-slate-950"}`}>
-                  {book?.title ?? "Story"} sharing
-                </h1>
-                <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Share exact chapters, story-bible surfaces, and editing powers with beta readers, editors, and coauthors without opening the entire draft.
-                </p>
-              </div>
-              {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
-            </div>
-          </section>
+          <WorkspaceFamilyHeader
+            active="collaboration"
+            bookId={bookId}
+            family="publish-export"
+            title={`${book?.title ?? "Story"} collaborators`}
+            description="Share exact chapters, story-bible surfaces, and editing powers with beta readers, editors, and coauthors without opening the entire draft."
+          />
+          {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
 
           <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
               <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Invite collaborator</h2>
               <div className="mt-5 grid gap-3">
+                <FieldLabel
+                  htmlFor="collaborator-email"
+                  label="Email"
+                  tooltip="Send access to the collaborator account that should receive this manuscript share."
+                  isDark={isDark}
+                />
                 <input
+                  id="collaborator-email"
                   ref={emailInputRef}
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  placeholder="reader@example.com"
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                />
+                <FieldLabel
+                  htmlFor="collaborator-display-name"
+                  label="Display name"
+                  tooltip="Optional name shown in collaborator activity and feedback summaries."
+                  isDark={isDark}
                 />
                 <input
+                  id="collaborator-display-name"
                   ref={displayNameInputRef}
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="Display name"
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                />
+                <FieldLabel
+                  htmlFor="collaborator-role"
+                  label="Role"
+                  tooltip="Role presets set the starting permission bundle; you can still tune individual permissions below."
+                  isDark={isDark}
                 />
                 <select
+                  id="collaborator-role"
                   value={role}
                   onChange={(event) => onRoleChange(event.target.value as CollaborationRole)}
                   className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
@@ -619,21 +634,39 @@ export default function CollaborationPage() {
               <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                 <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Assign beta reader</h3>
                 <div className="mt-4 grid gap-3">
+                  <FieldLabel
+                    htmlFor="beta-reader-email"
+                    label="Reader email"
+                    tooltip="This account receives the beta-read assignment and its scoped manuscript access."
+                    isDark={isDark}
+                  />
                   <input
+                    id="beta-reader-email"
                     value={betaForm.readerEmail}
                     onChange={(event) => setBetaForm((current) => ({ ...current, readerEmail: event.target.value }))}
-                    placeholder="beta.invitee@example.net"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                  />
+                  <FieldLabel
+                    htmlFor="beta-task-label"
+                    label="Assignment label"
+                    tooltip="Short name for the work packet the reader will see in their beta-read queue."
+                    isDark={isDark}
                   />
                   <input
+                    id="beta-task-label"
                     value={betaForm.taskLabel}
                     onChange={(event) => setBetaForm((current) => ({ ...current, taskLabel: event.target.value }))}
-                    placeholder="Full manuscript beta read"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                   />
                   <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <FieldLabel
+                        label="Scope"
+                        tooltip="Choose whether the beta reader sees the full manuscript, a chapter range, or a named section."
+                        isDark={isDark}
+                      />
                     <div
-                      className={`grid h-11 grid-cols-3 rounded-md border p-1 text-sm ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
+                      className={`mt-2 grid min-h-[4rem] grid-cols-[1.15fr_1fr_0.9fr] gap-3 rounded-none border p-3 text-sm ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
                       role="group"
                       aria-label="Beta read scope"
                     >
@@ -644,7 +677,7 @@ export default function CollaborationPage() {
                             key={option.value}
                             type="button"
                             onClick={() => setBetaForm((current) => ({ ...current, scopeKind: option.value }))}
-                            className={`rounded-md px-3 text-sm font-medium transition ${
+                            className={`flex min-h-[2.5rem] min-w-0 items-center justify-center rounded-none px-3 py-2 text-center text-sm font-medium leading-tight transition ${
                               isActive
                                 ? isDark
                                   ? "bg-violet-500 text-white"
@@ -660,75 +693,110 @@ export default function CollaborationPage() {
                         )
                       })}
                     </div>
+                    </div>
+                    <div>
+                    <FieldLabel
+                      htmlFor="beta-window-days"
+                      label="Window days"
+                      tooltip="Beta reads must stay within the supported 3 to 7 day review window."
+                      isDark={isDark}
+                    />
                     <input
+                      id="beta-window-days"
                       type="number"
                       min="3"
                       max="7"
                       value={betaForm.windowDays}
                       onChange={(event) => setBetaForm((current) => ({ ...current, windowDays: Number(event.target.value || 3) }))}
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                      className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                     />
+                    </div>
                   </div>
 
                   {betaForm.scopeKind !== "full_book" ? (
                     <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                      <FieldLabel htmlFor="beta-start-chapter" label="Start chapter" tooltip="First chapter visible in this beta-read packet." isDark={isDark} />
                       <input
+                        id="beta-start-chapter"
                         type="number"
                         min="1"
                         value={betaForm.chapterStart ?? ""}
                         onChange={(event) => setBetaForm((current) => ({ ...current, chapterStart: event.target.value ? Number(event.target.value) : null }))}
-                        placeholder="Start chapter"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                        className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                       />
+                      </div>
+                      <div>
+                      <FieldLabel htmlFor="beta-end-chapter" label="End chapter" tooltip="Last chapter visible in this beta-read packet." isDark={isDark} />
                       <input
+                        id="beta-end-chapter"
                         type="number"
                         min="1"
                         value={betaForm.chapterEnd ?? ""}
                         onChange={(event) => setBetaForm((current) => ({ ...current, chapterEnd: event.target.value ? Number(event.target.value) : null }))}
-                        placeholder="End chapter"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                        className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                       />
+                      </div>
                     </div>
                   ) : null}
 
                   {betaForm.scopeKind === "section" ? (
+                    <div>
+                    <FieldLabel htmlFor="beta-section-label" label="Section label" tooltip="Name the selected section so the reader knows the intent of the assignment." isDark={isDark} />
                     <input
+                      id="beta-section-label"
                       value={betaForm.sectionLabel ?? ""}
                       onChange={(event) => setBetaForm((current) => ({ ...current, sectionLabel: event.target.value }))}
-                      placeholder="Section label"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                      className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                     />
+                    </div>
                   ) : null}
 
                   <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                    <FieldLabel htmlFor="beta-required-progress" label="Progress %" tooltip="Minimum reading progress required before the assignment can be completed." isDark={isDark} />
                     <input
+                      id="beta-required-progress"
                       type="number"
                       min="1"
                       max="100"
                       value={betaForm.requiredProgressPct ?? 100}
                       onChange={(event) => setBetaForm((current) => ({ ...current, requiredProgressPct: Number(event.target.value || 100) }))}
-                      placeholder="Progress %"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                      className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                     />
+                    </div>
+                    <div>
+                    <FieldLabel htmlFor="beta-required-comments" label="Comments" tooltip="Minimum number of chapter comments the beta reader must leave." isDark={isDark} />
                     <input
+                      id="beta-required-comments"
                       type="number"
                       min="0"
                       value={betaForm.requiredCommentCount ?? 0}
                       onChange={(event) => setBetaForm((current) => ({ ...current, requiredCommentCount: Number(event.target.value || 0) }))}
-                      placeholder="Comments"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                      className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                     />
+                    </div>
+                    <div>
+                    <FieldLabel htmlFor="beta-required-feedback-items" label="Feedback items" tooltip="Minimum structured feedback items required before final submission." isDark={isDark} />
                     <input
+                      id="beta-required-feedback-items"
                       type="number"
                       min="1"
                       value={betaForm.requiredFeedbackItemCount ?? 1}
                       onChange={(event) => setBetaForm((current) => ({ ...current, requiredFeedbackItemCount: Number(event.target.value || 1) }))}
-                      placeholder="Feedback items"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                      className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                     />
+                    </div>
                   </div>
 
+                  <FieldLabel
+                    htmlFor="beta-author-questions"
+                    label="Author questions"
+                    tooltip="Prompt the reader with one focused question per line."
+                    isDark={isDark}
+                  />
                   <textarea
+                    id="beta-author-questions"
                     value={authorQuestionsText}
                     onChange={(event) => {
                       const nextValue = event.target.value
@@ -737,8 +805,7 @@ export default function CollaborationPage() {
                       setBetaForm((current) => ({ ...current, authorQuestions: questions }))
                     }}
                     rows={4}
-                    placeholder="One author question per line"
-                    className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 placeholder:text-slate-600 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-violet-400"}`}
+                    className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                   />
 
                   <label className={`flex items-center justify-between rounded-md border p-3 text-sm ${isDark ? "border-white/[0.06] bg-[#0d141c] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
@@ -798,6 +865,35 @@ export default function CollaborationPage() {
           </section>
         </main>
       </div>
+    </div>
+  )
+}
+
+function FieldLabel({
+  htmlFor,
+  label,
+  tooltip,
+  isDark,
+}: {
+  htmlFor?: string
+  label: string
+  tooltip: string
+  isDark: boolean
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor={htmlFor} className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+        {label}
+      </label>
+      <Tooltip content={tooltip} side="bottom" align="start">
+        <button
+          type="button"
+          aria-label={`${label} help`}
+          className={`inline-flex h-5 w-5 items-center justify-center rounded-full border text-3xs font-semibold ${isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-slate-200 bg-white text-slate-500"}`}
+        >
+          ?
+        </button>
+      </Tooltip>
     </div>
   )
 }

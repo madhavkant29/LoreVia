@@ -17,6 +17,7 @@ class RegisterBody(BaseModel):
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
+    device_id: str | None = Field(default=None, min_length=16, max_length=128)
 
 
 class UserOut(BaseModel):

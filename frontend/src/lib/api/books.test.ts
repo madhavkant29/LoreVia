@@ -205,6 +205,24 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:chapter-versions:7:")
   })
 
+  it("confirms upload charge when reprocessing manuscript", async () => {
+    await booksApi.reprocessManuscript("book-1")
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/manuscript/reprocess", {
+      confirm_upload_charge: true,
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+  })
+
+  it("reprocesses a single chapter without upload confirmation", async () => {
+    await booksApi.reprocessChapter("book-1", 3)
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/manuscript/chapters/3/reprocess", null)
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:writer-workspace")
+  })
+
   it("restores chapter versions and invalidates book and reader caches", async () => {
     await booksApi.restoreChapterVersion("book-1", "version-9")
 
@@ -244,6 +262,17 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:scenes:")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:revision-intelligence")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+  })
+
+  it("deletes chapters and invalidates book, reader, workspace, and version caches", async () => {
+    await booksApi.deleteChapter("book-1", 2)
+
+    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/chapters/2")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:workspace-tree")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:revision-intelligence")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:chapter-versions:2:")
   })
 
   it("reorders chapter scenes with version-aware payloads", async () => {
@@ -500,24 +529,24 @@ describe("books api", () => {
     })
   })
 
-  it("saves obsidian notes and invalidates related caches", async () => {
-    await booksApi.saveObsidianNote("book-1", { path: "Scenes/One.md", content: "# One" })
+  it("saves vault notes and invalidates related caches", async () => {
+    await booksApi.saveVaultNote("book-1", { path: "Scenes/One.md", content: "# One" })
 
-    expect(putMock).toHaveBeenCalledWith("/books/book-1/notes/obsidian", {
+    expect(putMock).toHaveBeenCalledWith("/books/book-1/notes/vault", {
       path: "Scenes/One.md",
       content: "# One",
     })
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-notes")
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-graph")
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-relations:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-notes")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-graph")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-relations:")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:workspace-tree")
   })
 
-  it("deletes obsidian notes with encoded paths and invalidates caches", async () => {
-    await booksApi.deleteObsidianNote("book-1", "Scenes/Act 1.md")
+  it("deletes vault notes with encoded paths and invalidates caches", async () => {
+    await booksApi.deleteVaultNote("book-1", "Scenes/Act 1.md")
 
-    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/notes/obsidian/Scenes%2FAct%201.md")
-    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:obsidian-notes")
+    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/notes/vault/Scenes%2FAct%201.md")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:vault-notes")
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:workspace-tree")
   })
 

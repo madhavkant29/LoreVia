@@ -57,7 +57,7 @@ export function LegalTopBar() {
           href={(isLoggedIn ? "/library" : "/") as Route}
           className="transition hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-800/30"
         >
-          <BrandLockup size="sm" iconClassName="h-9 w-9 rounded-xl" />
+          <BrandLockup size="sm" />
         </Link>
 
         {isLoggedIn ? (

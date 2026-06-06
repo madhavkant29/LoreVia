@@ -1,3 +1,4 @@
+import { memo } from "react"
 import type { KeyboardEvent, MutableRefObject, RefObject } from "react"
 import Link from "next/link"
 
@@ -7,6 +8,7 @@ import {
   getAskLoreViaDescription,
   getAskLoreViaHelperText,
 } from "@/lib/utils/askLoreVia"
+import { Skeleton } from "@/components/ui/Skeleton"
 import type { GroundedCitation } from "@/types/intelligence"
 
 interface QAEntry {
@@ -15,7 +17,7 @@ interface QAEntry {
   citations: GroundedCitation[]
 }
 
-export function AskLoreViaWorkspace({
+export const AskLoreViaWorkspace = memo(function AskLoreViaWorkspace({
   bookId,
   bookTitle,
   mode,
@@ -59,8 +61,8 @@ export function AskLoreViaWorkspace({
       className={cn(
         "min-h-screen transition-colors",
         isDark
-          ? "bg-[radial-gradient(circle_at_top,rgba(76,94,184,0.12),transparent_26%),linear-gradient(180deg,#060816_0%,#090d18_52%,#06070d_100%)] text-slate-100"
-          : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"
+          ? "bg-[#071211] text-slate-100"
+          : "bg-stone-50 text-stone-950"
       )}
     >
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 pb-14 pt-6 sm:px-6 lg:px-8">
@@ -173,6 +175,7 @@ export function AskLoreViaWorkspace({
               <AskResultCard
                 key={`${entry.question}-${index}`}
                 entry={entry}
+                bookId={bookId}
                 answerLabel={answerLabel}
                 isDark={isDark}
               />
@@ -211,7 +214,7 @@ export function AskLoreViaWorkspace({
       </div>
     </div>
   )
-}
+})
 
 function SuggestedQuestionsCard({
   isDark,
@@ -283,26 +286,26 @@ function AskQuestionCard({
   return (
     <section
       className={cn(
-        "rounded-lg border px-4 py-4 shadow-[0_18px_60px_-34px_rgba(0,0,0,0.55)] sm:px-6 sm:py-5",
+        "rounded-lg border px-4 py-4 sm:px-6 sm:py-5",
         isDark ? "border-white/10 bg-[#0b1020]/88" : "border-stone-200 bg-white/95"
       )}
     >
       <label htmlFor="ask-input" className="sr-only">
         Ask LoreVia a grounded question about the story
       </label>
+      <p className={cn("mb-2 text-xs", isDark ? "text-slate-500" : "text-stone-500")}>Ask anything about your story up to this point.</p>
       <textarea
         ref={inputRef}
         id="ask-input"
         value={currentValue}
         onChange={(event) => onInputChange(event.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="Ask anything about your story up to this point..."
         rows={4}
         disabled={loading}
         aria-label="Ask LoreVia a grounded question about the story"
         className={cn(
           "min-h-[10rem] w-full resize-none bg-transparent text-base leading-7 outline-none",
-          isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"
+          isDark ? "text-slate-100" : "text-stone-900"
         )}
       />
 
@@ -317,9 +320,7 @@ function AskQuestionCard({
           disabled={!currentValue.trim() || loading}
           className={cn(
             "inline-flex min-w-28 items-center justify-center gap-2 self-start rounded-md px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto",
-            isDark
-              ? "bg-[linear-gradient(135deg,#5564ff,#4b4be8)] shadow-[0_18px_36px_-24px_rgba(85,100,255,0.95)] hover:-translate-y-[1px]"
-              : "bg-[linear-gradient(135deg,#6d5efc,#5747ea)] shadow-[0_18px_36px_-24px_rgba(87,71,234,0.75)] hover:-translate-y-[1px]"
+            "bg-violet-700 hover:bg-violet-600"
           )}
         >
           <span>{loading ? "Asking..." : "Ask"}</span>
@@ -332,10 +333,12 @@ function AskQuestionCard({
 
 function AskResultCard({
   entry,
+  bookId,
   answerLabel,
   isDark,
 }: {
   entry: QAEntry
+  bookId: string
   answerLabel: string
   isDark: boolean
 }) {
@@ -387,7 +390,7 @@ function AskResultCard({
                   )}
                 >
                   Chapter {citation.chapter_num}
-                  {citation.chapter_title ? ` · ${citation.chapter_title}` : ""}
+                  {citation.chapter_title ? ` - ${citation.chapter_title}` : ""}
                 </span>
               ))}
             </div>
@@ -403,16 +406,27 @@ function AskResultCard({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className={cn("text-sm font-semibold", isDark ? "text-white" : "text-stone-900")}>
                       Chapter {citation.chapter_num}
-                      {citation.chapter_title ? ` · ${citation.chapter_title}` : ""}
+                      {citation.chapter_title ? ` - ${citation.chapter_title}` : ""}
                     </p>
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em]",
-                        isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-500"
-                      )}
-                    >
-                      {citation.source_type === "passage" ? "Passage" : "Summary"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em]",
+                          isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-500"
+                        )}
+                      >
+                        {citation.source_type === "passage" ? "Passage" : "Summary"}
+                      </span>
+                      <Link
+                        href={`/${bookId}/chapter/${citation.chapter_num}`}
+                        className={cn(
+                          "text-xs font-semibold transition",
+                          isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"
+                        )}
+                      >
+                        Jump to chapter
+                      </Link>
+                    </div>
                   </div>
                   <p className={cn("mt-3 text-sm leading-7", isDark ? "text-slate-300" : "text-stone-600")}>
                     {citation.excerpt}
@@ -431,14 +445,18 @@ function LoadingResultCard({ isDark }: { isDark: boolean }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-lg border px-5 py-5 sm:px-6",
+        "rounded-lg border px-5 py-5 sm:px-6",
         isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-white/90"
       )}
+      role="status"
+      aria-label="Loading Ask LoreVia answer"
+      aria-busy="true"
     >
-      <div className={cn("h-2.5 w-40 rounded-full", isDark ? "bg-white/10" : "bg-stone-200")} />
-      <div className={cn("mt-4 h-3 w-full rounded-full", isDark ? "bg-white/8" : "bg-stone-100")} />
-      <div className={cn("mt-3 h-3 w-5/6 rounded-full", isDark ? "bg-white/8" : "bg-stone-100")} />
-      <div className={cn("mt-3 h-3 w-2/3 rounded-full", isDark ? "bg-white/8" : "bg-stone-100")} />
+      <span className="sr-only">Loading Ask LoreVia answer</span>
+      <Skeleton className={cn("h-2.5 w-40", isDark ? "bg-white/10" : "bg-stone-200")} />
+      <Skeleton className={cn("mt-4 h-3 w-full", isDark ? "bg-white/8" : "bg-stone-100")} />
+      <Skeleton className={cn("mt-3 h-3 w-5/6", isDark ? "bg-white/8" : "bg-stone-100")} />
+      <Skeleton className={cn("mt-3 h-3 w-2/3", isDark ? "bg-white/8" : "bg-stone-100")} />
     </div>
   )
 }

@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
 import type { Book } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
@@ -10,7 +11,7 @@ import { PanelTitle } from "./PanelTitle"
 import type { IconName } from "./types"
 import { clamp, formatDate, formatNumber, panelClass } from "./utils"
 
-export function CurrentProjectCard({
+export const CurrentProjectCard = memo(function CurrentProjectCard({
   book,
   isDark,
   canOpenManuscript,
@@ -60,7 +61,7 @@ export function CurrentProjectCard({
             </div>
             <div className={`mt-2 h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-slate-100"}`}>
               <div
-                className="h-full rounded-full bg-[linear-gradient(90deg,#7c3aed,#a855f7)]"
+                className="h-full rounded-full bg-teal-700"
                 style={{ width: `${clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)}%` }}
               />
             </div>
@@ -102,4 +103,4 @@ export function CurrentProjectCard({
       </div>
     </section>
   )
-}
+})

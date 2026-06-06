@@ -250,6 +250,7 @@ async def test_build_summary_collection_reports_newly_scheduled_analysis_as_queu
         {
             "chapter_number": 1,
             "chapter_title": "One",
+            "chapter_kind": "chapter",
             "read": True,
             "available": False,
             "status": "queued",

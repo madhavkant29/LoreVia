@@ -17,7 +17,7 @@ export default function NotificationsPage() {
   const isDark = theme === "dark"
 
   return (
-    <div className={`min-h-screen transition-colors ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
+    <div className={`min-h-screen transition-colors ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <NotificationsPanel mode="page" />
     </div>
   )

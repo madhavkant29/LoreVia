@@ -3,14 +3,16 @@
 import { useCallback, useRef } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
-import { booksApi } from "@/lib/api/books"
-import { intelligenceApi } from "@/lib/api/intelligence"
-import { worldBuildingApi } from "@/lib/api/worldBuilding"
-
 interface PrefetchEntry {
   queryKey: unknown[]
   queryFn: () => Promise<unknown>
   staleTime?: number
+}
+
+export const prefetchLoaders = {
+  loadBooksApi: async () => (await import("@/lib/api/books")).booksApi,
+  loadIntelligenceApi: async () => (await import("@/lib/api/intelligence")).intelligenceApi,
+  loadWorldBuildingApi: async () => (await import("@/lib/api/worldBuilding")).worldBuildingApi,
 }
 
 function buildPrefetchEntries(bookId: string): Record<string, PrefetchEntry[]> {
@@ -18,33 +20,48 @@ function buildPrefetchEntries(bookId: string): Record<string, PrefetchEntry[]> {
     overview: [
       {
         queryKey: [`book:${bookId}:overview`],
-        queryFn: () => booksApi.getOverview(bookId),
+        queryFn: async () => {
+          const booksApi = await prefetchLoaders.loadBooksApi()
+          return booksApi.getOverview(bookId)
+        },
         staleTime: 20_000,
       },
     ],
     advisor: [
       {
         queryKey: [`advisor:${bookId}:greeting`],
-        queryFn: () => intelligenceApi.advisorGreeting(bookId),
+        queryFn: async () => {
+          const intelligenceApi = await prefetchLoaders.loadIntelligenceApi()
+          return intelligenceApi.advisorGreeting(bookId)
+        },
         staleTime: 30_000,
       },
     ],
     characters: [
       {
         queryKey: [`book:${bookId}:characters`],
-        queryFn: () => booksApi.getCharacters(bookId),
+        queryFn: async () => {
+          const booksApi = await prefetchLoaders.loadBooksApi()
+          return booksApi.getCharacters(bookId)
+        },
         staleTime: 30_000,
       },
     ],
     "world-gap": [
       {
         queryKey: [`worldbuilding:${bookId}:documents`],
-        queryFn: () => worldBuildingApi.listDocuments(bookId),
+        queryFn: async () => {
+          const worldBuildingApi = await prefetchLoaders.loadWorldBuildingApi()
+          return worldBuildingApi.listDocuments(bookId)
+        },
         staleTime: 30_000,
       },
       {
         queryKey: [`worldbuilding:${bookId}:elements`],
-        queryFn: () => worldBuildingApi.listElements(bookId),
+        queryFn: async () => {
+          const worldBuildingApi = await prefetchLoaders.loadWorldBuildingApi()
+          return worldBuildingApi.listElements(bookId)
+        },
         staleTime: 30_000,
       },
     ],

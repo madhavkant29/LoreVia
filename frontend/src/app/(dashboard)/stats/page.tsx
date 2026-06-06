@@ -33,14 +33,14 @@ export default function StatsPage() {
   return (
     <WorkspacePage className="min-h-0 bg-transparent">
       <div className="space-y-8 pb-12">
-        <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-6 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-8 lg:p-10">
+        <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-6 dark:border-slate-700/70 dark:bg-[#10171d] sm:p-8 lg:p-10">
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-center">
             <div className="min-w-0">
               <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#1f615d] dark:text-[#69c6b1]">Stats dashboard</p>
               <h1 className="mt-4 max-w-[700px] font-display text-[3rem] leading-[0.94] tracking-[-0.06em] text-stone-950 dark:text-[#f3ede4] sm:text-[4rem]">
                 Writing momentum,
                 <br className="hidden sm:block" />
-                not just account totals.
+                {" "}not just account totals.
               </h1>
               <p className="mt-5 max-w-[620px] text-[1.02rem] leading-8 text-stone-600 dark:text-slate-300">
                 Track your writing output across time, see how your habits compound, and stay aligned with your goals.
@@ -79,7 +79,7 @@ export default function StatsPage() {
           <>
             <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.55fr)_320px]">
               <div className="min-w-0 space-y-6">
-                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <div className="flex items-start gap-3">
                     <span className="mt-1 text-stone-500 dark:text-slate-400">
                       <TrendIcon />
@@ -104,7 +104,7 @@ export default function StatsPage() {
                   </div>
                 </section>
 
-                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <WritingHeatmapPanel
                     heatmap={heatmap}
                     entriesTodayCount={stats.writing.entries_today.length}
@@ -113,11 +113,11 @@ export default function StatsPage() {
               </div>
 
               <div className="min-w-0 space-y-6">
-                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <EntriesTodayPanel entries={stats.writing.entries_today} />
                 </section>
 
-                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+                <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
                   <div className="flex items-start gap-3">
                     <span className="mt-1 text-stone-500 dark:text-slate-400">
                       <TargetIcon />
@@ -148,7 +148,7 @@ export default function StatsPage() {
               </div>
             </section>
 
-            <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 shadow-card dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
+            <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-5 dark:border-slate-700/70 dark:bg-[#10171d] sm:p-6">
               <div className="flex items-start gap-3">
                 <span className="mt-1 text-stone-500 dark:text-slate-400">
                   <StackIcon />

@@ -72,6 +72,7 @@ from app.models.intelligence import (
     QuoteEntry,
     WikiEntry,
 )
+from app.utils.db_utils import run_read_with_retry
 from app.utils.relationship_utils import repair_relationship_timelines
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
@@ -2000,6 +2001,17 @@ def build_character_review_payload(
 
 
 async def list_character_review_data(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+) -> dict[str, Any]:
+    return await run_read_with_retry(
+        db,
+        lambda: _list_character_review_data_once(db, book_id=book_id),
+    )
+
+
+async def _list_character_review_data_once(
     db: AsyncSession,
     *,
     book_id: uuid.UUID,

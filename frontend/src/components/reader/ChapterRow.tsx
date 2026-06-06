@@ -1,6 +1,8 @@
 "use client"
 
+import { memo } from "react"
 import { ChapterStatusChip } from "@/components/reader/ChapterStatusChip"
+import { chapterKindShortLabel } from "@/lib/utils/chapterLabels"
 import type { ChapterListItem } from "@/types/reader"
 
 type ChapterRowProps = {
@@ -8,8 +10,10 @@ type ChapterRowProps = {
   unitLabel: string
   isDark: boolean
   readBusy: boolean
+  deleteBusy?: boolean
   onOpen: () => void
   onToggleRead: () => void
+  onDelete?: () => void
 }
 
 function formatTagLabel(tag: string) {
@@ -35,8 +39,9 @@ function buildMetadata(chapter: ChapterListItem) {
   return items
 }
 
-export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onToggleRead }: ChapterRowProps) {
-  const title = chapter.title || `${unitLabel} ${chapter.number}`
+export const ChapterRow = memo(function ChapterRow({ chapter, unitLabel, isDark, readBusy, deleteBusy = false, onOpen, onToggleRead, onDelete }: ChapterRowProps) {
+  const kindLabel = chapterKindShortLabel(chapter.chapter_kind, chapter.number, unitLabel === "Scene" ? "Sc." : "Ch.")
+  const title = chapter.title || kindLabel
   const metadata = buildMetadata(chapter)
 
   return (
@@ -52,8 +57,8 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
         <div className="flex items-start gap-4">
           <div
             aria-hidden="true"
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${
-              isDark ? "border-white/10 bg-[linear-gradient(180deg,#131d28_0%,#101822_100%)] text-teal-200" : "border-stone-200 bg-stone-50 text-teal-700"
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md border ${
+              isDark ? "border-white/10 bg-[#101822] text-teal-200" : "border-stone-200 bg-stone-50 text-teal-700"
             }`}
           >
             <BookChapterIcon />
@@ -61,7 +66,7 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
 
           <div className="min-w-0">
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-sky-300/80" : "text-stone-500"}`}>
-              {unitLabel} {chapter.number}
+              {kindLabel}
             </p>
             <h2 className={`mt-2 truncate font-serif text-[2rem] leading-none tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
           </div>
@@ -122,12 +127,29 @@ export function ChapterRow({ chapter, unitLabel, isDark, readBusy, onOpen, onTog
               </svg>
               {readBusy ? "Saving..." : chapter.read ? "Mark unread" : "Mark read"}
             </button>
+            {onDelete ? (
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={deleteBusy}
+                className={`inline-flex min-w-[9.5rem] items-center justify-center rounded-md border px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/60 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  isDark
+                    ? "border-rose-400/25 bg-rose-500/10 text-rose-100 hover:bg-rose-500/15"
+                    : "border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100"
+                }`}
+              >
+                <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.25h10.5M10 10.25v6.25m4-6.25v6.25M8.25 7.25l.5 11.25A1.75 1.75 0 0 0 10.5 20h3A1.75 1.75 0 0 0 15.25 18.5l.5-11.25M10 7.25V5.5A1.5 1.5 0 0 1 11.5 4h1A1.5 1.5 0 0 1 14 5.5v1.75" />
+                </svg>
+                {deleteBusy ? "Removing..." : "Remove"}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
     </article>
   )
-}
+})
 
 function BookChapterIcon() {
   return (

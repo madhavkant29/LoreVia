@@ -23,6 +23,8 @@ const QUICK_PROMPTS = [
   "Has this character used magic before?",
   "Where was this plot thread introduced?",
 ]
+const SAVED_QUESTIONS_KEY_PREFIX = "lorevia-ask-recent-questions:v1:"
+const SAVED_QUESTION_LIMIT = 6
 
 interface QAEntry {
   question: string
@@ -39,6 +41,7 @@ export default function AskPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [history, setHistory] = useState<QAEntry[]>([])
+  const [savedQuestions, setSavedQuestions] = useState<string[]>([])
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -70,6 +73,16 @@ export default function AskPage() {
   })()
 
   const scopeLabel = getAskLoreViaScopeLabel(book?.mode, currentChapter)
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`${SAVED_QUESTIONS_KEY_PREFIX}${bookId}`)
+      const parsed = raw ? JSON.parse(raw) : []
+      setSavedQuestions(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [])
+    } catch {
+      setSavedQuestions([])
+    }
+  }, [bookId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -119,6 +132,15 @@ export default function AskPage() {
           },
         ]
       })
+      setSavedQuestions((current) => {
+        const next = [question, ...current.filter((item) => item !== question)].slice(0, SAVED_QUESTION_LIMIT)
+        try {
+          window.localStorage.setItem(`${SAVED_QUESTIONS_KEY_PREFIX}${bookId}`, JSON.stringify(next))
+        } catch {
+          // Ignore unavailable localStorage.
+        }
+        return next
+      })
     } catch (err: unknown) {
       setHistory((previous) => previous.slice(0, -1))
       const dailyCap = buildDailyCapEventDetail(err)
@@ -160,7 +182,7 @@ export default function AskPage() {
       onInputChange={setInput}
       onSubmit={ask}
       onKeyDown={handleKeyDown}
-      quickPrompts={QUICK_PROMPTS}
+      quickPrompts={[...savedQuestions, ...QUICK_PROMPTS.filter((prompt) => !savedQuestions.includes(prompt))].slice(0, 6)}
     />
   )
 }

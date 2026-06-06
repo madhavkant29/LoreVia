@@ -591,9 +591,10 @@ async def test_collaboration_manuscript_export_respects_selected_chapter_scope(c
 
     captured: dict[str, object] = {}
 
-    def _fake_manuscript_docx(*, title, chapters, scenes, preset, front_matter):
+    def _fake_manuscript_docx(*, title, chapters, scenes, preset, front_matter, font_family):
         captured["title"] = title
         captured["chapters"] = chapters
+        captured["font_family"] = font_family
         return b"docx-bytes"
 
     monkeypatch.setattr("app.api.v1.routes.books.exports.manuscript_docx", _fake_manuscript_docx)
@@ -637,6 +638,7 @@ async def test_collaboration_manuscript_export_respects_selected_chapter_scope(c
     assert export.status_code == 200
     assert export.content == b"docx-bytes"
     assert [chapter["number"] for chapter in captured["chapters"]] == [1, 2]
+    assert captured["font_family"] == "serif"
 
 
 @pytest.mark.asyncio

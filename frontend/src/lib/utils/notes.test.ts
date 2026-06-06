@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { listObsidianNotes, saveObsidianNote } = vi.hoisted(() => ({
-  listObsidianNotes: vi.fn(),
-  saveObsidianNote: vi.fn(),
+const { listVaultNotes, saveVaultNote } = vi.hoisted(() => ({
+  listVaultNotes: vi.fn(),
+  saveVaultNote: vi.fn(),
 }))
 
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
-    listObsidianNotes,
-    saveObsidianNote,
+    listVaultNotes,
+    saveVaultNote,
   },
 }))
 
@@ -22,8 +22,8 @@ import {
 
 describe("notes utilities", () => {
   beforeEach(() => {
-    listObsidianNotes.mockReset()
-    saveObsidianNote.mockReset()
+    listVaultNotes.mockReset()
+    saveVaultNote.mockReset()
   })
 
   it("sanitizes note path segments and joins folder paths safely", () => {
@@ -39,11 +39,11 @@ describe("notes utilities", () => {
   })
 
   it("deduplicates saved note paths and normalizes markdown heading content", async () => {
-    listObsidianNotes.mockResolvedValue([
+    listVaultNotes.mockResolvedValue([
       { path: "Characters/NoraLead.md" },
       { path: "Characters/NoraLead 2.md" },
     ])
-    saveObsidianNote.mockResolvedValue({ path: "Characters/NoraLead 3.md" })
+    saveVaultNote.mockResolvedValue({ path: "Characters/NoraLead 3.md" })
 
     await saveContextualVaultNote({
       bookId: "book-123",
@@ -52,7 +52,7 @@ describe("notes utilities", () => {
       context: "characters",
     })
 
-    expect(saveObsidianNote).toHaveBeenCalledWith("book-123", {
+    expect(saveVaultNote).toHaveBeenCalledWith("book-123", {
       path: "Characters/NoraLead 3.md",
       content: "# NoraLead\n\nFirst line\nSecond line",
     })

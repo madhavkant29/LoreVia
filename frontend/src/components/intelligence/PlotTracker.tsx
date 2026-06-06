@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
@@ -49,7 +49,7 @@ function statusClasses(status: string, isDark: boolean) {
   return palette[status] ?? palette.unknown
 }
 
-export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
+export const PlotTracker = memo(function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
   const [savingId, setSavingId] = useState<string | null>(null)
   const [vaultSavingId, setVaultSavingId] = useState<string | null>(null)
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({})
@@ -118,7 +118,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
       })
     } finally {
       setVaultSavingId(null)
-      void booksApi.listObsidianNotes(bookId).catch(() => null)
+      void booksApi.listVaultNotes(bookId).catch(() => null)
     }
   }
 
@@ -246,10 +246,10 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                         <textarea
                           value={draftNotes[thread.id] ?? ""}
                           onChange={(event) => setDraftNotes((current) => ({ ...current, [thread.id]: event.target.value }))}
-                          placeholder="Resolve this in arc 5."
                           rows={3}
-                          className={`w-full rounded-md border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400"}`}
+                          className={`w-full rounded-md border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
                         />
+                        <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Example: Resolve this in arc 5.</p>
                       </div>
                     </div>
                     <div className="mt-3 flex items-center justify-between gap-3">
@@ -272,7 +272,7 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
                         <button
                           onClick={() => void saveNote(thread.id)}
                           disabled={savingId === thread.id}
-                          className="rounded-full bg-[linear-gradient(135deg,#115e59,#0f766e)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                          className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                         >
                           {savingId === thread.id ? "Saving..." : "Save thread"}
                         </button>
@@ -287,4 +287,4 @@ export function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
       })}
     </div>
   )
-}
+})

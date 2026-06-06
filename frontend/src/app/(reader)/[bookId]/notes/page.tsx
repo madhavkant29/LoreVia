@@ -12,10 +12,10 @@ import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, BookNote, ObsidianGraph, ObsidianVaultNote } from "@/types/book"
+import type { Book, BookNote, VaultGraph, VaultNote } from "@/types/book"
 
-const ObsidianNotesEditor = dynamic(
-  () => import("@/components/reader/ObsidianNotesEditor").then((module) => module.ObsidianNotesEditor),
+const VaultNotesEditor = dynamic(
+  () => import("@/components/reader/VaultNotesEditor").then((module) => module.VaultNotesEditor),
   {
     ssr: false,
     loading: () => (
@@ -34,7 +34,7 @@ const AuthorToolsNav = dynamic(
   }
 )
 
-const EMPTY_GRAPH: ObsidianGraph = { nodes: [], edges: [] }
+const EMPTY_GRAPH: VaultGraph = { nodes: [], edges: [] }
 
 export default function BookNotesPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -72,20 +72,20 @@ export default function BookNotesPage() {
     enabled: secondaryDataEnabled,
     staleTime: 30_000,
   })
-  const { data: notes = [], isLoading: notesLoading } = useQuery<ObsidianVaultNote[]>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "obsidian-notes")),
-    queryFn: () => booksApi.listObsidianNotes(bookId),
+  const { data: notes = [], isLoading: notesLoading } = useQuery<VaultNote[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "vault-notes")),
+    queryFn: () => booksApi.listVaultNotes(bookId),
     staleTime: 30_000,
   })
-  const { data: graph = EMPTY_GRAPH } = useQuery<ObsidianGraph>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "obsidian-graph")),
-    queryFn: () => booksApi.getObsidianGraph(bookId),
+  const { data: graph = EMPTY_GRAPH } = useQuery<VaultGraph>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "vault-graph")),
+    queryFn: () => booksApi.getVaultGraph(bookId),
     enabled: secondaryDataEnabled,
     staleTime: 30_000,
   })
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#010409_0%,#07111c_50%,#0b1523_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#f6f3ea_0%,#eef5ef_50%,#eef3f8_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-[108rem] px-4 pb-20 pt-6 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav
@@ -104,7 +104,7 @@ export default function BookNotesPage() {
               <div className={`rounded-lg border border-dashed py-24 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>Loading vault notes workspace...</div>
             ) : (
               <>
-                <ObsidianNotesEditor
+                <VaultNotesEditor
                   bookId={bookId}
                   bookTitle={book?.title || "book"}
                   initialNotes={notes}
@@ -118,24 +118,24 @@ export default function BookNotesPage() {
                   <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Existing notes</p>
                   <h2 className={`mt-2 font-serif text-3xl ${isDark ? "text-white" : "text-stone-950"}`}>Chapter-linked manuscript notes</h2>
                   <p className={`mt-2 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    Your original manuscript notes still live here. The Obsidian vault is additive, not a replacement.
+                    Your original manuscript notes still live here. The vault is additive, not a replacement.
                   </p>
                 </div>
                 <Link
                   href={`/${bookId}/manuscript`}
-                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-stone-900 text-white"}`}
+                  className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-[#1f615d] text-white" : "bg-[#1f615d] text-white"}`}
                 >
                   Open manuscript notes
                 </Link>
                 <Link
                   href={`/${bookId}/scenes`}
-                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                  className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
                 >
                   Open scene workspace
                 </Link>
                 <Link
                   href={`/${bookId}/voice` as Route}
-                  className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                  className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
                 >
                   Open voice workspace
                 </Link>
@@ -175,14 +175,14 @@ export default function BookNotesPage() {
                       <div className="mt-4 flex flex-wrap gap-2">
                         <Link
                           href={`/${bookId}/manuscript`}
-                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
+                          className={`rounded-md px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-100" : "bg-white text-stone-700"}`}
                         >
                           Open manuscript
                         </Link>
                         {note.chapter_number ? (
                           <Link
                             href={`/${bookId}/chapter/${note.chapter_number}`}
-                            className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 text-slate-200" : "border-stone-200 text-stone-700"}`}
+                            className={`rounded-md border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 text-slate-200" : "border-stone-200 text-stone-700"}`}
                           >
                             Open chapter
                           </Link>

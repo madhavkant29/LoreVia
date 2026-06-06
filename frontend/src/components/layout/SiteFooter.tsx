@@ -7,7 +7,7 @@ import { BrandLockup } from "@/components/layout/BrandLockup"
 import { SocialLinks } from "@/components/layout/SocialLinks"
 import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { TRUST_RESOURCE_LINKS } from "@/lib/constants/trust"
-import { shouldHideSiteFooter } from "@/lib/routes"
+import { shouldHideSiteFooter, shouldOffsetSiteFooterForDashboardShell } from "@/lib/routes"
 import { useAuthStore } from "@/lib/stores/authStore"
 
 export function SiteFooter() {
@@ -18,6 +18,7 @@ export function SiteFooter() {
 
   const isLandingPage = pathname === "/"
   const isEditorialMarketingSurface = pathname === "/" || pathname?.startsWith("/compare") === true
+  const isDashboardShellSurface = shouldOffsetSiteFooterForDashboardShell(pathname)
 
   const footerLinkClass =
     `group inline-flex items-center gap-3 rounded-sm px-0 py-0.5 text-[1.02rem] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[rgba(var(--accent),0.45)] ${
@@ -37,13 +38,14 @@ export function SiteFooter() {
     { href: "/blog", label: "Blog", external: false as const },
     { href: "/answers", label: "Answers", external: false as const },
     { href: "/demo", label: "Demo", external: false as const },
+    { href: "/font-notice", label: "Font Notice", external: false as const },
     { href: "/status", label: "Status", external: false as const },
   ]
   const navigationColumns = [navigationLinks.slice(0, 6), navigationLinks.slice(6)]
 
   return (
     <footer
-      className={`border-t px-4 py-16 text-sm transition-colors sm:px-6 lg:px-8 ${
+      className={`border-t px-4 py-16 text-sm transition-colors sm:px-6 lg:px-8 ${isDashboardShellSurface ? "lg:ml-[15rem]" : ""} ${
         isEditorialMarketingSurface
           ? "border-white/8 bg-[#08110f] text-[#d9e0db]"
           : "border-slate-200 bg-[#f6f5f3] text-[rgb(var(--foreground))] dark:border-slate-700/70 dark:bg-[#12171c]"

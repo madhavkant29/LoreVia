@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.core.security import create_access_token
 from app.utils.auth_csrf import (
     AUTH_CSRF_COOKIE_NAME,
     AUTH_CSRF_HEADER_NAME,
@@ -13,17 +14,23 @@ from app.utils.auth_csrf import (
 )
 from app.utils.auth_cookies import (
     ACCESS_TOKEN_COOKIE_NAME,
+    DEVICE_ID_COOKIE_NAME,
     REFRESH_TOKEN_COOKIE_NAME,
     auth_cookie_secure,
     clear_auth_cookies,
     get_auth_token,
+    get_device_cookie,
+    resolve_device_id,
     set_auth_cookies,
     set_access_cookie,
+    set_device_cookie,
 )
+from app.utils.cookie_utils import auth_cookie_domain
 
 
 def test_set_auth_cookies_uses_http_only_lax_path(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", None, raising=False)
     monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
 
     response = Response()
@@ -41,6 +48,20 @@ def test_set_auth_cookies_uses_http_only_lax_path(monkeypatch):
     assert any("samesite=lax" in header.lower() for header in set_cookie_headers)
     assert any("secure" in header.lower() for header in set_cookie_headers)
     assert any("path=/" in header.lower() for header in set_cookie_headers)
+    assert all("domain=" not in header.lower() for header in set_cookie_headers)
+
+
+def test_auth_cookie_domain_requires_explicit_matching_override(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://app.getlorevia.com", raising=False)
+
+    monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", None, raising=False)
+    assert auth_cookie_domain() is None
+
+    monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", ".getlorevia.com", raising=False)
+    assert auth_cookie_domain() == "getlorevia.com"
+
+    monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", "example.com", raising=False)
+    assert auth_cookie_domain() is None
 
 
 def test_set_auth_cookies_expires_legacy_api_prefix_cookies(monkeypatch):
@@ -139,6 +160,53 @@ def test_set_access_cookie_expires_legacy_api_prefix_access_cookie(monkeypatch):
     assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
 
 
+def test_set_device_cookie_uses_http_only_lax_path(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+    response = Response()
+    set_device_cookie(response, "device-cookie-id01")
+
+    set_cookie_headers = [
+        value.decode() if isinstance(value, bytes) else value
+        for name, value in response.raw_headers
+        if name.lower() == b"set-cookie"
+    ]
+    active_device_cookie = next(
+        header for header in set_cookie_headers
+        if DEVICE_ID_COOKIE_NAME in header and "device-cookie-id01" in header
+    )
+    assert "httponly" in active_device_cookie.lower()
+    assert "samesite=lax" in active_device_cookie.lower()
+    assert "path=/" in active_device_cookie.lower()
+
+
+def test_resolve_device_id_prefers_cookie_over_request_payload():
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [(b"cookie", b"lorevia_device_id=device-cookie-id01")],
+        }
+    )
+
+    assert get_device_cookie(request) == "device-cookie-id01"
+    assert resolve_device_id(request, "request-device-id02") == "device-cookie-id01"
+
+
+def test_resolve_device_id_uses_request_payload_when_cookie_missing():
+    request = Request({"type": "http", "method": "POST", "headers": []})
+
+    assert resolve_device_id(request, "request-device-id02") == "request-device-id02"
+
+
+def test_resolve_device_id_requires_cookie_or_request_payload():
+    request = Request({"type": "http", "method": "POST", "headers": []})
+
+    with pytest.raises(ValueError, match="Device identifier is required."):
+        resolve_device_id(request, None)
+
+
 def test_set_auth_csrf_cookie_uses_readable_lax_cookie(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
     monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
@@ -160,13 +228,16 @@ def test_set_auth_csrf_cookie_uses_readable_lax_cookie(monkeypatch):
     assert "path=/" in active_csrf_cookie.lower()
 
 
-def test_cookie_authenticated_request_requires_csrf_only_for_unsafe_non_bearer_methods():
+def test_cookie_authenticated_request_requires_csrf_only_for_unsafe_requests_without_valid_bearer():
     patch_request = Request({"type": "http", "method": "PATCH", "headers": []})
     get_request = Request({"type": "http", "method": "GET", "headers": []})
-    bearer_request = Request({"type": "http", "method": "POST", "headers": [(b"authorization", b"Bearer token")]})
+    forged_bearer_request = Request({"type": "http", "method": "POST", "headers": [(b"authorization", b"Bearer token")]})
+    valid_bearer = create_access_token("user-1")
+    bearer_request = Request({"type": "http", "method": "POST", "headers": [(b"authorization", f"Bearer {valid_bearer}".encode())]})
 
     assert cookie_authenticated_request_requires_csrf(patch_request) is True
     assert cookie_authenticated_request_requires_csrf(get_request) is False
+    assert cookie_authenticated_request_requires_csrf(forged_bearer_request) is True
     assert cookie_authenticated_request_requires_csrf(bearer_request) is False
 
 

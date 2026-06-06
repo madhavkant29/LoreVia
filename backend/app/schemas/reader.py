@@ -93,6 +93,7 @@ class ChapterAnalysisStatusOut(BaseModel):
 class ChapterListItemOut(BaseModel):
     number: int
     title: str | None = None
+    chapter_kind: str = "chapter"
     processed: bool
     intelligence_available: bool = True
     read: bool
@@ -122,6 +123,7 @@ class SummaryKeyEventOut(BaseModel):
 class SummaryCollectionItemOut(BaseModel):
     chapter_number: int
     chapter_title: str | None = None
+    chapter_kind: str = "chapter"
     read: bool
     available: bool
     status: str = "pending"

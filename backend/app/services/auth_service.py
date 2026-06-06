@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import is_local_mode, settings
@@ -16,11 +16,15 @@ from app.utils.auth_utils import current_token_version, hash_device_id
 
 
 class DeviceTrialLimitError(Exception):
-    """Raised when a device has already consumed its free-trial signup."""
+    """Raised when a device is already linked to too many accounts."""
 
 
 def device_trial_enforcement_active() -> bool:
     return settings.DEVICE_TRIAL_ENFORCEMENT_ENABLED and not is_local_mode()
+
+
+def device_account_limit_message() -> str:
+    return f"This device is already linked to the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} accounts."
 
 
 async def register_user(db: AsyncSession, email: str, password: str) -> tuple[User, str, str]:
@@ -48,15 +52,52 @@ async def ensure_device_trial_available(db: AsyncSession, device_id: str) -> Non
     device_id_hash = hash_device_id(device_id)
     existing_trial_count = (
         await db.execute(
-            select(func.count())
+            select(func.count(distinct(DeviceTrial.user_id)))
             .select_from(DeviceTrial)
             .where(DeviceTrial.device_id_hash == device_id_hash)
         )
     ).scalar_one()
     if int(existing_trial_count or 0) >= settings.DEVICE_TRIAL_MAX_ACCOUNTS:
-        raise DeviceTrialLimitError(
-            f"This device has already used the maximum of {settings.DEVICE_TRIAL_MAX_ACCOUNTS} trial accounts."
+        raise DeviceTrialLimitError(device_account_limit_message())
+
+
+async def link_device_to_user_if_allowed(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    device_id: str,
+    *,
+    strict: bool = True,
+) -> None:
+    if not device_trial_enforcement_active():
+        return
+
+    device_id_hash = hash_device_id(device_id)
+    existing_link = (
+        await db.execute(
+            select(DeviceTrial.id)
+            .where(
+                DeviceTrial.user_id == user_id,
+                DeviceTrial.device_id_hash == device_id_hash,
+            )
+            .limit(1)
         )
+    ).scalar_one_or_none()
+    if existing_link is not None:
+        return
+
+    linked_account_count = (
+        await db.execute(
+            select(func.count(distinct(DeviceTrial.user_id)))
+            .select_from(DeviceTrial)
+            .where(DeviceTrial.device_id_hash == device_id_hash)
+        )
+    ).scalar_one()
+    if int(linked_account_count or 0) >= settings.DEVICE_TRIAL_MAX_ACCOUNTS:
+        if strict:
+            raise DeviceTrialLimitError(device_account_limit_message())
+        return
+
+    db.add(build_device_trial(user_id, device_id))
 
 
 def build_device_trial(user_id: uuid.UUID, device_id: str) -> DeviceTrial:

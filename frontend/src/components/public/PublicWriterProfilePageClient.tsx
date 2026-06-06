@@ -168,15 +168,15 @@ export function PublicWriterProfilePageClient({
   return (
     <div className={`min-h-screen ${pageClass}`}>
       <div className="mx-auto max-w-[1240px] px-4 py-8 sm:px-6 lg:px-8">
-        <Link href="/library" className={`inline-flex items-center gap-2 text-sm transition ${softText} ${isDark ? "hover:text-white" : "hover:text-slate-900"}`}>
+        <Link href="/public" className={`inline-flex items-center gap-2 text-sm transition ${softText} ${isDark ? "hover:text-white" : "hover:text-slate-900"}`}>
           <ArrowLeftIcon />
-          Back to library
+          Back to public library
         </Link>
 
         <section className={`mt-5 rounded-lg border p-5 sm:p-6 lg:p-7 ${panelClass}`}>
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-              <div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-full border text-4xl ${insetClass} ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+              <div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border text-4xl ${insetClass} ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                 @
               </div>
 
@@ -192,7 +192,7 @@ export function PublicWriterProfilePageClient({
 
             <Link
               href={`/chats?username=${encodeURIComponent(profileView.username)}` as Route}
-              className={`inline-flex h-10 items-center justify-center rounded-full border px-4 text-sm font-semibold transition ${secondaryButtonClass}`}
+              className={`inline-flex h-10 items-center justify-center rounded-md border px-4 text-sm font-semibold transition ${secondaryButtonClass}`}
             >
               Message @{profileView.username}
             </Link>
@@ -257,7 +257,7 @@ export function PublicWriterProfilePageClient({
           eyebrow="Activity"
           title="Discussion history"
           trailing={
-            <div className={`inline-flex rounded-full p-1 ${isDark ? "bg-white/[0.05]" : "bg-[#f0f2f5]"}`}>
+            <div className={`inline-flex rounded-md p-1 ${isDark ? "bg-white/[0.05]" : "bg-[#f0f2f5]"}`}>
               <TabButton isDark={isDark} active={activeTab === "posts"} onClick={() => setActiveTab("posts")} label={`Posts (${profileView.posts.length})`} />
               <TabButton isDark={isDark} active={activeTab === "comments"} onClick={() => setActiveTab("comments")} label={`Comments (${profileView.comments.length})`} />
             </div>
@@ -309,12 +309,12 @@ export function PublicWriterProfilePageClient({
                   {forumDiscussionHref || publicSampleHref ? (
                     <div className="mt-5 flex flex-wrap gap-3">
                       {forumDiscussionHref ? (
-                        <Link href={forumDiscussionHref as Route} className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold transition ${accentButtonClass}`}>
+                        <Link href={forumDiscussionHref as Route} className={`inline-flex rounded-md px-4 py-2 text-sm font-semibold transition ${accentButtonClass}`}>
                           Open forum discussion
                         </Link>
                       ) : null}
                       {publicSampleHref ? (
-                        <Link href={publicSampleHref as Route} className={`inline-flex rounded-full border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}>
+                        <Link href={publicSampleHref as Route} className={`inline-flex rounded-md border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}>
                           Read public sample
                         </Link>
                       ) : null}
@@ -426,7 +426,7 @@ function TabButton({ isDark, active, onClick, label }: { isDark: boolean; active
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+      className={`rounded-sm px-4 py-2 text-sm font-semibold transition ${
         active
           ? isDark
             ? "bg-[#f0b323] text-slate-950"
@@ -458,11 +458,11 @@ function PublicBookCard({ isDark, book }: { isDark: boolean; book: PublicBook })
         <span>{book.analytics?.book_view_count?.toLocaleString?.() ?? 0} views</span>
       </div>
       <div className="mt-5 flex flex-wrap gap-3">
-        <Link href={`/public/${book.public_slug || book.id}` as Route} className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-white text-slate-950 hover:bg-slate-200" : "bg-slate-950 text-white hover:bg-slate-800"}`}>
+        <Link href={`/public/${book.public_slug || book.id}` as Route} className={`inline-flex rounded-md px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}>
           Read public book
         </Link>
         {book.active_forum_post_id ? (
-          <Link href={`/public/forum/${book.active_forum_post_id}` as Route} className={`inline-flex rounded-full border px-4 py-2 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.03] text-white hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}>
+          <Link href={`/public/forum/${book.active_forum_post_id}` as Route} className={`inline-flex rounded-md border px-4 py-2 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.03] text-white hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}>
             Open discussion
           </Link>
         ) : null}

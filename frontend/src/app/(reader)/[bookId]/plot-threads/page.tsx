@@ -5,6 +5,8 @@ import { useEffect } from "react"
 import { useParams } from "next/navigation"
 
 import { PlotTracker } from "@/components/intelligence/PlotTracker"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { WorkspacePage, WorkspacePanel } from "@/components/ui/Workspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
 
@@ -18,26 +20,26 @@ export default function PlotThreadsPage() {
   }, [bookId])
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
-      <div className="mx-auto max-w-7xl px-4 pb-16 pt-6 sm:px-6 lg:px-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Author dashboard</p>
-            <h1 className={`mt-2 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>Plot Thread Dashboard</h1>
-            <p className={`mt-3 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-              See every tracked thread across the manuscript, check what is still unresolved, and leave private reminders for future arcs.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Link href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>Overview</Link>
-            <Link href={`/${bookId}/manuscript`} className="rounded-full bg-[linear-gradient(135deg,#115e59,#0f766e)] px-4 py-2 text-sm font-semibold text-white">Manuscript</Link>
-          </div>
-        </div>
+    <WorkspacePage className={isDark ? "text-slate-100" : "text-stone-950"}>
+      <div className="mx-auto max-w-7xl px-0 pb-16 pt-6 sm:px-2 lg:px-4">
+        <WorkspaceFamilyHeader
+          active="plot-threads"
+          bookId={bookId}
+          family="story-bible"
+          title="Plot threads"
+          description="Track open arcs across the manuscript, identify unresolved pressure points, and keep private reminders beside the story structure."
+          actions={(
+            <>
+              <Link href={`/${bookId}`} className="app-button-secondary">Overview</Link>
+              <Link href={`/${bookId}/manuscript`} className="app-button-primary">Manuscript</Link>
+            </>
+          )}
+        />
 
-        <div className={`mt-8 rounded-lg border p-5 sm:p-6 ${isDark ? "border-white/10 bg-black/70" : "border-stone-200 bg-white/90"}`}>
+        <WorkspacePanel className="mt-6 p-5 sm:p-6">
           <PlotTracker bookId={bookId} mode="dashboard" />
-        </div>
+        </WorkspacePanel>
       </div>
-    </div>
+    </WorkspacePage>
   )
 }

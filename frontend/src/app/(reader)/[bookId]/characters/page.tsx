@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
-import { startTransition, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react"
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
@@ -12,7 +12,14 @@ import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
+import { CharacterEvidencePanel } from "@/components/reader/CharacterEvidencePanel"
+import { CharacterProfileRightRail, type CharacterHealth, type ConnectedRelationship, type SidebarTab } from "@/components/reader/CharacterProfileRightRail"
+import { CharacterProfileTabs, type CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
+import { CharacterWorkspaceHeader } from "@/components/reader/CharacterWorkspaceHeader"
+import { CharacterWorkspaceSidebarHeader } from "@/components/reader/CharacterWorkspaceSidebarHeader"
 import { FirstTimeTooltip } from "@/components/tooltips/FirstTimeTooltip"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 import type { Book } from "@/types/book"
 import type {
   Character,
@@ -31,8 +38,17 @@ const RelationshipGraph = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex min-h-[32rem] items-center justify-center rounded-lg border border-dashed text-sm text-inherit">
-        Loading relationship graph...
+      <div className="min-h-[32rem] rounded-lg border border-dashed p-5" role="status" aria-label="Loading relationship graph" aria-busy="true">
+        <span className="sr-only">Loading relationship graph</span>
+        <Skeleton className="h-4 w-40" />
+        <div className="relative mt-8 h-80">
+          <Skeleton variant="circle" className="absolute left-[12%] top-[18%] h-14 w-14" />
+          <Skeleton variant="circle" className="absolute left-[38%] top-[8%] h-10 w-10" />
+          <Skeleton variant="circle" className="absolute left-[52%] top-[44%] h-16 w-16" />
+          <Skeleton variant="circle" className="absolute right-[16%] top-[24%] h-12 w-12" />
+          <Skeleton className="absolute left-[20%] top-[34%] h-px w-52 rotate-12" />
+          <Skeleton className="absolute left-[50%] top-[50%] h-px w-44 -rotate-12" />
+        </div>
       </div>
     ),
   }
@@ -66,8 +82,6 @@ type RelationshipComposerDraft = {
   toChapter: string
 }
 
-type CharacterTab = "overview" | "relationships" | "arc" | "evidence" | "continuity" | "notes"
-type SidebarTab = "insights" | "evidence"
 type CastFilter = "all" | "main" | "minor" | "needs-review" | "duplicates"
 type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
@@ -85,18 +99,6 @@ type MergeSuggestion = {
   secondaryIsProtected: boolean
   primaryIsCurated: boolean
   secondaryIsCurated: boolean
-}
-
-type ConnectedRelationship = RelationshipGraphData["edges"][number] & {
-  counterpartId: string
-  counterpartName: string
-}
-
-type CharacterHealth = {
-  score: number
-  tone: "strong" | "moderate" | "attention"
-  summary: string
-  issues: string[]
 }
 
 type MenuAction = {
@@ -480,33 +482,6 @@ function flagClasses(isDark: boolean, flag: string) {
   return isDark ? "bg-sky-500/12 text-sky-200" : "bg-sky-50 text-sky-700"
 }
 
-function sidebarTabClasses(isDark: boolean, active: boolean) {
-  if (active) {
-    return isDark
-      ? "border-b border-violet-400 text-white"
-      : "border-b border-violet-500 text-violet-700"
-  }
-  return isDark ? "border-b border-transparent text-slate-400 hover:text-slate-200" : "border-b border-transparent text-stone-500 hover:text-stone-800"
-}
-
-function workspaceTabClasses(isDark: boolean, active: boolean) {
-  if (active) {
-    return isDark
-      ? "border-b-2 border-violet-400 text-white"
-      : "border-b-2 border-violet-500 text-violet-700"
-  }
-  return isDark ? "border-b-2 border-transparent text-slate-400 hover:text-slate-200" : "border-b-2 border-transparent text-stone-500 hover:text-stone-800"
-}
-
-function filterChipClasses(isDark: boolean, active: boolean) {
-  if (active) {
-    return isDark
-      ? "border-violet-400/40 bg-violet-500/14 text-violet-100"
-      : "border-violet-300 bg-violet-50 text-violet-700"
-  }
-  return isDark ? "border-white/10 text-slate-300 hover:bg-white/[0.04]" : "border-stone-200 text-stone-600 hover:bg-stone-50"
-}
-
 function buildSelectedCharacterSummary(character: Character | null, connections: ConnectedRelationship[]) {
   if (!character) return ""
 
@@ -563,7 +538,7 @@ function actionButtonClasses(isDark: boolean) {
 }
 
 function menuPanelClasses(isDark: boolean) {
-  return `absolute right-0 top-full z-30 mt-2 w-60 overflow-hidden rounded-2xl border p-1 shadow-2xl ${
+  return `absolute right-0 top-full z-30 mt-2 w-60 overflow-hidden rounded-md border p-1 ${
     isDark ? "border-white/10 bg-[#0b1018]" : "border-stone-200 bg-white"
   }`
 }
@@ -580,13 +555,13 @@ function workspaceActionButtonClasses(
 ) {
   if (active) {
     if (tone === "teal") {
-      return "border border-teal-400/30 bg-[linear-gradient(135deg,rgba(13,148,136,0.94),rgba(15,118,110,0.94))] text-white shadow-[0_14px_34px_rgba(13,148,136,0.18)]"
+      return "border border-teal-500 bg-[#1f615d] text-white"
     }
     if (tone === "violet") {
-      return "border border-violet-400/30 bg-[linear-gradient(135deg,rgba(124,58,237,0.96),rgba(109,40,217,0.96))] text-white shadow-[0_14px_34px_rgba(109,40,217,0.2)]"
+      return "border border-violet-500 bg-violet-700 text-white"
     }
     if (tone === "amber") {
-      return "border border-amber-400/30 bg-[linear-gradient(135deg,rgba(245,158,11,0.98),rgba(217,119,6,0.98))] text-white shadow-[0_14px_34px_rgba(217,119,6,0.22)]"
+      return "border border-amber-500 bg-amber-600 text-white"
     }
     return "border border-white/15 bg-white/[0.08] text-white"
   }
@@ -598,8 +573,8 @@ function workspaceActionButtonClasses(
 
 function fieldClasses(isDark: boolean) {
   return isDark
-    ? "w-full rounded-xl border border-white/10 bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
-    : "w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200/70"
+    ? "w-full rounded-xl border border-white/10 bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
+    : "w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-200/70"
 }
 
 function sectionEyebrowClasses(isDark: boolean, tone: "default" | "teal" | "violet" | "amber" = "default") {
@@ -702,6 +677,54 @@ function ShellIcon({
   )
 }
 
+function CharacterBibleSkeleton({ isDark, atmosphere }: { isDark: boolean; atmosphere: string }) {
+  const panelClass = isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/85"
+
+  return (
+    <div className={`min-h-screen ${atmosphere}`}>
+      <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8" role="status" aria-label="Loading Character Bible" aria-busy="true">
+        <span className="sr-only">Loading Character Bible</span>
+        <section className={`rounded-lg border p-5 ${panelClass}`}>
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="mt-4 h-9 w-64 max-w-full" />
+              <Skeleton className="mt-3 h-4 w-full max-w-2xl" />
+            </div>
+            <div className="grid w-full grid-cols-2 gap-3 md:grid-cols-4 xl:max-w-xl">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-20 rounded-md" />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)_18rem]">
+          <SidebarSkeleton className={panelClass} />
+          <div className="space-y-5">
+            <CardSkeleton className={panelClass} />
+            <div className="grid gap-4 md:grid-cols-2">
+              <CardSkeleton className={panelClass} />
+              <CardSkeleton className={panelClass} />
+            </div>
+            <div className={`rounded-md border p-4 ${panelClass}`}>
+              <Skeleton className="h-4 w-32" />
+              <div className="mt-4 space-y-3">
+                <RowSkeleton />
+                <RowSkeleton />
+              </div>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <CardSkeleton className={panelClass} />
+            <CardSkeleton className={panelClass} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function StatCard({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
   const iconName = label.includes("merge")
     ? "merge"
@@ -719,7 +742,7 @@ function StatCard({ label, value, isDark }: { label: string; value: string; isDa
         : "default"
 
   return (
-    <div className={`min-h-[92px] rounded-md border px-4 py-3.5 ${isDark ? "border-white/10 bg-[#0b1018] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" : "border-stone-200 bg-white/92"}`}>
+    <div className={`min-h-[92px] rounded-md border px-4 py-3.5 ${isDark ? "border-white/10 bg-[#0b1018]" : "border-stone-200 bg-white/92"}`}>
       <div className="flex items-start justify-between gap-3">
         <span className={`inline-flex h-9 w-9 items-center justify-center rounded-sm ${
           tone === "violet"
@@ -767,27 +790,10 @@ function SurfaceCard({
   className?: string
 }) {
   return (
-    <section className={`rounded-md border px-4 py-4 ${isDark ? "border-white/8 bg-[#0d141d]/92 shadow-[0_16px_34px_rgba(0,0,0,0.14)]" : "border-stone-200 bg-stone-50/80"} ${className}`}>
+    <section className={`rounded-md border px-4 py-4 ${isDark ? "border-white/8 bg-[#0d141d]/92" : "border-stone-200 bg-stone-50/80"} ${className}`}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
       <div className="mt-4">{children}</div>
     </section>
-  )
-}
-
-function HealthRing({ score, tone, isDark }: { score: number; tone: CharacterHealth["tone"]; isDark: boolean }) {
-  const accent = tone === "strong" ? "#22c55e" : tone === "moderate" ? "#8b5cf6" : "#f59e0b"
-
-  return (
-    <div
-      className="relative flex h-24 w-24 items-center justify-center rounded-full"
-      style={{
-        background: `conic-gradient(${accent} ${score}%, ${isDark ? "rgba(255,255,255,0.09)" : "rgba(148,163,184,0.2)"} ${score}% 100%)`,
-      }}
-    >
-      <div className={`flex h-[74px] w-[74px] items-center justify-center rounded-full text-2xl font-semibold ${isDark ? "bg-[#0d1016] text-white" : "bg-white text-stone-950"}`}>
-        {score}%
-      </div>
-    </div>
   )
 }
 
@@ -867,6 +873,7 @@ function QuickActionTile({
 export default function CharactersPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
+  const confirm = useConfirmDialog()
 
   const { data: bookData = null, isLoading: bookLoading } = useBookDetail(bookId)
   const { data: progressData = null } = useQuery<ReadingProgress | null>({
@@ -924,7 +931,7 @@ export default function CharactersPage() {
   const [selectedMergeKey, setSelectedMergeKey] = useState("")
   const [manualMergePrimaryId, setManualMergePrimaryId] = useState("")
   const [manualMergeSecondaryId, setManualMergeSecondaryId] = useState("")
-  const [activeTab, setActiveTab] = useState<CharacterTab>("overview")
+  const [activeTab, setActiveTab] = useState<CharacterProfileTab>("overview")
   const [relationshipsEnabled, setRelationshipsEnabled] = useState(false)
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("insights")
   const [castFilter, setCastFilter] = useState<CastFilter>("all")
@@ -962,6 +969,24 @@ export default function CharactersPage() {
   const [reprocessAllowMerge, setReprocessAllowMerge] = useState(true)
   const [reprocessAllowDemote, setReprocessAllowDemote] = useState(true)
   const [reprocessBusy, setReprocessBusy] = useState(false)
+
+  const timeoutRef = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    return () => {
+      for (const id of timeoutRef.current) {
+        window.clearTimeout(id)
+      }
+    }
+  }, [])
+
+  function scheduleTimeout(callback: () => void, delay: number) {
+    const id = window.setTimeout(() => {
+      timeoutRef.current.delete(id)
+      callback()
+    }, delay)
+    timeoutRef.current.add(id)
+  }
 
   useEffect(() => {
     setBook(bookData)
@@ -1613,10 +1638,10 @@ export default function CharactersPage() {
       const shareUrl = `${window.location.origin}${response.share_url}`
       await navigator.clipboard.writeText(shareUrl)
       setShareState("copied")
-      window.setTimeout(() => setShareState("idle"), 2200)
+      scheduleTimeout(() => setShareState("idle"), 2200)
     } catch {
       setShareState("error")
-      window.setTimeout(() => setShareState("idle"), 2200)
+      scheduleTimeout(() => setShareState("idle"), 2200)
     }
   }
 
@@ -1647,7 +1672,12 @@ export default function CharactersPage() {
 
   async function handleDeleteCharacter() {
     if (!selectedCharacter) return
-    const confirmed = window.confirm(`Delete ${selectedCharacter.name} from this book? This is best for false positives and cannot be undone.`)
+    const confirmed = await confirm({
+      title: `Delete ${selectedCharacter.name}?`,
+      body: `Delete ${selectedCharacter.name} from this book? This is best for false positives and cannot be undone.`,
+      confirmLabel: "Delete character",
+      tone: "danger",
+    })
     if (!confirmed) return
 
     setDeleting(true)
@@ -1737,7 +1767,7 @@ export default function CharactersPage() {
         folderSegments: [selectedCharacter.name],
       })
       setNoteToast(`Saved ${selectedCharacter.name} to Characters.`)
-      window.setTimeout(() => setNoteToast(null), 2400)
+      scheduleTimeout(() => setNoteToast(null), 2400)
     } catch {
       setActionError("Could not save this character to the notes workspace.")
     }
@@ -1859,7 +1889,7 @@ export default function CharactersPage() {
       setWorkspaceMode("review")
       setSelectedId(refreshed[0]?.id ?? "")
       setNoteToast(`Moved ${selectedCharacter.name} back into review as candidate ${response.candidate_id.slice(0, 8)}.`)
-      window.setTimeout(() => setNoteToast(null), 2600)
+      scheduleTimeout(() => setNoteToast(null), 2600)
     } catch {
       setActionError("Could not move this character back into the review queue.")
     } finally {
@@ -1898,7 +1928,7 @@ export default function CharactersPage() {
       })
       setChars((current) => current.map((item) => item.id === updated.id ? updated : item))
       setNoteToast(`Saved review note for ${updated.name}.`)
-      window.setTimeout(() => setNoteToast(null), 2200)
+      scheduleTimeout(() => setNoteToast(null), 2200)
     } catch {
       setActionError("Could not save this review note.")
     } finally {
@@ -2014,7 +2044,7 @@ export default function CharactersPage() {
       await refetchRepairPreview()
       await refetchIdentityDiagnostics()
       setNoteToast("Character repair applied.")
-      window.setTimeout(() => setNoteToast(null), 2200)
+      scheduleTimeout(() => setNoteToast(null), 2200)
     } catch {
       setActionError("Could not apply the repair plan.")
     } finally {
@@ -2032,7 +2062,7 @@ export default function CharactersPage() {
       await refetchRepairPreview()
       await refetchIdentityDiagnostics()
       setNoteToast("Identity action undone.")
-      window.setTimeout(() => setNoteToast(null), 2200)
+      scheduleTimeout(() => setNoteToast(null), 2200)
     } catch {
       setActionError("Could not undo this identity action.")
     } finally {
@@ -2138,20 +2168,18 @@ export default function CharactersPage() {
 
   const stats = topStats(chars.length, graphData?.edges.length ?? 0, relationshipChapter, mergeSuggestions.length)
 
-  const atmosphere = isDark
-    ? "bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.08),transparent_24%),radial-gradient(circle_at_top_right,rgba(124,58,237,0.14),transparent_26%),linear-gradient(180deg,#04070c_0%,#081019_34%,#0b1017_100%)] text-slate-100"
-    : "bg-[radial-gradient(circle_at_top_left,rgba(124,58,237,0.08),transparent_26%),radial-gradient(circle_at_top_right,rgba(244,114,182,0.07),transparent_24%),linear-gradient(180deg,#fbf8f3_0%,#f7f1e8_46%,#f4ede4_100%)] text-stone-950"
+  const atmosphere = isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"
+  const sidebarSummary =
+    workspaceMode === "duplicates"
+      ? `${filteredMergeSuggestions.length} suggestions${isManualMerge ? " / manual pair selected" : ""}`
+      : workspaceMode === "review"
+        ? `${filteredPendingCandidates.length} candidate items / ${filteredRelationshipCandidates.length} relationship items`
+        : workspaceMode === "repair"
+          ? `${repairPreview.planned_merges.length} planned merges / ${repairPreview.planned_demotions.length} planned demotions`
+          : `${filteredChars.length} characters`
 
   if (loading) {
-    return (
-      <div className={`min-h-screen ${atmosphere}`}>
-        <div className="mx-auto max-w-[1500px] px-4 py-8 sm:px-6 lg:px-8">
-          <div className={`rounded-lg border p-6 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white/85 text-stone-600"}`}>
-            Loading the Character Bible...
-          </div>
-        </div>
-      </div>
-    )
+    return <CharacterBibleSkeleton isDark={isDark} atmosphere={atmosphere} />
   }
 
   return (
@@ -2163,31 +2191,19 @@ export default function CharactersPage() {
         isDark={isDark}
       />
       <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8">
-        <button
-          onClick={() => router.back()}
-          className={`inline-flex items-center gap-2 text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-stone-600 hover:text-stone-950"}`}
-        >
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-            <path fillRule="evenodd" d="M11.78 4.22a.75.75 0 0 1 0 1.06L8.06 9h8.19a.75.75 0 0 1 0 1.5H8.06l3.72 3.72a.75.75 0 1 1-1.06 1.06l-5-5a.75.75 0 0 1 0-1.06l5-5a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
-          </svg>
-          Back
-        </button>
-
-        <div className="mt-4 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0 xl:max-w-[32rem]">
-            <h1 className={`text-[2.55rem] font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Character Bible</h1>
-            <p className={`mt-1.5 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-              Manage cast, aliases, relationships, continuity, and duplicate review.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3 xl:min-w-[820px] xl:max-w-[940px] xl:flex-1">
+        <CharacterWorkspaceHeader
+          title="Character Bible"
+          description="Manage cast, aliases, relationships, continuity, and duplicate review."
+          onBack={() => router.back()}
+          isDark={isDark}
+          stats={(
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {stats.map((stat) => (
                 <StatCard key={stat.label} label={stat.label} value={stat.value} isDark={isDark} />
               ))}
             </div>
-
+          )}
+          actions={(
             <div className="flex flex-wrap items-center justify-start gap-3 xl:justify-end">
               {isAuthorMode ? (
                 <button
@@ -2235,83 +2251,25 @@ export default function CharactersPage() {
               ) : null}
               <OverflowMenu isDark={isDark} open={pageMenuOpen} onToggle={() => setPageMenuOpen((current) => !current)} actions={pageMenuActions} />
             </div>
-          </div>
-        </div>
+          )}
+        />
 
         {mergeError ? <p className="mt-3 text-sm text-amber-400">{mergeError}</p> : null}
         {error ? <p className="mt-3 text-sm text-rose-400">{error}</p> : null}
 
         {!error && (chars.length > 0 || creating || workspaceMode !== "profile") ? (
-          <div className={`mt-5 overflow-hidden rounded-lg border shadow-[0_24px_70px_rgba(0,0,0,0.18)] ${isDark ? "border-white/10 bg-[#070c13]" : "border-stone-200 bg-white/94"}`}>
+          <div className={`mt-5 overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-[#070c13]" : "border-stone-200 bg-white/94"}`}>
             <div className="grid xl:h-[calc(100vh-12rem)] xl:grid-cols-[340px_minmax(0,1fr)_320px] 2xl:grid-cols-[350px_minmax(0,1fr)_330px]">
               <aside className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-white/8" : "border-stone-200"}`}>
-                <div className={`sticky top-0 z-10 border-b px-4 py-4 backdrop-blur ${isDark ? "border-white/8 bg-[#070c13]/96" : "border-stone-200 bg-white/96"}`}>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${sectionEyebrowClasses(isDark, workspaceMode === "review" ? "teal" : workspaceMode === "duplicates" ? "violet" : workspaceMode === "repair" ? "amber" : "default")}`}>
-                    {workspaceMode === "duplicates" ? "Duplicate review" : workspaceMode === "review" ? "Review queue" : workspaceMode === "repair" ? "Repair preview" : "Cast"}
-                  </p>
-                  <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                    {workspaceMode === "duplicates"
-                      ? `${filteredMergeSuggestions.length} suggestions${isManualMerge ? " · manual pair selected" : ""}`
-                      : workspaceMode === "review"
-                        ? `${filteredPendingCandidates.length} candidate items · ${filteredRelationshipCandidates.length} relationship items`
-                        : workspaceMode === "repair"
-                          ? `${repairPreview.planned_merges.length} planned merges · ${repairPreview.planned_demotions.length} planned demotions`
-                      : `${filteredChars.length} characters`}
-                  </p>
-
-                  <label className={`mt-4 flex items-center gap-3 rounded-md border px-3 py-3 ${isDark ? "border-white/10 bg-[#0c1119]" : "border-stone-200 bg-stone-50"}`}>
-                    <span className="sr-only">
-                      {workspaceMode === "duplicates"
-                        ? "Search merge suggestions"
-                        : workspaceMode === "review"
-                          ? "Search review candidates"
-                          : workspaceMode === "repair"
-                            ? "Search repair preview"
-                            : "Search characters"}
-                    </span>
-                    <svg className={`h-4 w-4 ${isDark ? "text-slate-500" : "text-stone-400"}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                      <path fillRule="evenodd" d="M8.5 3a5.5 5.5 0 1 0 3.473 9.765l3.63 3.631a.75.75 0 1 0 1.06-1.06l-3.63-3.63A5.5 5.5 0 0 0 8.5 3ZM4.5 8.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
-                    </svg>
-                    <input
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      aria-label={workspaceMode === "duplicates"
-                        ? "Search merge suggestions"
-                        : workspaceMode === "review"
-                          ? "Search review candidates"
-                          : workspaceMode === "repair"
-                            ? "Search repair preview"
-                            : "Search characters"}
-                      placeholder={workspaceMode === "duplicates" ? "Search merge suggestions..." : workspaceMode === "review" ? "Search candidates, reasons, snippets..." : workspaceMode === "repair" ? "Search characters, repairs, merges..." : "Search characters, aliases, traits..."}
-                      className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-stone-900 placeholder:text-stone-400"}`}
-                    />
-                    <span className={`rounded-md border px-1.5 py-0.5 text-3xs font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-500" : "border-stone-200 bg-white text-stone-400"}`}>
-                      Ctrl K
-                    </span>
-                  </label>
-
-                  {workspaceMode === "profile" ? (
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {([
-                        ["all", "All"],
-                        ["main", "Main"],
-                        ["minor", "Minor"],
-                        ["needs-review", "Needs review"],
-                        ["duplicates", "Duplicates"],
-                      ] as Array<[CastFilter, string]>).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setCastFilter(value)}
-                          aria-pressed={castFilter === value}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filterChipClasses(isDark, castFilter === value)}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                <CharacterWorkspaceSidebarHeader
+                  castFilter={castFilter}
+                  isDark={isDark}
+                  mode={workspaceMode}
+                  onCastFilterChange={setCastFilter}
+                  onSearchChange={setSearch}
+                  search={search}
+                  summary={sidebarSummary}
+                />
 
                 {workspaceMode === "profile" ? (
                   <div className="px-3 py-2">
@@ -2331,7 +2289,7 @@ export default function CharactersPage() {
                             setWorkspaceMode("profile")
                           }}
                           className={`mb-1 w-full px-3 py-3 text-left transition ${isActive
-                            ? isDark ? "rounded-md border border-violet-400/40 bg-violet-500/12 shadow-[inset_0_0_0_1px_rgba(167,139,250,0.16)]" : "rounded-md border border-violet-300 bg-violet-50"
+                            ? isDark ? "rounded-md border border-violet-400/40 bg-violet-500/12" : "rounded-md border border-violet-300 bg-violet-50"
                             : isDark ? "border-b border-white/8 hover:bg-white/[0.03]" : "border-b border-stone-200 hover:bg-stone-50/80"
                           }`}
                         >
@@ -2384,7 +2342,7 @@ export default function CharactersPage() {
                           <button
                             type="button"
                             onClick={openCreateCharacter}
-                            className="mt-3 rounded-sm bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-4 py-2.5 text-sm font-semibold text-white"
+                            className="mt-3 rounded-sm bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white"
                           >
                             Add character
                           </button>
@@ -2665,7 +2623,7 @@ export default function CharactersPage() {
                         >
                           Cancel
                         </button>
-                        <button type="button" disabled={createBusy} onClick={() => void handleCreateCharacter()} className="ml-auto rounded-md bg-[linear-gradient(135deg,#0f766e,#0d9488)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                        <button type="button" disabled={createBusy} onClick={() => void handleCreateCharacter()} className="ml-auto rounded-md bg-[#1f615d] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                           {createBusy ? "Creating..." : "Create character"}
                         </button>
                       </div>
@@ -2735,27 +2693,7 @@ export default function CharactersPage() {
                       </div>
                     </div>
 
-                    <div role="tablist" aria-label="Character workspace tabs" className={`mt-6 flex flex-wrap gap-8 border-b ${isDark ? "border-white/8" : "border-stone-200"}`}>
-                      {([
-                        ["overview", "Overview"],
-                        ["relationships", "Relationships"],
-                        ["arc", "Arc"],
-                        ["evidence", "Evidence"],
-                        ["continuity", "Continuity"],
-                        ["notes", "Notes"],
-                      ] as Array<[CharacterTab, string]>).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          role="tab"
-                          aria-selected={activeTab === value}
-                          onClick={() => setActiveTab(value)}
-                          className={`pb-3 text-sm font-medium transition ${workspaceTabClasses(isDark, activeTab === value)}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                    <CharacterProfileTabs active={activeTab} isDark={isDark} onSelect={setActiveTab} />
 
                     {activeTab === "overview" ? (
                       <div className="mt-5 grid gap-4 xl:grid-cols-2">
@@ -2841,7 +2779,7 @@ export default function CharactersPage() {
                             ) : null}
                             {isAuthorMode ? (
                               <div className="flex flex-wrap gap-2">
-                                <button type="button" aria-pressed={selectedCharacter.graph_visibility_override === "include"} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("include")} className="rounded-full bg-[linear-gradient(135deg,#0f766e,#0d9488)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                                <button type="button" aria-pressed={selectedCharacter.graph_visibility_override === "include"} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("include")} className="rounded-md bg-[#1f615d] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">
                                   Include in graph
                                 </button>
                                 <button type="button" aria-pressed={selectedCharacter.graph_visibility_override === "exclude"} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("exclude")} className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-60 ${isDark ? "border border-white/10 text-slate-200 hover:bg-white/[0.05]" : "border border-stone-200 text-stone-700 hover:bg-white"}`}>
@@ -2936,7 +2874,7 @@ export default function CharactersPage() {
                             </div>
                             {actionError ? <p className="mt-3 text-sm text-rose-400">{actionError}</p> : null}
                             <div className="mt-4 flex flex-wrap gap-2">
-                              <button type="button" disabled={saving} onClick={() => void handleSaveCharacter()} className="rounded-full bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                              <button type="button" disabled={saving} onClick={() => void handleSaveCharacter()} className="rounded-md bg-[#1f615d] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                                 {saving ? "Saving..." : "Save changes"}
                               </button>
                               <button
@@ -3029,7 +2967,6 @@ export default function CharactersPage() {
                                     value={relationshipDraft.toChapter}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, toChapter: event.target.value }))}
                                     inputMode="numeric"
-                                    placeholder="Optional"
                                     className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   />
                                 </label>
@@ -3044,7 +2981,7 @@ export default function CharactersPage() {
                                 </label>
                               </div>
                               <div className="mt-4 flex flex-wrap gap-2">
-                                <button type="button" disabled={createRelationshipBusy} onClick={() => void handleCreateRelationship()} className="rounded-full bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                                <button type="button" disabled={createRelationshipBusy} onClick={() => void handleCreateRelationship()} className="rounded-md bg-[#1f615d] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
                                   {createRelationshipBusy ? "Saving..." : "Create relationship"}
                                 </button>
                               </div>
@@ -3238,56 +3175,17 @@ export default function CharactersPage() {
                     ) : null}
 
                     {activeTab === "evidence" ? (
-                      <div className="mt-5 space-y-4">
-                        <SurfaceCard title="Passage evidence" isDark={isDark}>
-                          {evidenceLoadingId === selectedCharacter.id ? (
-                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Finding grounded passages...</p>
-                          ) : null}
-                          {selectedEvidence.length > 0 ? (
-                            <div className="space-y-3">
-                              {selectedEvidence.map((result, index) => (
-                                <div key={`${selectedCharacter.id}-evidence-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
-                                      Chapter {result.chapter_num}
-                                    </span>
-                                    {result.chapter_title ? (
-                                      <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{result.chapter_title}</span>
-                                    ) : null}
-                                  </div>
-                                  <p className={`mt-2 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
-                                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
-                                </div>
-                              ))}
-                            </div>
-                          ) : evidenceLoadingId !== selectedCharacter.id ? (
-                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No chapter-grounded evidence cards are available yet.</p>
-                          ) : null}
-                          {evidenceError ? <p className="mt-3 text-sm text-rose-400">{evidenceError}</p> : null}
-                        </SurfaceCard>
-
-                        <SurfaceCard title="Relationship evidence" isDark={isDark}>
-                          {selectedConnections.length > 0 ? (
-                            <div className="space-y-3">
-                              {selectedConnections.map((edge, index) => (
-                                <div key={`${selectedCharacter.id}-relationship-evidence-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
-                                  <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                                    {selectedCharacter.name} to {edge.counterpartName}
-                                  </p>
-                                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                                    {formatRelationshipType(edge.type)} / {sentimentLabel(edge.sentiment)}{typeof edge.from_chapter === "number" ? ` / Chapter ${edge.from_chapter}` : ""}
-                                  </p>
-                                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                                    {edge.description || "This relationship still needs a grounded description and chapter reference."}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No relationship evidence has been captured yet.</p>
-                          )}
-                        </SurfaceCard>
-                      </div>
+                      <CharacterEvidencePanel
+                        characterId={selectedCharacter.id}
+                        characterName={selectedCharacter.name}
+                        error={evidenceError}
+                        evidence={selectedEvidence}
+                        formatRelationshipType={formatRelationshipType}
+                        isDark={isDark}
+                        loading={evidenceLoadingId === selectedCharacter.id}
+                        relationships={selectedConnections}
+                        sentimentLabel={sentimentLabel}
+                      />
                     ) : null}
 
                     {activeTab === "continuity" ? (
@@ -3386,7 +3284,7 @@ export default function CharactersPage() {
                       <button
                         type="button"
                         onClick={openCreateCharacter}
-                        className="mt-4 rounded-md bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                        className="mt-4 rounded-md bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600"
                       >
                         Add character
                       </button>
@@ -3473,7 +3371,7 @@ export default function CharactersPage() {
                           </div>
 
                           <div className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handlePromoteCandidate(selectedReviewCandidate)} className="w-full rounded-md bg-[linear-gradient(135deg,#0f766e,#0d9488)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handlePromoteCandidate(selectedReviewCandidate)} className="w-full rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                               {candidateActionId === selectedReviewCandidate.id ? "Promoting..." : "Promote candidate"}
                             </button>
                             <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || !selectedCharacter} onClick={() => void handleAttachCandidate(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
@@ -3580,7 +3478,7 @@ export default function CharactersPage() {
                           <button type="button" onClick={() => void refetchRepairPreview()} className={actionButtonClasses(isDark)}>
                             {repairPreviewFetching ? "Refreshing..." : "Refresh preview"}
                           </button>
-                          <button type="button" disabled={reprocessBusy} onClick={() => void handleApplyCharacterReprocess()} className="rounded-md bg-[linear-gradient(135deg,#b45309,#d97706)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                          <button type="button" disabled={reprocessBusy} onClick={() => void handleApplyCharacterReprocess()} className="rounded-md bg-amber-700 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                             {reprocessBusy ? "Applying..." : "Apply repair plan"}
                           </button>
                         </div>
@@ -3875,7 +3773,7 @@ export default function CharactersPage() {
                               type="button"
                               onClick={() => void handleMergeCharacters(selectedMergePrimary.id, selectedMergeSecondary.id, selectedMergeSuggestion?.suggestionId)}
                               disabled={mergeBusy}
-                              className="rounded-md bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px] disabled:opacity-60"
+                              className="rounded-md bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600 disabled:opacity-60"
                             >
                               {mergeBusy ? "Merging..." : "Merge"}
                             </button>
@@ -3907,7 +3805,7 @@ export default function CharactersPage() {
                           <button
                             type="button"
                             onClick={() => openManualMerge()}
-                            className="rounded-md bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                            className="rounded-md bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600"
                           >
                             Start manual merge
                           </button>
@@ -3942,132 +3840,30 @@ export default function CharactersPage() {
                 ) : null}
 
                 {workspaceMode === "profile" && selectedCharacter && selectedHealth ? (
-                  <div className="p-4">
-                    <div role="tablist" aria-label="Character insights tabs" className="flex gap-6 border-b px-1 pb-3">
-                      {([
-                        ["insights", "Insights"],
-                        ["evidence", "Evidence"],
-                      ] as Array<[SidebarTab, string]>).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          role="tab"
-                          aria-selected={sidebarTab === value}
-                          onClick={() => {
-                            setSidebarTab(value)
-                            if (value === "evidence") openCharacterEvidence()
-                          }}
-                          className={`pb-2 text-sm font-medium transition ${sidebarTabClasses(isDark, sidebarTab === value)}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                  <CharacterProfileRightRail
+                    character={selectedCharacter}
+                    connections={selectedConnections}
+                    evidence={selectedEvidence}
+                    evidenceError={evidenceError}
+                    evidenceLoading={evidenceLoadingId === selectedCharacter.id}
+                    health={selectedHealth}
+                    isDark={isDark}
+                    mergeSuggestionCount={mergeSuggestions.length}
+                    partitioning={partitioning}
+                    selectedTab={sidebarTab}
+                    onFindEvidence={openCharacterEvidence}
+                    onManualMerge={() => openManualMerge(selectedCharacter.id)}
+                    onOpenNotes={() => setActiveTab("notes")}
+                    onOpenRelationships={openRelationships}
+                    onPartition={() => void handlePartitionCharacter()}
+                    onRefreshEvidence={() => void loadCharacterEvidence(selectedCharacter, true)}
+                    onReviewDuplicates={() => openDuplicateReview(selectedCharacter.id)}
+                    onSelectTab={(tab) => {
+                      setSidebarTab(tab)
+                      if (tab === "evidence") openCharacterEvidence()
+                    }}
+                  />
 
-                    {sidebarTab === "insights" ? (
-                      <div className="mt-4 space-y-4">
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
-                          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Character health</p>
-                          <div className="mt-4 flex items-center gap-4">
-                            <HealthRing score={selectedHealth.score} tone={selectedHealth.tone} isDark={isDark} />
-                            <div>
-                              <p className={`text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                                {selectedHealth.tone === "strong" ? "Strong" : selectedHealth.tone === "moderate" ? "Moderate" : "Needs attention"}
-                              </p>
-                              <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedHealth.summary}</p>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 space-y-2">
-                            {selectedHealth.issues.map((issue, index) => (
-                              <div key={`${issue}-${index}`} className={`flex items-center justify-between rounded-xl border px-3 py-2.5 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                                <span className="text-sm">{issue}</span>
-                                <SectionChevron className={`h-4 w-4 ${isDark ? "text-slate-500" : "text-stone-400"}`} />
-                              </div>
-                            ))}
-                          </div>
-                        </section>
-
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
-                          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Quick actions</p>
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                            <QuickActionTile isDark={isDark} icon="search" title="Find evidence" description="Search scenes and grounded passages." onClick={openCharacterEvidence} />
-                            <QuickActionTile isDark={isDark} icon="relationships" title="Open relationships" description="View the full relationship graph." onClick={openRelationships} />
-                            <QuickActionTile isDark={isDark} icon="review" title="Review duplicates" description={mergeSuggestions.length > 0 ? `${mergeSuggestions.length} suggestions ready for review.` : "No suggestion yet? Start a manual merge for this character."} onClick={() => openDuplicateReview(selectedCharacter.id)} />
-                            <QuickActionTile isDark={isDark} icon="merge" title="Manual merge" description="Choose another record and merge it yourself." onClick={() => openManualMerge(selectedCharacter.id)} />
-                            <QuickActionTile isDark={isDark} icon="split" title={partitioning ? "Splitting..." : "Split card"} description="Break one merged record into separate character cards and keep the new profiles." onClick={() => void handlePartitionCharacter()} />
-                          </div>
-                        </section>
-
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
-                          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Context</p>
-                          <div className="mt-4 space-y-3">
-                            <div className={`flex items-center justify-between rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                              <div>
-                                <p className="text-sm font-semibold">Relationships</p>
-                                <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{selectedConnections.length} connected ties</p>
-                              </div>
-                              <button type="button" onClick={openRelationships} className={`text-xs font-semibold ${isDark ? "text-slate-300 hover:text-white" : "text-stone-700 hover:text-stone-950"}`}>
-                                Open
-                              </button>
-                            </div>
-                            <div className={`flex items-center justify-between rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                              <div>
-                                <p className="text-sm font-semibold">Evidence</p>
-                                <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{selectedEvidence.length} cards loaded</p>
-                              </div>
-                              <button type="button" onClick={openCharacterEvidence} className={`text-xs font-semibold ${isDark ? "text-slate-300 hover:text-white" : "text-stone-700 hover:text-stone-950"}`}>
-                                View
-                              </button>
-                            </div>
-                            <div className={`flex items-center justify-between rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                              <div>
-                                <p className="text-sm font-semibold">Related notes</p>
-                                <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{selectedCharacter.relationship_summaries?.length ?? 0} linked notes</p>
-                              </div>
-                              <button type="button" onClick={() => setActiveTab("notes")} className={`text-xs font-semibold ${isDark ? "text-slate-300 hover:text-white" : "text-stone-700 hover:text-stone-950"}`}>
-                                Open
-                              </button>
-                            </div>
-                          </div>
-                        </section>
-                      </div>
-                    ) : null}
-
-                    {sidebarTab === "evidence" ? (
-                      <div className="mt-4 space-y-4">
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Evidence</p>
-                              <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedCharacter.name}</p>
-                            </div>
-                            <button type="button" onClick={() => void loadCharacterEvidence(selectedCharacter, true)} className={actionButtonClasses(isDark)}>
-                              Refresh
-                            </button>
-                          </div>
-
-                          <div className="mt-4 space-y-3">
-                            {evidenceLoadingId === selectedCharacter.id ? (
-                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Searching passages...</p>
-                            ) : null}
-                            {selectedEvidence.slice(0, 5).map((result, index) => (
-                              <div key={`${selectedCharacter.id}-sidebar-evidence-${index}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
-                                <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
-                                <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
-                                <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
-                              </div>
-                            ))}
-                            {selectedEvidence.length === 0 && evidenceLoadingId !== selectedCharacter.id ? (
-                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No evidence cards are loaded yet.</p>
-                            ) : null}
-                            {evidenceError ? <p className="text-sm text-rose-400">{evidenceError}</p> : null}
-                          </div>
-                        </section>
-                      </div>
-                    ) : null}
-
-                  </div>
                 ) : null}
 
                 {workspaceMode === "review" ? (
@@ -4258,7 +4054,7 @@ export default function CharactersPage() {
                           <button
                             type="button"
                             onClick={() => openManualMerge()}
-                            className="w-full rounded-md bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                            className="w-full rounded-md bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600"
                           >
                             Begin manual merge
                           </button>
@@ -4285,7 +4081,7 @@ export default function CharactersPage() {
                   <button
                     type="button"
                     onClick={openReviewQueue}
-                    className="rounded-md bg-[linear-gradient(135deg,#0f766e,#0d9488)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(13,148,136,0.2)] transition hover:translate-y-[-1px]"
+                    className="rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#25756f]"
                   >
                     Review held candidates
                   </button>
@@ -4293,7 +4089,7 @@ export default function CharactersPage() {
                 <button
                   type="button"
                   onClick={openCreateCharacter}
-                  className="rounded-md bg-[linear-gradient(135deg,#8b5cf6,#6d28d9)] px-5 py-3 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(109,40,217,0.22)] transition hover:translate-y-[-1px]"
+                  className="rounded-md bg-violet-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-600"
                 >
                   Add character manually
                 </button>
@@ -4305,4 +4101,3 @@ export default function CharactersPage() {
     </div>
   )
 }
-

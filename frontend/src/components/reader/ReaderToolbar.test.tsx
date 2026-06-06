@@ -78,9 +78,11 @@ describe("ReaderToolbar", () => {
     expect(container.textContent).toContain("Search passages")
     expect(container.textContent).toContain("The Lantern Room")
     expect(container.textContent).toContain("33%")
+    expect(container.textContent).toContain("Old Style Serif")
+    expect(container.textContent).toContain("EB Garamond")
 
     const publishedButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Published")
-    const serifButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "serif")
+    const serifButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Serif")
     expect(publishedButton?.getAttribute("aria-pressed")).toBe("true")
     expect(serifButton?.getAttribute("aria-pressed")).toBe("true")
   })

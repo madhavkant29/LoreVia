@@ -77,7 +77,6 @@ export default async function PricingPage() {
       <JsonLdScript id="pricing-breadcrumbs-jsonld" data={breadcrumbJsonLd} />
       <QueryProvider>
         <main className="app-shell min-h-screen">
-          <div className="app-shell__mesh" />
           <Navbar />
           <section className="app-container relative max-w-[1160px] px-4 pb-16 pt-10 sm:px-6 lg:px-8 lg:pt-14">
             <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-start">
@@ -86,7 +85,7 @@ export default async function PricingPage() {
                 <h1 className="mt-4 font-display text-[3rem] leading-[0.94] tracking-[-0.05em] text-foreground sm:text-[4rem]">
                   Choose the plan that
                   <br className="hidden sm:block" />
-                  matches your work
+                  {" "}matches your work
                 </h1>
                 <p className="mt-5 max-w-2xl text-[1.05rem] leading-8 text-muted-foreground">
                   Free stays included with your account. Compare Free, Author, and Architect, switch billing cadence, and start checkout without leaving the app.

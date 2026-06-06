@@ -109,7 +109,7 @@ services:
       POSTGRES_DB: lorevia
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports: ["5432:5432"]
+    ports: ["5433:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d lorevia"]
       interval: 5s

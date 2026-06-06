@@ -7,6 +7,8 @@ import { useParams, useRouter } from "next/navigation"
 
 import { ChapterList } from "@/components/reader/ChapterList"
 import { ChaptersPageHeader } from "@/components/reader/ChaptersPageHeader"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { Skeleton } from "@/components/ui/Skeleton"
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
@@ -29,10 +31,13 @@ function storyUnitLabel(workType?: Book["work_type"]) {
 export default function ChapterListPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const router = useRouter()
+  const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
   const [readBusy, setReadBusy] = useState<string | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState<string | null>(null)
+  const [actionStatus, setActionStatus] = useState<string | null>(null)
   const bookQuery = useQuery<Book>({
     queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
     queryFn: () => booksApi.get(bookId),
@@ -68,7 +73,30 @@ export default function ChapterListPage() {
     }
   }
 
+  async function removeChapter(chapterNumber: number) {
+    const confirmed = await confirm({
+      title: `Remove ${unitLabel} ${chapterNumber}?`,
+      body: `Remove ${unitLabel} ${chapterNumber}? This deletes its manuscript text, scenes, notes, comments, and chapter intelligence. This cannot be undone.`,
+      confirmLabel: `Remove ${unitLabel.toLowerCase()}`,
+      tone: "danger",
+    })
+    if (!confirmed) return
+
+    setDeleteBusy(`chapter:${chapterNumber}`)
+    setActionStatus(null)
+    try {
+      await booksApi.deleteChapter(bookId, chapterNumber)
+      await Promise.all([bookQuery.refetch(), chapterListQuery.refetch()])
+      setActionStatus(`${unitLabel} ${chapterNumber} removed.`)
+    } catch {
+      setActionStatus(`Could not remove ${unitLabel.toLowerCase()} ${chapterNumber}.`)
+    } finally {
+      setDeleteBusy(null)
+    }
+  }
+
   const unitLabel = storyUnitLabel(book?.work_type)
+  const canRemoveChapters = book?.mode === "author"
   const processedCount = useMemo(() => (data?.chapters ?? []).filter((chapter) => chapter.processed).length, [data])
   const chapterCount = data?.chapters.length ?? 0
   const backLabel = book?.mode === "author" ? "Back to Manuscripts" : "Back to Book"
@@ -77,7 +105,7 @@ export default function ChapterListPage() {
     : `Showing the full ${unitLabel.toLowerCase()} list with your current read status.`
 
   return (
-    <div className={`min-h-screen transition-colors ${isDark ? "bg-[radial-gradient(circle_at_top,#0d1a22_0%,#081019_28%,#05080f_62%,#030508_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen transition-colors ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-[100rem] px-4 pb-14 pt-5 sm:px-6 lg:px-8">
         <div className="grid gap-6 xl:grid-cols-[17rem_minmax(0,1fr)]">
           <AuthorToolsNav
@@ -113,6 +141,12 @@ export default function ChapterListPage() {
               </div>
             ) : null}
 
+            {actionStatus ? (
+              <div role="status" className={`rounded-lg border px-5 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                {actionStatus}
+              </div>
+            ) : null}
+
             {chapterListLoading ? (
               <LoadingChapterList unitLabel={unitLabel} isDark={isDark} />
             ) : null}
@@ -131,8 +165,10 @@ export default function ChapterListPage() {
                 unitLabel={unitLabel}
                 isDark={isDark}
                 readBusyKey={readBusy}
+                deleteBusyKey={deleteBusy}
                 onOpenChapter={(chapterNumber) => router.push(`/${bookId}/chapter/${chapterNumber}`)}
                 onToggleChapterRead={(chapterNumber, nextRead) => void setChapterRead(chapterNumber, nextRead)}
+                onDeleteChapter={canRemoveChapters ? (chapterNumber) => void removeChapter(chapterNumber) : undefined}
               />
             ) : null}
           </main>
@@ -148,32 +184,29 @@ function LoadingChapterList({ unitLabel, isDark }: { unitLabel: string; isDark: 
       <div className={`text-3xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapters</div>
       <div className={`space-y-3 rounded-lg border p-3 sm:p-4 ${isDark ? "border-white/10 bg-[#091018]/58" : "border-stone-200 bg-white/78"}`}>
         {Array.from({ length: 3 }, (_, index) => (
-          <div
-            key={index}
-            className={`animate-pulse rounded-lg border px-5 py-5 ${isDark ? "border-white/10 bg-[#0b1118]/78" : "border-stone-200 bg-white/85"}`}
-          >
+          <div key={index} className={`rounded-lg border px-5 py-5 ${isDark ? "border-white/10 bg-[#0b1118]/78" : "border-stone-200 bg-white/85"}`}>
             <div className="flex flex-col gap-5 xl:grid xl:grid-cols-[minmax(0,1.15fr)_minmax(16rem,0.8fr)_auto] xl:items-center">
               <div className="flex items-start gap-4">
-                <div className={`h-12 w-12 rounded-md ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                <Skeleton variant="circle" className="h-12 w-12 rounded-md" />
                 <div className="min-w-0 flex-1 space-y-3">
-                  <div className={`h-3 w-24 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-                  <div className={`h-7 w-44 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                  <Skeleton className="h-3 w-24 rounded-full" />
+                  <Skeleton className="h-7 w-44 rounded-full" />
                 </div>
               </div>
               <div className={`space-y-3 xl:border-l xl:pl-5 ${isDark ? "xl:border-white/10" : "xl:border-stone-200"}`}>
-                <div className={`h-3 w-40 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-                <div className={`h-3 w-32 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-                <div className={`h-3 w-36 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                <Skeleton className="h-3 w-40 rounded-full" />
+                <Skeleton className="h-3 w-32 rounded-full" />
+                <Skeleton className="h-3 w-36 rounded-full" />
               </div>
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2 xl:justify-end">
-                  <div className={`h-7 w-24 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-                  <div className={`h-7 w-20 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-                  <div className={`h-7 w-24 rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                  <Skeleton className="h-7 w-24 rounded-full" />
+                  <Skeleton className="h-7 w-20 rounded-full" />
+                  <Skeleton className="h-7 w-24 rounded-full" />
                 </div>
                 <div className="flex flex-wrap gap-2 xl:justify-end">
-                  <div className={`h-10 w-24 rounded-md ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
-                  <div className={`h-10 w-32 rounded-md ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+                  <Skeleton className="h-10 w-24 rounded-md" />
+                  <Skeleton className="h-10 w-32 rounded-md" />
                 </div>
               </div>
             </div>

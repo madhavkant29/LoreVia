@@ -80,11 +80,16 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
     case "editorial-review":
     case "voice":
     case "ask":
-    case "world-gap":
+    case "analysis":
+    case "reports":
       return permissions.can_run_ai_scans
     case "characters":
     case "relationships":
     case "plot-threads":
+    case "timeline":
+    case "foreshadowing":
+    case "world-gap":
+    case "cross-book-wiki":
       return permissions.can_view_story_bible
     case "notes":
     case "beta-feedback":
@@ -101,7 +106,7 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
 
 const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
   {
-    title: "Story",
+    title: "Library",
     items: [
       { id: "overview", label: "Overview", href: `/${bookId}` as Route, tone: "Home", helper: "See progress, next steps, and the latest signals around this book.", icon: "book" },
       { id: "read", label: "Preview Draft", href: `/${bookId}/chapter/${currentChapter}` as Route, tone: "Continue", helper: "Open the current draft in reading view and pick up where the story last left off.", icon: "read" },
@@ -109,33 +114,37 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     ],
   },
   {
-    title: "Writing",
+    title: "Manuscript",
     authorOnly: true,
     items: [
       { id: "manuscript", label: "Manuscript Editor", href: `/${bookId}/manuscript` as Route, tone: "Drafting", helper: "Write, revise, and shape the working manuscript with your drafting tools close by.", icon: "pen" },
       { id: "scenes", label: "Scene Workspace", href: `/${bookId}/scenes` as Route, tone: "File tree", helper: "Organize scenes, reorder structure, and manage the story at a scene-by-scene level.", icon: "files" },
+      { id: "notes", label: "Notes Workspace", href: `/${bookId}/notes` as Route, tone: "Vault", helper: "Keep book-specific notes, reminders, and reference details beside the draft.", icon: "notes" },
 
     ],
   },
   {
-    title: "Intelligence",
+    title: "Story Bible",
     authorOnly: true,
+    items: [
+      { id: "characters", label: "Character Bible", href: `/${bookId}/characters` as Route, tone: "Profiles", helper: "Track character profiles, arcs, and duplicate identity issues across the story.", icon: "users" },
+      { id: "relationships", label: "Relationships", href: `/${bookId}/graph` as Route, tone: "Network", helper: "Map connections between characters so alliances, conflicts, and ties stay clear.", icon: "links" },
+      { id: "timeline", label: "Timeline", href: `/${bookId}/timeline` as Route, tone: "Sequence", helper: "Review character presence, thread duration, and relationship shifts across the manuscript.", icon: "events" },
+      { id: "plot-threads", label: "Plot Threads", href: `/${bookId}/plot-threads` as Route, tone: "Arc tracking", helper: "Follow open arcs and see which plot threads are moving, drifting, or unresolved.", icon: "threads" },
+      { id: "foreshadowing", label: "Foreshadowing", href: `/${bookId}/foreshadowing` as Route, tone: "Signals", helper: "Review planted details, early clues, and hints that carry later narrative weight.", icon: "spark" },
+      { id: "world-gap", label: "World Gaps", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", helper: "Spot missing lore, weak canon links, and worldbuilding details that need support.", icon: "gap" },
+      { id: "cross-book-wiki", label: "Series Wiki", href: `/${bookId}/cross-book-wiki` as Route, tone: "Cross-book", helper: "Compare recurring people and lore entries across books in the same series.", icon: "book" },
+    ],
+  },
+  {
+    title: "Review Center",
     items: [
       { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", helper: "Review continuity risks, unresolved threads, and high-priority story pressure points.", icon: "spark" },
       { id: "editorial-review", label: "Editorial Review", href: `/${bookId}/editorial-review` as Route, tone: "Line edit", helper: "Run an editorial pass that calls out clarity, pacing, and prose-level friction.", icon: "quill" },
       { id: "voice", label: "Voice Consistency", href: `/${bookId}/voice` as Route, tone: "Dialogue drift", helper: "Check whether character voice stays consistent across scenes and revisions.", icon: "voice" },
       { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", helper: "Ask direct questions about the manuscript and get answers grounded in the current draft.", icon: "chat" },
-      { id: "world-gap", label: "World Gap Detection", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", helper: "Spot missing lore, weak canon links, and worldbuilding details that need support.", icon: "gap" },
-      { id: "characters", label: "Character Bible", href: `/${bookId}/characters` as Route, tone: "Profiles", helper: "Track character profiles, arcs, and duplicate identity issues across the story.", icon: "users" },
-      { id: "relationships", label: "Relationships", href: `/${bookId}/graph` as Route, tone: "Network", helper: "Map connections between characters so alliances, conflicts, and ties stay clear.", icon: "links" },
-      { id: "plot-threads", label: "Plot Threads", href: `/${bookId}/plot-threads` as Route, tone: "Arc tracking", helper: "Follow open arcs and see which plot threads are moving, drifting, or unresolved.", icon: "threads" },
-    ],
-  },
-  {
-    title: "Story Tools",
-    items: [
+      { id: "reports", label: "Chapter Reports", href: `/${bookId}/reports` as Route, tone: "Evidence", helper: "Review chapter-level continuity evidence, new characters, and thread movement.", icon: "analysis" },
       { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", helper: "Search the manuscript for names, lines, or moments without manually scanning chapters.", icon: "search" },
-      { id: "timeline", label: "Major Events", href: `/${bookId}/timeline` as Route, tone: "Plot", helper: "Review key events in sequence so the story timeline stays easy to reason about.", icon: "events" },
       { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", helper: "Read chapter and story recaps when you need context fast before editing.", icon: "summary" },
       { id: "beta-feedback", label: "Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Review", helper: "Leave chapter comments and open your assignment feedback without leaving the reading flow.", icon: "users" },
       { id: "quotes", label: "Saved Quotes", href: "/quotes" as Route, tone: "Highlights", helper: "Revisit memorable lines and collected excerpts pulled from this and other projects.", icon: "quote" },
@@ -143,12 +152,17 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     ],
   },
   {
-    title: "Workspace",
+    title: "Collaborate",
     authorOnly: true,
     items: [
-      { id: "notes", label: "Notes", href: `/${bookId}/notes` as Route, tone: "Vault", helper: "Keep book-specific notes, reminders, and reference details beside the draft.", icon: "notes" },
       { id: "author-loop", label: "Author Lens", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark" },
       { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", helper: "Manage who can access the book and what each collaborator is allowed to do.", icon: "users" },
+    ],
+  },
+  {
+    title: "Publish & Export",
+    authorOnly: true,
+    items: [
       { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", helper: "Bring files in, send drafts out, and package the manuscript for other workflows.", icon: "files" },
     ],
   },
@@ -189,7 +203,7 @@ export function AuthorToolsNav({
           if (showAuthorSections || !section.authorOnly) {
             return true
           }
-          return hasFreeSampleIntelligenceAccess && section.title === "Intelligence"
+          return hasFreeSampleIntelligenceAccess && section.title === "Review Center"
         })
         .map((section) => ({
           ...section,
@@ -213,7 +227,7 @@ export function AuthorToolsNav({
   const expandedRailWidth = railSize === "compact" ? "xl:w-[16.5rem]" : "xl:w-[18.5rem]"
   const hoverExpandedRailWidth = railSize === "compact" ? "xl:group-hover/navwrap:w-[16.5rem] xl:group-focus-within/navwrap:w-[16.5rem]" : "xl:group-hover/navwrap:w-[18.5rem] xl:group-focus-within/navwrap:w-[18.5rem]"
   const containerClass = rail
-    ? `group/rail z-20 flex w-full flex-col overflow-hidden rounded-lg border p-3 shadow-[0_22px_54px_-42px_rgba(58,49,37,0.24)] transition-[width,background-color,border-color,box-shadow] duration-300 xl:h-[calc(100vh-7.5rem)] ${isPinnedOpen ? expandedRailWidth : `${collapsedRailWidth} ${hoverExpandedRailWidth}`} ${
+    ? `group/rail z-20 flex w-full flex-col overflow-hidden rounded-lg border p-3 transition-[width,background-color,border-color] duration-300 xl:h-[calc(100vh-7.5rem)] ${isPinnedOpen ? expandedRailWidth : `${collapsedRailWidth} ${hoverExpandedRailWidth}`} ${
         isDark ? "border-white/10 bg-[#0b1220]/96 text-white xl:hover:border-white/14 xl:hover:bg-[#101826]/96" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)] text-stone-950 xl:hover:border-stone-300 xl:hover:bg-white"
       }`
     : `sticky top-5 rounded-lg border p-4 ${isDark ? "border-white/10 bg-[rgba(8,14,24,0.9)]" : "border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.96)]"}`
@@ -241,7 +255,7 @@ export function AuthorToolsNav({
           aria-label={isPinnedOpen ? "Collapse sidebar" : "Expand sidebar"}
           data-testid="author-nav-rail-toggle"
           onClick={() => setIsPinnedOpen((current) => !current)}
-          className="absolute left-0 top-8 z-30 hidden h-10 w-10 -translate-x-1/2 rounded-full shadow-[0_16px_34px_-24px_rgba(0,0,0,0.75)] xl:flex"
+          className="absolute left-0 top-8 z-30 hidden h-10 w-10 -translate-x-1/2 rounded-full xl:flex"
         >
           <span className={`transition-transform duration-200 ${isPinnedOpen ? "rotate-180" : ""}`}>
             <NavSvg icon="chevron-right" />
@@ -274,8 +288,8 @@ export function AuthorToolsNav({
                         className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                           selected
                             ? isDark
-                              ? "border-white/12 bg-[linear-gradient(135deg,rgba(94,234,212,0.14),rgba(129,140,248,0.16))] text-white shadow-[0_18px_38px_-28px_rgba(94,234,212,0.18)]"
-                              : "bg-teal-800 text-white shadow-[0_18px_34px_-26px_rgba(58,49,37,0.22)]"
+                              ? "border-teal-300/20 bg-teal-900/70 text-white"
+                              : "bg-teal-800 text-white"
                             : isDark
                               ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
                               : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
@@ -361,8 +375,8 @@ export function AuthorToolsNav({
                     className={`group/item flex min-h-[3.1rem] items-start gap-3 rounded-md border px-2.5 py-2.5 text-sm outline-none transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-offset-0 ${
                       selected
                         ? isDark
-                          ? "border-white/12 bg-[linear-gradient(135deg,rgba(94,234,212,0.14),rgba(129,140,248,0.16))] text-white shadow-[0_18px_38px_-28px_rgba(94,234,212,0.18)]"
-                          : "bg-teal-800 text-white shadow-[0_18px_34px_-26px_rgba(58,49,37,0.22)]"
+                          ? "border-teal-300/20 bg-teal-900/70 text-white"
+                          : "bg-teal-800 text-white"
                         : isDark
                           ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
                           : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
@@ -429,12 +443,11 @@ function NavHeader({
 }) {
   return (
     <div className="flex items-center gap-3 px-1">
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border shadow-sm ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
         <ThemeBrandImage variant="icon" mode={isDark ? "dark" : "light"} className="h-5 w-5 object-contain" />
       </div>
       <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
-        <ThemeBrandImage variant="lockup" mode={isDark ? "dark" : "light"} className="h-5 w-auto object-contain" />
-        <h2 className={`mt-2 truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
+        <h2 className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
       </div>
     </div>
   )

@@ -106,7 +106,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
               <article
                 className={`relative flex h-full flex-col rounded-lg border p-6 md:p-7 ${
                   tier.highlight
-                    ? "border-[#205f58] bg-[linear-gradient(180deg,rgba(17,49,45,0.98),rgba(11,28,25,0.98))] shadow-[0_24px_54px_-34px_rgba(18,64,59,0.52)]"
+                    ? "border-[#205f58] bg-[#11312d]"
                     : "border-white/10 bg-[#0d1715]"
                 }`}
               >
@@ -147,7 +147,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
 
                 <Link
                   href={ctaHref}
-                  className={`mt-10 inline-flex w-full items-center justify-center rounded-xl px-4 py-3.5 text-sm font-semibold transition ${
+                  className={`mt-10 inline-flex w-full items-center justify-center rounded-md px-4 py-3.5 text-sm font-semibold transition ${
                     tier.highlight
                       ? "bg-[#2d8b81] text-white hover:bg-[#36a094]"
                       : "border border-white/12 bg-white/5 text-white hover:bg-white/8"

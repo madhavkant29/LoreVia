@@ -9,11 +9,20 @@ that do not include those headers while still allowing platform health checks.
 
 from __future__ import annotations
 
+import ipaddress
+
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 _HEALTHCHECK_PATHS = frozenset({"/health", "/ready"})
+_TRUSTED_EDGE_PROXY_NETS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+)
 
 
 class CloudflareTunnelMiddleware:
@@ -33,7 +42,13 @@ class CloudflareTunnelMiddleware:
             return
 
         headers = dict(scope.get("headers", []))
-        if b"cf-connecting-ip" not in headers:
+        direct_client = scope.get("client")
+        direct_host = direct_client[0] if direct_client else ""
+        if (
+            not _is_trusted_edge_proxy(direct_host)
+            or headers.get(b"x-lorevia-edge-verified") != b"1"
+            or b"cf-connecting-ip" not in headers
+        ):
             response = JSONResponse(
                 status_code=403,
                 content={"detail": "Cloudflare tunnel enforcement rejected this request."},
@@ -42,3 +57,11 @@ class CloudflareTunnelMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+
+def _is_trusted_edge_proxy(host: str) -> bool:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(address in network for network in _TRUSTED_EDGE_PROXY_NETS)

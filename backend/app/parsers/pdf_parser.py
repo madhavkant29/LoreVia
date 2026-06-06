@@ -8,6 +8,18 @@ from typing import Any, cast
 
 import fitz
 
+from app.parsers.heading_patterns import (
+    NUMBER_WORDS,
+    ORDINAL_WORDS,
+    build_heading_regex,
+    classify_heading_type,
+    has_toc_signals,
+    is_toc_indicator,
+)
+from app.utils.language_utils import detect_language
+
+# Legacy English-only regexes — kept for backward compatibility with tests
+# and fallback when no language is provided. Prefer build_heading_regex().
 CHAPTER_RE = re.compile(
     r"^(?:(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
     r"(?:\d+[a-z]?|[ivxlcdm]+|[a-z]{1,3}|(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
@@ -48,65 +60,6 @@ HEADING_FALLBACK_RE = re.compile(
     r"four|five|six|seven|eight|nine))?)\b|^(?:prologue|epilogue|interlude|afterword|appendix)\b",
     re.IGNORECASE,
 )
-NUMBER_WORDS = {
-    "zero": 0,
-    "one": 1,
-    "two": 2,
-    "three": 3,
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-    "ten": 10,
-    "eleven": 11,
-    "twelve": 12,
-    "thirteen": 13,
-    "fourteen": 14,
-    "fifteen": 15,
-    "sixteen": 16,
-    "seventeen": 17,
-    "eighteen": 18,
-    "nineteen": 19,
-    "twenty": 20,
-    "thirty": 30,
-    "forty": 40,
-    "fifty": 50,
-    "sixty": 60,
-    "seventy": 70,
-    "eighty": 80,
-    "ninety": 90,
-}
-ORDINAL_WORDS = {
-    "first": 1,
-    "second": 2,
-    "third": 3,
-    "fourth": 4,
-    "fifth": 5,
-    "sixth": 6,
-    "seventh": 7,
-    "eighth": 8,
-    "ninth": 9,
-    "tenth": 10,
-    "eleventh": 11,
-    "twelfth": 12,
-    "thirteenth": 13,
-    "fourteenth": 14,
-    "fifteenth": 15,
-    "sixteenth": 16,
-    "seventeenth": 17,
-    "eighteenth": 18,
-    "nineteenth": 19,
-    "twentieth": 20,
-    "thirtieth": 30,
-    "fortieth": 40,
-    "fiftieth": 50,
-    "sixtieth": 60,
-    "seventieth": 70,
-    "eightieth": 80,
-    "ninetieth": 90,
-}
 LETTER_HEADING_RE = re.compile(r"^[a-z]{1,3}$", re.IGNORECASE)
 HEADING_NUMBER_RE = re.compile(
     r"^(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+([a-z0-9ivxlcdm]+(?:[-\s][a-z0-9ivxlcdm]+)*)\b",
@@ -118,16 +71,16 @@ PAGINATION_RE = re.compile(
 )
 
 
-def parse_pdf(raw_bytes: bytes, *, split_large_chapters: bool = True) -> list[dict]:
-    chapters, _ = parse_pdf_with_diagnostics(raw_bytes, split_large_chapters=split_large_chapters)
+def parse_pdf(raw_bytes: bytes, *, split_large_chapters: bool = True, language: str | None = None) -> list[dict]:
+    chapters, _ = parse_pdf_with_diagnostics(raw_bytes, split_large_chapters=split_large_chapters, language=language)
     return chapters
 
 
-def parse_pdf_with_diagnostics(raw_bytes: bytes, *, split_large_chapters: bool = True) -> tuple[list[dict], dict[str, Any]]:
-    return _parse_pdf_internal(raw_bytes, split_large_chapters=split_large_chapters)
+def parse_pdf_with_diagnostics(raw_bytes: bytes, *, split_large_chapters: bool = True, language: str | None = None) -> tuple[list[dict], dict[str, Any]]:
+    return _parse_pdf_internal(raw_bytes, split_large_chapters=split_large_chapters, language=language)
 
 
-def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool) -> tuple[list[dict], dict[str, Any]]:
+def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, language: str | None = None) -> tuple[list[dict], dict[str, Any]]:
     doc = cast(Any, fitz).open(stream=raw_bytes, filetype="pdf")
     try:
         total_pages = int(doc.page_count or 0)
@@ -193,11 +146,35 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool) -> tupl
                 )
             )
 
-        chapters = _build_chapters(stream)
+        # ── Language detection ──────────────────────────────────────────
+        detected_language = language
+        detected_language_confidence: float | None = None
+        if detected_language is None:
+            sample_text = " ".join(
+                item.get("text", "")
+                for item in stream
+                if item.get("type") == "text"
+            )[:5000]
+            lang_result = detect_language(sample_text, max_chars=5000)
+            detected_language = lang_result["detected"]
+            detected_language_confidence = lang_result["confidence"]
+
+        heading_regex = build_heading_regex(languages=[detected_language])
+
+        chapters = _build_chapters(
+            stream,
+            heading_regex=heading_regex,
+            language=detected_language,
+        )
         initial_anomalies = _collect_parse_anomalies(chapters, total_pages=total_pages)
         fallback_strategy: str | None = None
         if _should_retry_with_permissive_headings(chapters, anomalies=initial_anomalies):
-            permissive_chapters = _build_chapters(stream, permissive_headings=True)
+            permissive_chapters = _build_chapters(
+                stream,
+                permissive_headings=True,
+                heading_regex=heading_regex,
+                language=detected_language,
+            )
             if _parse_quality_score(permissive_chapters) > _parse_quality_score(chapters):
                 chapters = permissive_chapters
                 fallback_strategy = "permissive_heading_retry"
@@ -218,8 +195,10 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool) -> tupl
             forced_large_chapter_split=effective_split and not split_large_chapters,
             anomalies=final_anomalies,
             diagnostics_state=diagnostics_state,
+            detected_language=detected_language,
+            detected_language_confidence=detected_language_confidence,
         )
-        return normalized_chapters or [{"number": 1, "title": "Full Text", "text": "", "images": []}], diagnostics
+        return normalized_chapters or [{"number": 1, "title": "Full Text", "text": "", "images": [], "section_type": "unknown"}], diagnostics
     finally:
         doc.close()
 
@@ -427,11 +406,46 @@ def _merge_soft_wrapped_lines(text: str) -> list[str]:
     return paragraphs
 
 
-def _build_chapters(stream: list[dict], *, permissive_headings: bool = False) -> list[dict]:
+def _build_chapters(stream: list[dict], *, permissive_headings: bool = False, heading_regex: re.Pattern | None = None, language: str = "en") -> list[dict]:
     chapters: list[dict] = []
     current = _blank_chapter(1)
 
+    # ── TOC detection: scan first ~10% of text items for TOC signals ─────
+    toc_range: tuple[int, int] | None = None
+    text_items = [item for item in stream if item.get("type") == "text" and item.get("text", "").strip()]
+    if text_items:
+        toc_scan_count = max(5, len(text_items) // 10)
+        toc_sample_lines = [
+            item.get("text", "")
+            for item in text_items[:toc_scan_count]
+            if item.get("text", "").strip()
+        ]
+        if has_toc_signals(toc_sample_lines):
+            # Find the extent of the TOC: from first TOC-like line to last
+            toc_start = None
+            toc_end = None
+            for idx, item in enumerate(text_items):
+                text = item.get("text", "").strip()
+                if not text:
+                    continue
+                if toc_start is None and is_toc_indicator(text):
+                    toc_start = idx
+                if toc_start is not None and is_toc_indicator(text):
+                    toc_end = idx
+                elif toc_start is not None and toc_end is not None and not is_toc_indicator(text):
+                    if idx - toc_end > 3:
+                        break
+            if toc_start is not None and toc_end is not None and toc_end > toc_start:
+                # Map back to original stream indices
+                stream_indices = [i for i, item in enumerate(stream) if item.get("type") == "text"]
+                if toc_start < len(stream_indices) and toc_end < len(stream_indices):
+                    toc_range = (stream_indices[toc_start], stream_indices[toc_end])
+
+    hre = heading_regex if heading_regex is not None else CHAPTER_RE
+
     for index, item in enumerate(stream):
+        if toc_range is not None and toc_range[0] <= index <= toc_range[1]:
+            continue
         if item["type"] == "text":
             next_text = None
             if index + 1 < len(stream) and stream[index + 1]["type"] == "text":
@@ -440,14 +454,17 @@ def _build_chapters(stream: list[dict], *, permissive_headings: bool = False) ->
                 item["text"],
                 next_text=next_text,
                 permissive=permissive_headings,
+                heading_regex=hre,
             )
             if heading:
+                section_type, _ = classify_heading_type(heading, language)
                 remainder = _heading_remainder(item["text"], heading)
                 if _chapter_has_content(current):
                     chapters.append(current)
-                    current = _blank_chapter(len(chapters) + 1, heading)
+                    current = _blank_chapter(len(chapters) + 1, heading, section_type)
                 else:
                     current["title"] = heading
+                    current["section_type"] = section_type
                 if remainder:
                     current["text_parts"].append(remainder)
                 continue
@@ -460,7 +477,7 @@ def _build_chapters(stream: list[dict], *, permissive_headings: bool = False) ->
                 if (
                     isinstance(previous, str)
                     and not MEDIA_MARKER_RE.fullmatch(previous.strip())
-                    and _should_merge_across_pages(previous, item["text"])
+                    and _should_merge_across_pages(previous, item["text"], heading_regex=hre)
                 ):
                     current["text_parts"][-1] = f"{previous} {item['text']}".strip()
                     continue
@@ -492,6 +509,9 @@ def _normalize_chapters(chapters: list[dict], *, split_large_chapters: bool, tot
     normalized: list[dict] = []
     next_number = 1
     for chapter in chapters:
+        section_type = chapter.get("section_type", "unknown")
+        if section_type == "toc":
+            continue
         text_parts = _drop_front_matter_text_parts(chapter["text_parts"])
         if not any(part.strip() for part in text_parts) and not chapter["images"]:
             continue
@@ -512,6 +532,7 @@ def _normalize_chapters(chapters: list[dict], *, split_large_chapters: bool, tot
                     "text": text,
                     "images": _images_for_text_parts(text_parts_part, chapter["images"]),
                     "source_number": source_number if len(split_parts) == 1 else None,
+                    "section_type": section_type,
                 }
             )
             next_number += 1
@@ -598,12 +619,13 @@ def _roman_to_int(value: str) -> int | None:
     return total or None
 
 
-def _blank_chapter(number: int, title: str | None = None) -> dict:
+def _blank_chapter(number: int, title: str | None = None, section_type: str = "unknown") -> dict:
     return {
         "number": number,
         "title": title,
         "text_parts": [],
         "images": [],
+        "section_type": section_type,
     }
 
 
@@ -639,14 +661,16 @@ def _is_repeated_noise(text: str, repeated_noise: set[str]) -> bool:
     return lowered in repeated_noise or lowered.isdigit() or _is_pagination_noise(text)
 
 
-def _extract_heading(text: str, *, next_text: str | None = None, permissive: bool = False) -> str | None:
+def _extract_heading(text: str, *, next_text: str | None = None, permissive: bool = False, heading_regex: re.Pattern | None = None) -> str | None:
     lines = [line.strip() for line in text.replace("\r", "\n").splitlines() if line.strip()]
     if not lines:
         return None
     first_line = _normalize_heading_candidate(lines[0]).strip(" .:-")
     if not first_line:
         return None
-    if CHAPTER_RE.match(first_line):
+
+    hre = heading_regex if heading_regex is not None else CHAPTER_RE
+    if hre.match(first_line):
         return first_line
     heading_candidate = None
     score = 0
@@ -663,6 +687,11 @@ def _extract_heading(text: str, *, next_text: str | None = None, permissive: boo
     threshold = 3 if permissive else 4
     if heading_candidate and score >= threshold:
         return heading_candidate
+    if heading_regex is not None:
+        # When using a multilingual regex, also try clean ASCII fallback
+        cleaned_line = re.sub(r"[^\w\s]", "", first_line).strip()
+        if cleaned_line and hre.match(cleaned_line):
+            return cleaned_line
     cleaned_line = re.sub(r"[^\w\s]", "", first_line).strip()
     if re.match(r"^part\s+of\b", cleaned_line, flags=re.IGNORECASE):
         return None
@@ -932,12 +961,12 @@ def _is_probable_front_matter(text: str) -> bool:
     return False
 
 
-def _should_merge_across_pages(previous: str, current: str) -> bool:
+def _should_merge_across_pages(previous: str, current: str, *, heading_regex: re.Pattern | None = None) -> bool:
     previous = _clean_text(previous)
     current = _clean_text(current)
     if not previous or not current:
         return False
-    if _extract_heading(current):
+    if _extract_heading(current, heading_regex=heading_regex):
         return False
     return previous[-1] not in ".!?\"'"
 
@@ -1041,6 +1070,8 @@ def _build_parser_diagnostics(
     forced_large_chapter_split: bool,
     anomalies: Sequence[str],
     diagnostics_state: dict[str, Any],
+    detected_language: str = "en",
+    detected_language_confidence: float | None = None,
 ) -> dict[str, Any]:
     word_counts = [_count_words(str(chapter.get("text") or "")) for chapter in normalized_chapters if str(chapter.get("text") or "").strip()]
     headings = [str(chapter.get("title") or "").strip() for chapter in chapters if str(chapter.get("title") or "").strip()]
@@ -1052,9 +1083,20 @@ def _build_parser_diagnostics(
         "max": max(word_counts) if word_counts else 0,
     }
 
+    section_type_counts: dict[str, int] = {}
+    for chapter in chapters:
+        stype = chapter.get("section_type", "unknown")
+        section_type_counts[stype] = section_type_counts.get(stype, 0) + 1
+
+    toc_detected = section_type_counts.get("toc", 0) > 0
+    front_matter_count = sum(
+        count for stype, count in section_type_counts.items()
+        if stype in {"preface", "foreword", "acknowledgements", "dedication", "copyright", "title_page"}
+    )
+
     return {
         "source": "pdf",
-        "parser_version": "pdf_linewise_v3",
+        "parser_version": "pdf_linewise_v4",
         "total_pages": total_pages,
         "chapter_count": len(normalized_chapters),
         "heading_count": len(headings),
@@ -1069,4 +1111,9 @@ def _build_parser_diagnostics(
         "anomalies": list(anomalies),
         "fallback_strategy": fallback_strategy,
         "forced_large_chapter_split": bool(forced_large_chapter_split),
+        "detected_language": detected_language,
+        "detected_language_confidence": detected_language_confidence,
+        "section_type_counts": section_type_counts,
+        "toc_detected": toc_detected,
+        "front_matter_count": front_matter_count,
     }

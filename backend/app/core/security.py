@@ -7,6 +7,7 @@ from passlib.context import CryptContext
 from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+DUMMY_PASSWORD_HASH = pwd_context.hash("lorevia-invalid-login-timing-placeholder")
 
 
 def hash_password(password: str) -> str:

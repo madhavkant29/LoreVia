@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape"
 
-import type { ObsidianGraph } from "@/types/book"
+import { Tooltip } from "@/components/ui/Tooltip"
+import type { VaultGraph } from "@/types/book"
 
-const POSITION_STORAGE_KEY = "obsidian-graph-positions:v1"
+const POSITION_STORAGE_KEY = "vault-graph-positions:v1"
 
 type StoredPositions = Record<string, { x: number; y: number }>
 
@@ -31,7 +32,7 @@ function persistStoredPositions(positions: StoredPositions) {
   window.localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(positions))
 }
 
-function buildLocalGraph(graph: ObsidianGraph, focusPath: string | null) {
+function buildLocalGraph(graph: VaultGraph, focusPath: string | null) {
   if (!focusPath) return graph
   const neighborIds = new Set<string>([focusPath])
   for (const edge of graph.edges) {
@@ -44,14 +45,14 @@ function buildLocalGraph(graph: ObsidianGraph, focusPath: string | null) {
   }
 }
 
-export function GraphViewer({
+export const GraphViewer = memo(function GraphViewer({
   graph,
   selectedPath,
   onOpenNote,
   isDark,
   heightClassName = "min-h-[23rem]",
 }: {
-  graph: ObsidianGraph
+  graph: VaultGraph
   selectedPath: string | null
   onOpenNote: (path: string) => void
   isDark: boolean
@@ -73,12 +74,8 @@ export function GraphViewer({
   const focusPath = hoveredPath || selectedPath
   const focusNode = renderedGraph.nodes.find((node) => node.path === focusPath) ?? null
 
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    const storedPositions = loadStoredPositions()
-    storedPositionsRef.current = storedPositions
-    const stylesheet: any = [
+  const graphStylesheet = useMemo<any>(
+    () => [
       {
         selector: "node",
         style: {
@@ -140,7 +137,15 @@ export function GraphViewer({
           opacity: 0.12,
         },
       },
-    ]
+    ],
+    [isDark],
+  )
+
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    const storedPositions = loadStoredPositions()
+    storedPositionsRef.current = storedPositions
 
     const elements: ElementDefinition[] = [
       ...renderedGraph.nodes.map((node) => ({
@@ -172,7 +177,7 @@ export function GraphViewer({
       minZoom: 0.42,
       maxZoom: 2.2,
       elements,
-      style: stylesheet,
+      style: graphStylesheet,
       layout: hasStoredPositions
         ? { name: "preset", fit: true, padding: 40 }
         : {
@@ -293,7 +298,7 @@ export function GraphViewer({
       />
 
       <div className="absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-3">
-        <div className={`rounded-2xl border px-3 py-2 backdrop-blur-md ${isDark ? "border-white/10 bg-black/35 text-slate-200" : "border-white/70 bg-white/70 text-stone-700"}`}>
+        <div className={`rounded-md border px-3 py-2 ${isDark ? "border-white/10 bg-black/60 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Graph View</p>
           <p className="mt-1 text-sm font-medium">{renderedGraph.nodes.length} notes | {renderedGraph.edges.length} links</p>
           {focusNode ? (
@@ -303,18 +308,22 @@ export function GraphViewer({
           )}
         </div>
 
-        <div className={`flex flex-wrap items-center gap-2 rounded-2xl border px-2 py-2 backdrop-blur-md ${isDark ? "border-white/10 bg-black/35" : "border-white/70 bg-white/70"}`}>
-          <GraphButton label="+" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() * 1.18, renderedPosition: { x: 180, y: 120 } }))} />
-          <GraphButton label="-" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() / 1.18, renderedPosition: { x: 180, y: 120 } }))} />
-          <GraphButton label="Fit" onClick={() => runAction((cy) => cy.fit(undefined, 28))} wide />
+        <div className={`flex flex-wrap items-center gap-2 rounded-md border px-2 py-2 ${isDark ? "border-white/10 bg-black/60" : "border-stone-200 bg-white"}`}>
+          <GraphButton label="+" ariaLabel="Zoom in graph" tooltip="Zoom in" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() * 1.18, renderedPosition: { x: 180, y: 120 } }))} />
+          <GraphButton label="-" ariaLabel="Zoom out graph" tooltip="Zoom out" onClick={() => runAction((cy) => cy.zoom({ level: cy.zoom() / 1.18, renderedPosition: { x: 180, y: 120 } }))} />
+          <GraphButton label="Fit" ariaLabel="Fit graph to view" tooltip="Fit graph to view" onClick={() => runAction((cy) => cy.fit(undefined, 28))} wide />
           <GraphButton
             label={localMode ? "Global" : "Local"}
+            ariaLabel={localMode ? "Show full graph" : "Show local note graph"}
+            tooltip={localMode ? "Show full graph" : "Show current note neighborhood"}
             onClick={() => setLocalMode((current) => !current)}
             wide
             active={localMode}
           />
           <GraphButton
             label="Reset"
+            ariaLabel="Reset graph layout"
+            tooltip="Reset graph layout"
             onClick={() =>
               runAction((cy) => {
                 if (typeof window !== "undefined") {
@@ -348,7 +357,7 @@ export function GraphViewer({
         ].map((item) => (
           <div
             key={item.label}
-            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-3xs backdrop-blur-md ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-white/70 bg-white/70 text-stone-600"}`}
+            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-3xs ${isDark ? "border-white/10 bg-black/60 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}
           >
             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.tone }} />
             {item.label}
@@ -357,22 +366,28 @@ export function GraphViewer({
       </div>
     </div>
   )
-}
+})
 
 function GraphButton({
   label,
+  ariaLabel,
+  tooltip,
   onClick,
   wide = false,
   active = false,
 }: {
   label: string
+  ariaLabel: string
+  tooltip: string
   onClick: () => void
   wide?: boolean
   active?: boolean
 }) {
-  return (
+  const button = (
     <button
       type="button"
+      aria-label={ariaLabel}
+      aria-pressed={active || undefined}
       onClick={onClick}
       className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
         active
@@ -383,4 +398,6 @@ function GraphButton({
       {label}
     </button>
   )
+
+  return <Tooltip content={tooltip}>{button}</Tooltip>
 }

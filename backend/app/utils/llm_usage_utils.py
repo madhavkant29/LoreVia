@@ -3,15 +3,20 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from fastapi import HTTPException
 from openai.types.chat import ChatCompletion
 from openai.types.create_embedding_response import CreateEmbeddingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.user import LlmUsageEvent
+from app.models.user import LlmUsageEvent, User
+from app.parsers.chunker import count_tokens
+from app.utils.billing_utils import ARCHITECT_TIER, AUTHOR_TIER, billing_access_tier
 from app.utils.request_context import get_request_id, get_request_user_id
 
 log = logging.getLogger("lorevia.llm_usage")
@@ -23,6 +28,16 @@ class LlmUsageSummary:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+
+
+@dataclass(frozen=True)
+class ManualReprocessTokenCaps:
+    five_hour: int
+    weekly: int
+    monthly: int
+
+
+LlmTokenCaps = ManualReprocessTokenCaps
 
 
 def _coerce_uuid(value: object | None) -> uuid.UUID | None:
@@ -44,6 +59,166 @@ def _usage_counts(response: ChatCompletion | CreateEmbeddingResponse) -> tuple[i
     completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
     total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
     return prompt_tokens, completion_tokens, total_tokens
+
+
+def _message_content_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                value = item.get("text") or item.get("content") or item.get("input_text")
+                if value:
+                    parts.append(str(value))
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(content)
+
+
+def estimate_chat_completion_tokens(kwargs: dict[str, Any]) -> int:
+    messages = kwargs.get("messages") or []
+    prompt_parts: list[str] = []
+    if isinstance(messages, list):
+        for message in messages:
+            if isinstance(message, dict):
+                prompt_parts.append(str(message.get("role") or ""))
+                prompt_parts.append(_message_content_text(message.get("content")))
+            else:
+                prompt_parts.append(str(message))
+    else:
+        prompt_parts.append(str(messages))
+    prompt_tokens = count_tokens("\n".join(prompt_parts))
+    completion_tokens = int(kwargs.get("max_tokens") or kwargs.get("max_completion_tokens") or 1000)
+    return max(prompt_tokens + completion_tokens, 1)
+
+
+def estimate_embedding_tokens(kwargs: dict[str, Any]) -> int:
+    input_value = kwargs.get("input")
+    if isinstance(input_value, list):
+        return max(sum(count_tokens(str(item or "")) for item in input_value), 1)
+    return max(count_tokens(str(input_value or "")), 1)
+
+
+def llm_token_caps_for_user(user: Any) -> LlmTokenCaps:
+    tier = billing_access_tier(user)
+    if tier == ARCHITECT_TIER:
+        return LlmTokenCaps(
+            five_hour=settings.ARCHITECT_LLM_TOKENS_5H,
+            weekly=settings.ARCHITECT_LLM_TOKENS_WEEK,
+            monthly=settings.ARCHITECT_LLM_TOKENS_MONTH,
+        )
+    if tier == AUTHOR_TIER:
+        return LlmTokenCaps(
+            five_hour=settings.AUTHOR_LLM_TOKENS_5H,
+            weekly=settings.AUTHOR_LLM_TOKENS_WEEK,
+            monthly=settings.AUTHOR_LLM_TOKENS_MONTH,
+        )
+    return LlmTokenCaps(
+        five_hour=settings.FREE_LLM_TOKENS_5H,
+        weekly=settings.FREE_LLM_TOKENS_WEEK,
+        monthly=settings.FREE_LLM_TOKENS_MONTH,
+    )
+
+
+def manual_reprocess_token_caps_for_user(user: Any) -> ManualReprocessTokenCaps:
+    return llm_token_caps_for_user(user)
+
+
+def estimate_manual_reprocess_tokens(chapter_text: str) -> int:
+    source_tokens = count_tokens(chapter_text)
+    return max(source_tokens * 6, source_tokens + 1000)
+
+
+async def assert_manual_reprocess_token_capacity(
+    db: AsyncSession,
+    user: Any,
+    *,
+    estimated_tokens: int,
+    now: datetime | None = None,
+) -> ManualReprocessTokenCaps:
+    return await assert_llm_token_capacity(
+        db,
+        user=user,
+        estimated_tokens=estimated_tokens,
+        now=now,
+        limit_subject="Manual chapter reprocess",
+    )
+
+
+async def assert_llm_token_capacity(
+    db: AsyncSession,
+    user: Any | None = None,
+    *,
+    user_id: uuid.UUID | None = None,
+    estimated_tokens: int,
+    now: datetime | None = None,
+    limit_subject: str = "LLM usage",
+) -> LlmTokenCaps:
+    resolved_user_id = _coerce_uuid(user_id or getattr(user, "id", None) or get_request_user_id())
+    if resolved_user_id is None:
+        return LlmTokenCaps(five_hour=0, weekly=0, monthly=0)
+    resolved_user = user
+    if resolved_user is None:
+        resolved_user = await db.get(User, resolved_user_id)
+    if resolved_user is None:
+        raise HTTPException(403, "User is required for LLM usage.")
+    caps = llm_token_caps_for_user(resolved_user)
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    windows = (
+        ("5-hour", current - timedelta(hours=5), caps.five_hour),
+        ("weekly", current - timedelta(days=7), caps.weekly),
+        ("monthly", current - timedelta(days=30), caps.monthly),
+    )
+    for label, started_at, limit in windows:
+        used = int(
+            (
+                await db.execute(
+                    select(func.coalesce(func.sum(LlmUsageEvent.total_tokens), 0)).where(
+                        LlmUsageEvent.user_id == resolved_user_id,
+                        LlmUsageEvent.created_at >= started_at,
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+        if used + max(int(estimated_tokens or 0), 0) > limit:
+            raise HTTPException(
+                429,
+                f"{limit_subject} token limit exceeded for the {label} window.",
+            )
+    return caps
+
+
+async def assert_llm_token_capacity_for_request(
+    *,
+    db: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
+    estimated_tokens: int,
+    limit_subject: str = "LLM usage",
+) -> LlmTokenCaps:
+    resolved_user_id = _coerce_uuid(user_id or get_request_user_id())
+    if resolved_user_id is None:
+        return LlmTokenCaps(five_hour=0, weekly=0, monthly=0)
+    if db is not None:
+        return await assert_llm_token_capacity(
+            db,
+            user_id=resolved_user_id,
+            estimated_tokens=estimated_tokens,
+            limit_subject=limit_subject,
+        )
+    async with AsyncSessionLocal() as session:
+        return await assert_llm_token_capacity(
+            session,
+            user_id=resolved_user_id,
+            estimated_tokens=estimated_tokens,
+            limit_subject=limit_subject,
+        )
 
 
 async def record_llm_usage_event(
@@ -142,6 +317,12 @@ async def create_tracked_chat_completion(
     metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> ChatCompletion:
+    await assert_llm_token_capacity_for_request(
+        db=db,
+        user_id=user_id,
+        estimated_tokens=estimate_chat_completion_tokens(kwargs),
+        limit_subject="LLM usage",
+    )
     response = await client.chat.completions.create(model=model, **kwargs)
     try:
         await record_llm_usage_event(
@@ -170,6 +351,12 @@ async def create_tracked_embedding(
     metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> CreateEmbeddingResponse:
+    await assert_llm_token_capacity_for_request(
+        db=db,
+        user_id=user_id,
+        estimated_tokens=estimate_embedding_tokens(kwargs),
+        limit_subject="LLM usage",
+    )
     response = await client.embeddings.create(model=model, **kwargs)
     try:
         await record_llm_usage_event(

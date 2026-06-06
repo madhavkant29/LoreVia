@@ -2,6 +2,7 @@ from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaR
 from app.models.book import (
     Book,
     BookCollaborator,
+    BookUploadCharge,
     PublicBookAnalyticsEvent,
     PublicBookRanking,
     BookForumComment,
@@ -13,8 +14,8 @@ from app.models.book import (
     ChapterMedia,
     ChapterVersion,
     ManuscriptAnnotation,
-    ObsidianVaultNote,
-    ObsidianVaultNoteSource,
+    VaultNote,
+    VaultNoteSource,
     NoteBacklink,
     NoteLink,
     NoteSeriesLink,

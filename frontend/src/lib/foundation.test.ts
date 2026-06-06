@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { canUseAuthorFeatures, isPaidTier, tierLabel } from "./billing/plans"
 import { LEGAL_EMAIL, SUPPORT_EMAIL } from "./constants/contact"
 import { TRUST_EFFECTIVE_DATE, TRUST_RESOURCE_LINKS } from "./constants/trust"
-import { shouldHideSiteFooter, shouldSkipAuthBootstrap } from "./routes"
+import { shouldHideSiteFooter, shouldOffsetSiteFooterForDashboardShell, shouldSkipAuthBootstrap } from "./routes"
 import {
   DEFAULT_OG_IMAGE,
   INDEXNOW_KEY_PATH,
@@ -132,6 +132,17 @@ describe("foundation utilities", () => {
   it("keeps the site footer visible on public static routes", () => {
     expect(shouldHideSiteFooter("/pricing")).toBe(false)
     expect(shouldHideSiteFooter("/public/uploads")).toBe(false)
+  })
+
+  it("offsets the site footer on dashboard shell routes", () => {
+    expect(shouldOffsetSiteFooterForDashboardShell("/settings")).toBe(true)
+    expect(shouldOffsetSiteFooterForDashboardShell("/library/add-chapter")).toBe(true)
+  })
+
+  it("does not offset the site footer on public routes without the dashboard shell", () => {
+    expect(shouldOffsetSiteFooterForDashboardShell("/")).toBe(false)
+    expect(shouldOffsetSiteFooterForDashboardShell("/pricing")).toBe(false)
+    expect(shouldOffsetSiteFooterForDashboardShell("/public/uploads")).toBe(false)
   })
 
   it("resolves root-relative paths with toAbsoluteUrl", () => {

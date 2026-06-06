@@ -88,7 +88,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className={`rounded-lg border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] backdrop-blur ${
+    <div className={`rounded-lg border p-8 ${
       isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
     }`}>
       <div className="mb-8 text-center">
@@ -114,60 +114,66 @@ export default function RegisterPage() {
       </div>
 
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          className={`rounded-xl border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-          }`}
-          required
-          autoComplete="email"
-        />
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={e => setUsername(e.target.value)}
-          className={`rounded-xl border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-          }`}
-          required
-          minLength={3}
-          maxLength={32}
-          autoComplete="username"
-        />
+        <label className="flex flex-col gap-1.5">
+          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Email</span>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+              isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+            }`}
+            required
+            autoComplete="email"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Username</span>
+          <input
+            type="text"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+              isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+            }`}
+            required
+            minLength={3}
+            maxLength={32}
+            autoComplete="username"
+          />
+        </label>
         <div className="space-y-3">
-          <div className="relative">
-            <input
-              type={showPassword ? "text" : "password"}
-              placeholder="Password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className={`w-full rounded-xl border px-3 py-3 pr-20 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-              }`}
-              required
-              minLength={12}
-              autoComplete="new-password"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((current) => !current)}
-              className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium transition ${
-                isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-900"
-              }`}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? "Hide" : "Show"}
-            </button>
-          </div>
+          <label className="flex flex-col gap-1.5">
+            <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Password</span>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className={`w-full rounded-md border px-3 py-3 pr-20 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+                  isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+                }`}
+                required
+                minLength={12}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((current) => !current)}
+                className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium transition ${
+                  isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-900"
+                }`}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+          </label>
           <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={() => setPassword(generateStrongPassword())}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition ${
                 isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
               }`}
             >
@@ -176,13 +182,13 @@ export default function RegisterPage() {
           </div>
         </div>
         {error && (
-          <p className={`rounded-xl border px-4 py-3 text-sm ${
+          <p className={`rounded-md border px-4 py-3 text-sm ${
             isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
           }`}>
             {error}
           </p>
         )}
-        <label className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
+        <label className={`flex items-start gap-3 rounded-md border px-4 py-3 text-sm ${
           isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"
         }`}>
           <input
@@ -216,8 +222,8 @@ export default function RegisterPage() {
         <button
           type="submit"
           disabled={loading}
-          className={`rounded-xl py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50 ${
-            isDark ? "bg-[linear-gradient(135deg,#4f46e5,#4338ca)] hover:opacity-95" : "bg-stone-950 hover:bg-stone-800"
+          className={`rounded-md py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50 ${
+            isDark ? "bg-[#1f615d] hover:bg-[#174c49]" : "bg-stone-950 hover:bg-stone-800"
           }`}
         >
           {loading ? "Creating..." : "Create account"}

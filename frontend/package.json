@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node node_modules/next/dist/bin/next dev -p 3000",
+    "dev:e2e": "node scripts/start-e2e-dev.mjs",
     "build": "node node_modules/next/dist/bin/next build",
     "start": "node node_modules/next/dist/bin/next start",
     "test": "vitest run",

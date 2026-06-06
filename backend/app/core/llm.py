@@ -99,7 +99,12 @@ async def complete_with_fallback(
     usage_book_id: uuid.UUID | None = None,
     usage_metadata: dict[str, Any] | None = None,
     usage_db: AsyncSession | None = None,
+    language: str | None = None,
 ) -> str:
+    from app.utils.advisor_utils import language_context_hint
+
+    if language:
+        system = language_context_hint(language) + system
     openai_error: Exception | None = None
 
     if settings.OPENAI_API_KEY:

@@ -5,11 +5,12 @@ import type { Route } from "next"
 import Link from "next/link"
 
 import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
+import { CoverEditOverlay } from "@/components/ui/CoverEditOverlay"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
-import type { Book, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
+import type { Book, GoalCalendarItem, PreWritingCheck, RevisionActionItem, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
 
 type IconName =
@@ -34,6 +35,8 @@ type IconName =
 
 type WorkspaceSaveState = "idle" | "saving" | "saved" | "error"
 type AuthorDashboardTab = "overview" | "revision" | "planning" | "story-map" | "stats"
+type RevisionInsightSelection = { key: string; title: string; subtitle: string; items: RevisionActionItem[] }
+type RevisionSeverityFilter = "all" | "high" | "medium" | "low"
 
 type Props = {
   bookId: string
@@ -135,6 +138,8 @@ export function AuthorWorkspaceDashboard({
   onWriterWorkspaceChange,
 }: Props) {
   const [activeTab, setActiveTab] = useState<AuthorDashboardTab>("overview")
+  const [coverUrlOverride, setCoverUrlOverride] = useState<string | null>(null)
+  const deferedBookCoverUrl = coverUrlOverride !== null ? coverUrlOverride : book.cover_url
   const deferredStoryHealth = useDeferredValue(storyHealth)
   const deferredPreWritingCheck = useDeferredValue(preWritingCheck)
   const deferredRevisionIntelligence = useDeferredValue(revisionIntelligence)
@@ -176,6 +181,8 @@ export function AuthorWorkspaceDashboard({
           onOpenRelationships={onOpenRelationships}
           onNavigate={onNavigate}
           bookId={bookId}
+          resolvedCoverUrl={deferedBookCoverUrl}
+          onCoverUpdated={(updated) => setCoverUrlOverride(updated.cover_url ?? null)}
         />
         <RecentChaptersCard
           book={book}
@@ -248,7 +255,7 @@ export function AuthorWorkspaceDashboard({
                 : "Deep tools for planning, structure, and story intelligence."}
             </p>
           </div>
-          <div role="tablist" aria-label="Author workspace tabs" className={`grid gap-1 rounded-2xl border p-1 sm:grid-cols-3 xl:grid-cols-5 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
+          <div role="tablist" aria-label="Author workspace tabs" className={`grid gap-1 rounded-md border p-1 sm:grid-cols-3 xl:grid-cols-5 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
             {([
               ["overview", "Overview"],
               ["revision", "Revision Hub"],
@@ -442,6 +449,8 @@ function CurrentProjectCard({
   onOpenRelationships,
   onNavigate,
   bookId,
+  resolvedCoverUrl,
+  onCoverUpdated,
 }: {
   book: Book
   isDark: boolean
@@ -456,6 +465,8 @@ function CurrentProjectCard({
   onOpenRelationships: () => void
   onNavigate: (href: string) => void
   bookId: string
+  resolvedCoverUrl: string | null | undefined
+  onCoverUpdated: (book: Book) => void
 }) {
   const goalProgress = clamp((dailyWords / Math.max(1, dailyTarget)) * 100, 0, 100)
   const manuscriptProgress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
@@ -467,10 +478,18 @@ function CurrentProjectCard({
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current project</p>
       <div className="mt-4 grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)] xl:grid-cols-[10rem_minmax(0,1fr)]">
         <SmartBookCover
-          src={book.cover_url}
+          src={resolvedCoverUrl}
           title={book.title}
           isDark={isDark}
           className="aspect-[0.72] min-h-48 overflow-hidden rounded-lg"
+          overlay={
+            <CoverEditOverlay
+              bookId={bookId}
+              isDark={isDark}
+              hasCover={Boolean(resolvedCoverUrl)}
+              onCoverUpdated={onCoverUpdated}
+            />
+          }
         />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
@@ -485,7 +504,7 @@ function CurrentProjectCard({
               <button
                 type="button"
                 onClick={onOpenManuscript}
-                className={`inline-flex min-h-11 items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
               >
                 <Icon name="book" />
                 Open Manuscript Editor
@@ -553,7 +572,7 @@ function RecentChaptersCard({
             key={chapter.number}
             type="button"
             onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)}
-            className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-start justify-between gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
             <div className="min-w-0">
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
@@ -563,7 +582,7 @@ function RecentChaptersCard({
             <span className="text-xs font-semibold text-teal-600">{chapter.read ? "Read" : "Open"}</span>
           </button>
         )) : (
-          <p className={`rounded-2xl border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+          <p className={`rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
             {unitTitle} indexing is still syncing.
           </p>
         )}
@@ -628,7 +647,7 @@ function CurrentProjectHero({
             <button
               type="button"
               onClick={onOpenRelationships}
-              className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-md border px-4 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
             >
               <Icon name="users" />
               Open relationship map
@@ -659,7 +678,7 @@ function CurrentProjectHero({
                 <button
                   type="button"
                   onClick={onOpenManuscript}
-                  className={`inline-flex min-h-12 items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-800"}`}
+                  className={`inline-flex min-h-12 items-center gap-2 rounded-md px-5 py-3 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-800"}`}
                 >
                   <Icon name="book" />
                   Open manuscript editor
@@ -668,7 +687,7 @@ function CurrentProjectHero({
               <button
                 type="button"
                 onClick={() => onNavigate(`/${bookId}/chapters`)}
-                className={`inline-flex min-h-12 items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
+                className={`inline-flex min-h-12 items-center gap-2 rounded-md border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
               >
                 <Icon name="file" />
                 Review chapters
@@ -676,7 +695,7 @@ function CurrentProjectHero({
               <button
                 type="button"
                 onClick={() => onNavigate(`/${bookId}/summaries`)}
-                className={`inline-flex min-h-12 items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
+                className={`inline-flex min-h-12 items-center gap-2 rounded-md border px-5 py-3 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
               >
                 <Icon name="search" />
                 Open summaries
@@ -731,7 +750,7 @@ function CurrentProjectHero({
                 key={chapter.number}
                 type="button"
                 onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)}
-                className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                className={`flex w-full items-start justify-between gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
               >
                 <div className="min-w-0">
                   <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
@@ -742,7 +761,7 @@ function CurrentProjectHero({
                 </span>
               </button>
             )) : (
-              <p className={`rounded-2xl border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+              <p className={`rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
                 {unitTitle} indexing is still syncing.
               </p>
             )}
@@ -766,6 +785,7 @@ function StoryPulseCard({
   storyHealthError?: boolean
   onRetryStoryHealth?: () => void
 }) {
+  const [selectedMetricLabel, setSelectedMetricLabel] = useState<string | null>(null)
   if (storyHealthError && !storyHealth && onRetryStoryHealth) {
     return (
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
@@ -787,6 +807,7 @@ function StoryPulseCard({
   const summary = storyHealth?.summary ?? "LoreVia is still building the latest story pulse."
   const healthColor = score >= 85 ? "#45d483" : score >= 70 ? "#8b5cf6" : score >= 55 ? "#f5bf3d" : "#fb7185"
   const topMetrics = (storyHealth?.metrics ?? []).slice(0, 3)
+  const selectedMetric = topMetrics.find((metric) => metric.label === selectedMetricLabel) ?? null
 
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
@@ -813,18 +834,30 @@ function StoryPulseCard({
 
       <div className="mt-5 space-y-3">
         {topMetrics.map((metric) => (
-          <div key={metric.label} className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+          <button
+            key={metric.label}
+            type="button"
+            onClick={() => setSelectedMetricLabel((current) => current === metric.label ? null : metric.label)}
+            className={`w-full rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"} ${selectedMetricLabel === metric.label ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+          >
             <div className="flex items-center justify-between gap-3">
               <span className={isDark ? "min-w-0 break-words text-sm text-slate-200" : "min-w-0 break-words text-sm text-slate-700"}>{metric.label}</span>
               <span className="text-sm font-semibold text-teal-700">{metric.score}%</span>
             </div>
-          </div>
+          </button>
         ))}
       </div>
 
+      {selectedMetric ? (
+        <div className={`mt-4 rounded-md border px-4 py-3 ${isDark ? "border-sky-400/30 bg-sky-500/10" : "border-sky-200 bg-sky-50"}`}>
+          <p className={`text-sm font-semibold ${isDark ? "text-sky-100" : "text-sky-800"}`}>{selectedMetric.label}: {selectedMetric.score}%</p>
+          <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{selectedMetric.detail}</p>
+        </div>
+      ) : null}
+
       <Link
         href={`/${bookId}/analysis` as Route}
-        className={`mt-5 inline-flex w-full items-center justify-center rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+        className={`mt-5 inline-flex w-full items-center justify-center rounded-md border px-4 py-3 text-sm font-semibold transition ${
           isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
         }`}
       >
@@ -875,7 +908,7 @@ function ActiveIssuesCard({
         </p>
 
         {processingSummary ? (
-          <p className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+          <p className={`mt-4 rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
             {processingSummary}
           </p>
         ) : null}
@@ -883,7 +916,7 @@ function ActiveIssuesCard({
         <button
           type="button"
           onClick={() => onNavigate(`/${bookId}/reports`)}
-          className={`mt-4 inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
+          className={`mt-4 inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700" : "bg-teal-800 text-white hover:bg-teal-700"}`}
         >
           Create revision checklist
         </button>
@@ -894,7 +927,7 @@ function ActiveIssuesCard({
             key={issue.title}
             type="button"
             onClick={() => onNavigate(issue.href)}
-            className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
             <Icon name={issue.icon} className="h-5 w-5 text-teal-700" />
             <div className="min-w-0 flex-1">
@@ -927,7 +960,7 @@ function CompactQuickLinksCard({
             key={link.title}
             type="button"
             onClick={() => onNavigate(link.href)}
-            className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`flex w-full items-start gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
             <Icon name={link.icon} className="mt-0.5 h-5 w-5 text-teal-700" />
             <div className="min-w-0">
@@ -1002,7 +1035,7 @@ function RecentSignalsCard({
             key={`${entry.title}-${entry.note}`}
             type="button"
             onClick={() => onNavigate(entry.href)}
-            className={`w-full rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+            className={`w-full rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
               <p className={`break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.title}</p>
               <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{entry.note}</p>
@@ -1124,6 +1157,132 @@ function RevisionHubTab({
   storyHealthError?: boolean
   onRetryStoryHealth?: () => void
 }) {
+  const [selectedInsight, setSelectedInsight] = useState<RevisionInsightSelection | null>(null)
+  const [chapterSeverityFilter, setChapterSeverityFilter] = useState<RevisionSeverityFilter>("all")
+  const [selectedChapterKey, setSelectedChapterKey] = useState<string | null>(null)
+  const [selectedRevisionItemId, setSelectedRevisionItemId] = useState<string | null>(null)
+  const [chapterFindingsHighlighted, setChapterFindingsHighlighted] = useState(false)
+
+  // Compute derived data before early returns to ensure hooks can be used consistently
+  const allItems = useMemo(() => (
+    revisionIntelligence
+      ? [
+          ...revisionIntelligence.change_impacts,
+          ...revisionIntelligence.scene_advice,
+          ...revisionIntelligence.confusion_map,
+          ...revisionIntelligence.voice_alerts,
+        ]
+      : []
+  ), [revisionIntelligence])
+
+  const timelineItems = useMemo(() => allItems.filter((item) =>
+    [item.title, item.description, item.recommendation, item.source_label]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .match(/\btimeline\b|\border\b|\bsequence\b|\btransition\b|\bearlier\b|\blater\b|\bbefore\b|\bafter\b/)
+  ), [allItems])
+
+  const focusCards = useMemo<RevisionInsightSelection[]>(() => (
+    revisionIntelligence
+      ? [
+          {
+            key: "continuity",
+            title: "Continuity & logic",
+            subtitle: "Downstream logic, contradictions, and dependency breaks LoreVia surfaced.",
+            items: revisionIntelligence.change_impacts,
+          },
+          {
+            key: "character",
+            title: "Character consistency",
+            subtitle: "Voice, behavior, and point-of-view consistency checks LoreVia flagged.",
+            items: revisionIntelligence.voice_alerts,
+          },
+          {
+            key: "world",
+            title: "Worldbuilding gaps",
+            subtitle: "Lore and anchoring issues that may leave the reader under-oriented.",
+            items: revisionIntelligence.confusion_map,
+          },
+          {
+            key: "timeline",
+            title: "Timeline / order",
+            subtitle: "Ordering, transition, and chronology issues surfaced across the current revision set.",
+            items: timelineItems,
+          },
+        ]
+      : []
+  ), [revisionIntelligence, timelineItems])
+
+  const filteredChapterItems = allItems.filter((item) =>
+    chapterSeverityFilter === "all" ? true : item.severity === chapterSeverityFilter
+  )
+
+  const chaptersByNumber = new Map(chapters.map((chapter) => [chapter.number, chapter]))
+  const visibleChapterNumbers = chapters.slice(-5).map((chapter) => chapter.number)
+  const referencedChapterNumbers = filteredChapterItems
+    .map((item) => item.chapter_ref)
+    .filter((chapterNumber): chapterNumber is number => typeof chapterNumber === "number")
+  const chapterNumbers = [...new Set([...visibleChapterNumbers, ...referencedChapterNumbers])].sort((left, right) => right - left)
+  const chapterFindings: Array<{
+    key: string
+    chapterNumber: number | null
+    title: string
+    subtitle: string
+    items: RevisionActionItem[]
+  }> = chapterNumbers.map((chapterNumber) => {
+    const chapter = chaptersByNumber.get(chapterNumber)
+    return {
+      key: `chapter-${chapterNumber}`,
+      chapterNumber,
+      title: `Chapter ${chapterNumber}`,
+      subtitle: chapter?.title || "Referenced by revision intelligence",
+      items: filteredChapterItems.filter((item) => item.chapter_ref === chapterNumber),
+    }
+  })
+
+  const unassignedChapterItems = filteredChapterItems.filter((item) => typeof item.chapter_ref !== "number")
+  if (unassignedChapterItems.length > 0) {
+    chapterFindings.push({
+      key: "book-wide",
+      chapterNumber: null,
+      title: "Book-wide findings",
+      subtitle: "Not tied to a specific chapter yet",
+      items: unassignedChapterItems,
+    })
+  }
+
+  const selectedChapterFinding = chapterFindings.find((row) => row.key === selectedChapterKey) ?? null
+
+  // All hooks must be called before any conditional returns
+  useEffect(() => {
+    if (!selectedInsight || !revisionIntelligence) return
+    const nextSelection = [...focusCards].find((card) => card.key === selectedInsight.key) ?? null
+    setSelectedInsight((current) => current === nextSelection ? current : nextSelection)
+  }, [focusCards, revisionIntelligence, selectedInsight])
+
+  useEffect(() => {
+    if (selectedChapterKey === null || !revisionIntelligence) return
+    const hasSelectedChapter = chapterFindings.some(({ key, items }) => key === selectedChapterKey && items.length > 0)
+    if (!hasSelectedChapter) {
+      setSelectedChapterKey(null)
+    }
+  }, [selectedChapterKey, chapterSeverityFilter, revisionIntelligence])
+
+  useEffect(() => {
+    if (selectedRevisionItemId === null || !revisionIntelligence) return
+    const hasSelectedItem = allItems.some((item) => item.id === selectedRevisionItemId)
+    if (!hasSelectedItem) {
+      setSelectedRevisionItemId(null)
+    }
+  }, [selectedRevisionItemId, revisionIntelligence])
+
+  useEffect(() => {
+    if (!chapterFindingsHighlighted) return
+    const timeoutId = window.setTimeout(() => setChapterFindingsHighlighted(false), 1800)
+    return () => window.clearTimeout(timeoutId)
+  }, [chapterFindingsHighlighted])
+
   if (revisionIntelligenceError && !revisionIntelligence && onRetryRevisionIntelligence) {
     return (
       <ErrorCard
@@ -1145,20 +1304,53 @@ function RevisionHubTab({
     )
   }
 
-  const allItems = [
-    ...revisionIntelligence.change_impacts,
-    ...revisionIntelligence.scene_advice,
-    ...revisionIntelligence.confusion_map,
-    ...revisionIntelligence.voice_alerts,
-  ]
   const highCount = allItems.filter((item) => item.severity === "high").length || revisionIntelligence.summary.high_severity_count
   const mediumCount = allItems.filter((item) => item.severity === "medium").length
   const lowCount = allItems.filter((item) => item.severity === "low").length
   const readyScore = storyHealth?.score ?? Math.max(0, 100 - highCount * 6 - mediumCount * 3 - lowCount)
-  const chapterFindings = chapters.slice(-5).reverse().map((chapter) => ({
-    chapter,
-    count: allItems.filter((item) => item.chapter_ref === chapter.number).length,
-  }))
+
+  const selectReadinessSeverity = (severity: RevisionSeverityFilter) => {
+    setChapterSeverityFilter(severity)
+    setSelectedChapterKey(null)
+    setSelectedRevisionItemId(null)
+    setChapterFindingsHighlighted(true)
+  }
+
+  const renderClickableFinding = (item: RevisionActionItem) => {
+    const isActive = selectedRevisionItemId === item.id
+    return (
+      <button
+        type="button"
+        key={item.id}
+        onClick={() => setSelectedRevisionItemId((current) => current === item.id ? null : item.id)}
+        className={`w-full rounded-md border px-3 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"} ${isActive ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${severityClass(item.severity, isDark)}`}>{item.severity}</span>
+          {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{`Chapter ${item.chapter_ref}`}</span> : null}
+          <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{item.source_label || "Revision intelligence"}</span>
+        </div>
+        <p className={`mt-2 text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
+        <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{item.recommendation || item.description}</p>
+        {isActive ? (
+          <div className={`mt-3 rounded-md border px-3 py-3 ${isDark ? "border-sky-400/25 bg-sky-500/10" : "border-sky-200 bg-sky-50"}`}>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-sky-200" : "text-sky-800"}`}>What LoreVia found</p>
+            <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-200" : "text-slate-700"}`}>{item.description}</p>
+            {item.recommendation ? (
+              <>
+                <p className={`mt-3 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-sky-200" : "text-sky-800"}`}>Suggested next step</p>
+                <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-200" : "text-slate-700"}`}>{item.recommendation}</p>
+              </>
+            ) : null}
+            <div className={`mt-3 flex flex-wrap gap-2 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <span>Status: {item.status.replace("_", " ")}</span>
+              <span>Category: {item.category}</span>
+            </div>
+          </div>
+        ) : null}
+      </button>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -1166,45 +1358,74 @@ function RevisionHubTab({
         <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision focus</p>
           <div className="mt-4 space-y-3">
-            {[
-              ["Continuity & logic", highCount, "high"],
-              ["Character consistency", mediumCount, "medium"],
-              ["Worldbuilding gaps", revisionIntelligence.confusion_map.length, "medium"],
-              ["Timeline / order", lowCount, "low"],
-            ].map(([label, count, severity]) => (
-              <div key={label} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+            {focusCards.map((card, index) => {
+              const severity = index === 0 ? "high" : index < 3 ? "medium" : "low"
+              const isActive = selectedInsight?.key === card.key
+              const count = card.items.length
+              return (
+              <button
+                type="button"
+                key={card.key}
+                onClick={() => setSelectedInsight(isActive ? null : card)}
+                className={`w-full rounded-md border px-3 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"} ${isActive ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+              >
                 <div className="flex items-center justify-between gap-3">
-                  <span className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{label}</span>
+                  <span className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{card.title}</span>
                   <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClass(String(severity)[0].toUpperCase() + String(severity).slice(1), isDark)}`}>{count}</span>
                 </div>
-              </div>
-            ))}
+              </button>
+            )})}
           </div>
         </section>
-        <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+        <section className={`${panelClass(isDark, "h-full p-4 sm:p-5 transition-shadow duration-300")} ${chapterFindingsHighlighted ? (isDark ? "shadow-[0_0_0_2px_rgba(56,189,248,0.5),0_0_30px_rgba(20,184,166,0.22)]" : "shadow-[0_0_0_2px_rgba(14,116,144,0.3),0_0_26px_rgba(14,165,233,0.2)]") : ""}`}>
           <div className="flex items-center justify-between gap-3">
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Chapter-specific findings</p>
             <div className="flex gap-1">
-              {["All", "High", "Medium", "Low"].map((label) => <span key={label} className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-400" : "bg-slate-100 text-slate-500"}`}>{label}</span>)}
+              {(["all", "high", "medium", "low"] as const).map((label) => {
+                const isActive = chapterSeverityFilter === label
+                return (
+                  <button
+                    type="button"
+                    key={label}
+                    onClick={() => {
+                      setChapterSeverityFilter(label)
+                      setSelectedChapterKey(null)
+                    }}
+                    className={`rounded-full px-2 py-1 text-3xs font-semibold transition ${isActive ? (isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700") : (isDark ? "bg-white/[0.05] text-slate-400 hover:bg-white/[0.08]" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}`}
+                  >
+                    {label[0].toUpperCase() + label.slice(1)}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <div className="mt-4 space-y-2">
-            {chapterFindings.map(({ chapter, count }) => (
-                <div key={chapter.number} className={`flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+            {chapterFindings.map(({ key, title, subtitle, items }) => {
+              const isActive = selectedChapterKey === key
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  onClick={() => {
+                    setSelectedChapterKey(isActive ? null : key)
+                    setSelectedRevisionItemId(null)
+                  }}
+                  className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"} ${isActive ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+                >
                   <div className="min-w-0">
-                    <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>Chapter {chapter.number}</p>
-                    <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{chapter.title || "Untitled"}</p>
+                    <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{title}</p>
+                    <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{subtitle}</p>
                   </div>
-                  <span className="text-sm font-semibold text-teal-600">{count} issue{count === 1 ? "" : "s"}</span>
-                </div>
-            ))}
+                  <span className="text-sm font-semibold text-teal-600">{items.length} issue{items.length === 1 ? "" : "s"}</span>
+                </button>
+            )})}
           </div>
         </section>
         <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recommended fixes</p>
           <div className="mt-4 space-y-3">
             {allItems.slice(0, 3).map((item) => (
-              <div key={item.id} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+              <div key={item.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                 <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
                 <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.recommendation || item.description}</p>
               </div>
@@ -1218,13 +1439,81 @@ function RevisionHubTab({
             <ScoreRing isDark={isDark} score={readyScore} label="ready" />
           </div>
           <div className="mt-4 space-y-2">
-            <InfoLine isDark={isDark} label="High severity" value={String(highCount)} />
-            <InfoLine isDark={isDark} label="Medium severity" value={String(mediumCount)} />
-            <InfoLine isDark={isDark} label="Low severity" value={String(lowCount)} />
+            <InfoLine
+              isDark={isDark}
+              label="High severity"
+              value={String(highCount)}
+              active={chapterSeverityFilter === "high"}
+              onClick={() => selectReadinessSeverity("high")}
+            />
+            <InfoLine
+              isDark={isDark}
+              label="Medium severity"
+              value={String(mediumCount)}
+              active={chapterSeverityFilter === "medium"}
+              onClick={() => selectReadinessSeverity("medium")}
+            />
+            <InfoLine
+              isDark={isDark}
+              label="Low severity"
+              value={String(lowCount)}
+              active={chapterSeverityFilter === "low"}
+              onClick={() => selectReadinessSeverity("low")}
+            />
           </div>
           <Link href={`/${bookId}/analysis` as Route} className={footerLinkClass(isDark)}>View readiness report <Icon name="chevron" /></Link>
         </section>
       </div>
+      {selectedInsight ? (
+        <section className={panelClass(isDark, "p-4 sm:p-5")}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Selected findings</p>
+              <h3 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{selectedInsight.title}</h3>
+              <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{selectedInsight.subtitle}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedInsight(null)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+            >
+              Clear
+            </button>
+          </div>
+          <div className="mt-4 space-y-3">
+            {selectedInsight.items.length > 0 ? selectedInsight.items.map((item) => renderClickableFinding(item)) : (
+              <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No findings are currently surfaced for this bucket.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
+      {selectedChapterFinding ? (
+        <section className={panelClass(isDark, "p-4 sm:p-5")}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Chapter findings</p>
+              <h3 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{selectedChapterFinding.title}</h3>
+              <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                {chapterSeverityFilter === "all"
+                  ? "All surfaced revision findings for this row."
+                  : `${chapterSeverityFilter[0].toUpperCase() + chapterSeverityFilter.slice(1)} severity findings for this row.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedChapterKey(null)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${isDark ? "bg-white/10 text-slate-200 hover:bg-white/15" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+            >
+              Clear
+            </button>
+          </div>
+          <div className="mt-4 space-y-3">
+            {selectedChapterFinding.items.length > 0 ? selectedChapterFinding.items.map((item) => renderClickableFinding(item)) : (
+              <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No findings are currently surfaced for this chapter.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
       <RevisionIntelligencePanel
         bookId={bookId}
         revision={revisionIntelligence}
@@ -1306,7 +1595,7 @@ function PlanningTab({
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Session goals</p>
             <div className="mt-4 space-y-3">
               {incompleteItems.slice(0, 3).map((item) => (
-                <div key={item.id} className={`rounded-2xl border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+                <div key={item.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                   <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
                   <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Due {formatPlannerDate(item.due_date)}</p>
                 </div>
@@ -1361,9 +1650,11 @@ function WorkspaceStatsTab({
   const progress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
 
   return (
-    <div className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="space-y-5">
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="xl:col-span-3">
         <ProjectOverviewCard isDark={isDark} currentWords={currentWords} chapterCount={chapterCount} characterCount={characterCount} worldArticleCount={worldArticleCount} />
+      </div>
+      <div className="space-y-5">
         <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} onUpdateGoal={onOpenManuscript} />
         <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
         <ProgressBreakdownCard isDark={isDark} progress={progress} />
@@ -1429,14 +1720,14 @@ function StoryMapTab({
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+            <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Active characters</p>
               <div className="mt-3 space-y-3">
                 {(preWritingCheck?.active_characters ?? []).slice(0, 4).map((character) => (
                   <div key={character.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{character.name}</p>
                     <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {character.role || "Character"}{character.last_seen_chapter ? ` Ã¢â‚¬Â¢ last seen in Chapter ${character.last_seen_chapter}` : ""}
+                      {character.role || "Character"}{character.last_seen_chapter ? ` / last seen in Chapter ${character.last_seen_chapter}` : ""}
                     </p>
                   </div>
                 ))}
@@ -1444,14 +1735,14 @@ function StoryMapTab({
               </div>
             </div>
 
-            <div className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+            <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Unresolved threads</p>
               <div className="mt-3 space-y-3">
                 {(preWritingCheck?.unresolved_threads ?? []).slice(0, 4).map((thread) => (
                   <div key={thread.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{thread.title}</p>
                     <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                      {thread.status}{thread.introduced_at ? ` Ã¢â‚¬Â¢ introduced in Chapter ${thread.introduced_at}` : ""}
+                      {thread.status}{thread.introduced_at ? ` / introduced in Chapter ${thread.introduced_at}` : ""}
                     </p>
                   </div>
                 ))}
@@ -1474,7 +1765,7 @@ function StoryMapTab({
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Continuity findings</p>
           <div className="mt-4 space-y-3">
             {(preWritingCheck?.alerts ?? []).slice(0, 5).map((alert) => (
-              <div key={`${alert.title}-${alert.chapter_ref ?? "na"}`} className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+              <div key={`${alert.title}-${alert.chapter_ref ?? "na"}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{alert.title}</p>
                   {alert.chapter_ref ? <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Ch {alert.chapter_ref}</span> : null}
@@ -1525,12 +1816,19 @@ function ProjectOverviewCard({
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace stats</p>
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-5 grid grid-cols-1 gap-3">
         {stats.map((stat) => (
-          <div key={stat.label} className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
-            <Icon name={stat.icon} className="h-5 w-5 text-teal-700" />
-            <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
-            <p className={`mt-2 break-words text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{stat.value}</p>
+          <div
+            key={stat.label}
+            className={`flex min-w-0 items-start gap-3 rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}
+          >
+            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-sm ${isDark ? "bg-white/[0.04]" : "bg-slate-50"}`}>
+              <Icon name={stat.icon} className="h-5 w-5 text-teal-700" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className={`text-xs leading-tight ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
+              <p className={`mt-1 text-2xl font-semibold tabular-nums ${isDark ? "text-white" : "text-slate-950"}`}>{stat.value}</p>
+            </div>
           </div>
         ))}
       </div>
@@ -1590,7 +1888,7 @@ function DailyGoalCard({ isDark, dailyWords, dailyTarget, onUpdateGoal }: { isDa
 function CompactProgressRow({ isDark, label, value, percent, tone = "teal" }: { isDark: boolean; label: string; value: string; percent: number; tone?: "teal" | "amber" | "rose" }) {
   const color = tone === "amber" ? "bg-amber-400" : tone === "rose" ? "bg-rose-400" : "bg-teal-500"
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+    <div className={`rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
       <div className="flex items-center justify-between gap-3">
         <span className={`min-w-0 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{label}</span>
         <span className={`max-w-[58%] break-words text-right text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
@@ -1602,9 +1900,24 @@ function CompactProgressRow({ isDark, label, value, percent, tone = "teal" }: { 
   )
 }
 
-function InfoLine({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
+function InfoLine({ isDark, label, value, onClick, active = false }: { isDark: boolean; label: string; value: string; onClick?: () => void; active?: boolean }) {
+  const baseClass = `flex w-full items-center justify-between gap-3 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${baseClass} transition ${isDark ? "hover:bg-white/[0.06]" : "hover:bg-slate-50"} ${active ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+      >
+        <span className={isDark ? "min-w-0 text-left text-slate-500" : "min-w-0 text-left text-slate-400"}>{label}</span>
+        <span className={`max-w-[56%] break-words text-right font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
+      </button>
+    )
+  }
+
   return (
-    <div className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+    <div className={baseClass}>
       <span className={isDark ? "min-w-0 text-slate-500" : "min-w-0 text-slate-400"}>{label}</span>
       <span className={`max-w-[56%] break-words text-right font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
     </div>
@@ -1632,7 +1945,7 @@ function ModeToggle({
     >
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 shadow-[0_10px_24px_-16px_rgba(13,148,136,0.8)] transition-transform duration-300 ease-out ${thumbClass}`}
+        className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 transition-transform duration-300 ease-out ${thumbClass}`}
       />
       {(["reader", "author"] as const).map((mode) => (
         <button
@@ -1660,7 +1973,7 @@ function ActionRow({ isDark, icon, title, body, onClick, tone = "default" }: { i
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+      className={`flex w-full items-center gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
     >
       <Icon name={icon} className={`h-5 w-5 ${iconClass}`} />
       <div className="min-w-0 flex-1">
@@ -1689,7 +2002,7 @@ function ScoreRing({ isDark, score, label }: { isDark: boolean; score: number; l
 
 function PlanningMetric({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
   return (
-    <div className={`rounded-2xl border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
+    <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
       <p className={`mt-2 break-words text-lg font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
     </div>
@@ -1764,7 +2077,7 @@ function InsightsCard({ isDark, worldArticleCount, progress }: { isDark: boolean
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Insights</p>
       <div className="mt-4 space-y-3">
         {insights.map((insight, index) => (
-          <div key={insight} className={`rounded-2xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
+          <div key={insight} className={`rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
             <span className="mr-2 font-semibold text-teal-600">{index + 1}.</span>{insight}
           </div>
         ))}
@@ -1925,7 +2238,7 @@ function GoalCalendarCard({
                     key={day.value}
                     type="button"
                     onClick={() => setSelectedDate(day.value)}
-                    className={`min-h-[5.8rem] rounded-2xl border p-2 text-left transition ${
+                    className={`min-h-[5.8rem] rounded-md border p-2 text-left transition ${
                       selected
                         ? isDark ? "border-teal-800/25 bg-teal-800/10" : "border-teal-300 bg-teal-50"
                         : isDark ? "border-white/[0.05] bg-[#101720] hover:bg-[#16202b]" : "border-slate-200 bg-white hover:bg-slate-50"
@@ -1967,7 +2280,7 @@ function GoalCalendarCard({
 
             <div className="mt-4 space-y-3">
               {selectedItems.length > 0 ? selectedItems.map((item) => (
-                <div key={item.id} className={`rounded-2xl border p-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                <div key={item.id} className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                   <div className="flex items-start gap-3">
                     <input
                       type="checkbox"
@@ -1995,7 +2308,7 @@ function GoalCalendarCard({
                   </div>
                 </div>
               )) : (
-                <div className={`rounded-2xl border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+                <div className={`rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
                   Nothing is scheduled for this day yet.
                 </div>
               )}
@@ -2008,8 +2321,8 @@ function GoalCalendarCard({
                   value={draftTitle}
                   onChange={(event) => setDraftTitle(event.target.value)}
                   disabled={!editable || saveState === "saving"}
-                  placeholder={editable ? "Draft chapter, revise outline, finish scene..." : "Loading planner..."}
-                  className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                  aria-label="Planning item"
+                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                 />
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
                   <input
@@ -2019,14 +2332,14 @@ function GoalCalendarCard({
                     value={draftQuotaValue}
                     onChange={(event) => setDraftQuotaValue(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    placeholder="Quota"
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-teal-700"}`}
+                    aria-label="Planning quota"
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   />
                   <select
                     value={draftQuotaUnit}
                     onChange={(event) => setDraftQuotaUnit(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   >
                     {["words", "chapters", "scenes", "pages", "tasks"].map((unit) => (
                       <option key={unit} value={unit}>{unit}</option>
@@ -2039,13 +2352,13 @@ function GoalCalendarCard({
                     value={selectedDate}
                     onChange={(event) => setSelectedDate(event.target.value)}
                     disabled={!editable || saveState === "saving"}
-                    className={`h-11 rounded-2xl border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
                   />
                   <button
                     type="button"
                     onClick={() => void addCalendarItem()}
                     disabled={!editable || saveState === "saving" || !draftTitle.trim()}
-                    className={`inline-flex h-11 items-center justify-center rounded-2xl px-4 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700 disabled:bg-teal-800/35" : "bg-teal-800 text-white hover:bg-teal-800 disabled:bg-teal-300"}`}
+                    className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-800 text-white hover:bg-teal-700 disabled:bg-teal-800/35" : "bg-teal-800 text-white hover:bg-teal-800 disabled:bg-teal-300"}`}
                   >
                     Add item
                   </button>
@@ -2087,7 +2400,7 @@ function HeroMetric({
       <p className={`mt-3 text-xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
       <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{note}</p>
       <div className={`mt-4 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-100"}`}>
-        <div className="h-full rounded-full bg-[linear-gradient(90deg,#7c3aed,#a855f7)]" style={{ width: `${clamp(progress, 0, 100)}%` }} />
+        <div className="h-full rounded-full bg-teal-700" style={{ width: `${clamp(progress, 0, 100)}%` }} />
       </div>
     </div>
   )
@@ -2131,19 +2444,19 @@ function EmptyTabState({ isDark, title, body }: { isDark: boolean; title: string
 }
 
 function panelClass(isDark: boolean, extra = "") {
-  return `min-w-0 rounded-lg border shadow-card ${
+  return `min-w-0 rounded-lg border ${
     isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"
   } ${extra}`
 }
 
 function secondaryButtonClass(isDark: boolean) {
-  return `inline-flex min-h-11 items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold transition ${
+  return `inline-flex min-h-11 items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-semibold transition ${
     isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
   }`
 }
 
 function footerLinkClass(isDark: boolean) {
-  return `mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+  return `mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border px-4 py-3 text-sm font-semibold transition ${
     isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
   }`
 }

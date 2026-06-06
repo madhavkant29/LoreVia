@@ -99,7 +99,7 @@ export function serializeAutosaveDraft(draft: ManuscriptAutosaveDraft) {
 }
 
 export function parseAutosaveDraft(raw: string | null): ManuscriptAutosaveDraft | null {
-  if (!raw) return null
+  if (!raw || typeof raw !== "string") return null
 
   try {
     const parsed = JSON.parse(raw) as Partial<ManuscriptAutosaveDraft>
@@ -122,7 +122,7 @@ export function serializeSceneAutosaveDraft(draft: SceneAutosaveDraft) {
 }
 
 export function parseSceneAutosaveDraft(raw: string | null): SceneAutosaveDraft | null {
-  if (!raw) return null
+  if (!raw || typeof raw !== "string") return null
 
   try {
     const parsed = JSON.parse(raw) as Partial<SceneAutosaveDraft>

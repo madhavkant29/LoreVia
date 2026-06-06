@@ -12,7 +12,6 @@ export default function ReaderLayout({ children }: { children: React.ReactNode }
   return (
     <AppRuntime>
       <div className="app-shell min-h-screen">
-        <div className="app-shell__mesh" />
         <div className="relative">{children}</div>
       </div>
     </AppRuntime>

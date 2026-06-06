@@ -331,17 +331,17 @@ export interface ManuscriptAnnotation {
   updated_at: string
 }
 
-export interface ObsidianPreviewFile {
+export interface VaultPreviewFile {
   path: string
   content: string
 }
 
-export interface ObsidianPreview {
+export interface VaultPreview {
   root_folder: string
-  files: ObsidianPreviewFile[]
+  files: VaultPreviewFile[]
 }
 
-export interface ObsidianVaultNote {
+export interface VaultNote {
   id: string
   book_id: string
   path: string
@@ -351,7 +351,7 @@ export interface ObsidianVaultNote {
   updated_at: string
 }
 
-export interface ObsidianVaultNoteSaveResult {
+export interface VaultNoteSaveResult {
   path: string
   source: string
   content: string
@@ -360,7 +360,7 @@ export interface ObsidianVaultNoteSaveResult {
   updated_at: string | null
 }
 
-export interface ObsidianNoteLink {
+export interface VaultNoteLink {
   id: string
   book_id: string
   source_note_id: string
@@ -372,7 +372,7 @@ export interface ObsidianNoteLink {
   created_at: string
 }
 
-export interface ObsidianNoteTag {
+export interface VaultNoteTag {
   id: string
   book_id: string
   note_id: string
@@ -381,7 +381,7 @@ export interface ObsidianNoteTag {
   created_at: string
 }
 
-export interface ObsidianNoteSeriesLink {
+export interface VaultNoteSeriesLink {
   id: string
   series_id: string
   source_book_id: string
@@ -394,14 +394,14 @@ export interface ObsidianNoteSeriesLink {
   created_at: string
 }
 
-export interface ObsidianNoteRelations {
-  links: ObsidianNoteLink[]
-  backlinks: ObsidianNoteLink[]
-  tags: ObsidianNoteTag[]
-  series_links: ObsidianNoteSeriesLink[]
+export interface VaultNoteRelations {
+  links: VaultNoteLink[]
+  backlinks: VaultNoteLink[]
+  tags: VaultNoteTag[]
+  series_links: VaultNoteSeriesLink[]
 }
 
-export interface ObsidianGraphNode {
+export interface VaultGraphNode {
   id: string
   path: string
   title: string
@@ -409,15 +409,15 @@ export interface ObsidianGraphNode {
   link_count: number
 }
 
-export interface ObsidianGraphEdge {
+export interface VaultGraphEdge {
   source: string
   target: string
   label?: string | null
 }
 
-export interface ObsidianGraph {
-  nodes: ObsidianGraphNode[]
-  edges: ObsidianGraphEdge[]
+export interface VaultGraph {
+  nodes: VaultGraphNode[]
+  edges: VaultGraphEdge[]
 }
 
 export interface UserStats {
@@ -721,7 +721,16 @@ export interface WriterWorkspace {
   typewriter_mode?: TypewriterModeSettings
   manuscript_layout?: ManuscriptLayoutSettings
   structure_tree?: WorkspaceStructureNode[]
+  reprocess?: ReprocessMetadata
   processing?: BookProcessing | null
+}
+
+export interface ReprocessMetadata {
+  auto_reprocess_enabled: boolean
+  pending_chapters: number[]
+  last_mode_changed_at?: string | null
+  last_manual_chapter_started_at?: string | null
+  last_manual_chapter_number?: number | null
 }
 
 export interface RevisionActionItem {
@@ -743,6 +752,7 @@ export interface RevisionGenreCheck {
   label: string
   checks: string[]
   rationale: string
+  findings: RevisionActionItem[]
 }
 
 export interface RevisionPlanPass {
@@ -945,9 +955,59 @@ export interface CharacterEvent {
   impact_score: number
   role?: string | null
   accomplishments: string[]
-  growth_direction: string
-  growth_magnitude: number
-  is_major: boolean
+  growth_direction?: string
+  growth_magnitude?: number
+  is_major?: boolean
+}
+
+export interface BookEventsPaginated {
+  items: BookEventsItem[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface BookEvents {
+  major_events: MajorEvent[]
+  character_events: CharacterEvent[]
+}
+
+// ── Import Preview ─────────────────────────────────────────────────────────
+
+export type SectionType =
+  | "title_page" | "copyright" | "dedication" | "toc" | "foreword"
+  | "preface" | "acknowledgements" | "prologue" | "part" | "chapter"
+  | "interlude" | "epilogue" | "afterword" | "appendix" | "glossary"
+  | "notes" | "unknown"
+
+export interface SectionMeta {
+  id: string
+  type: SectionType
+  title: string
+  number: number | null
+  start_page: number | null
+  end_page: number | null
+  confidence: number
+  include_in_analysis: boolean
+}
+
+export interface ImportWarning {
+  message: string
+  severity: "info" | "warning" | "error"
+}
+
+export interface ImportPreview {
+  detected_language: string
+  language_confidence: number
+  title: string
+  author: string
+  sections: SectionMeta[]
+  chapter_count: number
+  toc_detected: boolean
+  front_matter_count: number
+  confidence: number
+  warnings: ImportWarning[]
 }
 
 export interface BookEventsItem {

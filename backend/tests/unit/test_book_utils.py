@@ -11,13 +11,16 @@ from PIL import Image
 from app.models.book import Book, Chapter, ManuscriptAnnotation
 from app.models.user import User
 from app.utils.book_utils import (
+    _build_revision_change_summary,
     _detect_continuity_flags_from_rows,
     _latest_state_before_chapter,
     _map_chapter_consistency_state_history,
+    _scene_keyword_set,
     list_manuscript_annotations,
     _build_knowledge_timeline,
     _build_narration_signature,
     _describe_narration_shift,
+    _select_genre_checks,
     build_chapter_title_from_summary,
     build_emotional_arc_payload,
     build_book_processing_payload,
@@ -35,6 +38,7 @@ from app.utils.book_utils import (
     build_scene_chapter_import_text,
     markdown_to_html,
     manuscript_html_to_text,
+    normalize_chapter_kind,
     normalize_chapter_title,
     normalize_imported_chapters,
     normalize_scene_metadata,
@@ -98,6 +102,51 @@ class _RowResult:
 
     def all(self):
         return list(self._rows)
+
+
+def test_scene_keyword_set_filters_common_revision_noise_but_keeps_story_terms():
+    keywords = _scene_keyword_set(
+        "Aide ailleurs apr auteurs said Nora crossed the silver gate with royal blood.",
+        character_names={"Nora"},
+        thread_terms={"Silver Gate"},
+    )
+
+    assert "aide" not in keywords
+    assert "ailleurs" not in keywords
+    assert "apr" not in keywords
+    assert "auteurs" not in keywords
+    assert {"nora", "silver gate", "royal", "blood"}.issubset(keywords)
+
+
+def test_build_revision_change_summary_falls_back_when_only_noise_terms_changed():
+    summary, focus_terms = _build_revision_change_summary(
+        before_text="Nora crossed the silver gate.",
+        after_text="Aide ailleurs apr auteurs. Nora crossed the silver gate.",
+        unit_label="Chapter 2",
+        character_names={"Nora"},
+        thread_terms={"Silver Gate"},
+        world_terms=set(),
+    )
+
+    assert summary == "You changed Chapter 2: the scene logic and wording shifted enough to re-check downstream assumptions."
+    assert focus_terms == []
+
+
+def test_normalize_writer_workspace_preserves_reprocess_metadata():
+    workspace = normalize_writer_workspace(
+        {
+            "reprocess": {
+                "auto_reprocess_enabled": False,
+                "pending_chapters": [3, 1, 3, 0, "bad"],
+                "last_manual_chapter_number": 3,
+                "last_manual_chapter_started_at": "2026-06-06T00:00:00+00:00",
+            }
+        }
+    )
+
+    assert workspace["reprocess"]["auto_reprocess_enabled"] is False
+    assert workspace["reprocess"]["pending_chapters"] == [1, 3]
+    assert workspace["reprocess"]["last_manual_chapter_number"] == 3
 
 
 class TestCleanMarkdownAsterisks:
@@ -724,6 +773,53 @@ def test_resolve_upload_format_and_work_type_infers_and_preserves_technical_form
     assert resolve_upload_format_and_work_type("novel.pdf") == ("pdf", "novel")
 
 
+def test_normalize_chapter_kind_accepts_supported_front_and_back_matter():
+    assert normalize_chapter_kind("Preface") == "preface"
+    assert normalize_chapter_kind("table of contents") == "toc"
+    assert normalize_chapter_kind("acknowledgements") == "acknowledgments"
+    assert normalize_chapter_kind("unknown-heading") == "chapter"
+    assert normalize_chapter_kind(None) == "chapter"
+
+
+def test_select_genre_checks_includes_ranked_findings():
+    checks = _select_genre_checks(
+        "Fantasy",
+        [
+            {
+                "id": "finding-1",
+                "category": "confusion",
+                "title": "Lore term overload",
+                "description": "Several world terms arrive in one scene.",
+                "severity": "medium",
+            },
+            {
+                "id": "finding-2",
+                "category": "voice",
+                "title": "Modern diction drift",
+                "description": "The setting voice sounds too modern.",
+                "severity": "medium",
+            },
+        ],
+    )
+
+    assert len(checks) == 1
+    assert checks[0]["label"] == "Fantasy"
+    assert [item["id"] for item in checks[0]["findings"]] == ["finding-1", "finding-2"]
+
+
+def test_normalize_imported_chapters_preserves_section_type_as_chapter_kind():
+    normalized = normalize_imported_chapters(
+        [{"number": 1, "title": "Preface", "text": "Before the story.", "section_type": "preface"}],
+        chapter_number=None,
+        start_number=1,
+        replace_existing=False,
+        chunk_long_documents=False,
+        preserve_exact_structure=False,
+    )
+
+    assert normalized[0]["chapter_kind"] == "preface"
+
+
 def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_structure_is_preserved():
     long_text = "\n\n".join([
         " ".join(["opening"] * 1800),
@@ -744,6 +840,27 @@ def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_struc
     assert normalized[0]["title"] == "Chapter I"
     assert "(Part 1)" not in normalized[0]["title"]
     assert normalized[0]["text"] == long_text
+    assert normalized[0]["chapter_kind"] == "chapter"
+
+
+def test_normalize_imported_chapters_uses_chapter_kind_for_split_parts():
+    long_text = "\n\n".join([
+        " ".join(["front"] * 1800),
+        " ".join(["matter"] * 1800),
+    ])
+
+    normalized = normalize_imported_chapters(
+        [{"number": 1, "title": "Preface", "text": long_text, "section_type": "preface"}],
+        chapter_number=None,
+        start_number=1,
+        replace_existing=False,
+        chunk_long_documents=True,
+        preserve_exact_structure=False,
+    )
+
+    assert len(normalized) == 2
+    assert [chapter["chapter_kind"] for chapter in normalized] == ["chapter", "chapter"]
+
 
 
 def test_normalize_imported_chapters_keeps_images_with_matching_markers_when_split():
@@ -905,11 +1022,11 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
             "tags": ["dagger", "reveal"],
         }]
 
-    async def _fake_list_obsidian_notes(*_args, **_kwargs):
+    async def _fake_list_vault_notes(*_args, **_kwargs):
         return [{"path": "Plot Threads/Silver Gate.md", "content": "# Silver Gate\n\nMira hides the dagger near the gate."}]
 
     monkeypatch.setattr("app.utils.book_utils.list_novel_scenes", _fake_list_novel_scenes)
-    monkeypatch.setattr("app.utils.book_utils.list_obsidian_notes", _fake_list_obsidian_notes)
+    monkeypatch.setattr("app.utils.book_utils.list_vault_notes", _fake_list_vault_notes)
     monkeypatch.setattr(
         "app.utils.book_utils.download_book",
         lambda _key: serialize_manuscript_content("The silver gate loomed over the harbor.", "<p>The silver gate loomed over the harbor.</p>").encode("utf-8"),
@@ -928,6 +1045,21 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
     assert results[0]["scene_id"] == "scene-1"
     assert results[1]["note_path"] == "Plot Threads/Silver Gate.md"
     assert results[2]["chapter_number"] == 4
+
+
+@pytest.mark.asyncio
+async def test_search_author_workspace_rejects_nested_regex_repetition():
+    with pytest.raises(HTTPException) as exc_info:
+        await search_author_workspace(
+            None,
+            book=SimpleNamespace(id=uuid.uuid4()),
+            user_id=uuid.uuid4(),
+            query="(a+)+$",
+            scopes=["manuscript"],
+            regex=True,
+        )
+
+    assert exc_info.value.status_code == 400
 
 
 def test_build_narration_signature_detects_first_person_anchor():
@@ -978,7 +1110,7 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
 
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True: (chapters, diagnostics),
+        lambda raw, *, split_large_chapters=True, language=None: (chapters, diagnostics),
     )
 
     payload = await parse_book_upload_for_ingestion(
@@ -997,7 +1129,7 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
 async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_source_preservation(monkeypatch):
     parse_calls: list[bool] = []
 
-    def _fake_parse_pdf(raw, *, split_large_chapters=True):
+    def _fake_parse_pdf(raw, *, split_large_chapters=True, language=None):
         parse_calls.append(split_large_chapters)
         return ([{"number": 1, "title": "Chapter 7", "text": "Original full chapter"}], {"source": "pdf"})
 

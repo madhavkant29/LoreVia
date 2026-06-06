@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useTransition } from "react"
+import type { ReactNode } from "react"
 import { adminApi } from "@/lib/api/admin"
 import type {
   AdminAuditEvent,
@@ -22,6 +23,23 @@ function hasScope(session: AdminSession | null, scope: AdminScope) {
 function formatDate(value?: string | null) {
   if (!value) return "Unknown"
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+}
+
+function StatusBadge({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode
+  tone?: "neutral" | "success" | "warning" | "danger"
+}) {
+  const toneClass = {
+    neutral: "border-[#d9dfd6] bg-[#f6f7f4] text-[#526056]",
+    success: "border-[#b8d7c0] bg-[#eff8f0] text-[#1f6b3a]",
+    warning: "border-[#ecd7b0] bg-[#fff8e8] text-[#8a5a12]",
+    danger: "border-[#e8c4c0] bg-[#fff3f1] text-[#a2382b]",
+  }[tone]
+
+  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${toneClass}`}>{children}</span>
 }
 
 export default function AdminPage() {
@@ -105,14 +123,22 @@ export default function AdminPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#657166]">LoreVia Admin</p>
             <h1 className="mt-2 text-3xl font-semibold">Operations Console</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#617065]">Moderation, billing, access, and audit review for protected operational workflows.</p>
           </div>
           <div className="text-sm text-[#526056]">
             {session.is_owner ? "Owner" : session.scopes.join(", ")}
-            {session.requires_step_up ? " · verification required" : " · recently verified"}
+            {session.requires_step_up ? " / verification required" : " / recently verified"}
           </div>
         </header>
 
-        {message ? <div className="border border-[#b8c7b8] bg-white px-4 py-3 text-sm">{message}</div> : null}
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <AdminMetric label="Publish reviews" value={String(publicShares.length)} />
+          <AdminMetric label="Content reports" value={String(reports.length)} />
+          <AdminMetric label="Refund reviews" value={String(refunds.length)} />
+          <AdminMetric label="Admin principals" value={String(principals.length)} />
+        </section>
+
+        {message ? <div className="rounded-lg border border-[#b8c7b8] bg-white px-4 py-3 text-sm">{message}</div> : null}
 
         {session.requires_step_up ? (
           <StepUpPanel onSubmit={(password) => runAction(() => adminApi.stepUp(password).then(() => adminApi.session().then(setSession)), "Admin verification complete.")} />
@@ -165,11 +191,20 @@ export default function AdminPage() {
   )
 }
 
+function AdminMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-[#d9dfd6] bg-white px-4 py-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#657166]">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-[#1c261f]">{value}</p>
+    </div>
+  )
+}
+
 function StepUpPanel({ onSubmit }: { onSubmit: (password: string) => void }) {
   const [password, setPassword] = useState("")
   return (
     <form
-      className="flex flex-col gap-3 border border-[#d9dfd6] bg-white p-4 md:flex-row md:items-end"
+      className="flex flex-col gap-3 rounded-lg border border-[#d9dfd6] bg-white p-4 md:flex-row md:items-end"
       onSubmit={(event) => {
         event.preventDefault()
         onSubmit(password)
@@ -178,9 +213,9 @@ function StepUpPanel({ onSubmit }: { onSubmit: (password: string) => void }) {
     >
       <label className="flex flex-1 flex-col gap-2 text-sm font-medium">
         Verify password
-        <input className="border border-[#c9d2c8] px-3 py-2" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <input className="rounded-md border border-[#c9d2c8] px-3 py-2" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
       </label>
-      <button className="border border-[#1f3c2a] bg-[#1f3c2a] px-4 py-2 text-sm font-semibold text-white" type="submit">
+      <button className="rounded-md border border-[#1f615d] bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white" type="submit">
         Verify
       </button>
     </form>
@@ -203,27 +238,44 @@ function ModerationPanel({
   const [bookId, setBookId] = useState("")
   const [reason, setReason] = useState("")
   return (
-    <section className="border border-[#d9dfd6] bg-white p-5">
-      <h2 className="text-xl font-semibold">Moderation</h2>
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold">Moderation</h2>
+        <StatusBadge tone={publicShares.length || reports.length ? "warning" : "success"}>
+          {publicShares.length + reports.length} queued
+        </StatusBadge>
+      </div>
       <div className="mt-4 space-y-3">
         {publicShares.slice(0, 6).map((share) => (
-          <div key={share.book_id} className="border-t border-[#edf0eb] pt-3">
-            <p className="font-medium">{share.title}</p>
-            <p className="text-sm text-[#617065]">{share.author_username ?? share.user_id} · {formatDate(share.requested_at)}</p>
+          <div key={share.book_id} className="rounded-md border border-[#edf0eb] bg-[#fbfcfa] p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <p className="font-medium">{share.title}</p>
+              <StatusBadge tone={share.copyright_warning ? "warning" : "neutral"}>
+                {share.copyright_warning ? "Copyright warning" : "Pending review"}
+              </StatusBadge>
+            </div>
+            <p className="mt-1 text-sm text-[#617065]">{share.author_username ?? share.user_id} / {formatDate(share.requested_at)}</p>
+            <p className="mt-1 text-xs text-[#7b877e]">Book ID: {share.book_id}</p>
             <div className="mt-2 flex gap-2">
-              <button disabled={disabled} className="border px-3 py-1 text-sm" onClick={() => onReview(share.book_id, true)}>Approve</button>
-              <button disabled={disabled} className="border px-3 py-1 text-sm" onClick={() => onReview(share.book_id, false, "Rejected after moderation review.")}>Reject</button>
+              <button disabled={disabled} className="rounded-md border border-[#bdd5c1] bg-[#eff8f0] px-3 py-1 text-sm text-[#1f6b3a]" onClick={() => onReview(share.book_id, true)}>Approve</button>
+              <button disabled={disabled} className="rounded-md border border-[#e8c4c0] bg-[#fff3f1] px-3 py-1 text-sm text-[#a2382b]" onClick={() => onReview(share.book_id, false, "Rejected after moderation review.")}>Reject</button>
             </div>
           </div>
         ))}
         {publicShares.length === 0 ? <p className="text-sm text-[#617065]">No pending public shares.</p> : null}
       </div>
       <div className="mt-6 grid gap-3">
-        <input className="border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Book ID" value={bookId} onChange={(event) => setBookId(event.target.value)} />
-        <textarea className="min-h-20 border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Required reason" value={reason} onChange={(event) => setReason(event.target.value)} />
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          Book ID
+          <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={bookId} onChange={(event) => setBookId(event.target.value)} />
+        </label>
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          Required reason
+          <textarea className="min-h-20 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
+        </label>
         <div className="flex flex-wrap gap-2">
           {(["hideBook", "removeBook", "restoreBook"] as const).map((action) => (
-            <button key={action} disabled={disabled || !bookId || !reason} className="border px-3 py-2 text-sm" onClick={() => onBookAction(bookId, action, reason)}>
+            <button key={action} disabled={disabled || !bookId || !reason} className="rounded-md border border-[#d9dfd6] px-3 py-2 text-sm disabled:opacity-50" onClick={() => onBookAction(bookId, action, reason)}>
               {action.replace("Book", "")}
             </button>
           ))}
@@ -232,10 +284,18 @@ function ModerationPanel({
       <div className="mt-6">
         <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[#617065]">Reports</h3>
         {reports.slice(0, 6).map((report) => (
-          <p key={report.id} className="mt-2 border-t border-[#edf0eb] pt-2 text-sm">
-            {report.report_type}: {report.reason}
-          </p>
+          <article key={report.id} className="mt-3 rounded-md border border-[#edf0eb] bg-[#fbfcfa] p-3 text-sm">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <p className="font-medium">{report.report_type}: {report.reason}</p>
+              <StatusBadge tone={report.status === "open" ? "warning" : "neutral"}>{report.status}</StatusBadge>
+            </div>
+            {report.details ? <p className="mt-2 leading-6 text-[#617065]">{report.details}</p> : null}
+            <p className="mt-2 text-xs text-[#7b877e]">
+              Book ID: {report.reported_book_id} / Reporter: {report.reporter_email ?? report.reporter_user_id ?? "anonymous"} / {formatDate(report.created_at)}
+            </p>
+          </article>
         ))}
+        {reports.length === 0 ? <p className="mt-2 text-sm text-[#617065]">No open content reports.</p> : null}
       </div>
     </section>
   )
@@ -255,7 +315,7 @@ function RefundPanel({
   onDeny: (reviewId: string, reason: string) => void
 }) {
   return (
-    <section className="border border-[#d9dfd6] bg-white p-5">
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
       <h2 className="text-xl font-semibold">Refunds</h2>
       {billingStatus ? <BillingStatusPanel status={billingStatus} /> : null}
       <div className="mt-4 space-y-4">
@@ -270,12 +330,10 @@ function RefundPanel({
 
 function BillingStatusPanel({ status }: { status: AdminBillingStatus }) {
   return (
-    <div className="mt-4 border border-[#edf0eb] bg-[#f8faf7] p-4 text-sm">
+    <div className="mt-4 rounded-md border border-[#edf0eb] bg-[#f8faf7] p-4 text-sm">
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="font-semibold">Billing setup</h3>
-        <span className={status.payments_ready ? "text-[#1f6b3a]" : "text-[#9a3412]"}>
-          {status.payments_ready ? "Ready" : "Action required"}
-        </span>
+        <StatusBadge tone={status.payments_ready ? "success" : "warning"}>{status.payments_ready ? "Ready" : "Action required"}</StatusBadge>
       </div>
       <p className="mt-2 text-[#617065]">
         {status.fully_configured_plan_count} configured plans. Recommended checkout URL: {status.recommended_default_checkout_url}
@@ -305,15 +363,18 @@ function RefundRow({
   return (
     <div className="border-t border-[#edf0eb] pt-3">
       <p className="font-medium">{review.paddle_transaction_id}</p>
-      <p className="text-sm text-[#617065]">{review.status} · {review.billing_interval} · {formatDate(review.charge_at)}</p>
-      <textarea className="mt-2 min-h-16 w-full border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Required decision reason" value={reason} onChange={(event) => setReason(event.target.value)} />
+      <p className="text-sm text-[#617065]">{review.status} / {review.billing_interval} / {formatDate(review.charge_at)}</p>
+      <label className="mt-2 grid gap-1.5 text-sm font-medium text-[#46534a]">
+        Required decision reason
+        <textarea className="min-h-16 w-full rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
+      </label>
       <label className="mt-2 flex items-center gap-2 text-sm">
         <input type="checkbox" checked={providerFollowupOnly} onChange={(event) => setProviderFollowupOnly(event.target.checked)} />
         Provider follow-up only
       </label>
       <div className="mt-2 flex gap-2">
-        <button disabled={disabled || !reason} className="border px-3 py-1 text-sm" onClick={() => onApprove(review.id, reason, providerFollowupOnly)}>Approve</button>
-        <button disabled={disabled || !reason} className="border px-3 py-1 text-sm" onClick={() => onDeny(review.id, reason)}>Deny</button>
+        <button disabled={disabled || !reason} className="rounded-md border border-[#bdd5c1] bg-[#eff8f0] px-3 py-1 text-sm text-[#1f6b3a]" onClick={() => onApprove(review.id, reason, providerFollowupOnly)}>Approve</button>
+        <button disabled={disabled || !reason} className="rounded-md border border-[#e8c4c0] bg-[#fff3f1] px-3 py-1 text-sm text-[#a2382b]" onClick={() => onDeny(review.id, reason)}>Deny</button>
       </div>
     </div>
   )
@@ -335,11 +396,17 @@ function AccessPanel({
   const [isOwner, setIsOwner] = useState(false)
   const [scopes, setScopes] = useState<AdminScope[]>(["moderation_admin"])
   return (
-    <section className="border border-[#d9dfd6] bg-white p-5">
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
       <h2 className="text-xl font-semibold">Admin Access</h2>
       <div className="mt-4 grid gap-3">
-        <input className="border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="User ID" value={userId} onChange={(event) => setUserId(event.target.value)} />
-        <textarea className="min-h-16 border border-[#c9d2c8] px-3 py-2 text-sm" placeholder="Required owner reason" value={reason} onChange={(event) => setReason(event.target.value)} />
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          User ID
+          <input className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={userId} onChange={(event) => setUserId(event.target.value)} />
+        </label>
+        <label className="grid gap-1.5 text-sm font-medium text-[#46534a]">
+          Required owner reason
+          <textarea className="min-h-16 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]" value={reason} onChange={(event) => setReason(event.target.value)} />
+        </label>
         <div className="flex flex-wrap gap-3 text-sm">
           {SCOPE_OPTIONS.map((scope) => (
             <label key={scope} className="flex items-center gap-2">
@@ -356,7 +423,7 @@ function AccessPanel({
             owner
           </label>
         </div>
-        <button disabled={disabled || !userId || !reason} className="border border-[#1f3c2a] bg-[#1f3c2a] px-3 py-2 text-sm font-semibold text-white" onClick={() => onGrant({ user_id: userId, scopes, is_owner: isOwner, reason })}>
+        <button disabled={disabled || !userId || !reason} className="rounded-md border border-[#1f615d] bg-[#1f615d] px-3 py-2 text-sm font-semibold text-white" onClick={() => onGrant({ user_id: userId, scopes, is_owner: isOwner, reason })}>
           Grant or update access
         </button>
       </div>
@@ -364,9 +431,9 @@ function AccessPanel({
         {principals.map((principal) => (
           <div key={principal.id} className="border-t border-[#edf0eb] pt-3 text-sm">
             <p className="font-medium">{principal.user_id}</p>
-            <p className="text-[#617065]">{principal.status} · {principal.is_owner ? "owner" : principal.scopes.join(", ")}</p>
+            <p className="text-[#617065]">{principal.status} / {principal.is_owner ? "owner" : principal.scopes.join(", ")}</p>
             {principal.status === "active" ? (
-              <button disabled={disabled} className="mt-2 border px-3 py-1" onClick={() => onRevoke(principal.id, "Owner revoked admin access.")}>Revoke</button>
+              <button disabled={disabled} className="mt-2 rounded-md border border-[#e8c4c0] bg-[#fff3f1] px-3 py-1 text-[#a2382b]" onClick={() => onRevoke(principal.id, "Owner revoked admin access.")}>Revoke</button>
             ) : null}
           </div>
         ))}
@@ -377,13 +444,13 @@ function AccessPanel({
 
 function AuditPanel({ events }: { events: AdminAuditEvent[] }) {
   return (
-    <section className="border border-[#d9dfd6] bg-white p-5">
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
       <h2 className="text-xl font-semibold">Audit</h2>
       <div className="mt-4 space-y-3">
         {events.map((event) => (
           <div key={event.id} className="border-t border-[#edf0eb] pt-3 text-sm">
-            <p className="font-medium">{event.action_type} · {event.result}</p>
-            <p className="text-[#617065]">{event.reason ?? "No reason"} · {formatDate(event.created_at)}</p>
+            <p className="font-medium">{event.action_type} / {event.result}</p>
+            <p className="text-[#617065]">{event.reason ?? "No reason"} / {formatDate(event.created_at)}</p>
           </div>
         ))}
       </div>

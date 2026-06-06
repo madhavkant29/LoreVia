@@ -89,7 +89,7 @@ export default function CompleteUsernamePage() {
 
   return (
     <div
-      className={`rounded-lg border p-8 shadow-[0_28px_90px_-55px_rgba(15,23,42,0.28)] backdrop-blur ${
+      className={`rounded-lg border p-8 ${
         isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
       }`}
     >
@@ -101,19 +101,21 @@ export default function CompleteUsernamePage() {
       </div>
 
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-          minLength={3}
-          maxLength={32}
-          required
-          className={`rounded-xl border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-            isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-stone-300 bg-white text-stone-900 placeholder:text-stone-400"
-          }`}
-        />
+        <label className="flex flex-col gap-1.5">
+          <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Username</span>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            minLength={3}
+            maxLength={32}
+            required
+            className={`rounded-md border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-700/30 ${
+              isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-stone-300 bg-white text-stone-900"
+            }`}
+          />
+        </label>
 
         {checkingSession && !error ? (
           <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -123,7 +125,7 @@ export default function CompleteUsernamePage() {
 
         {error && (
           <p
-            className={`rounded-xl border px-4 py-3 text-sm ${
+            className={`rounded-md border px-4 py-3 text-sm ${
               isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
             }`}
           >
@@ -134,8 +136,8 @@ export default function CompleteUsernamePage() {
         <button
           type="submit"
           disabled={loading}
-          className={`rounded-xl py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50 ${
-            isDark ? "bg-[linear-gradient(135deg,#4f46e5,#4338ca)] hover:opacity-95" : "bg-stone-950 hover:bg-stone-800"
+          className={`rounded-md py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50 ${
+            isDark ? "bg-[#1f615d] hover:bg-[#174c49]" : "bg-stone-950 hover:bg-stone-800"
           }`}
         >
           {loading ? "Saving..." : "Continue"}

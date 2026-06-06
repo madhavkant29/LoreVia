@@ -46,25 +46,25 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await page.goto("/public/forum")
 
   await expect(page.getByRole("heading", { name: /beta novel rankings worth opening/i })).toBeVisible()
-  await expect(page.getByRole("link", { name: /back to library/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /back to public library/i })).toBeVisible()
   await expect(page.getByText("Showing 1-12 of 12 threads")).toBeVisible()
   await page.locator("select").nth(0).selectOption("top_rated")
   await page.locator("select").nth(1).selectOption("weekly")
   await expect(page.getByText("Top Rated Weekly").first()).toBeVisible()
   await expect(page.getByText("Showing 1-12 of 12 threads")).toBeVisible()
   await page.getByRole("button", { name: "General discussion" }).click()
-  await page.getByPlaceholder(/general discussion headline/i).fill("How do you raise tension without chaos?")
-  await page.getByPlaceholder(/what do you want advice or discussion on/i).fill("I want craft advice on building pressure in quiet scenes.")
+  await page.getByLabel(/general discussion headline/i).fill("How do you raise tension without chaos?")
+  await page.getByLabel(/discussion body/i).fill("I want craft advice on building pressure in quiet scenes.")
   await page.getByRole("button", { name: "Open general thread" }).click()
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-\d+$/)
 
   await expect(page.getByRole("heading", { name: /how do you raise tension without chaos/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^library$/i })).toBeVisible()
-  await page.getByPlaceholder(/add a thoughtful public comment/i).fill("Happy to review pacing and clarity.")
+  await page.getByLabel(/public comment/i).fill("Happy to review pacing and clarity.")
   await page.getByRole("button", { name: "Post comment" }).click()
   await expect(page.getByText("Happy to review pacing and clarity.")).toBeVisible()
   await page.getByRole("button", { name: "Reply" }).first().click()
-  await page.getByPlaceholder(/reply to @author/i).fill("That is exactly the section I would start with too.")
+  await page.getByLabel(/reply to @author/i).fill("That is exactly the section I would start with too.")
   await page.getByRole("button", { name: "Post reply" }).click()
   await expect(page.getByText("That is exactly the section I would start with too.")).toBeVisible()
   await expect(page.getByRole("link", { name: "@author" }).first()).toBeVisible()
@@ -96,9 +96,9 @@ test("public library cross-links safe samples and writer trust", async ({ page }
   await installMockApi(page)
   await page.goto("/public")
 
-  await expect(page.getByRole("heading", { name: /explore public-domain demos and creator-published originals/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /published work for focused reading/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
-  await page.getByRole("link", { name: "Open discussion" }).click()
+  await page.getByRole("link", { name: "Discussion" }).click()
 
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/)
   await page.goto("/public")
@@ -122,11 +122,21 @@ test("login surfaces an invalid-credentials error", async ({ page }) => {
   await installMockApi(page, { session: "guest", login: "unauthorized" })
   await page.goto("/login")
 
-  await page.getByPlaceholder("Email").fill("reader@example.com")
-  await page.getByPlaceholder("Password").fill("wrong-password")
+  await page.getByLabel("Email", { exact: true }).fill("reader@example.com")
+  await page.getByLabel("Password", { exact: true }).fill("wrong-password")
   await page.getByRole("button", { name: /^sign in$/i }).click()
 
   await expect(page.getByText("Invalid email or password.")).toBeVisible()
+})
+
+test("auth redirects protect private pages and skip login for active sessions", async ({ page }) => {
+  await page.goto("/library")
+  await expect(page).toHaveURL(/\/login\?next=%2Flibrary$/)
+
+  await installMockApi(page)
+  await page.goto("/login")
+  await expect(page).toHaveURL(/\/library$/)
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
 })
 
 test("admin route returns 404 when the request is not allowed", async ({ page }) => {
@@ -153,9 +163,12 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
   await page.goto("/library")
 
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
-  await expect(page.getByText("Upcoming Beta Reads")).toBeVisible()
-  await expect(page.getByText("Complete reviews before the deadline.")).toBeVisible()
-  await expect(page.getByText("Chapter 12 feedback - Seraphina Vale")).toBeVisible()
+  await page.keyboard.press("Control+K")
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible()
+  await page.getByLabel("Search commands").fill("open manuscript")
+  await expect(page.getByRole("button", { name: /open manuscript: sky of ash/i })).toBeVisible()
+  await page.keyboard.press("Escape")
+
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.getByRole("button", { name: /^new project$/i }).click()
   await expect(page.getByRole("heading", { name: /upload book/i })).toBeVisible()
@@ -171,17 +184,26 @@ test("settings page updates the public username", async ({ page }) => {
   await page.getByRole("button", { name: /change username/i }).click()
 
   await expect(page.getByText("Public username updated.")).toBeVisible()
-  await expect(page.getByText("@storysmith")).toBeVisible()
+  await expect(page.locator("#identity").getByText("@storysmith")).toBeVisible()
 })
 
 test("settings page updates promotional email preferences", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/settings")
 
-  await expect(page.getByText("Control promotional LoreVia emails")).toBeVisible()
+  await expect(page.getByText("LoreVia emails")).toBeVisible()
   await page.getByRole("button", { name: /Product updates/i }).click()
 
   await expect(page.getByText("Email preferences updated.")).toBeVisible()
+})
+
+test("settings sidebar follows the current section while scrolling", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/settings")
+
+  await expect(page.getByRole("link", { name: "Account" })).toHaveAttribute("aria-current", "location")
+  await page.locator("#session").scrollIntoViewIfNeeded()
+  await expect(page.getByRole("link", { name: "Session" })).toHaveAttribute("aria-current", "location")
 })
 
 test("author uploads default the manuscript byline from the public username", async ({ page }) => {
@@ -190,7 +212,7 @@ test("author uploads default the manuscript byline from the public username", as
   await page.getByRole("button", { name: /^new project$/i }).first().click()
   await page.getByRole("button", { name: /^author mode$/i }).click()
 
-  const bylineInput = page.getByPlaceholder("Manuscript author or pen name")
+  const bylineInput = page.getByLabel("Manuscript author or pen name")
   await expect(bylineInput).toHaveValue("author")
   await expect(page.getByText("This name appears on this manuscript only.")).toBeVisible()
   await expect(page.getByText("different pen name or byline")).toBeVisible()
@@ -240,6 +262,15 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(sidebarRail).toBeVisible()
   await sidebarRail.hover()
   await expect(sidebarRail.locator('[data-testid="author-nav-helper-overview"]')).toContainText("See progress, next steps, and the latest signals around this book.")
+  await expect(sidebarRail.locator('[data-testid="author-nav-item-scenes"]')).toContainText("Scene Workspace")
+  await expect(sidebarRail.locator('[data-testid="author-nav-item-notes"]')).toContainText("Notes Workspace")
+  await expect.poll(async () => {
+    return sidebarRail.evaluate((rail) => {
+      const scenes = rail.querySelector('[data-testid="author-nav-item-scenes"]')
+      const notes = rail.querySelector('[data-testid="author-nav-item-notes"]')
+      return Boolean(scenes && notes && scenes.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+  }).toBe(true)
 
   const dismissCookies = page.getByRole("button", { name: /not now/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -268,7 +299,7 @@ test("book overview keeps world-gap issue language constructive", async ({ page 
   await installMockApi(page)
   await page.goto(BOOK_ROUTE)
 
-  await expect(page.getByRole("button", { name: /World Gaps.*2 review targets queued/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /World Gaps.*2 issues detected/i })).toBeVisible()
 })
 
 test("notifications surface revision digest guidance", async ({ page }) => {
@@ -286,9 +317,136 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await page.goto(`${BOOK_ROUTE}/manuscript`)
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
-  await expect(page.getByPlaceholder("Search chapters")).toBeVisible()
+  await expect(page.getByLabel("Search chapters")).toBeVisible()
   await expect(page.getByRole("link", { name: /open workspace/i })).toBeVisible()
+  const workspaceModes = page.getByRole("tablist", { name: "Manuscript workspace modes" })
+  await expect(workspaceModes.getByRole("tab", { name: "Write" })).toBeVisible()
+  await expect(workspaceModes.getByRole("tab", { name: "Plan" })).toBeVisible()
+  await expect(workspaceModes.getByRole("tab", { name: "Analysis" })).toBeVisible()
+  await expect(workspaceModes.getByRole("tab", { name: "Characters" })).toHaveCount(0)
   await expect(page.getByText(/^Gate Crossing$/)).toBeVisible()
+  await workspaceModes.getByRole("tab", { name: "Plan" }).click()
+  await expect(page.getByRole("spinbutton", { name: "Chapter target words" })).toHaveValue("2500")
+  await expect(page.getByRole("spinbutton", { name: "Book target words" })).toHaveValue("90000")
+  await expect(page.getByRole("spinbutton", { name: "Session target words" })).toHaveValue("800")
+  await expect(page.getByText("No manual chapter snapshots yet.")).toBeVisible()
+  await page.getByRole("button", { name: "Use template" }).first().click()
+  await expect(page.getByRole("heading", { name: "Use or customize template" })).toBeVisible()
+  await expect(page.getByRole("radio", { name: /chapter note/i })).toBeChecked()
+  await expect(page.getByRole("radio", { name: /corkboard card/i })).toBeVisible()
+  await expect(page.getByRole("radio", { name: /draft outline block/i })).toBeVisible()
+  await page.getByRole("button", { name: "Close" }).click()
+  await workspaceModes.getByRole("tab", { name: "Analysis" }).click()
+  const analysisPanels = page.getByRole("tablist", { name: "Analysis workspace panels" })
+  await expect(analysisPanels.getByRole("tab", { name: "Insights" })).toBeVisible()
+  await expect(analysisPanels.getByRole("tab", { name: "Characters" })).toBeVisible()
+})
+
+test("manuscript workspace removes a chapter from the editor rail", async ({ page }) => {
+  await installMockApi(page)
+  const deleteRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/books/book-1/chapters/2") && request.method() === "DELETE") {
+      deleteRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+  const removeChapterButton = page.getByRole("button", { name: "Remove Chapter 2" })
+  await expect(removeChapterButton).toBeVisible()
+
+  await removeChapterButton.click()
+  const editorConfirmDialog = page.getByRole("dialog", { name: "Remove Chapter 2?" })
+  await expect(editorConfirmDialog).toBeVisible()
+  await editorConfirmDialog.getByRole("button", { name: "Remove chapter", exact: true }).click()
+
+  await expect(page.getByRole("button", { name: "Remove Chapter 2" })).toHaveCount(0)
+  await expect(page.getByText(/^Gate Crossing$/)).toHaveCount(0)
+  await expect(page.locator('input[value="3. River of Glass"]')).toBeVisible()
+  expect(deleteRequests).toHaveLength(1)
+})
+
+test("chapter navigator removes a chapter after confirmation", async ({ page }) => {
+  await installMockApi(page)
+  const deleteRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/books/book-1/chapters/2") && request.method() === "DELETE") {
+      deleteRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/chapters`)
+  const chapterRow = page.locator("article").filter({ hasText: "The Ember Gate" })
+  await expect(chapterRow).toContainText("The Ember Gate")
+  await chapterRow.scrollIntoViewIfNeeded()
+
+  await chapterRow.getByRole("button", { name: "Remove" }).click()
+  const cancelDialog = page.getByRole("dialog", { name: "Remove Chapter 2?" })
+  await expect(cancelDialog).toBeVisible()
+  await cancelDialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(chapterRow).toContainText("The Ember Gate")
+  expect(deleteRequests).toHaveLength(0)
+
+  await chapterRow.getByRole("button", { name: "Remove" }).click()
+  const confirmDialog = page.getByRole("dialog", { name: "Remove Chapter 2?" })
+  await expect(confirmDialog).toBeVisible()
+  await confirmDialog.getByRole("button", { name: "Remove chapter", exact: true }).click()
+  await expect(page.getByRole("status")).toContainText("Chapter 2 removed.")
+  await expect(chapterRow).toHaveCount(0)
+  await expect(page.locator("article").filter({ hasText: "River of Glass" })).toContainText("River of Glass")
+  expect(deleteRequests).toHaveLength(1)
+})
+
+test("manuscript reprocess requires confirmation before consuming an upload", async ({ page }) => {
+  await installMockApi(page)
+  const reprocessRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/manuscript/reprocess") && request.method() === "POST") {
+      reprocessRequests.push(request.postData() ?? "")
+    }
+  })
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  await page.getByRole("button", { name: "Reprocess manuscript" }).click()
+  await expect(page.getByRole("heading", { name: "Reprocess manuscript?" })).toBeVisible()
+  await expect(page.getByText(/This will consume 1 book upload/)).toBeVisible()
+  await page.getByRole("button", { name: "Cancel" }).click()
+  await expect(page.getByRole("heading", { name: "Reprocess manuscript?" })).toHaveCount(0)
+  expect(reprocessRequests).toHaveLength(0)
+
+  await page.getByRole("button", { name: "Reprocess manuscript" }).click()
+  await page.getByRole("button", { name: "Reprocess and use 1 upload" }).click()
+  await expect(page.getByText("Reprocessing started for 3 chapters. This consumed 1 book upload.").first()).toBeVisible()
+  expect(reprocessRequests).toHaveLength(1)
+  expect(JSON.parse(reprocessRequests[0] ?? "{}")).toEqual({ confirm_upload_charge: true })
+})
+
+test("manual chapter reprocess marks saved edits pending and starts without upload charge", async ({ page }) => {
+  await installMockApi(page)
+  const reprocessRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/manuscript/chapters/1/reprocess") && request.method() === "POST") {
+      reprocessRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  const autoReprocessToggle = page.getByLabel("Auto reprocess edits")
+  await expect(autoReprocessToggle).toBeChecked()
+  await autoReprocessToggle.click()
+  await expect(autoReprocessToggle).not.toBeChecked()
+  await expect(page.getByText("Turning this off stops LoreVia from reprocessing saved edits automatically. To update story memory, open each edited chapter and click Reprocess. This adds extra steps, but can reduce token usage.")).toBeVisible()
+
+  await page.getByRole("button", { name: /Chapter 1 Ashfall/ }).click()
+  await page.locator('[contenteditable="true"]').first().fill("A new sentence for the saved chapter.")
+  await page.getByRole("button", { name: "Save now" }).click()
+  await expect(page.getByText("Needs reprocess")).toBeVisible()
+
+  await page.getByRole("button", { name: "Reprocess chapter" }).click()
+  await expect(page.getByText("Chapter 1 reprocessing started. This uses tokens, not a book upload.")).toBeVisible()
+  await expect(page.getByText("Needs reprocess")).toHaveCount(0)
+  expect(reprocessRequests).toHaveLength(1)
 })
 
 test("manuscript workspace switches into paged preview for chapter and full-book views", async ({ page }) => {
@@ -315,6 +473,25 @@ test("manuscript workspace switches into paged preview for chapter and full-book
   await page.getByRole("button", { name: "Full book" }).click()
   await expect(page.getByText("Read-only paged preview")).toBeVisible()
   await expect(page.getByText("Page 1 of")).toBeVisible()
+  await expect.poll(async () => {
+    const raw = await previewShell.getAttribute("data-preview-page-count")
+    return Number(raw ?? "0")
+  }).toBeGreaterThan(1)
+  await expect.poll(async () => {
+    return previewShell.evaluate((node) => Math.round(node.getBoundingClientRect().width))
+  }).toBeLessThanOrEqual(830)
+  await expect.poll(async () => {
+    return previewShell.evaluate((node) => window.getComputedStyle(node).backgroundColor)
+  }).not.toBe("rgb(5, 7, 10)")
+
+  await previewShell.evaluate((node) => {
+    const pointerId = 1
+    node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, button: 0, clientX: 700 }))
+    node.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, button: 0, clientX: 120 }))
+    node.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, button: 0, clientX: 120 }))
+  })
+
+  await expect(page.getByText("Page 2 of")).toBeVisible()
 })
 
 test("manuscript workspace reorders chapter scenes within the sidebar", async ({ page }) => {
@@ -328,13 +505,25 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
 
   const sceneCards = page.locator("[data-scene-id]")
   await expect(sceneCards).toHaveCount(2)
+  const firstSceneCopy = page.getByTestId("scene-copy-scene-1")
+  await expect(firstSceneCopy).toBeVisible()
+  await expect.poll(async () => {
+    return firstSceneCopy.evaluate((node) => Math.round(node.getBoundingClientRect().width))
+  }).toBeGreaterThanOrEqual(220)
   await expect(sceneCards.nth(0)).toHaveAttribute("data-scene-id", "scene-1")
   await expect(sceneCards.nth(1)).toHaveAttribute("data-scene-id", "scene-2")
 
-  await page.locator('[data-scene-id="scene-2"]').scrollIntoViewIfNeeded()
+  const moveSceneUp = page.getByTestId("move-scene-scene-2-up")
+  await moveSceneUp.scrollIntoViewIfNeeded()
+  await expect(moveSceneUp).toBeEnabled()
 
-  const dragHandle = page.locator('[data-scene-id="scene-2"]').getByRole("button", { name: /drag/i })
-  await dragHandle.dragTo(page.locator('[data-scene-drop-slot="2:0"]'))
+  const reorderResponse = page.waitForResponse((response) =>
+    response.request().method() === "PATCH" &&
+    response.url().includes("/books/book-1/chapters/2/scenes/order") &&
+    response.status() === 200
+  )
+  await moveSceneUp.click()
+  await reorderResponse
 
   await expect(sceneCards.nth(0)).toHaveAttribute("data-scene-id", "scene-2")
   await expect(sceneCards.nth(1)).toHaveAttribute("data-scene-id", "scene-1")
@@ -348,15 +537,23 @@ test("manuscript workspace surfaces chapter annotations in the notes rail", asyn
   await expect(page.locator('[data-editor-key="chapter-2"]')).toBeVisible()
 
   await page.getByTitle("Open notes").click()
+  await expect(page.getByText("New note")).toBeVisible()
+  await expect(page.getByText("Notes workspace", { exact: true })).toBeVisible()
+  await expect(page.getByText("Manual Editor/Chapter 2/Gate imagery.md")).toBeVisible()
   await expect(page.getByText("1 annotation anchored to this chapter.")).toBeVisible()
-  await expect(page.getByText("Gate imagery")).toBeVisible()
+  await expect(page.getByText("Gate imagery", { exact: true })).toHaveCount(2)
+  await page.getByPlaceholder("Chapter 2 note title").fill("Rail smoke note")
+  await page.getByPlaceholder("Capture a beat, fix, continuity concern, or draft thought...").fill("Remember the gate-bell echo before the bridge.")
+  await page.getByRole("button", { name: "Save note" }).click()
+  await expect(page.getByRole("status")).toContainText("Saved to manuscript notes and the notes workspace.")
+  await expect(page.getByText("Rail smoke note").first()).toBeVisible()
 })
 
 test("collaboration workspace creates a story-scoped share", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/collaboration`)
 
-  await expect(page.getByRole("heading", { name: "Sky of Ash sharing" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Sky of Ash collaborators" })).toBeVisible()
   await expect(page.getByRole("combobox")).toHaveValue("beta_reader")
   await expect(page.getByText("Feedback-focused role for reader response.")).toBeVisible()
   await expect(page.getByText("Can edit manuscript")).toBeVisible()
@@ -366,10 +563,10 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
     await dismissCookies.click()
   }
 
-  const emailField = page.getByPlaceholder("reader@example.com")
-  const nameField = page.getByPlaceholder("Display name")
+  const emailField = page.getByLabel("Email", { exact: true })
+  const nameField = page.getByLabel("Display name", { exact: true })
   await nameField.fill("Dev Editor")
-  await page.getByRole("combobox").selectOption("developmental_editor")
+  await page.getByLabel("Role", { exact: true }).selectOption("developmental_editor")
   await expect(page.getByText("Structure, continuity, and arc partner.")).toBeVisible()
   const selectedChaptersOnly = page.getByLabel("Can view selected chapters only")
   await selectedChaptersOnly.uncheck()
@@ -409,6 +606,8 @@ test("reader published layout applies book typography without mobile overflow", 
   await expect(paragraphAfterSceneBreak).toBeVisible()
   await expect(broadcastBlock).toBeVisible()
   await expect(quoteBlock).toBeVisible()
+  await expect(page.getByText("Keep the road language consistent with the later bridge beat.")).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText("Madhav")).toBeVisible()
 
   await expect(normalParagraph).toHaveCSS("font-family", /Georgia|Times New Roman|serif/i)
   await expect(normalParagraph).toHaveCSS("text-align", "justify")
@@ -668,7 +867,7 @@ test("relationship graph inspector responds to node and edge selection", async (
     await dismissCookies.click()
   }
 
-  await expect(page.getByRole("heading", { name: "Relationship Graph", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Relationship graph", exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Read the map", exact: true })).toBeVisible()
 
   await page.waitForFunction(() => {

@@ -438,6 +438,28 @@ class ManuscriptReprocessOut(BaseModel):
     status: str
     chapters_queued: int = 0
     total_words: int = 0
+    upload_charge_consumed: bool = False
+    charge_kind: Literal["manual_reprocess"] | None = None
+
+
+class ManuscriptReprocessBody(BaseModel):
+    confirm_upload_charge: bool = False
+
+
+class ReprocessMetadataOut(BaseModel):
+    auto_reprocess_enabled: bool = True
+    pending_chapters: list[int] = Field(default_factory=list)
+    last_mode_changed_at: str | None = None
+    last_manual_chapter_started_at: str | None = None
+    last_manual_chapter_number: int | None = None
+
+
+class ReprocessMetadataBody(BaseModel):
+    auto_reprocess_enabled: bool | None = None
+    pending_chapters: list[int] | None = None
+    last_mode_changed_at: str | None = None
+    last_manual_chapter_started_at: str | None = None
+    last_manual_chapter_number: int | None = None
 
 
 class PreWritingCharacterOut(BaseModel):
@@ -727,6 +749,7 @@ class WriterWorkspaceOut(BaseModel):
     typewriter_mode: TypewriterModeOut = Field(default_factory=TypewriterModeOut)
     manuscript_layout: ManuscriptLayoutOut = Field(default_factory=ManuscriptLayoutOut)
     structure_tree: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
+    reprocess: ReprocessMetadataOut = Field(default_factory=ReprocessMetadataOut)
     processing: BookProcessingOut | None = None
 
 
@@ -856,6 +879,7 @@ class WriterWorkspaceBody(BaseModel):
     typewriter_mode: TypewriterModeBody | None = None
     manuscript_layout: ManuscriptLayoutBody | None = None
     structure_tree: list[WorkspaceStructureNodeBody] | None = None
+    reprocess: ReprocessMetadataBody | None = None
 
 
 class RevisionActionItemOut(BaseModel):
@@ -877,6 +901,7 @@ class RevisionGenreCheckOut(BaseModel):
     label: str
     checks: list[str] = Field(default_factory=list)
     rationale: str
+    findings: list[RevisionActionItemOut] = Field(default_factory=list)
 
 
 class RevisionPlanPassOut(BaseModel):
@@ -1045,29 +1070,29 @@ class ManuscriptAnnotationOut(BaseModel):
     updated_at: datetime
 
 
-class ObsidianPreviewFileOut(BaseModel):
+class VaultPreviewFileOut(BaseModel):
     path: str
     content: str
 
 
-class ObsidianPreviewOut(BaseModel):
+class VaultPreviewOut(BaseModel):
     root_folder: str
-    files: list[ObsidianPreviewFileOut]
+    files: list[VaultPreviewFileOut]
 
 
-class ObsidianVaultNoteBody(BaseModel):
+class VaultNoteBody(BaseModel):
     path: str
     content: str
 
 
-class ObsidianNoteLinkBody(BaseModel):
+class VaultNoteLinkBody(BaseModel):
     source_path: str
     target_path: str
     link_type: str = "reference"
     target_label: str | None = None
 
 
-class ObsidianVaultNoteOut(BaseModel):
+class VaultNoteOut(BaseModel):
     id: str
     book_id: str
     path: str
@@ -1077,7 +1102,7 @@ class ObsidianVaultNoteOut(BaseModel):
     updated_at: datetime
 
 
-class ObsidianVaultNoteSaveOut(BaseModel):
+class VaultNoteSaveOut(BaseModel):
     path: str
     source: str
     content: str
@@ -1086,7 +1111,7 @@ class ObsidianVaultNoteSaveOut(BaseModel):
     updated_at: datetime | None = None
 
 
-class ObsidianNoteTagOut(BaseModel):
+class VaultNoteTagOut(BaseModel):
     id: str
     book_id: str
     note_id: str
@@ -1095,7 +1120,7 @@ class ObsidianNoteTagOut(BaseModel):
     created_at: datetime
 
 
-class ObsidianNoteLinkOut(BaseModel):
+class VaultNoteLinkOut(BaseModel):
     id: str
     book_id: str
     source_note_id: str
@@ -1107,7 +1132,7 @@ class ObsidianNoteLinkOut(BaseModel):
     created_at: datetime
 
 
-class ObsidianNoteSeriesLinkOut(BaseModel):
+class VaultNoteSeriesLinkOut(BaseModel):
     id: str
     series_id: str
     source_book_id: str
@@ -1120,11 +1145,11 @@ class ObsidianNoteSeriesLinkOut(BaseModel):
     created_at: datetime
 
 
-class ObsidianNoteLinkListOut(BaseModel):
-    links: list[ObsidianNoteLinkOut]
-    backlinks: list[ObsidianNoteLinkOut]
-    tags: list[ObsidianNoteTagOut]
-    series_links: list[ObsidianNoteSeriesLinkOut]
+class VaultNoteLinkListOut(BaseModel):
+    links: list[VaultNoteLinkOut]
+    backlinks: list[VaultNoteLinkOut]
+    tags: list[VaultNoteTagOut]
+    series_links: list[VaultNoteSeriesLinkOut]
 
 
 class SceneMetadataBody(BaseModel):
@@ -1230,7 +1255,7 @@ class ChapterSceneOrderOut(BaseModel):
     scenes: list[ChapterSceneOrderItemOut] = Field(default_factory=list)
 
 
-class ObsidianGraphNodeOut(BaseModel):
+class VaultGraphNodeOut(BaseModel):
     id: str
     path: str
     title: str
@@ -1238,15 +1263,15 @@ class ObsidianGraphNodeOut(BaseModel):
     link_count: int = 0
 
 
-class ObsidianGraphEdgeOut(BaseModel):
+class VaultGraphEdgeOut(BaseModel):
     source: str
     target: str
     label: str | None = None
 
 
-class ObsidianGraphOut(BaseModel):
-    nodes: list[ObsidianGraphNodeOut]
-    edges: list[ObsidianGraphEdgeOut]
+class VaultGraphOut(BaseModel):
+    nodes: list[VaultGraphNodeOut]
+    edges: list[VaultGraphEdgeOut]
 
 
 class WorkspaceSearchFiltersBody(BaseModel):

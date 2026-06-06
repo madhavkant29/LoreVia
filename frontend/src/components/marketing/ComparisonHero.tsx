@@ -23,20 +23,20 @@ export function ComparisonHero({ title, summary }: ComparisonHeroProps) {
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
               href={ctaHref}
-              className="inline-flex items-center justify-center rounded-xl bg-[#1f615d] px-6 py-3.5 text-base font-semibold text-white transition hover:bg-[#25756f]"
+              className="inline-flex items-center justify-center rounded-md bg-[#1f615d] px-6 py-3.5 text-base font-semibold text-white transition hover:bg-[#25756f]"
             >
               Start free
             </Link>
             <Link
               href="/pricing"
-              className="inline-flex items-center justify-center rounded-xl border border-white/12 bg-white/5 px-6 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
+              className="inline-flex items-center justify-center rounded-md border border-white/12 bg-white/5 px-6 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
             >
               View pricing
             </Link>
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-[linear-gradient(180deg,rgba(15,35,32,0.94),rgba(9,18,16,0.98))] p-6 shadow-[0_24px_70px_-48px_rgba(0,0,0,0.75)]">
+        <div className="rounded-lg border border-white/10 bg-[#0d1715] p-6">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-md border border-white/8 bg-[#0b1513] p-5">
               <p className="text-xs uppercase tracking-[0.22em] text-[#6fae9f]">What LoreVia emphasizes</p>

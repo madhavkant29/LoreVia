@@ -42,7 +42,24 @@ describe("revision intelligence helpers", () => {
           status: "pending",
         },
       ],
-      genre_checks: [],
+      genre_checks: [
+        {
+          genre: "fantasy",
+          label: "Fantasy",
+          checks: ["magic system consistency"],
+          rationale: "Lore-weighted checks.",
+          findings: [
+            {
+              id: "rev-1",
+              category: "impact",
+              title: "Impact item",
+              description: "Something breaks later.",
+              severity: "high",
+              status: "pending",
+            },
+          ],
+        },
+      ],
       revision_plan: [
         {
           title: "Pass 1",
@@ -69,6 +86,7 @@ describe("revision intelligence helpers", () => {
     const patched = patchRevisionIntelligenceItem(revision, "rev-1", { status: "fixed" })
 
     expect(patched.change_impacts[0]?.status).toBe("fixed")
+    expect(patched.genre_checks[0]?.findings[0]?.status).toBe("fixed")
     expect(patched.revision_plan[0]?.items[0]?.status).toBe("fixed")
     expect(patched.summary.active_item_count).toBe(0)
     expect(patched.summary.high_severity_count).toBe(0)

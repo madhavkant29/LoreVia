@@ -1,20 +1,26 @@
+import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
-from app.models.book import Book, Series, SeriesBook
+from app.models.book import Book, BookUploadCharge, Series, SeriesBook
 from app.models.intelligence import WorldBuildingDocument
 from app.models.user import SubscriptionEvent, User
 from app.utils.billing_utils import (
     append_billing_confirmation_token,
     build_subscription_metrics_summary,
     calculate_upload_usage_summary,
+    consume_billing_confirmation_token_once,
     create_billing_confirmation_token,
     ensure_upload_capacity,
     normalize_tier,
     paddle_plan_from_event_data,
     recommended_paddle_default_checkout_url,
+    record_book_upload_charge,
     summary_mode_allowed,
     verify_billing_confirmation_token,
     worldbuilding_upload_cost_for_book,
@@ -77,6 +83,104 @@ async def test_calculate_upload_usage_counts_weighted_worldbuilding_documents(db
     assert usage.total_uploads == 6
     assert usage.upload_limit == 15
     assert usage.uploads_remaining == 9
+
+
+@pytest.mark.asyncio
+async def test_calculate_upload_usage_includes_manual_reprocess_charges(db):
+    user = User(email="billing-reprocess@lorevia.app", username="billingreprocess", password_hash="hash", tier="author")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Charged Project", format="txt", s3_key="books/charged.txt", status="ready")
+    db.add(book)
+    await db.flush()
+    db.add(
+        BookUploadCharge(
+            user_id=user.id,
+            book_id=book.id,
+            charge_kind="manual_reprocess",
+            quantity=1,
+            source_id="run-1",
+        )
+    )
+    await db.commit()
+
+    usage = await calculate_upload_usage_summary(db, user)
+
+    assert usage.manuscript_uploads == 2
+    assert usage.total_uploads == 2
+    assert usage.uploads_remaining == 13
+
+
+@pytest.mark.asyncio
+async def test_record_book_upload_charge_is_idempotent_by_source(db):
+    user = User(email="billing-charge-idem@lorevia.app", username="billingchargeidem", password_hash="hash", tier="author")
+    db.add(user)
+    await db.flush()
+    book = Book(user_id=user.id, title="Idempotent Project", format="txt", s3_key="books/idempotent.txt", status="ready")
+    db.add(book)
+    await db.flush()
+
+    first = await record_book_upload_charge(
+        db,
+        user_id=user.id,
+        book_id=book.id,
+        charge_kind="manual_reprocess",
+        source_id="run-idem",
+    )
+    second = await record_book_upload_charge(
+        db,
+        user_id=user.id,
+        book_id=book.id,
+        charge_kind="manual_reprocess",
+        source_id="run-idem",
+    )
+    await db.commit()
+
+    count = await db.scalar(select(func.count()).select_from(BookUploadCharge).where(BookUploadCharge.user_id == user.id))
+    assert first.id == second.id
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_record_book_upload_charge_uses_savepoint_for_idempotency_race():
+    existing = BookUploadCharge(
+        user_id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        charge_kind="manual_reprocess",
+        source_id="run-race",
+    )
+
+    class _ScalarResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class _NestedTransaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[_ScalarResult(None), _ScalarResult(existing)])
+    db.flush = AsyncMock(side_effect=IntegrityError("duplicate", {}, Exception("duplicate")))
+    db.rollback = AsyncMock()
+    db.begin_nested.return_value = _NestedTransaction()
+
+    result = await record_book_upload_charge(
+        db,
+        user_id=existing.user_id,
+        book_id=existing.book_id,
+        charge_kind="manual_reprocess",
+        source_id="run-race",
+    )
+
+    assert result is existing
+    db.begin_nested.assert_called_once_with()
+    db.rollback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -182,6 +286,26 @@ def test_billing_confirmation_token_round_trip(monkeypatch):
 
     assert verify_billing_confirmation_token(token, "txn_123") is True
     assert verify_billing_confirmation_token(token, "txn_other") is False
+
+
+@pytest.mark.asyncio
+async def test_billing_confirmation_token_can_only_be_consumed_once(monkeypatch):
+    consumed_token_ids: set[str] = set()
+
+    async def _consume(token_id: str, ttl_seconds: int) -> bool:
+        assert ttl_seconds > 0
+        if token_id in consumed_token_ids:
+            return False
+        consumed_token_ids.add(token_id)
+        return True
+
+    monkeypatch.setattr("app.utils.billing_utils.settings.JWT_SECRET", "jwt-secret", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.settings.JWT_ALGORITHM", "HS256", raising=False)
+    monkeypatch.setattr("app.utils.billing_utils.consume_billing_confirmation_token", _consume)
+    token = create_billing_confirmation_token("txn_123")
+
+    assert await consume_billing_confirmation_token_once(token, "txn_123") is True
+    assert await consume_billing_confirmation_token_once(token, "txn_123") is False
 
 
 def test_append_billing_confirmation_token_preserves_existing_checkout_query():

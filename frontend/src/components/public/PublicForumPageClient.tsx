@@ -12,6 +12,7 @@ import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { formatReputationScore, getEligibleForumAuthorBooks } from "@/lib/utils/publicForum"
 import type { Book } from "@/types/book"
 import type { PublicForumPost, PublicForumPostListResponse } from "@/types/public"
@@ -54,6 +55,7 @@ export function PublicForumPageClient({
   const [selectedBookId, setSelectedBookId] = useState("")
   const [headline, setHeadline] = useState("")
   const [body, setBody] = useState("")
+  const [imageFile, setImageFile] = useState<File | null>(null)
   const [novelTitle, setNovelTitle] = useState("")
   const [novelGenre, setNovelGenre] = useState("")
   const [novelDescription, setNovelDescription] = useState("")
@@ -249,6 +251,7 @@ export function PublicForumPageClient({
         body: body.trim(),
         desiredBetaReaderCount: composerThreadType === "novel" ? parsedDesiredCount : null,
         allowContactRequests: composerThreadType === "novel" ? allowContactRequests : false,
+        imageFile,
       })
       router.push(`/public/forum/${created.id}` as Route)
     } catch (error) {
@@ -266,13 +269,13 @@ export function PublicForumPageClient({
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#0a0f14] text-slate-100" : "bg-[#edf1f5] text-slate-950"}`}>
-      <div className={`border-b backdrop-blur ${isDark ? "border-white/10 bg-[#0f141b]/95" : "border-slate-200 bg-white/95"}`}>
+      <div className={`border-b ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-white"}`}>
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <Link href="/library" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{"<- Back to library"}</Link>
+          <Link href="/public" className={`text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{"<- Back to public library"}</Link>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-3xs font-semibold uppercase tracking-[0.18em]">
-                <span className={`rounded-full px-2.5 py-1 ${isDark ? "bg-[#1d2631] text-slate-200" : "bg-slate-100 text-slate-700"}`}>LoreVia Forum</span>
+                <span className={`rounded-md px-2.5 py-1 ${isDark ? "bg-[#1d2631] text-slate-200" : "bg-slate-100 text-slate-700"}`}>LoreVia Forum</span>
                 <span className={isDark ? "text-slate-500" : "text-slate-500"}>{feedTab === "ranked" ? "Ranked beta novels" : "General discussions"}</span>
                 <MetaDivider isDark={isDark} />
                 <span className={isDark ? "text-emerald-300" : "text-emerald-700"}>Live</span>
@@ -295,18 +298,18 @@ export function PublicForumPageClient({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className={`inline-flex rounded-full p-1 ${isDark ? "bg-white/[0.05]" : "bg-slate-100"}`}>
+            <div className={`inline-flex rounded-md p-1 ${isDark ? "bg-white/[0.05]" : "bg-slate-100"}`}>
               <button
                 type="button"
                 onClick={() => setFeedTab("ranked")}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${feedTab === "ranked" ? (isDark ? "bg-amber-400 text-slate-950" : "bg-slate-950 text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
+                className={`rounded-sm px-4 py-2 text-sm font-semibold transition ${feedTab === "ranked" ? (isDark ? "bg-teal-300 text-slate-950" : "bg-[#1f615d] text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
               >
                 Beta Novels
               </button>
               <button
                 type="button"
                 onClick={() => setFeedTab("general")}
-                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${feedTab === "general" ? (isDark ? "bg-amber-400 text-slate-950" : "bg-slate-950 text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
+                className={`rounded-sm px-4 py-2 text-sm font-semibold transition ${feedTab === "general" ? (isDark ? "bg-teal-300 text-slate-950" : "bg-[#1f615d] text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
               >
                 General
               </button>
@@ -315,13 +318,13 @@ export function PublicForumPageClient({
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className={`grid w-full gap-3 ${feedTab === "ranked" ? "lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)]" : "lg:grid-cols-[minmax(0,1fr)]"}`}>
-              <label className={`flex h-11 w-full items-center gap-3 rounded-2xl border px-4 ${isDark ? "border-white/10 bg-[#151b22]" : "border-slate-200 bg-white"}`}>
+              <label className={`flex h-11 w-full items-center gap-3 rounded-md border px-4 ${isDark ? "border-white/10 bg-[#151b22]" : "border-slate-200 bg-white"}`}>
                 <SearchIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={feedTab === "ranked" ? "Search title, genre, author, headline, or body" : "Search headline or body"}
-                  className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-slate-500" : "placeholder:text-slate-400"}`}
+                  aria-label={feedTab === "ranked" ? "Search title, genre, author, headline, or body" : "Search headline or body"}
+                  className="w-full bg-transparent text-sm outline-none"
                 />
               </label>
 
@@ -330,7 +333,7 @@ export function PublicForumPageClient({
                   <select
                     value={ranking}
                     onChange={(event) => setRanking(event.target.value)}
-                    className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
+                    className={`h-11 rounded-md border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
                   >
                     {rankingOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -342,7 +345,7 @@ export function PublicForumPageClient({
                   <select
                     value={timeWindow}
                     onChange={(event) => setTimeWindow(event.target.value)}
-                    className={`h-11 rounded-2xl border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
+                    className={`h-11 rounded-md border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
                   >
                     {timeWindowOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -375,15 +378,15 @@ export function PublicForumPageClient({
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8">
         <section className="min-w-0">
           {error ? (
-            <div className={`rounded-2xl border px-4 py-4 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>{error}</div>
+            <div className={`rounded-md border px-4 py-4 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>{error}</div>
           ) : null}
 
           <div className="grid gap-3">
             {(feedTab === "ranked" ? loading : generalLoading) ? (
-              <div className={`rounded-2xl border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Loading forum posts...</div>
+              <div className={`rounded-md border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Loading forum posts...</div>
             ) : null}
             {!(feedTab === "ranked" ? loading : generalLoading) && posts.length === 0 ? (
-              <div className={`rounded-2xl border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>
+              <div className={`rounded-md border px-4 py-5 text-sm ${isDark ? "border-white/10 bg-[#121821] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>
                 {feedTab === "ranked" ? "No public forum posts match this search yet." : "No general discussions yet. Be the first to start one!"}
               </div>
             ) : null}
@@ -401,7 +404,7 @@ export function PublicForumPageClient({
                     type="button"
                     onClick={() => feedTab === "general" ? setGeneralPage((c) => Math.max(1, c - 1)) : setPage((c) => Math.max(1, c - 1))}
                     disabled={activeData.page <= 1}
-                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                    className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                   >
                     Previous
                   </button>
@@ -410,7 +413,7 @@ export function PublicForumPageClient({
                     type="button"
                     onClick={() => feedTab === "general" ? setGeneralPage((c) => c + 1) : setPage((c) => c + 1)}
                     disabled={!activeData.has_more}
-                    className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                    className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border border-white/10 bg-white/5 text-slate-100 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                   >
                     Next
                   </button>
@@ -422,7 +425,7 @@ export function PublicForumPageClient({
 
         <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
           {viewer ? (
-            <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author tools</p>
@@ -433,18 +436,18 @@ export function PublicForumPageClient({
                 </div>
                 <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-700"}`}>@{viewer.username || "member"}</span>
               </div>
-              <div className={`mt-4 inline-flex rounded-full p-1 ${isDark ? "bg-white/[0.05]" : "bg-slate-100"}`}>
+              <div className={`mt-4 inline-flex rounded-md p-1 ${isDark ? "bg-white/[0.05]" : "bg-slate-100"}`}>
                 <button
                   type="button"
                   onClick={() => setComposerThreadType("novel")}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold ${composerThreadType === "novel" ? (isDark ? "bg-amber-400 text-slate-950" : "bg-slate-950 text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
+                  className={`rounded-sm px-4 py-2 text-sm font-semibold ${composerThreadType === "novel" ? (isDark ? "bg-teal-300 text-slate-950" : "bg-[#1f615d] text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
                 >
                   Novel discussion
                 </button>
                 <button
                   type="button"
                   onClick={() => setComposerThreadType("general")}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold ${composerThreadType === "general" ? (isDark ? "bg-amber-400 text-slate-950" : "bg-slate-950 text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
+                  className={`rounded-sm px-4 py-2 text-sm font-semibold ${composerThreadType === "general" ? (isDark ? "bg-teal-300 text-slate-950" : "bg-[#1f615d] text-white") : (isDark ? "text-slate-300" : "text-slate-700")}`}
                 >
                   General discussion
                 </button>
@@ -454,20 +457,20 @@ export function PublicForumPageClient({
                 {composerThreadType === "novel" ? (
                   <>
                     {!canOpenPublicDiscussions ? (
-                      <div className={`rounded-2xl border px-4 py-4 text-sm ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                      <div className={`rounded-md border px-4 py-4 text-sm ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
                         Opening public manuscript discussions is limited to Trial, Author, and Architect access. Free accounts can still browse threads, comment, react, and offer to beta read.
                         <div className="mt-4">
                           <button
                             type="button"
                             onClick={() => router.push("/upgrade" as Route)}
-                            className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09]"}`}
+                            className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
                           >
                             View plans
                           </button>
                         </div>
                       </div>
                     ) : authorBooks.length === 0 ? (
-                      <div className={`rounded-2xl border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-400" : "border-slate-200 text-slate-500"}`}>
+                      <div className={`rounded-md border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-400" : "border-slate-200 text-slate-500"}`}>
                         {authorForumLoadFailed
                           ? "LoreVia could not verify your current public forum threads right now. Refresh before opening a new discussion."
                           : "No eligible author projects are available right now. Private drafts and approved public-share novels with an existing open discussion are excluded until that thread is closed."}
@@ -477,7 +480,7 @@ export function PublicForumPageClient({
                         <select
                           value={selectedBookId}
                           onChange={(event) => setSelectedBookId(event.target.value)}
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-orange-500"}`}
+                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         >
                           {authorBooks.map((book) => (
                             <option key={book.id} value={book.id}>
@@ -488,29 +491,29 @@ export function PublicForumPageClient({
                         <input
                           value={novelTitle}
                           onChange={(event) => setNovelTitle(event.target.value)}
-                          placeholder="Novel name"
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                          aria-label="Novel name"
+                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
                         <input
                           value={novelGenre}
                           onChange={(event) => setNovelGenre(event.target.value)}
-                          placeholder="Genre"
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                          aria-label="Genre"
+                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
                         <textarea
                           value={novelDescription}
                           onChange={(event) => setNovelDescription(event.target.value)}
-                          placeholder="Novel description"
-                          className={`min-h-[7rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                          aria-label="Novel description"
+                          className={`min-h-[7rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
                         <input
                           value={desiredCount}
                           onChange={(event) => setDesiredCount(event.target.value)}
-                          placeholder="Desired readers"
                           inputMode="numeric"
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                          aria-label="Desired readers"
+                          className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                         />
-                        <label className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
+                        <label className={`flex items-center justify-between rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
                           <span>Allow contact</span>
                           <input
                             type="checkbox"
@@ -523,7 +526,7 @@ export function PublicForumPageClient({
                     )}
                   </>
                 ) : (
-                  <div className={`rounded-2xl border px-4 py-4 text-sm ${isDark ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100" : "border-cyan-200 bg-cyan-50 text-cyan-800"}`}>
+                  <div className={`rounded-md border px-4 py-4 text-sm ${isDark ? "border-teal-400/20 bg-teal-400/10 text-teal-100" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
                     Any signed-in member can open up to 5 general discussion threads per day for advice, genre talk, and broader writing conversations.
                   </div>
                 )}
@@ -532,29 +535,37 @@ export function PublicForumPageClient({
                   value={headline}
                   onChange={(event) => setHeadline(event.target.value)}
                   onInput={(event) => setHeadline((event.target as HTMLInputElement).value)}
-                  placeholder={composerThreadType === "novel" ? "Discussion headline" : "General discussion headline"}
-                  className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                  aria-label={composerThreadType === "novel" ? "Discussion headline" : "General discussion headline"}
+                  className={`w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
                 />
                 <textarea
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
                   onInput={(event) => setBody((event.target as HTMLTextAreaElement).value)}
-                  placeholder={composerThreadType === "novel" ? "What should readers focus on? Hook, pacing, emotional clarity, worldbuilding..." : "What do you want advice or discussion on?"}
-                  className={`min-h-[8rem] w-full rounded-2xl border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-orange-500"}`}
+                  aria-label={composerThreadType === "novel" ? "Reader focus" : "Discussion body"}
+                  className={`min-h-[8rem] w-full rounded-md border px-4 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100 focus:border-teal-400" : "border-slate-200 bg-slate-50 text-slate-900 focus:border-teal-700"}`}
+                />
+                <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                  {composerThreadType === "novel" ? "Tell readers what to focus on: hook, pacing, emotional clarity, or worldbuilding." : "Describe what you want advice or discussion on."}
+                </p>
+                <ImagePicker
+                  isDark={isDark}
+                  file={imageFile}
+                  onChange={setImageFile}
                 />
                 {composerStatus ? <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{composerStatus}</p> : null}
                 <button
                   type="button"
                   onClick={() => void createPost()}
                   disabled={creatingPost || (composerThreadType === "novel" && authorForumLoadFailed)}
-                  className={`inline-flex h-11 w-full items-center justify-center rounded-full px-5 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+                  className={`inline-flex h-11 w-full items-center justify-center rounded-md px-5 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
                 >
                   {creatingPost ? "Opening..." : composerThreadType === "novel" ? "Open novel thread" : "Open general thread"}
                 </button>
               </div>
             </section>
           ) : (
-            <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
               <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Browse first</p>
               <h2 className="mt-2 text-lg font-semibold">Read like a real beta reader</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
@@ -563,7 +574,7 @@ export function PublicForumPageClient({
             </section>
           )}
 
-          <section className={`rounded-3xl border p-4 shadow-sm ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+          <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
             <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>How this feed works</p>
             <div className="mt-4 space-y-3 text-sm">
               <InfoRow
@@ -595,7 +606,7 @@ export function PublicForumPageClient({
 function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPost }) {
   const isNovelThread = (post.thread_type || "novel") === "novel"
   return (
-    <article className={`overflow-hidden rounded-3xl border shadow-[0_14px_32px_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+    <article className={`overflow-hidden rounded-lg border transition ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
       <div className="flex">
         <div className={`flex w-[72px] shrink-0 flex-col items-center justify-start gap-2 border-r px-3 py-4 ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50/70"}`}>
           <VoteArrowIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
@@ -616,7 +627,7 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
             <MetaText isDark={isDark}>{post.author_trust_level}</MetaText>
             <MetaDivider isDark={isDark} />
             <MetaText isDark={isDark}>rep {formatReputationScore(post.author_reputation_score)}</MetaText>
-            <span className={`rounded-full px-2 py-1 font-semibold ${isNovelThread ? (isDark ? "bg-amber-400/12 text-amber-200" : "bg-orange-100 text-orange-700") : (isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-700")}`}>
+            <span className={`rounded-full px-2 py-1 font-semibold ${isNovelThread ? (isDark ? "bg-amber-400/12 text-amber-200" : "bg-amber-100 text-amber-700") : (isDark ? "bg-teal-400/12 text-teal-200" : "bg-teal-100 text-teal-700")}`}>
               {isNovelThread ? "novel" : "general"}
             </span>
             {isNovelThread && post.allow_contact_requests ? (
@@ -643,6 +654,12 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
           </Link>
 
           <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{truncateBody(post.body)}</p>
+          <ForumImage
+            src={post.image_url ?? null}
+            alt={post.image_filename || "Forum discussion image"}
+            isDark={isDark}
+            className="mt-3"
+          />
           {post.ranking?.supporting_note ? (
             <p className={`mt-3 text-xs leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{post.ranking.supporting_note}</p>
           ) : null}
@@ -675,14 +692,14 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Link
               href={`/public/forum/${post.id}` as Route}
-              className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09]"}`}
+              className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
             >
               Open thread
             </Link>
             {post.author_username ? (
               <Link
                 href={`/chats?username=${encodeURIComponent(post.author_username)}` as Route}
-                className={`inline-flex h-10 items-center justify-center rounded-full px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
               >
                 Message @{post.author_username}
               </Link>
@@ -692,6 +709,62 @@ function ForumFeedCard({ isDark, post }: { isDark: boolean, post: PublicForumPos
         </div>
       </div>
     </article>
+  )
+}
+
+function ForumImage({
+  src,
+  alt,
+  isDark,
+  className = "",
+}: {
+  src: string | null
+  alt: string
+  isDark: boolean
+  className?: string
+}) {
+  const resolvedSrc = resolveAssetUrl(src)
+  if (!resolvedSrc) return null
+  return (
+    <div className={`overflow-hidden rounded-md border ${className} ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
+      <img src={resolvedSrc} alt={alt} className="max-h-[260px] w-full object-contain" />
+    </div>
+  )
+}
+
+function ImagePicker({
+  isDark,
+  file,
+  onChange,
+}: {
+  isDark: boolean
+  file: File | null
+  onChange: (file: File | null) => void
+}) {
+  return (
+    <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0f141b] text-slate-100" : "border-slate-200 bg-slate-50 text-slate-900"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="inline-flex cursor-pointer items-center gap-2 font-semibold">
+          <ImageIcon className={isDark ? "text-slate-400" : "text-slate-500"} />
+          <span>{file ? file.name : "Discussion image"}</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="sr-only"
+            onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        {file ? (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"}`}
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
@@ -712,7 +785,7 @@ function formatRelativeDay(value: string): string {
 
 function StatCard({ isDark, value, label }: { isDark: boolean, value: string, label: string }) {
   return (
-    <div className={`rounded-2xl px-3 py-3 ${isDark ? "bg-[#151b22]" : "bg-white ring-1 ring-slate-200"}`}>
+    <div className={`rounded-md px-3 py-3 ${isDark ? "bg-[#151b22]" : "bg-white ring-1 ring-slate-200"}`}>
       <p className="text-lg font-semibold">{value}</p>
       <p className={`mt-1 text-3xs uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{label}</p>
     </div>
@@ -839,6 +912,16 @@ function InboxIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 20 20" fill="none" className={`${className || "h-4 w-4"}`} aria-hidden="true">
       <path d="M4 6.5h12l1 6.5h-4.5L10 15.5 7.5 13H3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
       <path d="M4.5 6.5 6 4.5h8l1.5 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ImageIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className={`h-4 w-4 ${className || ""}`} aria-hidden="true">
+      <rect x="3.25" y="4.25" width="13.5" height="11.5" rx="1.75" stroke="currentColor" strokeWidth="1.5" />
+      <path d="m4.5 14 3.25-3.25 2.25 2.25 2.75-3.5L15.5 14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx="7.25" cy="7.75" r="1" fill="currentColor" />
     </svg>
   )
 }

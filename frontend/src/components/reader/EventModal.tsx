@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import type { CharacterEvent, MajorEvent } from "@/types/book"
 
 type Props = {
@@ -8,13 +9,13 @@ type Props = {
   onClose: () => void
 }
 
-export function EventModal({ isDark, event, onClose }: Props) {
+export const EventModal = memo(function EventModal({ isDark, event, onClose }: Props) {
   const chapterLabel = `Chapter ${event.chapter_number}${"chapter_title" in event && event.chapter_title ? ` - ${event.chapter_title}` : ""}`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
-        className={`w-full max-w-2xl rounded-lg border p-6 shadow-2xl ${isDark ? "border-white/10 bg-[#0f1117] text-white" : "border-stone-200 bg-white text-stone-900"}`}
+        className={`w-full max-w-2xl rounded-lg border p-6 ${isDark ? "border-white/10 bg-[#0f1117] text-white" : "border-stone-200 bg-white text-stone-900"}`}
         onClick={(eventValue) => eventValue.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
@@ -92,4 +93,4 @@ export function EventModal({ isDark, event, onClose }: Props) {
       </div>
     </div>
   )
-}
+})

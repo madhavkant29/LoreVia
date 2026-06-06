@@ -92,7 +92,7 @@ async def test_ready_checks_database_and_redis(monkeypatch) -> None:
             expected = (
                 "SELECT 1"
                 if self._execute_call_count == 1
-                else "SELECT '[0,0,0]'::extensions.vector"
+                else "SELECT '[0,0,0]'::vector"
             )
             assert str(statement) == expected
             db_checked = True

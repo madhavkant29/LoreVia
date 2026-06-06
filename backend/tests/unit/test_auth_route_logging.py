@@ -7,9 +7,9 @@ from fastapi import Response
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.api.v1.routes.auth import _record_login_activity, _schedule_trial_email_events_best_effort, oauth_supabase, refresh
-from app.core.security import create_access_token, create_refresh_token, decode_token
-from app.schemas.auth import RefreshBody, SupabaseOAuthBody
+from app.api.v1.routes.auth import _record_login_activity, _schedule_trial_email_events_best_effort, login, oauth_supabase, refresh
+from app.core.security import DUMMY_PASSWORD_HASH, create_access_token, create_refresh_token, decode_token
+from app.schemas.auth import LoginBody, RefreshBody, SupabaseOAuthBody
 
 
 class _AsyncContext:
@@ -48,7 +48,13 @@ async def test_supabase_oauth_failure_does_not_log_response_body(monkeypatch, ca
 
     with caplog.at_level("WARNING", logger="lorevia.auth"):
         with pytest.raises(HTTPException) as exc_info:
-            await oauth_supabase(body=body, response=response, db=object(), _=None)
+            await oauth_supabase(
+                request=Request({"type": "http", "method": "POST", "headers": []}),
+                body=body,
+                response=response,
+                db=object(),
+                _=None,
+            )
 
     assert exc_info.value.status_code == 401
     assert "top-secret-value" not in caplog.text
@@ -99,6 +105,41 @@ async def test_login_activity_cache_failure_does_not_block_auth(monkeypatch, cap
 
 
 @pytest.mark.asyncio
+async def test_login_unknown_email_runs_dummy_password_verification(monkeypatch):
+    class _Result:
+        def scalar(self):
+            return None
+
+    class FakeDB:
+        async def execute(self, *_args, **_kwargs):
+            return _Result()
+
+    verified_hashes: list[str] = []
+
+    def fake_verify_password(_plain: str, hashed: str) -> bool:
+        verified_hashes.append(hashed)
+        return False
+
+    monkeypatch.setattr("app.api.v1.routes.auth.verify_password", fake_verify_password)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await login(
+            request=Request({"type": "http", "method": "POST", "headers": []}),
+            body=LoginBody(
+                email="missing@example.com",
+                password="wrong-password",
+                device_id="missing-email-device01",
+            ),
+            response=Response(),
+            db=FakeDB(),
+            _=None,
+        )
+
+    assert exc_info.value.status_code == 401
+    assert verified_hashes == [DUMMY_PASSWORD_HASH]
+
+
+@pytest.mark.asyncio
 async def test_refresh_route_uses_canonical_local_user_for_supabase_subject(monkeypatch):
     local_user_id = uuid.uuid4()
     supabase_auth_id = uuid.uuid4()
@@ -130,11 +171,8 @@ async def test_refresh_route_uses_canonical_local_user_for_supabase_subject(monk
         assert subject == str(supabase_auth_id)
         return user
 
-    async def fake_refresh_session_active(*args, **kwargs):
+    async def fake_consume_refresh_session(*args, **kwargs):
         return True
-
-    async def fake_revoke_refresh_session(*args, **kwargs):
-        return None
 
     async def fake_record_login_activity(*args, **kwargs):
         return None
@@ -149,7 +187,7 @@ async def test_refresh_route_uses_canonical_local_user_for_supabase_subject(monk
             create_refresh_token(str(resolved_user.id), version=resolved_user.token_version, session_id="new-session"),
         )
 
-    def fake_user_response_with_cookies(_response, user_out, access_token: str, refresh_token: str):
+    def fake_user_response_with_cookies(_response, user_out, access_token: str, refresh_token: str, **_kwargs):
         captured["access"] = access_token
         captured["refresh"] = refresh_token
         return user_out
@@ -164,8 +202,7 @@ async def test_refresh_route_uses_canonical_local_user_for_supabase_subject(monk
         } if token == "legacy-refresh-token" else None,
     )
     monkeypatch.setattr("app.api.v1.routes.auth.get_user_for_auth_subject", fake_get_user_for_auth_subject)
-    monkeypatch.setattr("app.api.v1.routes.auth.refresh_session_active", fake_refresh_session_active)
-    monkeypatch.setattr("app.api.v1.routes.auth.revoke_refresh_session", fake_revoke_refresh_session)
+    monkeypatch.setattr("app.api.v1.routes.auth.consume_refresh_session", fake_consume_refresh_session)
     monkeypatch.setattr("app.api.v1.routes.auth._record_login_activity", fake_record_login_activity)
     monkeypatch.setattr("app.api.v1.routes.auth._mint_token_pair", fake_mint_token_pair)
     monkeypatch.setattr("app.api.v1.routes.auth._user_response_with_cookies", fake_user_response_with_cookies)

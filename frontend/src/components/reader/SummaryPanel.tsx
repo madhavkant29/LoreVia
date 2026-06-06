@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { readerApi } from "@/lib/api/reader"
@@ -7,6 +7,7 @@ import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { ChapterSummary, SummaryMode } from "@/types/reader"
 import { SUMMARY_MODE_LABELS } from "@/lib/constants"
 import { capture } from "@/lib/analytics/posthog"
+import { Skeleton } from "@/components/ui/Skeleton"
 
 interface Props {
   bookId: string
@@ -15,7 +16,7 @@ interface Props {
   theme: "light" | "dark"
 }
 
-export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
+export const SummaryPanel = memo(function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
   const [mode, setMode] = useState<SummaryMode>("short")
   const summaryQuery = useQuery({
     queryKey: asQueryKey(readerCacheKey(bookId, `summary:${chapterNum}:${mode}`)),
@@ -35,15 +36,18 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
-      <div className={`flex max-h-[86dvh] w-full flex-col rounded-t-3xl sm:max-h-[80vh] sm:max-w-lg sm:rounded-2xl transition-colors ${shellClass}`}>
+      <div className={`flex max-h-[86dvh] w-full flex-col rounded-t-lg transition-colors sm:max-h-[80vh] sm:max-w-lg ${shellClass}`}>
         <div className={theme === "dark" ? "flex items-center justify-between border-b border-white/10 px-5 py-4" : "flex items-center justify-between border-b border-gray-100 px-5 py-4"}>
           <h2 className="font-semibold">Chapter {chapterNum} Summary</h2>
-          <button onClick={onClose} className={theme === "dark" ? "text-xl text-gray-500 hover:text-white" : "text-xl text-gray-400 hover:text-gray-600"}>x</button>
+          <button type="button" onClick={onClose} aria-label="Close summary" className={theme === "dark" ? "text-xl text-gray-500 hover:text-white" : "text-xl text-gray-400 hover:text-gray-600"}>x</button>
         </div>
-        <div className="app-scroll flex gap-1 overflow-x-auto px-5 pt-4">
+        <div className="app-scroll flex gap-1 overflow-x-auto px-5 pt-4" role="tablist" aria-label="Summary length">
           {(Object.entries(SUMMARY_MODE_LABELS) as [SummaryMode, string][]).map(([m, label]) => (
             <button
               key={m}
+              type="button"
+              role="tab"
+              aria-selected={mode === m}
               onClick={() => setMode(m)}
               className={`shrink-0 rounded-full px-3 py-1.5 text-xs transition-colors ${
                 mode === m ? tabActiveClass : tabIdleClass
@@ -55,7 +59,15 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
         </div>
         <div className="app-scroll flex-1 overflow-y-auto px-5 py-4">
           {summaryQuery.isLoading || summaryQuery.isFetching ? (
-            <div className="flex justify-center py-8"><div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" /></div>
+            <div className="space-y-3 py-2" role="status" aria-label="Loading summary" aria-busy="true">
+              <span className="sr-only">Loading summary</span>
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-11/12" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="mt-6 h-3 w-24" />
+              <Skeleton className="h-4 w-4/5" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
           ) : normalized ? (
             <div>
               <p className={theme === "dark" ? "whitespace-pre-wrap text-sm leading-relaxed text-gray-100" : "whitespace-pre-wrap text-sm leading-relaxed text-gray-700"}>
@@ -110,7 +122,7 @@ export function SummaryPanel({ bookId, chapterNum, onClose, theme }: Props) {
       </div>
     </div>
   )
-}
+})
 
 function normalizeSummary(summary: ChapterSummary): ChapterSummary {
   const trimmed = summary.content.trim()

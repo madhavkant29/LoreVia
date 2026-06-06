@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import type { ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import Link from "next/link"
@@ -16,6 +17,7 @@ import { applyRevisionBoardState, buildRevisionTask, todayDateKey } from "@/lib/
 import type { BetaReadAssignment, BetaReadAssignmentDetail, BetaReadFeedbackItem } from "@/types/betaRead"
 import type { Book, GoalCalendarItem, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 
 const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
@@ -296,23 +298,21 @@ export default function AuthorLoopPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
-          <section className={`rounded-md border p-6 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-            <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-amber-300" : "text-amber-700"}`}>Author Loop</p>
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{book?.title ?? "Manuscript"} author loop</h1>
-                <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Upload privately, build the character bible, run cited continuity checks, invite a scoped beta reader, and turn feedback into revision work without juggling six separate tabs.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link href={`/${bookId}/characters`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-100 text-slate-800"}`}>Character bible</Link>
-                <Link href={`/${bookId}/beta-feedback`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-100 text-slate-800"}`}>Beta feedback</Link>
-                <Link href={`/${bookId}/editorial-review`} className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-violet-500 text-white" : "bg-slate-950 text-white"}`}>Editorial review</Link>
-              </div>
-            </div>
-            {statusMessage ? <p className={`mt-4 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{statusMessage}</p> : null}
-          </section>
+          <WorkspaceFamilyHeader
+            active="author-loop"
+            bookId={bookId}
+            family="review-center"
+            title={`${book?.title ?? "Manuscript"} author loop`}
+            description="Upload privately, build the character bible, run cited continuity checks, invite a scoped beta reader, and turn feedback into revision work without juggling separate tools."
+            actions={(
+              <>
+                <Link href={`/${bookId}/characters`} className="app-button app-button--secondary">Character bible</Link>
+                <Link href={`/${bookId}/beta-feedback`} className="app-button app-button--secondary">Beta feedback</Link>
+                <Link href={`/${bookId}/editorial-review`} className="app-button app-button--primary">Editorial review</Link>
+              </>
+            )}
+          />
+          {statusMessage ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{statusMessage}</p> : null}
 
           <section className="grid gap-3 xl:grid-cols-6">
             {steps.map((step) => (
@@ -466,58 +466,72 @@ export default function AuthorLoopPage() {
             <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>5. Invite beta reader</p>
               <div className="mt-4 grid gap-3">
-                <input
-                  value={readerEmail}
-                  onChange={(event) => setReaderEmail(event.target.value)}
-                  placeholder="reader@example.com"
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-amber-400"}`}
-                />
-                <select
-                  value={scopeKind}
-                  onChange={(event) => setScopeKind(event.target.value)}
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                >
-                  <option value="full_book">Full book</option>
-                  <option value="chapter_range">Chapter range</option>
-                </select>
+                <InviteField label="Reader email" isDark={isDark}>
+                  <input
+                    value={readerEmail}
+                    onChange={(event) => setReaderEmail(event.target.value)}
+                    aria-label="Reader email"
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
+                  />
+                </InviteField>
+                <InviteField label="Scope" isDark={isDark}>
+                  <select
+                    value={scopeKind}
+                    onChange={(event) => setScopeKind(event.target.value)}
+                    aria-label="Scope"
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
+                  >
+                    <option value="full_book">Full book</option>
+                    <option value="chapter_range">Chapter range</option>
+                  </select>
+                </InviteField>
                 {scopeKind !== "full_book" ? (
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <input
-                      type="number"
-                      min="1"
-                      value={chapterStart}
-                      onChange={(event) => setChapterStart(event.target.value)}
-                      placeholder="From chapter"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      value={chapterEnd}
-                      onChange={(event) => setChapterEnd(event.target.value)}
-                      placeholder="Through chapter"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                    />
+                    <InviteField label="From chapter" isDark={isDark}>
+                      <input
+                        type="number"
+                        min="1"
+                        value={chapterStart}
+                        onChange={(event) => setChapterStart(event.target.value)}
+                        aria-label="From chapter"
+                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
+                      />
+                    </InviteField>
+                    <InviteField label="Through chapter" isDark={isDark}>
+                      <input
+                        type="number"
+                        min="1"
+                        value={chapterEnd}
+                        onChange={(event) => setChapterEnd(event.target.value)}
+                        aria-label="Through chapter"
+                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
+                      />
+                    </InviteField>
                   </div>
                 ) : null}
-                <input
-                  type="date"
-                  value={deadline}
-                  onChange={(event) => setDeadline(event.target.value)}
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
-                />
-                <textarea
-                  value={authorQuestions}
-                  onChange={(event) => setAuthorQuestions(event.target.value)}
-                  rows={5}
-                  placeholder="One author prompt per line"
-                  className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 placeholder:text-slate-600 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-amber-400"}`}
-                />
+                <InviteField label="Deadline" isDark={isDark}>
+                  <input
+                    type="date"
+                    value={deadline}
+                    onChange={(event) => setDeadline(event.target.value)}
+                    aria-label="Deadline"
+                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
+                  />
+                </InviteField>
+                <InviteField label="Author prompts" detail="Add one prompt per line for the beta reader." isDark={isDark}>
+                  <textarea
+                    value={authorQuestions}
+                    onChange={(event) => setAuthorQuestions(event.target.value)}
+                    rows={5}
+                    aria-label="Author prompts"
+                    className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
+                  />
+                </InviteField>
                 <button
                   type="button"
                   onClick={() => void handleCreateAssignment()}
                   disabled={creatingAssignment}
-                  className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-amber-500 text-slate-950 hover:bg-amber-400 disabled:bg-amber-200"}`}
+                  className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
                 >
                   {creatingAssignment ? "Sending invite..." : "Send beta invite"}
                 </button>
@@ -631,5 +645,25 @@ function MetricPill({ isDark, label, value }: { isDark: boolean; label: string; 
     <div className={`rounded-full px-3 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-100 text-slate-700"}`}>
       {label}: {value}
     </div>
+  )
+}
+
+function InviteField({
+  label,
+  detail,
+  isDark,
+  children,
+}: {
+  label: string
+  detail?: string
+  isDark: boolean
+  children: ReactNode
+}) {
+  return (
+    <label className="grid gap-2">
+      <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{label}</span>
+      {children}
+      {detail ? <span className={`text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>{detail}</span> : null}
+    </label>
   )
 }

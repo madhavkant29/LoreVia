@@ -9,6 +9,14 @@ from httpx import Request, Response
 from app.workers.tasks.analysis_tasks import _is_retryable_analysis_error, analyse_chapter_task
 
 
+def _raise_after_closing_coro(exc: Exception):
+    def raise_error(coro):
+        coro.close()
+        raise exc
+
+    return raise_error
+
+
 class TestIsRetryableAnalysisError:
     def test_timeout_connection_protocol_errors_are_retryable(self):
         assert _is_retryable_analysis_error(httpx.TimeoutException("timed out"))
@@ -46,7 +54,7 @@ class TestAnalyseChapterTaskRetryFilter:
     def test_retryable_error_triggers_task_retry(self, monkeypatch):
         monkeypatch.setattr(
             "app.workers.tasks.analysis_tasks.run_worker_coro",
-            MagicMock(side_effect=httpx.TimeoutException("timed out")),
+            MagicMock(side_effect=_raise_after_closing_coro(httpx.TimeoutException("timed out"))),
         )
 
         task = analyse_chapter_task.__wrapped__.__func__
@@ -63,7 +71,7 @@ class TestAnalyseChapterTaskRetryFilter:
     def test_non_retryable_error_does_not_retry(self, monkeypatch):
         monkeypatch.setattr(
             "app.workers.tasks.analysis_tasks.run_worker_coro",
-            MagicMock(side_effect=json.JSONDecodeError("bad json", "{", 0)),
+            MagicMock(side_effect=_raise_after_closing_coro(json.JSONDecodeError("bad json", "{", 0))),
         )
 
         task = analyse_chapter_task.__wrapped__.__func__
@@ -84,7 +92,7 @@ class TestAnalyseChapterTaskRetryFilter:
         )
         monkeypatch.setattr(
             "app.workers.tasks.analysis_tasks.run_worker_coro",
-            MagicMock(side_effect=bad_request_error),
+            MagicMock(side_effect=_raise_after_closing_coro(bad_request_error)),
         )
 
         task = analyse_chapter_task.__wrapped__.__func__

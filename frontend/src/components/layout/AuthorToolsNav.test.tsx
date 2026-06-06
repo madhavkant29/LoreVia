@@ -142,12 +142,44 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-characters"]')?.textContent).toContain("Character Bible")
   })
 
+  it("places notes workspace directly under the scene workspace", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+    const manuscriptItem = view.querySelector('[data-testid="author-nav-item-manuscript"]')
+    const scenesItem = view.querySelector('[data-testid="author-nav-item-scenes"]')
+    const notesItem = view.querySelector('[data-testid="author-nav-item-notes"]')
+
+    expect(scenesItem?.textContent).toContain("Scene Workspace")
+    expect(notesItem?.textContent).toContain("Notes Workspace")
+    expect(notesItem?.getAttribute("href")).toBe("/book-1/notes")
+    expect(
+      Boolean(
+        manuscriptItem &&
+          scenesItem &&
+          notesItem &&
+          manuscriptItem.compareDocumentPosition(scenesItem) & Node.DOCUMENT_POSITION_FOLLOWING &&
+          scenesItem.compareDocumentPosition(notesItem) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    ).toBe(true)
+  })
+
   it("renders the author lens entry in the shared author rail", () => {
     mockBaseState()
 
     const view = renderAuthorToolsNav()
 
     expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')?.textContent).toContain("Author Lens")
+  })
+
+  it("groups story bible and review center tools in the shared author rail", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+
+    expect(view.querySelector('[data-testid="author-nav-item-timeline"]')?.textContent).toContain("Timeline")
+    expect(view.querySelector('[data-testid="author-nav-item-cross-book-wiki"]')?.textContent).toContain("Series Wiki")
+    expect(view.querySelector('[data-testid="author-nav-item-reports"]')?.textContent).toContain("Chapter Reports")
   })
 
   it("keeps reader-shell collaborators on reader navigation only", () => {

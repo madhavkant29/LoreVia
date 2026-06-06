@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { betaReadsApi } from "@/lib/api/betaReads"
@@ -9,6 +9,7 @@ import { booksApi } from "@/lib/api/books"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import type { BetaReadAssignment } from "@/types/betaRead"
+import type { ManuscriptAnnotation } from "@/types/book"
 import type { ChapterBetaFeedback } from "@/types/reader"
 
 type ReaderChapterFeedbackProps = {
@@ -18,7 +19,7 @@ type ReaderChapterFeedbackProps = {
   chapterFeedback: ChapterBetaFeedback[]
 }
 
-export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedback }: ReaderChapterFeedbackProps) {
+export const ReaderChapterFeedback = memo(function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedback }: ReaderChapterFeedbackProps) {
   const { data: book } = useBookDetail(bookId)
   const [chapterComment, setChapterComment] = useState("")
   const [commentStatus, setCommentStatus] = useState<string | null>(null)
@@ -32,18 +33,19 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
 
   const canSeeChapterFeedback = Boolean(
     book?.access_class === "owner" ||
-      (book?.access_class === "reader_collaborator" && book?.workspace_shell === "reader")
+      book?.access_class === "reader_collaborator" ||
+      book?.access_class === "author_collaborator"
   )
   const canLeaveChapterComment = Boolean(
-    book?.access_class === "reader_collaborator" &&
-      book?.workspace_shell === "reader" &&
-      book?.collaboration_permissions?.can_comment
+    book?.access_class === "owner" ||
+      book?.collaboration_permissions?.can_comment ||
+      book?.collaboration_permissions?.can_edit_manuscript
   )
 
   const annotationsQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, `annotations:${chapterNum}`)),
     queryFn: () => booksApi.getManuscriptAnnotations(bookId, chapterNum),
-    enabled: canLeaveChapterComment,
+    enabled: canSeeChapterFeedback,
     staleTime: 20_000,
   })
 
@@ -67,10 +69,12 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
     () => [...localFeedback].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at)),
     [localFeedback]
   )
+  const visibleAnnotations = useMemo(
+    () => [...(annotationsQuery.data ?? [])].sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at)),
+    [annotationsQuery.data]
+  )
 
-  const existingChapterCommentCount = activeBetaAssignment
-    ? visibleFeedback.length
-    : (annotationsQuery.data?.length ?? 0)
+  const existingChapterCommentCount = visibleFeedback.length + visibleAnnotations.length
 
   const saveChapterComment = async () => {
     const nextComment = chapterComment.trim() || commentInputRef.current?.value.trim() || ""
@@ -146,7 +150,7 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
             Reader feedback
           </p>
           <h2 className={`mt-1 text-lg font-semibold ${theme === "dark" ? "text-white" : "text-slate-950"}`}>
-            {canLeaveChapterComment ? "Leave a chapter comment" : "Chapter beta comments"}
+            {canLeaveChapterComment ? "Leave a chapter comment" : "Chapter comments"}
           </h2>
           <p className={`mt-1 text-sm ${theme === "dark" ? "text-slate-400" : "text-stone-500"}`}>
             {existingChapterCommentCount
@@ -164,12 +168,15 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
         </Link>
       </div>
 
-      {visibleFeedback.length > 0 ? (
+      {visibleFeedback.length > 0 || visibleAnnotations.length > 0 ? (
         <div className="mt-4 space-y-3">
+          {visibleAnnotations.map((annotation) => (
+            <AnnotationCommentCard key={annotation.id} annotation={annotation} theme={theme} />
+          ))}
           {visibleFeedback.map((item) => (
             <article
               key={item.id}
-              className={`rounded-2xl border px-4 py-4 ${
+              className={`rounded-md border px-4 py-4 ${
                 theme === "dark"
                   ? "border-white/10 bg-[#121722]"
                   : "border-stone-200 bg-stone-50"
@@ -200,20 +207,23 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
 
       {canLeaveChapterComment ? (
         <>
+          <label className={`mt-4 block text-xs font-semibold uppercase tracking-[0.18em] ${theme === "dark" ? "text-slate-400" : "text-stone-500"}`}>
+            Chapter comment
+          </label>
           <textarea
             ref={commentInputRef}
             value={chapterComment}
             onChange={(event) => setChapterComment(event.target.value)}
-            placeholder="What landed, confused you, or needs another pass in this chapter?"
-            className={`mt-4 min-h-28 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+            aria-label="Chapter comment"
+            className={`mt-2 min-h-28 w-full rounded-md border px-4 py-3 text-sm outline-none ${
               theme === "dark"
-                ? "border-white/10 bg-[#121722] text-white placeholder:text-slate-500"
-                : "border-stone-200 bg-white text-slate-950 placeholder:text-stone-400"
+                ? "border-white/10 bg-[#121722] text-white"
+                : "border-stone-200 bg-white text-slate-950"
             }`}
           />
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className={`text-xs ${theme === "dark" ? "text-slate-500" : "text-stone-500"}`}>
-              {commentStatus ?? "Comments are shared with the author on this chapter."}
+              {commentStatus ?? "Write what landed, confused you, or needs another pass. Comments are shared with the author on this chapter."}
             </p>
             <button
               type="button"
@@ -236,10 +246,44 @@ export function ReaderChapterFeedback({ bookId, chapterNum, theme, chapterFeedba
       ) : null}
     </section>
   )
-}
+})
 
 function chapterMatchesAssignment(chapterNum: number, assignment: BetaReadAssignment) {
   if (typeof assignment.chapter_start === "number" && chapterNum < assignment.chapter_start) return false
   if (typeof assignment.chapter_end === "number" && chapterNum > assignment.chapter_end) return false
   return true
+}
+
+function AnnotationCommentCard({ annotation, theme }: { annotation: ManuscriptAnnotation; theme: "light" | "dark" }) {
+  return (
+    <article
+      className={`rounded-md border px-4 py-4 ${
+        theme === "dark"
+          ? "border-white/10 bg-[#121722]"
+          : "border-stone-200 bg-stone-50"
+      }`}
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className={`text-sm font-semibold ${theme === "dark" ? "text-white" : "text-slate-950"}`}>
+            {annotation.created_by_label}
+          </p>
+          <p className={`mt-1 text-xs ${theme === "dark" ? "text-slate-500" : "text-stone-500"}`}>
+            {annotation.category.replace(/_/g, " ")} annotation · {annotation.visibility}
+          </p>
+        </div>
+        <p className={`text-xs ${theme === "dark" ? "text-slate-500" : "text-stone-500"}`}>
+          {new Date(annotation.updated_at).toLocaleString()}
+        </p>
+      </div>
+      {annotation.quote ? (
+        <blockquote className={`mt-3 border-l-2 pl-3 text-sm leading-6 ${theme === "dark" ? "border-teal-300/40 text-slate-300" : "border-teal-700/30 text-stone-600"}`}>
+          {annotation.quote}
+        </blockquote>
+      ) : null}
+      <p className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${theme === "dark" ? "text-slate-200" : "text-slate-700"}`}>
+        {annotation.comment}
+      </p>
+    </article>
+  )
 }

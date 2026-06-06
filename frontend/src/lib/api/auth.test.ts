@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { getMock, postMock, patchMock, isAxiosErrorMock } = vi.hoisted(() => ({
+const { getMock, postMock, patchMock, isAxiosErrorMock, signOutMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
   patchMock: vi.fn(),
   isAxiosErrorMock: vi.fn(),
+  signOutMock: vi.fn(),
 }))
 
 vi.mock("./client", () => ({
@@ -22,6 +23,14 @@ vi.mock("axios", () => ({
   isAxiosError: isAxiosErrorMock,
 }))
 
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    auth: {
+      signOut: signOutMock,
+    },
+  },
+}))
+
 import { authApi } from "./auth"
 
 describe("auth api", () => {
@@ -30,10 +39,12 @@ describe("auth api", () => {
     postMock.mockReset()
     patchMock.mockReset()
     isAxiosErrorMock.mockReset()
+    signOutMock.mockReset()
 
     postMock.mockResolvedValue({ data: { ok: true } })
     getMock.mockResolvedValue({ data: { ok: true } })
     patchMock.mockResolvedValue({ data: { ok: true } })
+    signOutMock.mockResolvedValue({})
   })
 
   it("registers with the expected payload", async () => {
@@ -49,11 +60,12 @@ describe("auth api", () => {
   })
 
   it("logs in with email and password", async () => {
-    await authApi.login("reader@example.com", "Secret123!")
+    await authApi.login("reader@example.com", "Secret123!", "device-3")
 
     expect(postMock).toHaveBeenCalledWith("/auth/login", {
       email: "reader@example.com",
       password: "Secret123!",
+      device_id: "device-3",
     })
   })
 
@@ -114,6 +126,7 @@ describe("auth api", () => {
     await authApi.logout()
 
     expect(postMock).toHaveBeenCalledWith("/auth/logout")
+    expect(signOutMock).toHaveBeenCalledWith({ scope: "local" })
   })
 
   it("returns the current user on me success", async () => {

@@ -814,7 +814,10 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
         return None
     async def _fake_cache_set(*_args, **_kwargs):
         return None
-    async def _fake_generate_recall(**_kwargs):
+    generated = {}
+
+    async def _fake_generate_recall(**kwargs):
+        generated.update(kwargs)
         return "Recall text"
     monkeypatch.setattr(reader, "cache_get", _fake_cache_get)
     monkeypatch.setattr(reader, "cache_set", _fake_cache_set)
@@ -875,8 +878,9 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
 
     assert no_progress == {"recall": None}
     assert recall["recall"] == "Recall text"
+    assert generated["usage_db"] is None
     assert db.rollbacks == 1
-    assert db.commits == 4
+    assert db.commits == 3
     assert progress_payload["chapters_read_count"] == 2
     assert updated == {"ok": True}
     assert marked["percent_complete"] == 100.0
@@ -925,6 +929,7 @@ async def test_memory_recall_caches_book_title_before_rollback(monkeypatch):
 
     assert payload["recall"] == "Recall text"
     assert generated["title"] == "Atlas"
+    assert generated["usage_db"] is None
     assert db.rollbacks == 1
 
 

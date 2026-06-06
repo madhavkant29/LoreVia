@@ -5,6 +5,8 @@ import type { Route } from "next"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { WorkspacePage } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -88,40 +90,36 @@ export default function AnalysisPage() {
   })
 
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#0a0a0a] text-slate-100" : "bg-[#f5efe6] text-stone-950"}`}>
-      <div className="mx-auto max-w-6xl px-4 pb-16 pt-6 sm:px-6 lg:px-8">
-        <div className={`rounded-lg border px-6 py-7 shadow-card ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white/70 bg-white/88"}`}>
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="max-w-3xl">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.3em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Analysis</p>
-              <h1 className={`mt-2 font-serif text-4xl ${isDark ? "text-white" : "text-stone-950"}`}>Keep the deep tools in one place.</h1>
-              <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-                The reading flow stays centered on the book. These extra analysis surfaces are still here when you want to zoom out and inspect structure, clues, or cross-book signals.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Link href={`/${bookId}`} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-                Overview
-              </Link>
-            </div>
-          </div>
-        </div>
+    <WorkspacePage className={isDark ? "text-slate-100" : "text-stone-950"}>
+      <div className="mx-auto max-w-6xl px-0 pb-16 pt-6 sm:px-2 lg:px-4">
+        <WorkspaceFamilyHeader
+          active="analysis"
+          bookId={bookId}
+          family="review-center"
+          title="Analysis workspace"
+          description="Open deeper manuscript diagnostics when you need to inspect structure, clues, continuity, and cross-book signals."
+          actions={(
+            <Link href={`/${bookId}`} className="app-button-secondary">
+              Overview
+            </Link>
+          )}
+        />
 
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {analysisTools.map((tool: typeof ANALYSIS_TOOLS_BASE[0]) => (
             <Link
               key={tool.href}
               href={tool.href.startsWith("/") ? tool.href as Route : `/${bookId}/${tool.href}` as Route}
-              className={`group rounded-lg border p-5 transition ${isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]" : "border-stone-200 bg-white/90 hover:bg-white"}`}
+              className="app-panel app-panel--subtle group p-5 transition hover:border-[rgba(var(--accent),0.42)]"
             >
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{tool.eyebrow}</p>
-              <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{tool.title}</p>
-              <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{tool.description}</p>
-              <p className={`mt-5 text-sm font-medium ${isDark ? "text-slate-200" : "text-stone-800"}`}>Open</p>
+              <p className="app-eyebrow">{tool.eyebrow}</p>
+              <p className="mt-3 text-2xl font-semibold text-[rgb(var(--foreground))]">{tool.title}</p>
+              <p className="app-copy mt-3">{tool.description}</p>
+              <p className="mt-5 text-sm font-semibold text-[rgb(var(--accent))]">Open tool</p>
             </Link>
           ))}
         </div>
       </div>
-    </div>
+    </WorkspacePage>
   )
 }

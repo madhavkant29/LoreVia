@@ -98,7 +98,7 @@ export default function SeriesPage() {
   const subMutedText = isDark ? "text-slate-500" : "text-stone-500"
   const surfaceClass = seriesSurfaceClass(isDark)
   const subtleSurfaceClass = seriesSurfaceClass(isDark, "subtle")
-  const controlClass = isDark ? "border-slate-700/70 bg-[#121921] text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"
+  const controlClass = isDark ? "border-slate-700/70 bg-[#121921] text-white" : "border-stone-200 bg-white text-stone-900"
   const primaryButtonClass = seriesPrimaryButtonClass(isDark)
   const secondaryButtonClass = seriesSecondaryButtonClass(isDark)
 
@@ -228,18 +228,22 @@ export default function SeriesPage() {
 
       <section className={`rounded-md border-2 p-5 ${surfaceClass}`}>
         <div className="grid gap-3 md:grid-cols-[1.2fr_1.5fr_auto]">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Create a new series"
-            className={`rounded-md border-2 px-4 py-3 text-sm outline-none ${controlClass}`}
-          />
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Short note about this series"
-            className={`rounded-md border-2 px-4 py-3 text-sm outline-none ${controlClass}`}
-          />
+          <label className="grid gap-1.5">
+            <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Series name</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={`rounded-md border-2 px-4 py-3 text-sm outline-none ${controlClass}`}
+            />
+          </label>
+          <label className="grid gap-1.5">
+            <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>Series note</span>
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className={`rounded-md border-2 px-4 py-3 text-sm outline-none ${controlClass}`}
+            />
+          </label>
           <button
             onClick={createSeries}
             disabled={busyKey === "create"}
@@ -297,7 +301,7 @@ export default function SeriesPage() {
                       onClick={() => void toggleSeriesBible(lane.id)}
                       className={`inline-flex items-center gap-1.5 rounded-sm border px-4 py-2 text-xs font-semibold transition ${secondaryButtonClass}`}
                     >
-                      {seriesBibleLoadingId === lane.id ? "Loading..." : bibleOpen ? "Hide Series Bible" : "View Series Bible"}
+                      {seriesBibleLoadingId === lane.id ? "Opening..." : bibleOpen ? "Hide Series Bible" : "View Series Bible"}
                     </button>
                   ) : null}
                   <button
@@ -305,7 +309,7 @@ export default function SeriesPage() {
                     onClick={() => void loadSeriesWorldAnalysis(lane.id)}
                     className={`inline-flex items-center gap-1.5 rounded-sm border px-4 py-2 text-xs font-semibold transition ${secondaryButtonClass}`}
                   >
-                    {worldAnalysisLoadingId === lane.id ? "Loading..." : "World analysis"}
+                    {worldAnalysisLoadingId === lane.id ? "Analyzing..." : "World analysis"}
                   </button>
                 </div>
               </div>
@@ -443,8 +447,8 @@ export default function SeriesPage() {
         const modalCollectionPlural = collectionUnitName(modalHasScreenplayEpisodes, true)
         const modalCollectionSingular = collectionUnitName(modalHasScreenplayEpisodes, false)
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-            <div className={`w-full max-w-2xl rounded-lg border-2 shadow-dropdown ${surfaceClass}`}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className={`w-full max-w-2xl rounded-lg border-2 ${surfaceClass}`}>
 
               {/* Modal header */}
               <div className={`flex items-center justify-between border-b px-6 py-4 ${isDark ? "border-slate-700/70" : "border-stone-200"}`}>
@@ -475,7 +479,7 @@ export default function SeriesPage() {
 
               <div className="max-h-[65vh] overflow-y-auto p-6 space-y-4">
 
-                {/* â”€â”€ Ask tab â”€â”€ */}
+                {/* Ask tab */}
                 {seriesModalTab === "ask" && (
                   <>
                     <p className={`text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -499,7 +503,7 @@ export default function SeriesPage() {
                             )}
                           </div>
                         ))}
-                        {askLoading && <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Analyzing seriesâ€¦</p>}
+                        {askLoading && <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>Analyzing series...</p>}
                       </div>
                     )}
 
@@ -511,7 +515,7 @@ export default function SeriesPage() {
                       <input
                         value={askQuery}
                         onChange={e => setAskQuery(e.target.value)}
-                        placeholder="Ask about continuity, characters, or plot across all booksâ€¦"
+                        aria-label="Ask series question"
                         className={`flex-1 rounded-md border-2 px-4 py-2.5 text-sm outline-none ${controlClass}`}
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSeriesAsk(askSeriesId) } }}
                       />
@@ -520,13 +524,14 @@ export default function SeriesPage() {
                         disabled={askLoading || !askQuery.trim()}
                         className={`rounded-md px-5 py-2.5 text-sm font-semibold disabled:opacity-50 ${primaryButtonClass}`}
                       >
-                        {askLoading ? "â€¦" : "Ask"}
+                        {askLoading ? "..." : "Ask"}
                       </button>
                     </div>
+                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Ask about continuity, characters, or plot across all books.</p>
                   </>
                 )}
 
-                {/* â”€â”€ Series Continuity Check tab â”€â”€ */}
+                {/* Series continuity check tab */}
                 {seriesModalTab === "continuity" && (
                   <>
                     <p className={`text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -541,7 +546,7 @@ export default function SeriesPage() {
                           onChange={e => setContinuityBookId(e.target.value)}
                           className={`w-full rounded-md border-2 px-3 py-2 text-sm outline-none ${controlClass}`}
                         >
-                          <option value="">Select bookâ€¦</option>
+                          <option value="">Select book...</option>
                           {seriesBooks.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
                         </select>
                       </div>
@@ -551,9 +556,10 @@ export default function SeriesPage() {
                           type="number" min={1}
                           value={continuityChapterNum}
                           onChange={e => setContinuityChapterNum(e.target.value)}
-                          placeholder={modalHasScreenplayEpisodes ? "e.g. 12" : "e.g. 5"}
+                          aria-label={modalHasScreenplayEpisodes ? "Scene number" : "Chapter number"}
                           className={`w-full rounded-md border-2 px-3 py-2 text-sm outline-none ${controlClass}`}
                         />
+                        <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Example: {modalHasScreenplayEpisodes ? "12" : "5"}.</p>
                       </div>
                     </div>
 
@@ -561,16 +567,17 @@ export default function SeriesPage() {
                       rows={6}
                       value={continuityText}
                       onChange={e => setContinuityText(e.target.value)}
-                      placeholder="Paste the passage you want to cross-check against earlier booksâ€¦"
+                      aria-label="Passage to cross-check"
                       className={`w-full resize-none rounded-md border-2 px-4 py-3 text-sm leading-7 outline-none ${controlClass}`}
                     />
+                    <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Paste the passage you want to cross-check against earlier books.</p>
 
                     <button
                       onClick={() => handleSeriesContinuityCheck(askSeriesId)}
                       disabled={continuityLoading || !continuityText.trim() || !continuityBookId}
                       className={`w-full rounded-md px-5 py-3 text-sm font-semibold disabled:opacity-50 ${primaryButtonClass}`}
                     >
-                      {continuityLoading ? "Checking across seriesâ€¦" : "Run series continuity check"}
+                      {continuityLoading ? "Checking across series..." : "Run series continuity check"}
                     </button>
 
                     {continuityLoading && continuityStatus ? (
@@ -617,7 +624,7 @@ export default function SeriesPage() {
                               }`}>
                                 <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{issue.title}</p>
                                 <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{issue.description}</p>
-                                {issue.suggestion && <p className={`mt-1.5 text-xs font-medium ${isDark ? "text-indigo-300" : "text-violet-700"}`}>â†’ {issue.suggestion}</p>}
+                                {issue.suggestion && <p className={`mt-1.5 text-xs font-medium ${isDark ? "text-indigo-300" : "text-violet-700"}`}>Suggestion: {issue.suggestion}</p>}
                               </div>
                             ))}
                           </div>
@@ -736,7 +743,7 @@ function SeriesBookCard({
   const isScreenplay = book.work_type === 'screenplay'
   const isComplete = progress >= 100
   const progressColor = isComplete
-    ? (isDark ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]")
+    ? "bg-emerald-500"
     : "bg-[#1f615d]"
 
   return (
@@ -845,8 +852,8 @@ function AddBookCard({
         <input
           value={position}
           onChange={(e) => setPosition(e.target.value.replace(/[^\d]/g, ""))}
-          placeholder={isScreenplay ? "Ep #" : "Vol #"}
-          className={`w-20 rounded-sm border-2 px-3 py-2 text-sm outline-none ${isDark ? "border-slate-700/70 bg-[#0f151c] text-white placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-900 placeholder:text-stone-400"}`}
+          aria-label={isScreenplay ? "Episode number" : "Volume number"}
+          className={`w-20 rounded-sm border-2 px-3 py-2 text-sm outline-none ${isDark ? "border-slate-700/70 bg-[#0f151c] text-white" : "border-stone-200 bg-white text-stone-900"}`}
         />
         <button
           onClick={async () => {

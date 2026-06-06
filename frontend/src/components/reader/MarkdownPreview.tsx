@@ -1,6 +1,7 @@
 "use client"
 
-import type { ObsidianVaultNote } from "@/types/book"
+import { useMemo } from "react"
+import type { VaultNote } from "@/types/book"
 import { sanitizeRichTextHtml } from "@/lib/utils/richText"
 
 function escapeHtml(value: string) {
@@ -11,7 +12,7 @@ function escapeHtml(value: string) {
 }
 
 type MarkdownRenderOptions = {
-  notesByPath?: Map<string, ObsidianVaultNote>
+  notesByPath?: Map<string, VaultNote>
   seen?: Set<string>
   depth?: number
 }
@@ -27,7 +28,7 @@ function inlineMarkdownToHtml(value: string, options: MarkdownRenderOptions = {}
     const label = escapeHtml((alias || trimmedTarget).trim())
     const note = options.notesByPath ? findNote(options.notesByPath, trimmedTarget) : null
     if (!note) {
-      return `<a href="#obsidian-note=${encodeURIComponent(trimmedTarget)}">${label}</a>`
+      return `<a href="#vault-note=${encodeURIComponent(trimmedTarget)}">${label}</a>`
     }
 
     const seen = options.seen ?? new Set<string>()
@@ -43,12 +44,12 @@ function inlineMarkdownToHtml(value: string, options: MarkdownRenderOptions = {}
       seen: nextSeen,
       depth: (options.depth ?? 0) + 1,
     })
-    return `<blockquote><p><strong>Embedded note:</strong> <a href="#obsidian-note=${encodeURIComponent(note.path)}">${label}</a></p>${embedded}</blockquote>`
+    return `<blockquote><p><strong>Embedded note:</strong> <a href="#vault-note=${encodeURIComponent(note.path)}">${label}</a></p>${embedded}</blockquote>`
   })
   html = html.replace(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g, (_, target: string, alias?: string) => {
     const safeTarget = encodeURIComponent(target.trim())
     const label = escapeHtml((alias || target).trim())
-    return `<a href="#obsidian-note=${safeTarget}">${label}</a>`
+    return `<a href="#vault-note=${safeTarget}">${label}</a>`
   })
   return html
 }
@@ -126,16 +127,18 @@ export function MarkdownPreview({
 }: {
   content: string
   isDark: boolean
-  notes?: ObsidianVaultNote[]
+  notes?: VaultNote[]
   currentPath?: string | null
   onOpenNote: (reference: string) => void
 }) {
-  const notesByPath = new Map((notes ?? []).map((note) => [note.path.toLowerCase(), note]))
-  const html = markdownToHtml(content, {
-    notesByPath,
-    seen: currentPath ? new Set([currentPath.toLowerCase()]) : new Set<string>(),
-    depth: 0,
-  })
+  const html = useMemo(() => {
+    const notesByPath = new Map((notes ?? []).map((note) => [note.path.toLowerCase(), note]))
+    return markdownToHtml(content, {
+      notesByPath,
+      seen: currentPath ? new Set([currentPath.toLowerCase()]) : new Set<string>(),
+      depth: 0,
+    })
+  }, [content, notes, currentPath])
 
   return (
     <div
@@ -146,16 +149,16 @@ export function MarkdownPreview({
         const anchor = (event.target as HTMLElement | null)?.closest("a")
         if (!anchor) return
         const href = anchor.getAttribute("href") || ""
-        if (!href.startsWith("#obsidian-note=")) return
+        if (!href.startsWith("#vault-note=")) return
         event.preventDefault()
-        onOpenNote(decodeURIComponent(href.replace("#obsidian-note=", "")))
+        onOpenNote(decodeURIComponent(href.replace("#vault-note=", "")))
       }}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )
 }
 
-function findNote(notesByPath: Map<string, ObsidianVaultNote>, reference: string) {
+function findNote(notesByPath: Map<string, VaultNote>, reference: string) {
   const normalized = reference.replace(/\.md$/i, "").trim().toLowerCase()
   if (!normalized) return null
   for (const note of notesByPath.values()) {

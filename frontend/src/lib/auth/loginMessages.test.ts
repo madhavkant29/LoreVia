@@ -19,9 +19,31 @@ describe("loginMessages", () => {
     )
   })
 
+  it("maps the google oauth no-account detail to create-account guidance", () => {
+    expect(
+      normalizeLoginError(
+        "No account found for this Google login. Please create an account first via the Register page.",
+      ),
+    ).toBe(
+      "No account found for that sign-in. Create one if you're new to LoreVia, or use the same sign-in method you originally chose, like Google.",
+    )
+  })
+
   it("maps invalid credentials details to an invalid-password message", () => {
     expect(normalizeLoginError("Invalid credentials")).toBe(
       "Invalid email or password.",
+    )
+  })
+
+  it("maps the device account cap detail into clearer login guidance", () => {
+    expect(normalizeLoginError("This device is already linked to the maximum of 2 accounts.")).toBe(
+      "This device is already linked to 2 LoreVia accounts. Sign in with one of those accounts or use a different device or browser profile.",
+    )
+  })
+
+  it("keeps the device-account guidance aligned with backend-configured limits", () => {
+    expect(normalizeLoginError("This device is already linked to the maximum of 3 accounts.")).toBe(
+      "This device is already linked to 3 LoreVia accounts. Sign in with one of those accounts or use a different device or browser profile.",
     )
   })
 

@@ -402,6 +402,11 @@ def update_book_processing_state(
         last_error=last_error,
         parser_diagnostics=effective_parser_diagnostics,
     )
+    workspace = book.writer_workspace if isinstance(book.writer_workspace, dict) else {}
+    current_processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    active_rebuild_run_id = current_processing.get("rebuild_run_id") if isinstance(current_processing, dict) else None
+    if active_rebuild_run_id:
+        processing_state["rebuild_run_id"] = str(active_rebuild_run_id)
     extraction_status = "running"
     if status == "ready" or stage == "analysis":
         extraction_status = "succeeded"
@@ -456,6 +461,9 @@ async def mark_book_processing_cancelled(
         last_error=last_error or f"Book was removed while processing at {stage} stage.",
         parser_diagnostics=current_parser_diagnostics(book),
     )
+    from app.services.editor_project_service import fail_rebuild_if_active
+
+    await fail_rebuild_if_active(db, book, error=last_error or f"Book was removed while processing at {stage} stage.")
     await db.commit()
 
 

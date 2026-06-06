@@ -95,7 +95,7 @@ export function PostHogClient() {
             lineHeight: "1.6",
           }}
           buttonStyle={{
-            background: "linear-gradient(135deg,#4f46e5,#4338ca)",
+            background: "#6d28d9",
             color: "white",
             fontSize: "13px",
             borderRadius: "9999px",
@@ -106,7 +106,7 @@ export function PostHogClient() {
             color: "rgba(255,255,255,0.85)",
             border: "1px solid rgba(255,255,255,0.18)",
             fontSize: "13px",
-            borderRadius: "9999px",
+            borderRadius: "0.375rem",
             padding: "10px 14px",
           }}
         >

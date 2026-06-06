@@ -14,27 +14,9 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: useQueryClientMock,
 }))
 
-vi.mock("@/lib/api/books", () => ({
-  booksApi: {
-    getOverview: getOverviewMock,
-    getCharacters: getCharactersMock,
-  },
-}))
+import * as useNavigationPrefetchModule from "./useNavigationPrefetch"
 
-vi.mock("@/lib/api/intelligence", () => ({
-  intelligenceApi: {
-    advisorGreeting: advisorGreetingMock,
-  },
-}))
-
-vi.mock("@/lib/api/worldBuilding", () => ({
-  worldBuildingApi: {
-    listDocuments: listDocumentsMock,
-    listElements: listElementsMock,
-  },
-}))
-
-import { useNavigationPrefetch } from "./useNavigationPrefetch"
+const { useNavigationPrefetch } = useNavigationPrefetchModule
 
 describe("useNavigationPrefetch", () => {
   let container: HTMLDivElement | null = null
@@ -59,10 +41,22 @@ describe("useNavigationPrefetch", () => {
     useQueryClientMock.mockReturnValue({
       prefetchQuery: prefetchQueryMock,
     })
+    vi.spyOn(useNavigationPrefetchModule.prefetchLoaders, "loadBooksApi").mockResolvedValue({
+      getOverview: getOverviewMock,
+      getCharacters: getCharactersMock,
+    } as unknown as Awaited<ReturnType<typeof useNavigationPrefetchModule.prefetchLoaders.loadBooksApi>>)
+    vi.spyOn(useNavigationPrefetchModule.prefetchLoaders, "loadIntelligenceApi").mockResolvedValue({
+      advisorGreeting: advisorGreetingMock,
+    } as unknown as Awaited<ReturnType<typeof useNavigationPrefetchModule.prefetchLoaders.loadIntelligenceApi>>)
+    vi.spyOn(useNavigationPrefetchModule.prefetchLoaders, "loadWorldBuildingApi").mockResolvedValue({
+      listDocuments: listDocumentsMock,
+      listElements: listElementsMock,
+    } as unknown as Awaited<ReturnType<typeof useNavigationPrefetchModule.prefetchLoaders.loadWorldBuildingApi>>)
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
     if (root) {
       act(() => {
         root?.unmount()
@@ -252,7 +246,7 @@ describe("useNavigationPrefetch", () => {
     expect(prefetchQueryMock).not.toHaveBeenCalled()
   })
 
-  it("invokes the correct API functions", () => {
+  it("invokes the correct API functions", async () => {
     getOverviewMock.mockResolvedValue({})
     advisorGreetingMock.mockResolvedValue({})
     getCharactersMock.mockResolvedValue([])
@@ -270,9 +264,7 @@ describe("useNavigationPrefetch", () => {
     advanceTimers()
 
     const calls = prefetchQueryMock.mock.calls as Array<[{ queryFn: () => Promise<unknown> }]>
-    for (const call of calls) {
-      void call[0].queryFn()
-    }
+    await Promise.all(calls.map((call) => call[0].queryFn()))
 
     expect(getOverviewMock).toHaveBeenCalledWith("book-1")
     expect(advisorGreetingMock).toHaveBeenCalledWith("book-1")

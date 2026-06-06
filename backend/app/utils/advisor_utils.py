@@ -49,7 +49,12 @@ from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
-from app.utils.llm_usage_utils import create_tracked_chat_completion, record_llm_usage_counts
+from app.utils.llm_usage_utils import (
+    assert_llm_token_capacity,
+    create_tracked_chat_completion,
+    estimate_chat_completion_tokens,
+    record_llm_usage_counts,
+)
 from app.utils.world_building_utils import build_world_logic_response, classify_world_intent
 
 log = logging.getLogger(__name__)
@@ -137,6 +142,43 @@ def safe_prompt_str(value: str | None) -> str:
     return (value or "").replace("{", "{{").replace("}", "}}")
 
 # ─── System / prompt templates ────────────────────────────────────────────────
+
+# ── Language context hint ──────────────────────────────────────────────────
+
+# Per-language display names for prompt enrichment
+_LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "fr": "French",
+    "es": "Spanish",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+}
+
+_SUPPORTED_LANGUAGES = frozenset(_LANGUAGE_NAMES.keys())
+
+
+def language_context_hint(language: str | None) -> str:
+    """Return a prompt hint instructing the LLM about the manuscript language.
+
+    When the language is non-English, the hint asks the model to:
+    - Extract and return structured JSON with English field names
+    - Preserve character names, locations, and quoted evidence in the source language
+    - Write descriptions and summaries in English
+
+    Returns an empty string for English or unknown languages.
+    """
+    if not language or language == "en" or language not in _SUPPORTED_LANGUAGES:
+        return ""
+    lang_name = _LANGUAGE_NAMES.get(language, language)
+    return (
+        f"The manuscript is in {lang_name}. "
+        "Extract characters, locations, events, relationships, and continuity issues. "
+        "Return structured JSON with English field names. "
+        "Preserve names and quoted evidence in the original language. "
+        "Write descriptions and summaries in English.\n\n"
+    )
+
 
 ADVISOR_SYSTEM = """\
 You are a Story Advisor for the novel "{title}". You are talking directly with the author.
@@ -1264,6 +1306,13 @@ async def stream_advisor_reply_payload(
     reply_parts: list[str] = []
     usage_counts: tuple[int, int, int] | None = None
     try:
+        await assert_llm_token_capacity(
+            db,
+            user_id=user_id,
+            estimated_tokens=estimate_chat_completion_tokens(
+                {"messages": prepared["llm_messages"], "max_tokens": 800}
+            ),
+        )
         stream = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
             temperature=0.55,
@@ -1483,6 +1532,13 @@ async def stream_series_advisor_reply_payload(
     reply_parts: list[str] = []
     usage_counts: tuple[int, int, int] | None = None
     try:
+        await assert_llm_token_capacity(
+            db,
+            user_id=user_id,
+            estimated_tokens=estimate_chat_completion_tokens(
+                {"messages": prepared["llm_messages"], "max_tokens": 900}
+            ),
+        )
         stream = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
             temperature=0.55,

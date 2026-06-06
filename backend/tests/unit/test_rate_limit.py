@@ -35,10 +35,17 @@ def test_client_identifier_prefers_cloudflare_header() -> None:
         {
             "x-forwarded-for": "198.51.100.7",
             "cf-connecting-ip": "203.0.113.11",
+            "x-lorevia-edge-verified": "1",
         }
     )
 
     assert _client_identifier(request) == "203.0.113.11"
+
+
+def test_client_identifier_ignores_forged_cloudflare_header_without_edge_marker() -> None:
+    request = _request_with_headers({"cf-connecting-ip": "203.0.113.11"}, client_host="198.51.100.8")
+
+    assert _client_identifier(request) == "198.51.100.8"
 
 
 def test_client_identifier_falls_back_to_socket_client() -> None:

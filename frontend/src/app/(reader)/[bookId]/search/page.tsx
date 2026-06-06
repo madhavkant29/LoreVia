@@ -87,7 +87,7 @@ function SearchPageInner() {
   const isAuthor = book?.mode === "author"
 
   return (
-    <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[linear-gradient(180deg,#000000_0%,#060606_44%,#0d0d0d_100%)] text-slate-100" : "bg-[linear-gradient(180deg,#fcf7ef_0%,#f8f3ec_46%,#f5f0ea_100%)] text-stone-950"}`}>
+    <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-5xl">
         <button onClick={() => router.back()} className={`text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>{"<- Back"}</button>
 
@@ -116,7 +116,7 @@ function SearchPageInner() {
             </p>
           </div>
           {isAuthor ? (
-            <Link href={`/${bookId}/reports`} className={`rounded-full border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+            <Link href={`/${bookId}/reports`} className={`rounded-md border px-4 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
               View chapter reports
             </Link>
           ) : null}
@@ -128,13 +128,16 @@ function SearchPageInner() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && runSearch()}
-              placeholder={isAuthor ? 'Find every scene where two characters are alone together' : 'Search for a scene, clue, or character moment'}
-              className={`flex-1 rounded-md border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white placeholder:text-slate-500" : "border-stone-200 bg-stone-50 text-stone-950 placeholder:text-stone-400"}`}
+              aria-label={isAuthor ? "Search manuscript" : "Search story"}
+              className={`flex-1 rounded-md border px-4 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-white" : "border-stone-200 bg-stone-50 text-stone-950"}`}
             />
-            <button onClick={() => runSearch()} disabled={loading} className="rounded-md bg-[linear-gradient(135deg,#115e59,#0f766e)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
+            <button onClick={() => runSearch()} disabled={loading} className="rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
               {loading ? "Searching..." : isAuthor ? "Search manuscript" : "Search"}
             </button>
           </div>
+          <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+            {isAuthor ? "Example: find every scene where two characters are alone together." : "Search for a scene, clue, or character moment."}
+          </p>
 
           <div className="mt-4 flex flex-wrap gap-2">
             {([
@@ -145,7 +148,7 @@ function SearchPageInner() {
                 key={value}
                 type="button"
                 onClick={() => setMode(value)}
-                className={`rounded-full border px-3 py-2 text-xs font-semibold ${mode === value
+                className={`rounded-md border px-3 py-2 text-xs font-semibold ${mode === value
                   ? isDark ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-800"
                   : isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"
                 }`}
@@ -161,7 +164,7 @@ function SearchPageInner() {
                 <button
                   key={prompt}
                   onClick={() => runSearch(prompt)}
-                  className={`rounded-full border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
+                  className={`rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}
                 >
                   {prompt}
                 </button>

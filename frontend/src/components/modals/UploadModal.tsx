@@ -1,7 +1,7 @@
 "use client"
 import axios from "axios"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { booksApi } from "@/lib/api/books"
 import { authApi } from "@/lib/api/auth"
 import { intelligenceApi } from "@/lib/api/intelligence"
@@ -13,9 +13,13 @@ import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
 import { asQueryKey, bookCacheKey, booksListCacheKey, booksSeriesCacheKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
 import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, PaginatedSeries, UserStats } from "@/types/book"
+import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, ImportPreview, PaginatedSeries, SectionMeta, UserStats } from "@/types/book"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
+import { ImportStructureEditor } from "@/components/modals/ImportStructureEditor"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { Skeleton } from "@/components/ui/Skeleton"
+import { Tooltip } from "@/components/ui/Tooltip"
 
 const MAX_TAGS = 8
 const TAG_SUGGESTION_LIMIT = 18
@@ -26,7 +30,7 @@ function getApiErrorDetail(error: unknown) {
   return typeof detail === "string" ? detail : null
 }
 
-export function UploadModal({
+export const UploadModal = memo(function UploadModal({
   onClose,
   initialMode = "reader",
   initialExistingBookId = "",
@@ -79,9 +83,15 @@ export function UploadModal({
   const [postImportSynopsis, setPostImportSynopsis] = useState<ManuscriptSynopsis | null>(null)
   const [chapterReports, setChapterReports] = useState<ChapterConsistencyReport[]>([])
   const [reportReady, setReportReady] = useState<{ bookId: string; chapterNum?: number; text: string } | null>(null)
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [dismissPreview, setDismissPreview] = useState(false)
+  const [importAsSingle, setImportAsSingle] = useState(false)
+  const [showEditor, setShowEditor] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const existingBookMenuRef = useRef<HTMLDivElement>(null)
+  const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const user = useAuthStore((state) => state.user)
   const canUploadAuthorMode = canUseAuthorFeatures(user?.tier)
@@ -180,6 +190,9 @@ export function UploadModal({
         setWorkType("screenplay")
       }
     }
+    setImportPreview(null)
+    setDismissPreview(false)
+    setImportAsSingle(false)
   }, [files, workTypeDirty])
 
   useEffect(() => {
@@ -190,7 +203,8 @@ export function UploadModal({
     setUploading(false)
     setProcessingBookId(null)
     if (processingBook.status === "ready") {
-      setTimeout(() => onClose(), 600)
+      const timer = setTimeout(() => onClose(), 600)
+      return () => clearTimeout(timer)
     }
   }, [onClose, processingBook, processingBookId])
 
@@ -278,6 +292,21 @@ export function UploadModal({
     setReportReady(null)
   }
 
+  const fetchPreview = async () => {
+    if (files.length === 0) return
+    setPreviewLoading(true)
+    setError(null)
+    try {
+      const preview = await booksApi.previewUpload(files[0], workType)
+      setImportPreview(preview)
+      setDismissPreview(false)
+    } catch (e) {
+      setError(getApiErrorDetail(e) || "Failed to analyze manuscript structure.")
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isManagingExisting && !canSubmitExistingImport) {
@@ -358,13 +387,17 @@ export function UploadModal({
       } else {
         const primaryFile = files[0]
         const filename = (primaryFile?.name || "").toLowerCase()
+        // When importAsSingle is true, disable chapter splitting
+        const effectiveSplit = importAsSingle ? false : true
+        const effectivePreserve = importAsSingle ? false : preserveChapterNumbers
         const format = filename.endsWith(".pdf") ? "pdf" : filename.endsWith(".epub") ? "epub" : "other"
         const response = await booksApi.upload(primaryFile, title, genre || undefined, author || undefined, {
           visibility,
           seriesIds: selectedSeriesIds,
           autoExtractCover,
-          preserveChapterNumbers,
+          preserveChapterNumbers: effectivePreserve,
           preserveSourceChapters,
+          forceSingleManuscript: importAsSingle,
           workType,
           coverFile: autoExtractCover ? null : coverFile,
           mode,
@@ -446,7 +479,7 @@ export function UploadModal({
           : null,
       ]
         .filter(Boolean)
-        .join(" · ")
+        .join(" - ")
     : null
   const uploadLimitCopy = uploadStats
     ? uploadStats.private.upload_limit_unlimited
@@ -458,7 +491,7 @@ export function UploadModal({
   const primaryActionDisabled =
     uploading ||
     needsUsername ||
-    (isManagingExisting ? !canSubmitExistingImport : startEmpty ? !title.trim() : files.length === 0)
+    (isManagingExisting ? !canSubmitExistingImport : startEmpty ? !title.trim() : importPreview && !dismissPreview ? true : files.length === 0)
   const primaryActionLabel = uploading
     ? uploadStage === "uploading"
       ? isManagingExisting && chapterSource === "paste"
@@ -473,12 +506,14 @@ export function UploadModal({
           : "Add Chapter & Process"
         : startEmpty
           ? "Start empty project"
-          : "Upload manuscript"
-  const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[92vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-4xl"} flex-col overflow-hidden rounded-lg border shadow-2xl transition-colors ${
+          : importPreview && !dismissPreview
+            ? "Review structure above to continue"
+            : "Upload manuscript"
+  const shellClassName = `flex ${isInline ? "min-h-0" : "max-h-[92vh]"} w-full ${postImportReview || isManagingExisting ? "max-w-5xl" : "max-w-4xl"} flex-col overflow-hidden rounded-lg border transition-colors ${
     isDark
       ? isInline
-        ? "border-white/10 bg-[#0B0B0B] text-slate-100 shadow-modal"
-        : "border-white/10 bg-[#0B0B0B]/95 backdrop-blur-xl text-slate-100 shadow-modal"
+        ? "border-white/10 bg-[#0B0B0B] text-slate-100"
+        : "border-white/10 bg-[#0B0B0B] text-slate-100"
       : "border-black/5 bg-white text-slate-950"
   }`
 
@@ -505,9 +540,15 @@ export function UploadModal({
             }`}
             aria-label="Close upload modal"
           >
-            ×
+            x
           </button>
         </div>
+
+        <UploadWizardSteps
+          isDark={isDark}
+          activeStep={uploadStage === "processing" ? 4 : importPreview && !dismissPreview ? 2 : files.length > 0 || startEmpty || isManagingExisting ? 1 : 0}
+          isManagingExisting={isManagingExisting}
+        />
 
         {uploadStage === "processing" && processingBook ? (
           <div className={`mb-4 rounded-xl border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
@@ -578,8 +619,182 @@ export function UploadModal({
                   </div>
                 </div>
               </div>
+
+              {files.length > 0 && !importPreview && !dismissPreview ? (
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={previewLoading}
+                    onClick={fetchPreview}
+                    className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                      isDark
+                        ? "bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                        : "bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                    }`}
+                  >
+                    {previewLoading ? (
+                      <span className="flex items-center gap-2">
+                        <Skeleton className="h-3.5 w-3.5 rounded-full bg-white/35" />
+                        Analyzing structure...
+                      </span>
+                    ) : (
+                      "Preview structure"
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDismissPreview(true)}
+                    className={`text-sm ${isDark ? "text-slate-400 hover:text-slate-300" : "text-slate-500 hover:text-slate-700"}`}
+                  >
+                    Skip preview
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
+
+          {importPreview && !dismissPreview ? (
+            <div className={`rounded-lg border p-5 ${isDark ? "border-indigo-500/30 bg-indigo-500/5" : "border-indigo-200 bg-indigo-50/80"}`}>
+              <div className="mb-3 flex items-center justify-between">
+                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-indigo-300" : "text-indigo-600"}`}>
+                  Structure preview
+                </p>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  importPreview.confidence >= 0.8 ? (isDark ? "bg-green-500/20 text-green-300" : "bg-green-100 text-green-700") :
+                  importPreview.confidence >= 0.5 ? (isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700") :
+                  (isDark ? "bg-red-500/20 text-red-300" : "bg-red-100 text-red-700")
+                }`}>
+                  {Math.round(importPreview.confidence * 100)}% confident
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className={`rounded-lg p-3 ${isDark ? "bg-white/[0.06]" : "bg-white"}`}>
+                  <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>Language</p>
+                  <p className={`mt-1 text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                    {importPreview.detected_language.toUpperCase()}
+                    {importPreview.language_confidence > 0 ? (
+                      <span className="ml-1 text-xs font-normal opacity-60">{Math.round(importPreview.language_confidence * 100)}%</span>
+                    ) : null}
+                  </p>
+                </div>
+                <div className={`rounded-lg p-3 ${isDark ? "bg-white/[0.06]" : "bg-white"}`}>
+                  <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>Chapters</p>
+                  <p className={`mt-1 text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                    {importPreview.chapter_count}
+                  </p>
+                </div>
+                <div className={`rounded-lg p-3 ${isDark ? "bg-white/[0.06]" : "bg-white"}`}>
+                  <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>Front matter</p>
+                  <p className={`mt-1 text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                    {importPreview.front_matter_count}
+                  </p>
+                </div>
+                <div className={`rounded-lg p-3 ${isDark ? "bg-white/[0.06]" : "bg-white"}`}>
+                  <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>TOC</p>
+                  <p className={`mt-1 text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                    {importPreview.toc_detected ? "Detected" : "None"}
+                  </p>
+                </div>
+              </div>
+
+              {importPreview.sections.length > 0 ? (
+                <div className="mt-3">
+                  <p className={`mb-2 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Sections ({importPreview.sections.length})
+                  </p>
+                  <div className={`max-h-48 overflow-y-auto rounded-lg border ${isDark ? "border-white/10" : "border-slate-200"}`}>
+                    {importPreview.sections.filter(s => s.type !== "unknown" || s.title).slice(0, 20).map((s) => (
+                      <div key={s.id} className={`flex items-center gap-3 border-b px-3 py-2 text-xs last:border-b-0 ${isDark ? "border-white/5" : "border-slate-100"}`}>
+                        <span className={`rounded px-1.5 py-0.5 font-medium ${
+                          s.include_in_analysis
+                            ? (isDark ? "bg-green-500/20 text-green-300" : "bg-green-100 text-green-700")
+                            : (isDark ? "bg-slate-500/20 text-slate-400" : "bg-slate-100 text-slate-500")
+                        }`}>
+                          {s.type}
+                        </span>
+                        <span className={isDark ? "text-slate-300" : "text-slate-700"}>
+                          {s.title || `Section ${s.number ?? "?"}`}
+                        </span>
+                        {!s.include_in_analysis ? (
+                          <span className={`ml-auto text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>excluded</span>
+                        ) : null}
+                      </div>
+                    ))}
+                    {importPreview.sections.length > 20 ? (
+                      <div className={`px-3 py-2 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                        +{importPreview.sections.length - 20} more sections
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {importPreview.warnings.length > 0 ? (
+                <div className="mt-3 space-y-1">
+                  {importPreview.warnings.map((w, i) => (
+                    <div key={i} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
+                      w.severity === "error" ? (isDark ? "bg-red-500/10 text-red-300" : "bg-red-50 text-red-700") :
+                      w.severity === "warning" ? (isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-700") :
+                      (isDark ? "bg-blue-500/10 text-blue-300" : "bg-blue-50 text-blue-700")
+                    }`}>
+                      <span className="mt-0.5 shrink-0">{w.severity === "error" ? "\u26A0" : w.severity === "warning" ? "\u25B2" : "\u2139"}</span>
+                      <span>{w.message}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  onClick={() => { setImportAsSingle(false) }}
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    isDark
+                      ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                      : "bg-indigo-600 text-white hover:bg-indigo-700"
+                  }`}
+                >
+                  Confirm &amp; Import
+                </button>
+                <button
+                  type="submit"
+                  onClick={() => { setImportAsSingle(true) }}
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    isDark
+                      ? "border border-white/20 bg-white/5 text-slate-200 hover:bg-white/10"
+                      : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  Import as single file
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditor(true)
+                  }}
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Edit structure
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {importPreview && showEditor ? (
+            <ImportStructureEditor
+              sections={importPreview.sections}
+              isDark={isDark}
+              onSave={(updatedSections) => {
+                setImportPreview({ ...importPreview, sections: updatedSections })
+                setShowEditor(false)
+              }}
+              onCancel={() => setShowEditor(false)}
+            />
+          ) : null}
+
           {!isManagingExisting ? (
             <div className="mb-1">
               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Optional metadata</p>
@@ -588,42 +803,46 @@ export function UploadModal({
 
           {!isManagingExisting ? (
             <div className="grid gap-4 xl:grid-cols-2">
-              <input
-                type="text"
-                placeholder="Title"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                onInput={e => setTitle((e.target as HTMLInputElement).value)}
-                required
-                className={`rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark
-                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-                }`}
-              />
+              <label className="grid gap-2">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Title</span>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  onInput={e => setTitle((e.target as HTMLInputElement).value)}
+                  required
+                  aria-label="Title"
+                  className={`rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark
+                      ? "border-white/10 bg-white/5 text-slate-100"
+                      : "border-gray-300 bg-white text-slate-950"
+                  }`}
+                />
+              </label>
               <div className="space-y-2">
-              <input
-                type="text"
-                placeholder={mode === "author"
-                  ? "Manuscript author or pen name"
-                  : willUseBlankCoverFallback
-                    ? "Author (shown on blank cover if no cover is found)"
-                    : "Author (optional)"}
-                value={author}
-                onChange={(e) => {
-                  setAuthor(e.target.value)
-                  setAuthorManuallyEdited(true)
-                }}
-                onInput={(e) => {
-                  setAuthor((e.target as HTMLInputElement).value)
-                  setAuthorManuallyEdited(true)
-                }}
-                className={`w-full rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                  isDark
-                    ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500"
-                    : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"
-                }`}
-              />
+              <label className="grid gap-2">
+                <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  {mode === "author" ? "Manuscript author or pen name" : willUseBlankCoverFallback ? "Author for blank cover" : "Author"}
+                </span>
+                <input
+                  type="text"
+                  value={author}
+                  onChange={(e) => {
+                    setAuthor(e.target.value)
+                    setAuthorManuallyEdited(true)
+                  }}
+                  onInput={(e) => {
+                    setAuthor((e.target as HTMLInputElement).value)
+                    setAuthorManuallyEdited(true)
+                  }}
+                  aria-label={mode === "author" ? "Manuscript author or pen name" : willUseBlankCoverFallback ? "Author for blank cover" : "Author"}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                    isDark
+                      ? "border-white/10 bg-white/5 text-slate-100"
+                      : "border-gray-300 bg-white text-slate-950"
+                  }`}
+                />
+              </label>
               {willUseBlankCoverFallback ? (
                 <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   If LoreVia cannot find a cover, it will generate a blank cover page using the title and author.
@@ -710,7 +929,7 @@ export function UploadModal({
                     disabled={locked}
                     className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
                       active
-                        ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                        ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950"
                         : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white/70"
                     }`}
                   >
@@ -739,7 +958,7 @@ export function UploadModal({
                   }}
                   className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${
                     !startEmpty
-                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950"
                       : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white/70"
                   }`}
                 >
@@ -753,7 +972,7 @@ export function UploadModal({
                   }}
                   className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${
                     startEmpty
-                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950 shadow-sm"
+                      ? isDark ? "bg-white text-slate-950" : "bg-white text-stone-950"
                       : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-white/70"
                   }`}
                 >
@@ -767,9 +986,9 @@ export function UploadModal({
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="username"
                     value={usernameInput}
                     onChange={(e) => setUsernameInput(e.target.value)}
+                    aria-label="Username"
                     className={`flex-1 rounded-lg border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
                     minLength={3}
                     maxLength={32}
@@ -809,7 +1028,7 @@ export function UploadModal({
                   {existingBookMenuOpen ? (
                     <div
                       role="listbox"
-                      className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-300 bg-white py-1 shadow-2xl"
+                      className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-gray-300 bg-white py-1"
                     >
                       <button
                         type="button"
@@ -869,8 +1088,8 @@ export function UploadModal({
                 type="text"
                 value={customTag}
                 onChange={e => setCustomTag(e.target.value)}
-                placeholder="Add genres or moods..."
-                className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-500"
+                aria-label="Add genres or moods"
+                className="flex-1 bg-transparent py-1.5 text-sm outline-none"
               />
               {customTag.trim().length > 0 && (
                 <button
@@ -927,7 +1146,7 @@ export function UploadModal({
                       : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  {tag} ×
+                  {tag} x
                 </button>
               ))}
             </div>
@@ -974,7 +1193,7 @@ export function UploadModal({
           ) : null}
 
           {isManagingExisting ? (
-            <div className={`rounded-2xl border p-5 ${isDark ? "border-indigo-500/20 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.18),transparent_45%),rgba(255,255,255,0.03)]" : "border-indigo-200 bg-[radial-gradient(circle_at_top_left,rgba(224,231,255,0.9),transparent_45%),#f8fafc]"}`}>
+            <div className={`rounded-md border p-5 ${isDark ? "border-indigo-500/20 bg-white/[0.03]" : "border-indigo-200 bg-slate-50"}`}>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-indigo-300" : "text-indigo-700"}`}>Single-{isScreenplayWorkspace ? "script" : "chapter"} workflow</p>
@@ -982,9 +1201,9 @@ export function UploadModal({
                     LoreVia will attach this {isScreenplayWorkspace ? "scene batch or script segment" : "chapter"} to {selectedExistingBook ? `"${selectedExistingBook.title}"` : "your selected manuscript"}, update character memory and thread data, then surface continuity risks from the fresh ingest.
                   </p>
                 </div>
-                <div className={`rounded-xl border px-4 py-3 text-xs ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-white bg-white text-stone-600 shadow-sm"}`}>
+                <div className={`rounded-md border px-4 py-3 text-xs ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-white bg-white text-stone-600"}`}>
                   <p className="font-semibold">After processing</p>
-                  <p className="mt-1">You’ll get a fresh summary, new-character changes, thread movement, and continuity review.</p>
+                  <p className="mt-1">You'll get a fresh summary, new-character changes, thread movement, and continuity review.</p>
                 </div>
               </div>
 
@@ -1004,7 +1223,7 @@ export function UploadModal({
                       }}
                       className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                         active
-                          ? isDark ? "bg-white text-slate-950" : "bg-indigo-600 text-white shadow-sm"
+                          ? isDark ? "bg-white text-slate-950" : "bg-indigo-600 text-white"
                           : isDark ? "text-slate-300 hover:bg-white/10" : "text-stone-600 hover:bg-stone-100"
                       }`}
                     >
@@ -1020,12 +1239,12 @@ export function UploadModal({
                     <input
                       type="number"
                       min={1}
-                      placeholder={`${storyUnitLabelTitle} number`}
                       value={chapterNumber}
                       onChange={(e) => {
                         setChapterNumber(e.target.value)
                         setChapterNumberDirty(true)
                       }}
+                      aria-label={`${storyUnitLabelTitle} number`}
                       className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
                     />
                     <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-300" : "border-gray-300 bg-white text-slate-700"}`}>
@@ -1038,20 +1257,23 @@ export function UploadModal({
                     <>
                       <input
                         type="text"
-                        placeholder={`${storyUnitLabelTitle} title (optional)`}
                         value={chapterTitle}
                         onChange={(e) => setChapterTitle(e.target.value)}
-                        className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100 placeholder:text-slate-500" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400"}`}
+                        aria-label={`${storyUnitLabelTitle} title`}
+                        className={`rounded-lg border px-3 py-2.5 text-sm ${isDark ? "border-white/10 bg-white/5 text-slate-100" : "border-gray-300 bg-white text-slate-950"}`}
                       />
                       <textarea
                         value={chapterText}
                         onChange={(e) => setChapterText(e.target.value)}
-                        placeholder={isScreenplayWorkspace
+                        rows={14}
+                        aria-label={`${storyUnitLabelTitle} text`}
+                        className={`min-h-[280px] rounded-xl border px-3 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-black/20 text-slate-100 focus:border-indigo-400/50" : "border-gray-300 bg-white text-slate-950 focus:border-indigo-400"}`}
+                      />
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                        {isScreenplayWorkspace
                           ? "Paste screenplay text here. LoreVia will split scenes, refresh character profiles, and immediately run continuity checks."
                           : "Paste one chapter here. LoreVia will save it into the manuscript, refresh character profiles, and immediately run continuity checks."}
-                        rows={14}
-                        className={`min-h-[280px] rounded-xl border px-3 py-3 text-sm leading-6 outline-none transition ${isDark ? "border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-500 focus:border-indigo-400/50" : "border-gray-300 bg-white text-slate-950 placeholder:text-slate-400 focus:border-indigo-400"}`}
-                      />
+                      </p>
                       <div className={`flex items-center justify-between text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                         <span>{chapterText.trim() ? `${chapterText.trim().split(/\s+/).length} words ready` : `No ${storyUnitLabel} text pasted yet`}</span>
                         <span>{replaceExisting ? `Will replace the selected ${storyUnitLabel} number` : `Will append if the ${storyUnitLabel} number is new`}</span>
@@ -1088,42 +1310,50 @@ export function UploadModal({
                 </div>
 
                 <div className="space-y-3">
-                  <div className={`rounded-xl border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-white bg-white shadow-sm"}`}>
+                  <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-white bg-white"}`}>
                     <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Processing options</p>
                     <div className="mt-3 flex flex-wrap gap-3">
                       <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         <input type="checkbox" checked={splitIntoChapters} onChange={(e) => setSplitIntoChapters(e.target.checked)} />
                         <span className="inline-flex items-center gap-1">
                           <span>{isScreenplayWorkspace ? "Split screenplay PDFs into scenes" : "Split PDFs into chapters"}</span>
-                          <button
-                            type="button"
-                            title={isScreenplayWorkspace
+                          <Tooltip
+                            content={isScreenplayWorkspace
                               ? "Keeps detected scene headings together. If screenplay formatting is noisy, LoreVia will still build a stable scene order."
                               : "Keeps detected chapters together. If chapter numbering is inconsistent, LoreVia will use its normal sequential split."}
-                            aria-label={isScreenplayWorkspace ? "What Split screenplay PDFs into scenes means" : "What Split PDFs into chapters means"}
-                            className={infoButtonClass}
                           >
-                            i
-                          </button>
+                            <button
+                              type="button"
+                              title={isScreenplayWorkspace
+                                ? "Keeps detected scene headings together. If screenplay formatting is noisy, LoreVia will still build a stable scene order."
+                                : "Keeps detected chapters together. If chapter numbering is inconsistent, LoreVia will use its normal sequential split."}
+                              aria-label={isScreenplayWorkspace ? "What Split screenplay PDFs into scenes means" : "What Split PDFs into chapters means"}
+                              className={infoButtonClass}
+                            >
+                              i
+                            </button>
+                          </Tooltip>
                         </span>
                       </label>
                       <label className={`flex items-center gap-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         <input type="checkbox" checked={chunkLongDocuments} onChange={(e) => setChunkLongDocuments(e.target.checked)} />
                         <span className="inline-flex items-center gap-1">
                           <span>Chunk long files</span>
-                          <button
-                            type="button"
-                            title="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript."
-                            aria-label="What Chunk long files means"
-                            className={infoButtonClass}
-                          >
-                            i
-                          </button>
+                          <Tooltip content="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript.">
+                            <button
+                              type="button"
+                              title="Breaks long text into smaller pieces (3,500 words per chapter) for easier processing. This may create more chapters than your original manuscript."
+                              aria-label="What Chunk long files means"
+                              className={infoButtonClass}
+                            >
+                              i
+                            </button>
+                          </Tooltip>
                         </span>
                       </label>
                       {chunkLongDocuments ? (
                         <p className={`ml-5 mt-1 text-xs ${isDark ? "text-amber-300" : "text-amber-700"}`}>
-                          ⚠️ This will split long chapters at 3,500 words. A 35,000-word manuscript may become 10+ chapters.
+                          Warning: This will split long chapters at 3,500 words. A 35,000-word manuscript may become 10+ chapters.
                         </p>
                       ) : null}
                     </div>
@@ -1389,6 +1619,10 @@ export function UploadModal({
             </div>
           ) : null}
 
+          {(chapterReports.length > 0 || postImportReview) ? (
+            <PostImportChecklist isDark={isDark} hasReview={Boolean(postImportReview)} hasReports={chapterReports.length > 0} />
+          ) : null}
+
           {postImportReview ? (
             <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-stone-50"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1487,7 +1721,7 @@ export function UploadModal({
                     {postImportThreads.length > 0 ? postImportThreads.map((thread) => (
                       <div key={thread.id} className={`mb-2 rounded-lg border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                         <p className="font-semibold">{thread.title}</p>
-                        <p className="mt-1 text-xs opacity-80">Introduced in chapter {thread.introduced_at ?? "?"} · {thread.status}</p>
+                        <p className="mt-1 text-xs opacity-80">Introduced in chapter {thread.introduced_at ?? "?"} - {thread.status}</p>
                       </div>
                     )) : <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No unresolved thread warnings loaded.</p>}
                   </div>
@@ -1507,16 +1741,44 @@ export function UploadModal({
           ) : null}
           </div>
           </div>
-          <div className={`sticky bottom-0 border-t px-6 py-4 ${isDark ? "border-white/10 bg-[#0B0B0B]/95" : "border-slate-200 bg-white/95"} backdrop-blur`}>
+          <div className={`sticky bottom-0 border-t px-6 py-4 ${isDark ? "border-white/10 bg-[#0B0B0B]" : "border-slate-200 bg-white"}`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 {isManagingExisting
                   ? `LoreVia will process this ${storyUnitLabel} after upload.`
-                  : files.length > 0
-                    ? "Ready to upload your manuscript."
-                    : "Select a file to enable upload."}
+                  : importPreview && !dismissPreview
+                    ? "Review the detected structure, then confirm to import."
+                    : files.length > 0
+                      ? "Ready to upload your manuscript."
+                      : "Select a file to enable upload."}
               </p>
               <div className="flex items-center gap-3">
+                {isManagingExisting ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const confirmed = await confirm({
+                        title: "Delete and reimport project?",
+                        body: "Delete this project and all its data? This cannot be undone.",
+                        confirmLabel: "Delete and reimport",
+                        tone: "danger",
+                      })
+                      if (!confirmed) return
+                      try {
+                        await booksApi.delete(existingBookId)
+                        void refetchBooks()
+                        onClose()
+                      } catch {
+                        setError("Failed to delete project.")
+                      }
+                    }}
+                    className={`rounded-xl px-4 py-2.5 text-sm font-medium transition ${
+                      isDark ? "border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20" : "border border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                    }`}
+                  >
+                    Delete &amp; reimport
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={onClose}
@@ -1542,19 +1804,89 @@ export function UploadModal({
 
   return isInline ? content : (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-md p-4 pt-6 md:pt-10"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 pt-6 md:pt-10"
       onClick={onClose}
     >
       {content}
     </div>
   )
-}
+})
 
 function normalizeTag(rawTag: string): string {
   return rawTag
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ")
+}
+
+function UploadWizardSteps({
+  isDark,
+  activeStep,
+  isManagingExisting,
+}: {
+  isDark: boolean
+  activeStep: number
+  isManagingExisting: boolean
+}) {
+  const steps = isManagingExisting
+    ? ["Choose source", "Add content", "Process", "Review"]
+    : ["Choose source", "Structure", "Details", "Process", "Review"]
+
+  return (
+    <div className={`border-b px-6 py-3 ${isDark ? "border-white/10 bg-white/[0.02]" : "border-slate-200/80 bg-slate-50/70"}`}>
+      <ol className="flex flex-wrap gap-2">
+        {steps.map((step, index) => {
+          const active = index <= activeStep
+          return (
+            <li
+              key={step}
+              className={`rounded-full border px-3 py-1.5 text-3xs font-semibold uppercase tracking-[0.18em] ${
+                active
+                  ? isDark
+                    ? "border-teal-300/20 bg-teal-500/10 text-teal-200"
+                    : "border-teal-200 bg-teal-50 text-teal-700"
+                  : isDark
+                    ? "border-white/10 bg-white/[0.03] text-slate-500"
+                    : "border-slate-200 bg-white text-slate-500"
+              }`}
+            >
+              {index + 1}. {step}
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+function PostImportChecklist({
+  isDark,
+  hasReview,
+  hasReports,
+}: {
+  isDark: boolean
+  hasReview: boolean
+  hasReports: boolean
+}) {
+  const items = [
+    { label: "Review imported structure", done: hasReports },
+    { label: "Scan continuity notes", done: hasReview },
+    { label: "Open the manuscript editor when processing finishes", done: false },
+  ]
+
+  return (
+    <div className={`mt-4 rounded-xl border p-4 ${isDark ? "border-teal-300/15 bg-teal-500/10" : "border-teal-100 bg-teal-50"}`}>
+      <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-teal-200" : "text-teal-700"}`}>Post-import checklist</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {items.map((item) => (
+          <div key={item.label} className={`rounded-lg border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/10 text-slate-200" : "border-white bg-white text-stone-700"}`}>
+            <span className={item.done ? "font-semibold" : ""}>{item.done ? "Done: " : "Next: "}</span>
+            {item.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function normalizeKeywords(input: string) {

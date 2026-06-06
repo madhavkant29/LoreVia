@@ -253,7 +253,7 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
     return (
       <section className={`flex ${shellClass} flex-col ${isDark ? "bg-[#05070a] text-slate-100" : "bg-white text-slate-950"}`}>
         <div className="flex flex-1 items-center justify-center p-8">
-          <div className={`rounded-3xl border px-6 py-6 text-sm ${isDark ? "border-white/10 bg-[#0c1219] text-slate-400" : "border-slate-200 bg-white text-slate-600"}`}>
+          <div className={`rounded-lg border px-6 py-6 text-sm ${isDark ? "border-white/10 bg-[#0c1219] text-slate-400" : "border-slate-200 bg-white text-slate-600"}`}>
             Loading chats...
           </div>
         </div>
@@ -265,14 +265,14 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
     return (
       <section className={`flex ${shellClass} flex-col ${isDark ? "bg-[#05070a] text-slate-100" : "bg-white text-slate-950"}`}>
         <div className="flex flex-1 items-center justify-center p-8">
-          <div className={`max-w-md rounded-3xl border px-6 py-6 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-white"}`}>
+          <div className={`max-w-md rounded-lg border px-6 py-6 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-white"}`}>
             <p className="text-lg font-semibold">Sign in to use direct messages</p>
             <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
               Private chats are only available to signed-in members. Friend requests are approved from notifications after you sign in.
             </p>
             <Link
               href="/login"
-              className={`mt-4 inline-flex rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09]"}`}
+              className={`mt-4 inline-flex rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
             >
               Go to login
             </Link>
@@ -292,7 +292,7 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
         <button
           type="button"
           onClick={() => setRefreshTick((current) => current + 1)}
-          className={`rounded-full border px-3 py-2 text-xs font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+          className={`rounded-md border px-3 py-2 text-xs font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
         >
           Refresh
         </button>
@@ -300,13 +300,13 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className={`min-h-0 border-b p-4 lg:border-b-0 lg:border-r ${isDark ? "border-white/10 bg-[#0a0f14]" : "border-slate-200 bg-slate-50/60"}`}>
-          <label className={`flex h-11 items-center gap-3 rounded-2xl border px-4 ${isDark ? "border-white/10 bg-[#111822]" : "border-slate-200 bg-white"}`}>
+          <label className={`flex h-11 items-center gap-3 rounded-md border px-4 ${isDark ? "border-white/10 bg-[#111822]" : "border-slate-200 bg-white"}`}>
             <SearchIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
             <input
               value={search}
               onChange={(event) => void runSearch(event.target.value)}
-              placeholder="Search usernames"
-              className={`w-full bg-transparent text-sm outline-none ${isDark ? "placeholder:text-slate-600" : "placeholder:text-slate-400"}`}
+              aria-label="Search usernames"
+              className="w-full bg-transparent text-sm outline-none"
             />
           </label>
 
@@ -314,7 +314,7 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
             <div className="mt-4 space-y-2">
               <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Pending for you</p>
               {relationships.incoming_requests.slice(0, 3).map((request) => (
-                <div key={request.id} className={`rounded-2xl border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-700"}`}>
+                <div key={request.id} className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-700"}`}>
                   @{request.requester_username || "member"} wants to connect.
                 </div>
               ))}
@@ -325,9 +325,9 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
             <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Conversations</p>
             <div className="mt-3 space-y-2">
               {loading ? (
-                <div className={`rounded-2xl border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Loading chats...</div>
+                <div className={`rounded-md border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Loading chats...</div>
               ) : conversations.length === 0 ? (
-                <div className={`rounded-2xl border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>No conversations yet.</div>
+                <div className={`rounded-md border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>No conversations yet.</div>
               ) : conversations.map((conversation) => (
                 <button
                   key={conversation.id}
@@ -336,7 +336,7 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
                     setSelectedConversationId(conversation.id)
                     setSelectedSearchUser(null)
                   }}
-                  className={`w-full rounded-2xl border px-3 py-3 text-left transition ${selectedConversationId === conversation.id ? (isDark ? "border-amber-400/30 bg-amber-400/10" : "border-orange-200 bg-orange-50") : (isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]" : "border-slate-200 bg-white hover:bg-slate-50")}`}
+                  className={`w-full rounded-md border px-3 py-3 text-left transition ${selectedConversationId === conversation.id ? (isDark ? "border-teal-300/30 bg-teal-300/10" : "border-teal-200 bg-teal-50") : (isDark ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]" : "border-slate-200 bg-white hover:bg-slate-50")}`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold">@{conversation.other_user.username}</p>
@@ -355,15 +355,15 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
               <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Search results</p>
               <div className="mt-3 space-y-2">
                 {searching ? (
-                  <div className={`rounded-2xl border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Searching...</div>
+                  <div className={`rounded-md border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>Searching...</div>
                 ) : searchResults.length === 0 ? (
-                  <div className={`rounded-2xl border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>No matching usernames.</div>
+                  <div className={`rounded-md border px-3 py-4 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-400" : "border-slate-200 bg-white text-slate-500"}`}>No matching usernames.</div>
                 ) : searchResults.map((result) => (
                   <button
                     key={result.id}
                     type="button"
                     onClick={() => setSelectedSearchUser(result)}
-                    className={`w-full rounded-2xl border px-3 py-3 text-left transition ${selectedSearchUser?.id === result.id ? (isDark ? "border-cyan-400/30 bg-cyan-400/10" : "border-cyan-200 bg-cyan-50") : (isDark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-white")}`}
+                    className={`w-full rounded-md border px-3 py-3 text-left transition ${selectedSearchUser?.id === result.id ? (isDark ? "border-teal-300/30 bg-teal-300/10" : "border-teal-200 bg-teal-50") : (isDark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-white")}`}
                   >
                     <p className="text-sm font-semibold">@{result.username}</p>
                     <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
@@ -378,25 +378,25 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
 
         <div className="min-h-0 p-4 lg:p-5">
           {status ? (
-            <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{status}</div>
+            <div className={`mb-4 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-700"}`}>{status}</div>
           ) : null}
 
           {selectedConversation ? (
             <div className="flex h-full min-h-[28rem] flex-col">
-              <div className={`rounded-3xl border px-4 py-4 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-slate-50"}`}>
+              <div className={`rounded-lg border px-4 py-4 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-lg font-semibold">@{selectedConversation.other_user.username}</p>
                 <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                   {selectedConversation.other_user.messaging_permission === "friends_only" ? "Friends only messaging" : "Open to messages from anyone"}
                 </p>
               </div>
 
-              <div className={`reader-scrollbar mt-4 flex-1 overflow-y-auto rounded-3xl border p-4 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-white"}`}>
+              <div className={`reader-scrollbar mt-4 flex-1 overflow-y-auto rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-white"}`}>
                 <div className="space-y-3">
                   {messages.map((message) => {
                     const mine = message.sender_user_id === user?.id
                     return (
                       <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${mine ? (isDark ? "bg-amber-400 text-slate-950" : "bg-[#ff6a1a] text-white") : (isDark ? "bg-white/[0.05] text-slate-100" : "bg-slate-100 text-slate-800")}`}>
+                        <div className={`max-w-[85%] rounded-lg px-4 py-3 text-sm leading-6 ${mine ? (isDark ? "bg-teal-300 text-slate-950" : "bg-[#1f615d] text-white") : (isDark ? "bg-white/[0.05] text-slate-100" : "bg-slate-100 text-slate-800")}`}>
                           <p>{message.body}</p>
                           <p className={`mt-2 text-3xs ${mine ? "text-current/80" : (isDark ? "text-slate-500" : "text-slate-500")}`}>{new Date(message.created_at).toLocaleString()}</p>
                         </div>
@@ -410,21 +410,21 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
                 <textarea
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
-                  placeholder="Write a message"
-                  className={`min-h-[6rem] flex-1 rounded-2xl border px-4 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-[#0c1219] text-slate-100 placeholder:text-slate-600" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400"}`}
+                  aria-label="Message"
+                  className={`min-h-[6rem] flex-1 rounded-md border px-4 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-[#0c1219] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
                 />
                 <button
                   type="button"
                   onClick={() => void handleSendMessage()}
                   disabled={sending || !messageDraft.trim()}
-                  className={`self-end rounded-full px-4 py-3 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300 disabled:bg-amber-400/40" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09] disabled:bg-slate-300"}`}
+                  className={`self-end rounded-md px-4 py-3 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
                 >
                   {sending ? "Sending..." : "Send"}
                 </button>
               </div>
             </div>
           ) : selectedSearchUser ? (
-            <div className={`rounded-3xl border p-5 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-white"}`}>
+            <div className={`rounded-lg border p-5 ${isDark ? "border-white/10 bg-[#0c1219]" : "border-slate-200 bg-white"}`}>
               <p className="text-lg font-semibold">@{selectedSearchUser.username}</p>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                 {selectedSearchUser.messaging_permission === "friends_only"
@@ -436,7 +436,7 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
                   <button
                     type="button"
                     onClick={() => void handleOpenConversation(selectedSearchUser.id)}
-                    className={`rounded-full px-4 py-3 text-sm font-semibold transition ${isDark ? "bg-amber-400 text-slate-950 hover:bg-amber-300" : "bg-[#ff6a1a] text-white hover:bg-[#f05a09]"}`}
+                    className={`rounded-md px-4 py-3 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}
                   >
                     Open chat
                   </button>
@@ -448,7 +448,7 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
                   <button
                     type="button"
                     onClick={() => void handleSendFriendRequest(selectedSearchUser.id)}
-                    className={`rounded-full px-4 py-3 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/[0.03] text-slate-100 hover:bg-white/[0.05]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
+                    className={`rounded-md px-4 py-3 text-sm font-semibold transition ${isDark ? "border border-white/10 bg-white/[0.03] text-slate-100 hover:bg-white/[0.05]" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}
                   >
                     Send friend request
                   </button>
@@ -456,7 +456,7 @@ export function ChatsPanel({ mode = "sidebar", enabled = true }: { mode?: "sideb
               </div>
             </div>
           ) : (
-            <div className={`rounded-3xl border p-6 ${isDark ? "border-white/10 bg-[#0c1219] text-slate-400" : "border-slate-200 bg-white text-slate-600"}`}>
+            <div className={`rounded-lg border p-6 ${isDark ? "border-white/10 bg-[#0c1219] text-slate-400" : "border-slate-200 bg-white text-slate-600"}`}>
               Pick a conversation or search for a username to start a private chat.
             </div>
           )}

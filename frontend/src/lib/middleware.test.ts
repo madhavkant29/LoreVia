@@ -1,7 +1,14 @@
 import { NextRequest } from "next/server"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { buildContentSecurityPolicy, config, createNonce, middleware } from "../middleware"
+import {
+  buildContentSecurityPolicy,
+  config,
+  createNonce,
+  isPrivatePageRoute,
+  isPublicPageRoute,
+  middleware,
+} from "../middleware"
 
 describe("middleware CSP", () => {
   const originalEnv = { ...process.env }
@@ -43,6 +50,156 @@ describe("middleware CSP", () => {
     const response = middleware(new NextRequest("https://getlorevia.com/login"))
 
     expect(response.headers.get("Content-Security-Policy")).toBeNull()
+  })
+
+  it("redirects unauthenticated users from private pages to login with next", () => {
+    Object.assign(process.env, { NODE_ENV: "development" })
+
+    const response = middleware(new NextRequest("https://getlorevia.com/library"))
+
+    expect(response.headers.get("location")).toBe("https://getlorevia.com/login?next=%2Flibrary")
+  })
+
+  it("preserves the target query string in login next redirects", () => {
+    Object.assign(process.env, { NODE_ENV: "development" })
+
+    const response = middleware(new NextRequest("https://getlorevia.com/library?sort=recent"))
+
+    expect(response.headers.get("location")).toBe("https://getlorevia.com/login?next=%2Flibrary%3Fsort%3Drecent")
+  })
+
+  it("redirects unauthenticated users from private book routes to login", () => {
+    Object.assign(process.env, { NODE_ENV: "development" })
+
+    const response = middleware(new NextRequest("https://getlorevia.com/sky-of-ash--book-1/manuscript"))
+
+    expect(response.headers.get("location")).toBe(
+      "https://getlorevia.com/login?next=%2Fsky-of-ash--book-1%2Fmanuscript"
+    )
+  })
+
+  it("redirects authenticated users away from auth entry pages", () => {
+    Object.assign(process.env, { NODE_ENV: "development" })
+
+    const request = new NextRequest("https://getlorevia.com/login?next=%2Fstats", {
+      headers: {
+        cookie: "lorevia_refresh_token=refresh-token",
+      },
+    })
+    const response = middleware(request)
+
+    expect(response.headers.get("location")).toBe("https://getlorevia.com/library")
+  })
+
+  it("allows public pages for authenticated and unauthenticated users", () => {
+    Object.assign(process.env, { NODE_ENV: "development" })
+
+    const guestResponse = middleware(new NextRequest("https://getlorevia.com/blog/how-to-revise"))
+    const authResponse = middleware(new NextRequest("https://getlorevia.com/public/forum", {
+      headers: {
+        cookie: "lorevia_access_token=access-token",
+      },
+    }))
+
+    expect(guestResponse.headers.get("location")).toBeNull()
+    expect(authResponse.headers.get("location")).toBeNull()
+  })
+
+  it("classifies known public page routes as non-private", () => {
+    const publicRoutes = [
+      "/",
+      "/answers",
+      "/answers/how-do-i-track-character-arcs",
+      "/auth/callback",
+      "/blog",
+      "/blog/how-to-keep-track-of-characters",
+      "/checkout",
+      "/checkout/success",
+      "/compare",
+      "/compare/lorevia-vs-scrivener",
+      "/compliance",
+      "/contact",
+      "/copyright",
+      "/demo",
+      "/demo/gregor-samsa-character-tracker",
+      "/eula",
+      "/pricing",
+      "/privacy",
+      "/public",
+      "/public/analytics",
+      "/public/forum",
+      "/public/forum/forum-post-1",
+      "/public/uploads",
+      "/public/writers/author",
+      "/public/public-book-1",
+      "/public/public-book-1/chapter/1",
+      "/refund",
+      "/status",
+      "/terms",
+    ]
+
+    for (const route of publicRoutes) {
+      expect(isPublicPageRoute(route), route).toBe(true)
+      expect(isPrivatePageRoute(route), route).toBe(false)
+    }
+  })
+
+  it("classifies auth entry routes as public but not private", () => {
+    for (const route of ["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"]) {
+      expect(isPublicPageRoute(route), route).toBe(true)
+      expect(isPrivatePageRoute(route), route).toBe(false)
+    }
+  })
+
+  it("classifies known private page routes", () => {
+    const privateRoutes = [
+      "/admin",
+      "/beta-reads",
+      "/chats",
+      "/complete-username",
+      "/library",
+      "/library/add-chapter",
+      "/notes",
+      "/notifications",
+      "/quotes",
+      "/series",
+      "/series/series-1/ask",
+      "/settings",
+      "/stats",
+      "/upgrade",
+      "/sky-of-ash--book-1",
+      "/sky-of-ash--book-1/advisor",
+      "/sky-of-ash--book-1/analysis",
+      "/sky-of-ash--book-1/ask",
+      "/sky-of-ash--book-1/author-loop",
+      "/sky-of-ash--book-1/beta-feedback",
+      "/sky-of-ash--book-1/chapter/1",
+      "/sky-of-ash--book-1/chapters",
+      "/sky-of-ash--book-1/characters",
+      "/sky-of-ash--book-1/collaboration",
+      "/sky-of-ash--book-1/compliance",
+      "/sky-of-ash--book-1/cross-book-wiki",
+      "/sky-of-ash--book-1/editorial-review",
+      "/sky-of-ash--book-1/export",
+      "/sky-of-ash--book-1/foreshadowing",
+      "/sky-of-ash--book-1/graph",
+      "/sky-of-ash--book-1/manuscript",
+      "/sky-of-ash--book-1/notes",
+      "/sky-of-ash--book-1/plot-threads",
+      "/sky-of-ash--book-1/relationship-evolution",
+      "/sky-of-ash--book-1/reports",
+      "/sky-of-ash--book-1/scenes",
+      "/sky-of-ash--book-1/search",
+      "/sky-of-ash--book-1/summaries",
+      "/sky-of-ash--book-1/timeline",
+      "/sky-of-ash--book-1/voice",
+      "/sky-of-ash--book-1/world-gap",
+    ]
+
+    for (const route of privateRoutes) {
+      expect(isPublicPageRoute(route), route).toBe(false)
+      expect(isPrivatePageRoute(route), route).toBe(true)
+    }
   })
 
   it("sets security headers and CSP for html routes in production", () => {

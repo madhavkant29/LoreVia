@@ -26,7 +26,7 @@ describe("manuscript preview utilities", () => {
     expect(trade.pageWidthMm).toBe(148)
     expect(trade.fontSizePt).toBe(11)
 
-    expect(kdp.label).toBe("Amazon KDP paperback")
+    expect(kdp.label).toBe("6×9 print paperback")
     expect(kdp.paddingLeftMm).toBeGreaterThan(kdp.paddingRightMm)
     expect(kdp.fontFamily).toContain("Garamond")
   })

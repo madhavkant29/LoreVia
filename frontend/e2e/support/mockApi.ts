@@ -20,6 +20,9 @@ type MockOptions = {
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
 const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
+const ACCESS_TOKEN_COOKIE = "lorevia_access_token"
+const REFRESH_TOKEN_COOKIE = "lorevia_refresh_token"
+const E2E_APP_ORIGIN = "http://localhost:3001"
 
 function normalizeMockApiPath(pathname: string) {
   return pathname
@@ -60,6 +63,8 @@ const book = {
   work_type: "novel",
   status: "ready",
   mode: "author",
+  workspace_shell: "author",
+  access_class: "owner",
   source_kind: "upload",
   preserve_chapter_numbers: true,
   cover_url: "/api/v1/books/book-1/cover?token=mock-cover",
@@ -1464,6 +1469,13 @@ const writerWorkspace = {
     items: [],
     last_generated_at: null,
   },
+  reprocess: {
+    auto_reprocess_enabled: true,
+    pending_chapters: [],
+    last_mode_changed_at: null,
+    last_manual_chapter_started_at: null,
+    last_manual_chapter_number: null,
+  },
   processing: book.processing,
 }
 
@@ -1690,7 +1702,22 @@ const preWritingCheck = {
       summary: "Nora enters the city and hears the bells.",
     },
   ],
-  alerts: [],
+  alerts: [
+    {
+      type: "world_gap",
+      severity: "medium",
+      title: "Northreach canon note is still thin",
+      description: "The current world corpus still needs stronger canon detail for Northreach before later continuity checks.",
+      chapter_number: 2,
+    },
+    {
+      type: "world_gap",
+      severity: "medium",
+      title: "Glass Road needs one more anchor",
+      description: "Readers only get a light setup for Glass Road before later references depend on it.",
+      chapter_number: 2,
+    },
+  ],
 }
 
 const emotionalArc = {
@@ -1757,6 +1784,18 @@ const notes = [
     chapter_title: "The Ember Gate",
     title: "Gate imagery",
     body: "Revisit the bell motif.",
+    created_at: "2026-05-08T10:00:00Z",
+    updated_at: "2026-05-08T10:00:00Z",
+  },
+]
+
+const vaultNotes = [
+  {
+    id: "vault-note-1",
+    book_id: "book-1",
+    path: "Manual Editor/Chapter 2/Gate imagery.md",
+    source: "manual_editor",
+    content: "# Gate imagery\n\nRevisit the bell motif.",
     created_at: "2026-05-08T10:00:00Z",
     updated_at: "2026-05-08T10:00:00Z",
   },
@@ -2147,15 +2186,34 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const characterBibleMode = options.characterBible ?? "default"
   const adminCookieMode = admin === "none" ? "guest" : admin
-  await page.context().addCookies([
+  const cookies = [
     {
       name: ADMIN_TEST_SESSION_COOKIE,
       value: `${adminCookieMode}:${ADMIN_TEST_SESSION_SECRET}`,
-      url: "http://localhost:3000",
+      url: E2E_APP_ORIGIN,
       httpOnly: true,
-      sameSite: "Lax",
+      sameSite: "Lax" as const,
     },
-  ])
+  ]
+  if (session === "authenticated") {
+    cookies.push(
+      {
+        name: ACCESS_TOKEN_COOKIE,
+        value: "mock-access-token",
+        url: E2E_APP_ORIGIN,
+        httpOnly: true,
+        sameSite: "Lax" as const,
+      },
+      {
+        name: REFRESH_TOKEN_COOKIE,
+        value: "mock-refresh-token",
+        url: E2E_APP_ORIGIN,
+        httpOnly: true,
+        sameSite: "Lax" as const,
+      },
+    )
+  }
+  await page.context().addCookies(cookies)
   user.username = defaultUsername
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
@@ -2163,6 +2221,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockWriterWorkspace = JSON.parse(JSON.stringify(writerWorkspace))
   let mockNotifications = JSON.parse(JSON.stringify(notifications))
   let mockWorkspaceTree = JSON.parse(JSON.stringify(workspaceTree))
+  let mockChapterList = JSON.parse(JSON.stringify(chapterList))
   let mockBetaReads = JSON.parse(JSON.stringify(initialBetaReads))
   let mockBetaReadQuestions = JSON.parse(JSON.stringify(initialBetaReadQuestions))
   let mockBetaReadFeedbackItems = JSON.parse(JSON.stringify(initialBetaReadFeedbackItems))
@@ -2172,6 +2231,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockCharacterReviewPayload = JSON.parse(JSON.stringify(characterReviewPayload))
   let mockRelationshipGraph = JSON.parse(JSON.stringify(relationshipGraph))
   let mockNotes = JSON.parse(JSON.stringify(notes))
+  let mockVaultNotes = JSON.parse(JSON.stringify(vaultNotes))
   let mockManuscriptAnnotations = JSON.parse(JSON.stringify(manuscriptAnnotations))
   let mockEmailPreferences: EmailPreferences = {
     email: user.email,
@@ -2426,6 +2486,56 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, book)
     }
 
+    if (path === "/api/v1/books/book-1/manuscript/reprocess" && method === "POST") {
+      return json(route, {
+        book_id: "book-1",
+        status: "processing",
+        chapters_queued: 3,
+        total_words: 31500,
+        upload_charge_consumed: true,
+        charge_kind: "manual_reprocess",
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/manuscript/import" && method === "POST") {
+      if (mockWriterWorkspace.reprocess?.auto_reprocess_enabled === false) {
+        mockWriterWorkspace.reprocess = {
+          ...mockWriterWorkspace.reprocess,
+          pending_chapters: Array.from(new Set([...(mockWriterWorkspace.reprocess.pending_chapters ?? []), 1])),
+        }
+      }
+      return json(route, {
+        status: "imported",
+        book_id: "book-1",
+        imported_chapters: [1],
+        chapters_created: 1,
+        analysis_dispatched: 0,
+        analysis_tasks: [],
+        chapter_content_versions: { 1: 3 },
+        total_chapters: 3,
+        mode: "author",
+        source_kind: "chapter_wise",
+        chapter_reports: [],
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/manuscript/chapters/1/reprocess" && method === "POST") {
+      mockWriterWorkspace.reprocess = {
+        ...(mockWriterWorkspace.reprocess ?? { auto_reprocess_enabled: false, pending_chapters: [] }),
+        pending_chapters: (mockWriterWorkspace.reprocess?.pending_chapters ?? []).filter((chapter: number) => chapter !== 1),
+        last_manual_chapter_number: 1,
+        last_manual_chapter_started_at: "2026-06-06T00:00:00Z",
+      }
+      return json(route, {
+        book_id: "book-1",
+        status: "processing",
+        chapters_queued: 1,
+        total_words: 1000,
+        upload_charge_consumed: false,
+        charge_kind: null,
+      })
+    }
+
     if (path === "/api/v1/books/book-1/forum-metadata" && method === "PUT") {
       const payload = route.request().postDataJSON() as {
         title?: string
@@ -2493,6 +2603,37 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/collaborators" && method === "GET") {
       return json(route, collaborators)
+    }
+
+    const collaboratorActivityMatch = path.match(/^\/api\/v1\/books\/book-1\/collaborators\/([^/]+)\/activity$/)
+    if (collaboratorActivityMatch && method === "GET") {
+      const collaboratorId = collaboratorActivityMatch[1]
+      const collaborator = collaborators.find((item: typeof collaborators[number]) => item.id === collaboratorId)
+      if (!collaborator) {
+        return notFound(route)
+      }
+
+      return json(route, {
+        collaborator,
+        assignments: mockBetaReads.filter((item: typeof mockBetaReads[number]) => item.collaborator_id === collaboratorId),
+        items: [
+          {
+            id: `${collaboratorId}-activity-1`,
+            kind: "chapter_comment",
+            title: "Left chapter feedback",
+            body: "Ari flagged the gate explanation as slightly repetitive.",
+            chapter_number: 2,
+            chapter_title: "The Ember Gate",
+            assignment_id: "beta-1",
+            feedback_item_id: "beta-1-feedback-1",
+            annotation_id: null,
+            created_at: "2026-05-14T18:00:00Z",
+          },
+        ],
+        chapter_comment_count: 1,
+        annotation_count: 0,
+        latest_activity_at: "2026-05-14T18:00:00Z",
+      })
     }
 
     if (path === "/api/v1/books/book-1/collaborators" && method === "POST") {
@@ -2797,6 +2938,28 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    const chapterDeleteMatch = path.match(/^\/api\/v1\/books\/book-1\/chapters\/(\d+)$/)
+    if (chapterDeleteMatch && method === "DELETE") {
+      const chapterNumber = Number.parseInt(chapterDeleteMatch[1] ?? "", 10)
+      const beforeCount = mockChapterList.chapters.length
+      mockChapterList = {
+        ...mockChapterList,
+        chapters: mockChapterList.chapters.filter((item: typeof mockChapterList.chapters[number]) => item.number !== chapterNumber),
+      }
+      if (mockChapterList.chapters.length === beforeCount) {
+        return notFound(route)
+      }
+      mockChapterList.read_upto = Math.max(0, ...mockChapterList.chapters.filter((item: typeof mockChapterList.chapters[number]) => item.read).map((item: typeof mockChapterList.chapters[number]) => item.number))
+      mockChapterList.current_chapter = mockChapterList.read_upto
+      mockWorkspaceTree = {
+        ...mockWorkspaceTree,
+        chapters: mockWorkspaceTree.chapters.filter((item: typeof mockWorkspaceTree.chapters[number]) => item.chapter_number !== chapterNumber),
+        scene_groups: mockWorkspaceTree.scene_groups.filter((item: typeof mockWorkspaceTree.scene_groups[number]) => item.chapter_number !== chapterNumber),
+      }
+      mockManuscriptAnnotations = mockManuscriptAnnotations.filter((annotation: typeof mockManuscriptAnnotations[number]) => annotation.chapter_number !== chapterNumber)
+      return route.fulfill({ status: 204 })
+    }
+
     if (path === "/api/v1/books/book-1/chapter-versions" && method === "GET") {
       return json(route, [])
     }
@@ -2885,6 +3048,47 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/notes" && method === "GET") {
       return json(route, mockNotes)
+    }
+
+    if (path === "/api/v1/books/book-1/notes" && method === "POST") {
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      const saved = {
+        id: body.note_id ? String(body.note_id) : `note-${mockNotes.length + 1}`,
+        book_id: "book-1",
+        book_title: "Sky of Ash",
+        chapter_number: typeof body.chapter_number === "number" ? body.chapter_number : null,
+        chapter_title: body.chapter_number === 2 ? "The Ember Gate" : null,
+        title: body.title ? String(body.title) : null,
+        body: String(body.body ?? ""),
+        created_at: "2026-05-08T12:00:00Z",
+        updated_at: "2026-05-08T12:00:00Z",
+      }
+      mockNotes = [saved, ...mockNotes.filter((note: typeof mockNotes[number]) => note.id !== saved.id)]
+      return json(route, saved)
+    }
+
+    if (path === "/api/v1/books/book-1/notes/vault" && method === "GET") {
+      return json(route, mockVaultNotes)
+    }
+
+    if (path === "/api/v1/books/book-1/notes/vault" && method === "PUT") {
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      const pathValue = String(body.path ?? "")
+      const saved = {
+        id: `vault-note-${mockVaultNotes.length + 1}`,
+        book_id: "book-1",
+        path: pathValue,
+        source: "manual_editor",
+        content: String(body.content ?? ""),
+        persisted: true,
+        created_at: "2026-05-08T12:00:00Z",
+        updated_at: "2026-05-08T12:00:00Z",
+      }
+      mockVaultNotes = [
+        saved,
+        ...mockVaultNotes.filter((note: typeof mockVaultNotes[number]) => note.path.toLowerCase() !== pathValue.toLowerCase()),
+      ]
+      return json(route, saved)
     }
 
     if (path === "/api/v1/reader/book-1/progress" && method === "GET") {
@@ -3047,7 +3251,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/reader/book-1/chapters" && method === "GET") {
-      return json(route, chapterList)
+      return json(route, mockChapterList)
     }
 
     if (path === "/api/v1/reader/book-1/relationships" && method === "GET") {

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, type KeyboardEvent, type MouseEvent } from "react"
+import { memo, useState, type KeyboardEvent, type MouseEvent } from "react"
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { booksApi } from "@/lib/api/books"
 import { isPaidTier } from "@/lib/billing/plans"
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
@@ -58,7 +59,7 @@ function stringToList(value: string) {
     .filter(Boolean)
 }
 
-export function CharacterCard({ character, bookId, compact = false, editable = false, onUpdated, onDeleted, theme = "light" }: Props) {
+export const CharacterCard = memo(function CharacterCard({ character, bookId, compact = false, editable = false, onUpdated, onDeleted, theme = "light" }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -76,6 +77,7 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
     motivations: listToString(character.motivations),
     fears: listToString(character.fears),
   })
+  const confirm = useConfirmDialog()
 
   const user = useAuthStore((state) => state.user)
   const traits = character.trait_state ?? {}
@@ -151,7 +153,12 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
 
   async function handleDelete() {
     if (!bookId) return
-    const confirmed = window.confirm(`Delete ${character.name} from this book? This is best for false positives and cannot be undone.`)
+    const confirmed = await confirm({
+      title: `Delete ${character.name}?`,
+      body: `Delete ${character.name} from this book? This is best for false positives and cannot be undone.`,
+      confirmLabel: "Delete character",
+      tone: "danger",
+    })
     if (!confirmed) return
     setDeleting(true)
     setError(null)
@@ -209,12 +216,12 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
 
       {expanded && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 sm:p-6"
           onClick={() => setExpanded(false)}
         >
           <div 
-            className={`relative z-50 w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl p-6 md:p-8 ${
-              isDark ? "bg-slate-900 text-white shadow-xl shadow-black/50 border border-slate-800" : "bg-white text-slate-900 shadow-2xl border border-slate-200"
+            className={`relative z-50 max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg p-6 md:p-8 ${
+              isDark ? "border border-slate-800 bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-900"
             }`}
             onClick={(e) => e.stopPropagation()}
           >
@@ -363,7 +370,8 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                   </label>
                   <label className="space-y-1">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Aliases</span>
-                    <input value={draft.aliases} onChange={(event) => setDraft((value) => ({ ...value, aliases: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.aliases} onChange={(event) => setDraft((value) => ({ ...value, aliases: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                   <label className="space-y-1 md:col-span-2">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Description</span>
@@ -375,15 +383,18 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
                   </label>
                   <label className="space-y-1">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Personality</span>
-                    <input value={draft.personalityTags} onChange={(event) => setDraft((value) => ({ ...value, personalityTags: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.personalityTags} onChange={(event) => setDraft((value) => ({ ...value, personalityTags: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                   <label className="space-y-1">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Motivations</span>
-                    <input value={draft.motivations} onChange={(event) => setDraft((value) => ({ ...value, motivations: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.motivations} onChange={(event) => setDraft((value) => ({ ...value, motivations: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                   <label className="space-y-1 md:col-span-2">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Fears</span>
-                    <input value={draft.fears} onChange={(event) => setDraft((value) => ({ ...value, fears: event.target.value }))} placeholder="Comma separated" className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <input value={draft.fears} onChange={(event) => setDraft((value) => ({ ...value, fears: event.target.value }))} className={`w-full rounded-md border px-3 py-2 text-sm ${isDark ? "border-slate-700 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-900"}`} />
+                    <span className={`block text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Separate multiple values with commas.</span>
                   </label>
                 </div>
                 {error ? <p className="mt-3 text-sm text-red-500">{error}</p> : null}
@@ -514,4 +525,4 @@ export function CharacterCard({ character, bookId, compact = false, editable = f
       )}
     </>
   )
-}
+})

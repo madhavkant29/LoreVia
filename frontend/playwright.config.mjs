@@ -13,7 +13,7 @@ export default defineConfig({
   },
   reporter: "list",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:3001",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
@@ -21,13 +21,13 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: "npm run dev -- --hostname localhost",
+    command: "npm run dev:e2e",
     env: {
       ...process.env,
       ADMIN_E2E_TEST_SECRET: process.env.ADMIN_E2E_TEST_SECRET,
     },
-    url: "http://localhost:3000",
-    reuseExistingServer: !process.env.CI,
+    url: "http://localhost:3001",
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 })
