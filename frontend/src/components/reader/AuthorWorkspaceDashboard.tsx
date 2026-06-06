@@ -1163,40 +1163,57 @@ function RevisionHubTab({
   const [selectedRevisionItemId, setSelectedRevisionItemId] = useState<string | null>(null)
   const [chapterFindingsHighlighted, setChapterFindingsHighlighted] = useState(false)
 
-  if (revisionIntelligenceError && !revisionIntelligence && onRetryRevisionIntelligence) {
-    return (
-      <ErrorCard
-        message="Failed to load revision intelligence"
-        onRetry={onRetryRevisionIntelligence}
-        variant="compact"
-        isDark={isDark}
-      />
-    )
-  }
+  // Compute derived data before early returns to ensure hooks can be used consistently
+  const allItems = revisionIntelligence
+    ? [
+        ...revisionIntelligence.change_impacts,
+        ...revisionIntelligence.scene_advice,
+        ...revisionIntelligence.confusion_map,
+        ...revisionIntelligence.voice_alerts,
+      ]
+    : []
 
-  if (!revisionIntelligence) {
-    return (
-      <EmptyTabState
-        isDark={isDark}
-        title="Revision intelligence is still syncing."
-        body="LoreVia will populate the full revision hub here once the latest manuscript intelligence finishes processing."
-      />
-    )
-  }
+  const timelineItems = allItems.filter((item) =>
+    [item.title, item.description, item.recommendation, item.source_label]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .match(/\btimeline\b|\border\b|\bsequence\b|\btransition\b|\bearlier\b|\blater\b|\bbefore\b|\bafter\b/)
+  )
 
-  const allItems = [
-    ...revisionIntelligence.change_impacts,
-    ...revisionIntelligence.scene_advice,
-    ...revisionIntelligence.confusion_map,
-    ...revisionIntelligence.voice_alerts,
-  ]
-  const highCount = allItems.filter((item) => item.severity === "high").length || revisionIntelligence.summary.high_severity_count
-  const mediumCount = allItems.filter((item) => item.severity === "medium").length
-  const lowCount = allItems.filter((item) => item.severity === "low").length
-  const readyScore = storyHealth?.score ?? Math.max(0, 100 - highCount * 6 - mediumCount * 3 - lowCount)
+  const focusCards: RevisionInsightSelection[] = revisionIntelligence
+    ? [
+        {
+          key: "continuity",
+          title: "Continuity & logic",
+          subtitle: "Downstream logic, contradictions, and dependency breaks LoreVia surfaced.",
+          items: revisionIntelligence.change_impacts,
+        },
+        {
+          key: "character",
+          title: "Character consistency",
+          subtitle: "Voice, behavior, and point-of-view consistency checks LoreVia flagged.",
+          items: revisionIntelligence.voice_alerts,
+        },
+        {
+          key: "world",
+          title: "Worldbuilding gaps",
+          subtitle: "Lore and anchoring issues that may leave the reader under-oriented.",
+          items: revisionIntelligence.confusion_map,
+        },
+        {
+          key: "timeline",
+          title: "Timeline / order",
+          subtitle: "Ordering, transition, and chronology issues surfaced across the current revision set.",
+          items: timelineItems,
+        },
+      ]
+    : []
+
   const filteredChapterItems = allItems.filter((item) =>
     chapterSeverityFilter === "all" ? true : item.severity === chapterSeverityFilter
   )
+
   const chaptersByNumber = new Map(chapters.map((chapter) => [chapter.number, chapter]))
   const visibleChapterNumbers = chapters.slice(-5).map((chapter) => chapter.number)
   const referencedChapterNumbers = filteredChapterItems
@@ -1219,6 +1236,7 @@ function RevisionHubTab({
       items: filteredChapterItems.filter((item) => item.chapter_ref === chapterNumber),
     }
   })
+
   const unassignedChapterItems = filteredChapterItems.filter((item) => typeof item.chapter_ref !== "number")
   if (unassignedChapterItems.length > 0) {
     chapterFindings.push({
@@ -1229,68 +1247,63 @@ function RevisionHubTab({
       items: unassignedChapterItems,
     })
   }
-  const selectedChapterFinding = chapterFindings.find((row) => row.key === selectedChapterKey) ?? null
-  const timelineItems = allItems.filter((item) =>
-    [item.title, item.description, item.recommendation, item.source_label]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .match(/\btimeline\b|\border\b|\bsequence\b|\btransition\b|\bearlier\b|\blater\b|\bbefore\b|\bafter\b/)
-  )
-  const focusCards: RevisionInsightSelection[] = [
-    {
-      key: "continuity",
-      title: "Continuity & logic",
-      subtitle: "Downstream logic, contradictions, and dependency breaks LoreVia surfaced.",
-      items: revisionIntelligence.change_impacts,
-    },
-    {
-      key: "character",
-      title: "Character consistency",
-      subtitle: "Voice, behavior, and point-of-view consistency checks LoreVia flagged.",
-      items: revisionIntelligence.voice_alerts,
-    },
-    {
-      key: "world",
-      title: "Worldbuilding gaps",
-      subtitle: "Lore and anchoring issues that may leave the reader under-oriented.",
-      items: revisionIntelligence.confusion_map,
-    },
-    {
-      key: "timeline",
-      title: "Timeline / order",
-      subtitle: "Ordering, transition, and chronology issues surfaced across the current revision set.",
-      items: timelineItems,
-    },
-  ]
 
+  const selectedChapterFinding = chapterFindings.find((row) => row.key === selectedChapterKey) ?? null
+
+  // All hooks must be called before any conditional returns
   useEffect(() => {
-    if (!selectedInsight) return
+    if (!selectedInsight || !revisionIntelligence) return
     const nextSelection = [...focusCards].find((card) => card.key === selectedInsight.key) ?? null
     setSelectedInsight(nextSelection)
-  }, [revisionIntelligence])
+  }, [revisionIntelligence, selectedInsight, focusCards])
 
   useEffect(() => {
-    if (selectedChapterKey === null) return
+    if (selectedChapterKey === null || !revisionIntelligence) return
     const hasSelectedChapter = chapterFindings.some(({ key, items }) => key === selectedChapterKey && items.length > 0)
     if (!hasSelectedChapter) {
       setSelectedChapterKey(null)
     }
-  }, [selectedChapterKey, chapterSeverityFilter, revisionIntelligence])
+  }, [selectedChapterKey, chapterSeverityFilter, revisionIntelligence, chapterFindings])
 
   useEffect(() => {
-    if (selectedRevisionItemId === null) return
+    if (selectedRevisionItemId === null || !revisionIntelligence) return
     const hasSelectedItem = allItems.some((item) => item.id === selectedRevisionItemId)
     if (!hasSelectedItem) {
       setSelectedRevisionItemId(null)
     }
-  }, [selectedRevisionItemId, revisionIntelligence])
+  }, [selectedRevisionItemId, revisionIntelligence, allItems])
 
   useEffect(() => {
     if (!chapterFindingsHighlighted) return
     const timeoutId = window.setTimeout(() => setChapterFindingsHighlighted(false), 1800)
     return () => window.clearTimeout(timeoutId)
   }, [chapterFindingsHighlighted])
+
+  if (revisionIntelligenceError && !revisionIntelligence && onRetryRevisionIntelligence) {
+    return (
+      <ErrorCard
+        message="Failed to load revision intelligence"
+        onRetry={onRetryRevisionIntelligence}
+        variant="compact"
+        isDark={isDark}
+      />
+    )
+  }
+
+  if (!revisionIntelligence) {
+    return (
+      <EmptyTabState
+        isDark={isDark}
+        title="Revision intelligence is still syncing."
+        body="LoreVia will populate the full revision hub here once the latest manuscript intelligence finishes processing."
+      />
+    )
+  }
+
+  const highCount = allItems.filter((item) => item.severity === "high").length || revisionIntelligence.summary.high_severity_count
+  const mediumCount = allItems.filter((item) => item.severity === "medium").length
+  const lowCount = allItems.filter((item) => item.severity === "low").length
+  const readyScore = storyHealth?.score ?? Math.max(0, 100 - highCount * 6 - mediumCount * 3 - lowCount)
 
   const selectReadinessSeverity = (severity: RevisionSeverityFilter) => {
     setChapterSeverityFilter(severity)
