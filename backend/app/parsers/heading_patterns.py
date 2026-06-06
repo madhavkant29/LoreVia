@@ -702,6 +702,9 @@ def has_toc_signals(lines: list[str], sample_size: int = 40) -> bool:
         return False
 
     sample = lines[: min(len(lines), sample_size)]
+    if any(len(_TOC_DOT_PATTERN.findall(line)) >= 3 for line in sample):
+        return True
+
     toc_count = sum(1 for line in sample if is_toc_indicator(line))
     if toc_count >= 3:
         return True

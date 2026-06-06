@@ -67,7 +67,7 @@ HEADING_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 INLINE_NUMBERED_HEADING_RE = re.compile(
-    r"\b(?P<heading>(?i:(?:chapter|ch\.?|chapitre)"
+    r"\b(?P<heading>(?:(?:Chapter|CHAPTER|Ch\.?|CH\.?|Chapitre|CHAPITRE)"
     r"\s+(?:\d+[a-z]?|[ivxlcdm]+)\s*[:.\-]?\s*)"
     r"(?:(?:[A-ZÀ-ÖØ-Þ0-9](?![a-zà-öø-ÿ])[A-ZÀ-ÖØ-Þ0-9'\-]*)(?:\s+(?:[A-ZÀ-ÖØ-Þ0-9](?![a-zà-öø-ÿ])[A-ZÀ-ÖØ-Þ0-9'\-]*)){0,8})?)",
 )
@@ -97,6 +97,7 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, languag
             "noise_lines_removed": 0,
             "noise_reason_counts": Counter(),
             "inline_artifacts_removed": 0,
+            "toc_detected": False,
         }
 
         for page_number, page in enumerate(doc, start=1):
@@ -171,6 +172,7 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, languag
             stream,
             heading_regex=heading_regex,
             language=detected_language,
+            diagnostics_state=diagnostics_state,
         )
         initial_anomalies = _collect_parse_anomalies(chapters, total_pages=total_pages)
         fallback_strategy: str | None = None
@@ -180,6 +182,7 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, languag
                 permissive_headings=True,
                 heading_regex=heading_regex,
                 language=detected_language,
+                diagnostics_state=diagnostics_state,
             )
             if _parse_quality_score(permissive_chapters) > _parse_quality_score(chapters):
                 chapters = permissive_chapters
@@ -190,6 +193,7 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, languag
             chapters,
             split_large_chapters=effective_split,
             total_pages=total_pages,
+            diagnostics_state=diagnostics_state,
         )
         final_anomalies = _collect_parse_anomalies(chapters, total_pages=total_pages, normalized_chapters=normalized_chapters)
         diagnostics = _build_parser_diagnostics(
@@ -412,7 +416,14 @@ def _merge_soft_wrapped_lines(text: str) -> list[str]:
     return paragraphs
 
 
-def _build_chapters(stream: list[dict], *, permissive_headings: bool = False, heading_regex: re.Pattern | None = None, language: str = "en") -> list[dict]:
+def _build_chapters(
+    stream: list[dict],
+    *,
+    permissive_headings: bool = False,
+    heading_regex: re.Pattern | None = None,
+    language: str = "en",
+    diagnostics_state: dict[str, Any] | None = None,
+) -> list[dict]:
     chapters: list[dict] = []
     current = _blank_chapter(1)
 
@@ -426,7 +437,29 @@ def _build_chapters(stream: list[dict], *, permissive_headings: bool = False, he
             for item in text_items[:toc_scan_count]
             if item.get("text", "").strip()
         ]
-        if has_toc_signals(toc_sample_lines):
+        toc_detected = has_toc_signals(toc_sample_lines)
+        if not toc_detected:
+            early_pages: list[int] = []
+            for item in text_items:
+                page = item.get("page")
+                if not isinstance(page, int) or page in early_pages:
+                    continue
+                early_pages.append(page)
+                if len(early_pages) >= 5:
+                    break
+            for page in early_pages:
+                page_lines = [
+                    item.get("text", "")
+                    for item in text_items
+                    if item.get("page") == page and item.get("text", "").strip()
+                ]
+                if has_toc_signals(page_lines):
+                    toc_detected = True
+                    break
+
+        if toc_detected:
+            if diagnostics_state is not None:
+                diagnostics_state["toc_detected"] = True
             # Find the extent of the TOC: from first TOC-like line to last
             toc_start = None
             toc_end = None
@@ -511,7 +544,13 @@ def _build_chapters(stream: list[dict], *, permissive_headings: bool = False, he
     return chapters
 
 
-def _normalize_chapters(chapters: list[dict], *, split_large_chapters: bool, total_pages: int) -> list[dict]:
+def _normalize_chapters(
+    chapters: list[dict],
+    *,
+    split_large_chapters: bool,
+    total_pages: int,
+    diagnostics_state: dict[str, Any] | None = None,
+) -> list[dict]:
     normalized: list[dict] = []
     next_number = 1
     for chapter in chapters:
@@ -525,6 +564,7 @@ def _normalize_chapters(chapters: list[dict], *, split_large_chapters: bool, tot
             text_parts,
             fallback_title=chapter.get("title") or f"Chapter {next_number}",
             section_type=section_type,
+            diagnostics_state=diagnostics_state,
         )
         for embedded_title, embedded_text_parts, embedded_section_type in embedded_sections:
             split_parts = _split_large_chapter_parts(embedded_text_parts) if split_large_chapters else [embedded_text_parts]
@@ -555,15 +595,22 @@ def _split_embedded_numbered_chapter_sections(
     *,
     fallback_title: str,
     section_type: str,
+    diagnostics_state: dict[str, Any] | None = None,
 ) -> list[tuple[str, list[str], str]]:
     text = _assemble_text_parts(text_parts)
     matches = list(INLINE_NUMBERED_HEADING_RE.finditer(text))
     if not matches:
+        if has_toc_signals(_blocks_to_paragraphs(text)):
+            if diagnostics_state is not None:
+                diagnostics_state["toc_detected"] = True
         return [(fallback_title, text_parts, section_type)]
 
     sections: list[tuple[str, list[str], str]] = []
     prefix = text[: matches[0].start()].strip()
-    if prefix and not _is_probable_front_matter(prefix) and not has_toc_signals(_blocks_to_paragraphs(prefix)):
+    if prefix and has_toc_signals(_blocks_to_paragraphs(prefix)):
+        if diagnostics_state is not None:
+            diagnostics_state["toc_detected"] = True
+    elif prefix and not _is_probable_front_matter(prefix):
         sections.append((fallback_title, [prefix], section_type))
 
     for index, match in enumerate(matches):
@@ -577,9 +624,15 @@ def _split_embedded_numbered_chapter_sections(
             continue
         heading_tail = segment[: min(len(segment), len(heading) + 30)]
         if is_toc_indicator(heading_tail):
+            if diagnostics_state is not None:
+                diagnostics_state["toc_detected"] = True
             continue
         body = segment[len(match.group("heading")) :].strip()
-        if not body or has_toc_signals(_blocks_to_paragraphs(body)[:8]):
+        if not body:
+            continue
+        if has_toc_signals(_blocks_to_paragraphs(body)[:8]):
+            if diagnostics_state is not None:
+                diagnostics_state["toc_detected"] = True
             continue
         sections.append((heading, _blocks_to_paragraphs(body), "chapter"))
 
@@ -1143,7 +1196,7 @@ def _build_parser_diagnostics(
         stype = chapter.get("section_type", "unknown")
         section_type_counts[stype] = section_type_counts.get(stype, 0) + 1
 
-    toc_detected = section_type_counts.get("toc", 0) > 0
+    toc_detected = section_type_counts.get("toc", 0) > 0 or bool(diagnostics_state.get("toc_detected"))
     front_matter_count = sum(
         count for stype, count in section_type_counts.items()
         if stype in {"preface", "foreword", "acknowledgements", "dedication", "copyright", "title_page"}
