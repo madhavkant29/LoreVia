@@ -854,7 +854,7 @@ def normalize_chapter_kind(value: str | None) -> str:
     return "chapter"
 
 
-def _normalize_processing_timestamp(value: object | None) -> str | None:
+def normalize_processing_timestamp(value: object | None) -> str | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -870,7 +870,7 @@ def _normalize_processing_timestamp(value: object | None) -> str | None:
     try:
         datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     except ValueError:
-        return raw
+        return None
     return normalized
 
 
@@ -918,9 +918,9 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
     if last_chapter_title:
         payload["last_chapter_title"] = last_chapter_title
     if started_at:
-        payload["started_at"] = _normalize_processing_timestamp(started_at)
+        payload["started_at"] = normalize_processing_timestamp(started_at)
     if updated_at:
-        payload["updated_at"] = _normalize_processing_timestamp(updated_at)
+        payload["updated_at"] = normalize_processing_timestamp(updated_at)
     if last_error:
         payload["last_error"] = last_error
     if parser_diagnostics:
@@ -946,7 +946,7 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
                 normalized_stage["total_chapters"] = int(total)
             stage_updated = stage.get("updated_at")
             if stage_updated:
-                normalized_stage["updated_at"] = _normalize_processing_timestamp(stage_updated)
+                normalized_stage["updated_at"] = normalize_processing_timestamp(stage_updated)
             stage_eta = stage.get("eta_seconds")
             if isinstance(stage_eta, (int, float)) and int(stage_eta) >= 0:
                 normalized_stage["eta_seconds"] = int(stage_eta)

@@ -848,10 +848,11 @@ export const booksApi = {
     format: "pdf" | "docx" | "epub" | "vault" = "docx",
     preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript",
     includeSceneMetadata = true,
-    fontFamily = "serif"
+    fontFamily = "serif",
+    includeToc = false
   ) =>
     apiClient.get<Blob>(bookPath(bookId, "/manuscript/export"), {
-      params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily },
+      params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily, include_toc: includeToc },
       responseType: "blob",
     }).then(r => r.data),
   delete: (id: string) => apiClient.delete<Book>(bookPath(id)).then(r => {

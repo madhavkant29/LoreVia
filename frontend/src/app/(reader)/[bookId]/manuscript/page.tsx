@@ -270,6 +270,7 @@ function ManuscriptPageInner() {
   const [compileFormat, setCompileFormat] = useState<"pdf" | "docx" | "epub" | "vault">("docx")
   const [includeSceneMetadataOnImport, setIncludeSceneMetadataOnImport] = useState(true)
   const [includeSceneMetadataOnExport, setIncludeSceneMetadataOnExport] = useState(true)
+  const [includeTableOfContentsOnExport, setIncludeTableOfContentsOnExport] = useState(false)
   const [showEditorSettings, setShowEditorSettings] = useState(false)
   const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
   const [fullBookLoading, setFullBookLoading] = useState(false)
@@ -2158,7 +2159,7 @@ function ManuscriptPageInner() {
     setExporting(format)
     try {
       const preset = writerWorkspace?.publishing.active_preset ?? "standard_manuscript"
-      const blob = await booksApi.exportManuscript(bookId, format, preset, includeSceneMetadataOnExport)
+      const blob = await booksApi.exportManuscript(bookId, format, preset, includeSceneMetadataOnExport, "serif", includeTableOfContentsOnExport)
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
@@ -2587,6 +2588,7 @@ function ManuscriptPageInner() {
                   open={showExportMenu}
                   activePreset={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
                   exporting={exporting}
+                  includeTableOfContents={includeTableOfContentsOnExport}
                   onToggle={() => setShowExportMenu((value) => !value)}
                   onPresetChange={(nextPreset) => {
                     void saveWorkspace({
@@ -2596,6 +2598,7 @@ function ManuscriptPageInner() {
                       },
                     }, { silent: true })
                   }}
+                  onIncludeTableOfContentsChange={setIncludeTableOfContentsOnExport}
                   onPrint={() => {
                     setShowExportMenu(false)
                     printManuscript()
@@ -4332,6 +4335,8 @@ function ManuscriptPageInner() {
           fullBookWordCount={fullBookWordCount}
           includeSceneMetadataOnExport={includeSceneMetadataOnExport}
           onIncludeSceneMetadataOnExportChange={setIncludeSceneMetadataOnExport}
+          includeTableOfContentsOnExport={includeTableOfContentsOnExport}
+          onIncludeTableOfContentsOnExportChange={setIncludeTableOfContentsOnExport}
           onUpdateFrontMatter={updateFrontMatter}
           exporting={exporting}
           workspaceSaving={workspaceSaving}

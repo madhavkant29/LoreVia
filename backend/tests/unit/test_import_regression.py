@@ -125,8 +125,9 @@ def test_french_pdf_toc_detection():
     assert any("Chapitre 1" in t for t in titles)
     assert "Chapitre 1: SCYLLA" not in titles  # TOC version excluded
 
-    # Front matter should be present
-    assert any("Preface" in t for t in titles) or any("Avant-propos" in t for t in titles)
+    # Front matter is detected for warnings, but not imported as manuscript chapters.
+    assert not any("Preface" in t for t in titles)
+    assert not any("Avant-propos" in t for t in titles)
 
 
 def test_french_pdf_chapter_count():

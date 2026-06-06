@@ -94,6 +94,21 @@ describe("books api", () => {
     expect(getMock).toHaveBeenCalledWith("/books/book-1/annotations", { params: { chapter_number: 2 } })
   })
 
+  it("exports a manuscript with optional table of contents", async () => {
+    await booksApi.exportManuscript("book-1", "pdf", "trade_paperback", false, "eb-garamond", true)
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/manuscript/export", {
+      params: {
+        format: "pdf",
+        preset: "trade_paperback",
+        include_scene_metadata: false,
+        font_family: "eb-garamond",
+        include_toc: true,
+      },
+      responseType: "blob",
+    })
+  })
+
   it("loads collaborator activity", async () => {
     await booksApi.getCollaboratorActivity("book-1", "collab-7")
 

@@ -47,6 +47,8 @@ type ManuscriptOverlayDialogsProps = {
   fullBookWordCount: number
   includeSceneMetadataOnExport: boolean
   onIncludeSceneMetadataOnExportChange: (checked: boolean) => void
+  includeTableOfContentsOnExport: boolean
+  onIncludeTableOfContentsOnExportChange: (checked: boolean) => void
   onUpdateFrontMatter: (field: keyof ManuscriptFrontMatter, value: string | boolean) => void
   exporting: "pdf" | "docx" | "epub" | "vault" | null
   workspaceSaving: boolean
@@ -87,6 +89,8 @@ export function ManuscriptOverlayDialogs({
   fullBookWordCount,
   includeSceneMetadataOnExport,
   onIncludeSceneMetadataOnExportChange,
+  includeTableOfContentsOnExport,
+  onIncludeTableOfContentsOnExportChange,
   onUpdateFrontMatter,
   exporting,
   workspaceSaving,
@@ -258,6 +262,20 @@ export function ManuscriptOverlayDialogs({
                   <span className="block font-semibold">Include scene metadata</span>
                   <span className={`mt-1 block text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                     Turn this off for clean submission prose with scene breaks rendered as ***.
+                  </span>
+                </span>
+              </label>
+              <label className={`mt-3 flex items-start gap-3 rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                <input
+                  type="checkbox"
+                  checked={includeTableOfContentsOnExport}
+                  onChange={(event) => onIncludeTableOfContentsOnExportChange(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-stone-300"
+                />
+                <span>
+                  <span className="block font-semibold">Add table of contents</span>
+                  <span className={`mt-1 block text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                    Inserts a TOC after the cover page. PDF exports include generated page numbers; Word updates page numbers when the field refreshes.
                   </span>
                 </span>
               </label>

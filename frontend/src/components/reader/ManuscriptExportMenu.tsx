@@ -8,8 +8,10 @@ export const ManuscriptExportMenu = memo(function ManuscriptExportMenu({
   open,
   activePreset,
   exporting,
+  includeTableOfContents,
   onToggle,
   onPresetChange,
+  onIncludeTableOfContentsChange,
   onPrint,
   onCompile,
 }: {
@@ -17,8 +19,10 @@ export const ManuscriptExportMenu = memo(function ManuscriptExportMenu({
   open: boolean
   activePreset: PublishingPreset
   exporting: CompileFormat | null
+  includeTableOfContents: boolean
   onToggle: () => void
   onPresetChange: (preset: PublishingPreset) => void
+  onIncludeTableOfContentsChange: (checked: boolean) => void
   onPrint: () => void
   onCompile: (format: CompileFormat) => void
 }) {
@@ -45,6 +49,20 @@ export const ManuscriptExportMenu = memo(function ManuscriptExportMenu({
               <option value="kdp_paperback">6×9 print paperback</option>
             </select>
           </div>
+          <label className={`mx-1.5 mb-1 flex items-start gap-2 rounded-xl px-3 py-2 text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>
+            <input
+              type="checkbox"
+              checked={includeTableOfContents}
+              onChange={(event) => onIncludeTableOfContentsChange(event.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-stone-300"
+            />
+            <span>
+              <span className="block font-medium">Add table of contents</span>
+              <span className={`mt-0.5 block text-xs leading-4 ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+                Inserts a TOC after the cover page.
+              </span>
+            </span>
+          </label>
           <button onClick={onPrint} className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>Print</button>
           <button onClick={() => onCompile("docx")} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Compile Word / DOCX"}</button>
           <button onClick={() => onCompile("pdf")} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Compile submission PDF"}</button>

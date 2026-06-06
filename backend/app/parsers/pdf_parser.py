@@ -557,6 +557,8 @@ def _normalize_chapters(
         section_type = chapter.get("section_type", "unknown")
         if section_type == "toc":
             continue
+        if _should_skip_output_section(chapter):
+            continue
         text_parts = _drop_front_matter_text_parts(chapter["text_parts"])
         if not any(part.strip() for part in text_parts) and not chapter["images"]:
             continue
@@ -634,7 +636,10 @@ def _split_embedded_numbered_chapter_sections(
             if diagnostics_state is not None:
                 diagnostics_state["toc_detected"] = True
             continue
-        sections.append((heading, _blocks_to_paragraphs(body), "chapter"))
+        body_blocks = _blocks_to_paragraphs(_drop_front_matter_paragraphs(body))
+        if not body_blocks:
+            continue
+        sections.append((heading, body_blocks, "chapter"))
 
     return sections or [(fallback_title, text_parts, section_type)]
 
@@ -776,6 +781,8 @@ def _extract_heading(text: str, *, next_text: str | None = None, permissive: boo
     first_line = _normalize_heading_candidate(lines[0]).strip(" .:-")
     if not first_line:
         return None
+    if _looks_like_page_number_heading(first_line):
+        return None
 
     hre = heading_regex if heading_regex is not None else CHAPTER_RE
     if hre.match(first_line):
@@ -814,6 +821,11 @@ def _normalize_heading_candidate(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned)
     cleaned = cleaned.replace(" .", ".").strip(" .:-")
     return cleaned
+
+
+def _looks_like_page_number_heading(text: str) -> bool:
+    normalized = " ".join(str(text or "").split()).strip(" .:-")
+    return bool(re.fullmatch(r"\d{1,4}", normalized))
 
 
 def _is_pagination_noise(
@@ -1054,6 +1066,30 @@ def _images_for_text_parts(text_parts: list[str], images: list[dict]) -> list[di
         for match in MEDIA_MARKER_RE.finditer(part)
     }
     return [image for image in images if image.get("marker") in markers]
+
+
+def _should_skip_output_section(chapter: dict) -> bool:
+    section_type = str(chapter.get("section_type") or "unknown")
+    text_parts = [str(part or "") for part in chapter.get("text_parts", [])]
+    text = _assemble_text_parts(text_parts)
+    if INLINE_NUMBERED_HEADING_RE.search(text):
+        return False
+    if section_type in {
+        "toc",
+        "preface",
+        "foreword",
+        "dedication",
+        "copyright",
+        "notes",
+        "title_page",
+    }:
+        return True
+    title = " ".join(str(chapter.get("title") or "").split()).strip()
+    if section_type == "part" and _count_words(text) < 80:
+        return True
+    if _looks_like_page_number_heading(title):
+        return True
+    return False
 
 
 def _is_probable_front_matter(text: str) -> bool:

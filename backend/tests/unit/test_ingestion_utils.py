@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import uuid
 import pytest
+from fastapi import HTTPException
 
 from app.engine.analysis.summariser import derive_summary_modes_from_detailed
 from app.models.book import Book
@@ -12,12 +13,14 @@ from app.utils.ingestion_utils import (
     build_ingestion_progress_state,
     build_chapter_dispatch_plan,
     extract_queue_wait_ms,
+    is_llm_usage_limit_error,
     is_book_hidden,
     is_retryable_processing_error,
     load_analysis_chapter_payload,
     load_processing_chapter_payload,
     load_staged_chapter_payload,
     mark_book_processing_cancelled,
+    merge_processing_pipeline,
     processing_state_for_completed_extraction,
     regroup_prose_chapters_for_reading,
     update_book_processing_state,
@@ -137,9 +140,52 @@ def test_update_book_processing_state_marks_extraction_succeeded_while_analysis_
     assert workspace["processing"]["is_fully_ready"] is False
 
 
+def test_update_book_processing_state_accepts_progress_pct_override():
+    book = Book(
+        user_id=uuid.uuid4(),
+        title="Scripted Progress Story",
+        format="pdf",
+        s3_key="books/scripted-progress.pdf",
+    )
+
+    workspace = update_book_processing_state(
+        book,
+        status="processing",
+        stage="analysis",
+        total_chapters=None,
+        completed_chapters=0,
+        started_at=datetime.now(UTC),
+        progress_pct=66.66,
+    )
+
+    assert workspace["processing"]["progress_pct"] == 66.7
+
+
+def test_merge_processing_pipeline_normalizes_postgres_text_timestamps():
+    processing = merge_processing_pipeline(
+        {"status": "processing", "stage": "analysis"},
+        extraction={"status": "succeeded", "updated_at": "2026-06-06 05:11:51.272085+00"},
+    )
+
+    assert processing["pipeline"]["extraction"]["updated_at"] == "2026-06-06T05:11:51.272085+00:00"
+
+
 def test_processing_state_for_completed_extraction_stays_processing_until_analysis_finishes():
     assert processing_state_for_completed_extraction(analysis_complete=False) == ("processing", "analysis")
     assert processing_state_for_completed_extraction(analysis_complete=True) == ("ready", "complete")
+
+
+def test_llm_usage_limit_error_detects_token_window_429():
+    exc = HTTPException(429, "LLM usage token limit exceeded for the 5-hour window.")
+
+    assert is_llm_usage_limit_error(exc) is True
+    assert is_retryable_processing_error(exc) is True
+
+
+def test_llm_usage_limit_error_ignores_other_429_errors():
+    exc = HTTPException(429, "Too many login attempts.")
+
+    assert is_llm_usage_limit_error(exc) is False
 
 
 @pytest.mark.asyncio
