@@ -1255,7 +1255,7 @@ function RevisionHubTab({
     if (!selectedInsight || !revisionIntelligence) return
     const nextSelection = [...focusCards].find((card) => card.key === selectedInsight.key) ?? null
     setSelectedInsight(nextSelection)
-  }, [revisionIntelligence, selectedInsight, focusCards])
+  }, [revisionIntelligence, selectedInsight])
 
   useEffect(() => {
     if (selectedChapterKey === null || !revisionIntelligence) return
@@ -1263,7 +1263,7 @@ function RevisionHubTab({
     if (!hasSelectedChapter) {
       setSelectedChapterKey(null)
     }
-  }, [selectedChapterKey, chapterSeverityFilter, revisionIntelligence, chapterFindings])
+  }, [selectedChapterKey, chapterSeverityFilter, revisionIntelligence])
 
   useEffect(() => {
     if (selectedRevisionItemId === null || !revisionIntelligence) return
@@ -1271,7 +1271,7 @@ function RevisionHubTab({
     if (!hasSelectedItem) {
       setSelectedRevisionItemId(null)
     }
-  }, [selectedRevisionItemId, revisionIntelligence, allItems])
+  }, [selectedRevisionItemId, revisionIntelligence])
 
   useEffect(() => {
     if (!chapterFindingsHighlighted) return
