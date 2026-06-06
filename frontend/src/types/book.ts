@@ -973,6 +973,16 @@ export interface BookEvents {
   character_events: CharacterEvent[]
 }
 
+export interface ChapterVersionRestoreStatus {
+  id: string
+  chapter_number: number
+  restore_status: string | null
+  restore_error: string | null
+  restore_task_id: string | null
+  restore_started_at: string | null
+  restore_completed_at: string | null
+}
+
 // ── Import Preview ─────────────────────────────────────────────────────────
 
 export type SectionType =

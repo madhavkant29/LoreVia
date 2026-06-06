@@ -384,3 +384,17 @@ export interface RelationshipGraph {
   offset?: number
   has_more?: boolean
 }
+
+export interface CharacterState {
+  trait_state: Record<string, unknown> | null
+  at_chapter: number
+  arc_note?: string | null
+  prompt_delta?: string | null
+}
+
+export interface RelationshipRepairResult {
+  pairs_repaired: number
+  relationships_deleted: number
+  relationships_remaining: number
+  relationship_candidates_updated: number
+}

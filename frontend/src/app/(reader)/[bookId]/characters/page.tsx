@@ -1897,6 +1897,43 @@ export default function CharactersPage() {
     }
   }
 
+  async function handleApproveCharacter() {
+    if (!selectedCharacter) return
+    setSaving(true)
+    setActionError(null)
+    try {
+      await booksApi.approveCharacter(bookId, selectedCharacter.id)
+      const refreshed = await refreshCharacters()
+      setChars(refreshed)
+      setSelectedId(selectedCharacter.id)
+      setNoteToast(`${selectedCharacter.name} has been approved.`)
+      scheduleTimeout(() => setNoteToast(null), 2600)
+    } catch {
+      setActionError("Could not approve this character.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRejectCharacter() {
+    if (!selectedCharacter) return
+    setSaving(true)
+    setActionError(null)
+    try {
+      await booksApi.rejectCharacter(bookId, selectedCharacter.id)
+      const refreshed = await refreshCharacters()
+      setChars(refreshed)
+      setSelectedId(refreshed[0]?.id ?? "")
+      setWorkspaceMode("profile")
+      setNoteToast(`${selectedCharacter.name} has been rejected as noise.`)
+      scheduleTimeout(() => setNoteToast(null), 2600)
+    } catch {
+      setActionError("Could not reject this character.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleToggleProtectedFromRepair() {
     if (!selectedCharacter) return
     setReviewNoteBusy(true)
@@ -2047,6 +2084,23 @@ export default function CharactersPage() {
       scheduleTimeout(() => setNoteToast(null), 2200)
     } catch {
       setActionError("Could not apply the repair plan.")
+    } finally {
+      setReprocessBusy(false)
+    }
+  }
+
+  async function handleRepairRelationships() {
+    setReprocessBusy(true)
+    setActionError(null)
+    try {
+      const result = await booksApi.repairRelationships(bookId)
+      await refreshGraph()
+      setNoteToast(
+        `Relationship repair: ${result.pairs_repaired} pairs repaired, ${result.relationships_deleted} deleted, ${result.relationships_remaining} remaining, ${result.relationship_candidates_updated} candidates updated.`,
+      )
+      scheduleTimeout(() => setNoteToast(null), 4000)
+    } catch {
+      setActionError("Could not repair relationship timelines.")
     } finally {
       setReprocessBusy(false)
     }
@@ -2819,6 +2873,16 @@ export default function CharactersPage() {
                                 <button type="button" disabled={saving} onClick={() => void handleDemoteSelectedCharacter()} className={actionButtonClasses(isDark)}>
                                   {saving ? "Moving..." : "Demote to review"}
                                 </button>
+                                {selectedCharacter?.approval_state === "pending_review" ? (
+                                  <>
+                                    <button type="button" disabled={saving} onClick={() => void handleApproveCharacter()} className="inline-flex items-center rounded-xl border px-4 py-2.5 text-sm font-medium transition border-emerald-600 bg-emerald-700 text-white hover:bg-emerald-800">
+                                      {saving ? "Approving..." : "Approve character"}
+                                    </button>
+                                    <button type="button" disabled={saving} onClick={() => void handleRejectCharacter()} className="inline-flex items-center rounded-xl border px-4 py-2.5 text-sm font-medium transition border-red-500 bg-red-600 text-white hover:bg-red-700">
+                                      {saving ? "Rejecting..." : "Reject as noise"}
+                                    </button>
+                                  </>
+                                ) : null}
                               </div>
                             </div>
                           </SurfaceCard>
@@ -3480,6 +3544,9 @@ export default function CharactersPage() {
                           </button>
                           <button type="button" disabled={reprocessBusy} onClick={() => void handleApplyCharacterReprocess()} className="rounded-md bg-amber-700 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                             {reprocessBusy ? "Applying..." : "Apply repair plan"}
+                          </button>
+                          <button type="button" disabled={reprocessBusy} onClick={() => void handleRepairRelationships()} className="rounded-md bg-amber-700 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                            {reprocessBusy ? "Repairing..." : "Repair relationship timelines"}
                           </button>
                         </div>
                       </SurfaceCard>

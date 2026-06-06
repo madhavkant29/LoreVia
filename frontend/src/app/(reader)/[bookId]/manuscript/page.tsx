@@ -1019,6 +1019,7 @@ function ManuscriptPageInner() {
 
   const restoreSnapshot = async (versionId: string) => {
     setRestoringVersionId(versionId)
+    let pollTimer: ReturnType<typeof setInterval> | null = null
     try {
       const restored = await booksApi.restoreChapterVersion(bookId, versionId)
       setSelectedChapter(restored.chapter_number)
@@ -1039,8 +1040,24 @@ function ManuscriptPageInner() {
       await runAutomaticChecks(restored.chapter_number, restored.text)
       await loadWorkspaceTree()
       setStatusMessage(`Restored chapter ${restored.chapter_number} from snapshot.`)
-    } finally {
+      pollTimer = setInterval(async () => {
+        try {
+          const status = await booksApi.getRestoreStatus(bookId, versionId)
+          if (status.restore_status === "done" || status.restore_status === "failed") {
+            if (pollTimer) clearInterval(pollTimer)
+            setRestoringVersionId(null)
+            if (status.restore_status === "failed") {
+              setStatusMessage(status.restore_error ?? "Restore failed.")
+            }
+          }
+        } catch {
+          if (pollTimer) clearInterval(pollTimer)
+          setRestoringVersionId(null)
+        }
+      }, 1500)
+    } catch {
       setRestoringVersionId(null)
+      if (pollTimer) clearInterval(pollTimer)
     }
   }
 

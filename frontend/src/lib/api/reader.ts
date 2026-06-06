@@ -4,6 +4,7 @@ import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import type { BetaReadAssignment, BetaReadAssignmentListResponse, ChapterData, ChapterListResponse, ContextResult, ChapterSummary, ForeshadowingItem, PlotThread, ReadingProgress, RecallResponse, RelationshipEvolutionPair, SummaryCollectionResponse, SummaryMode, ThematicSearchResult, TimelineResponse } from "@/types/reader"
 import type { RelationshipGraph } from "@/types/character"
+import type { BookEventsPaginated } from "@/types/book"
 
 function readerPath(bookId: string, suffix = "") {
   return `/reader/${normalizeBookRouteId(bookId)}${suffix}`
@@ -37,6 +38,14 @@ export const readerApi = {
     apiClient.get<{ items: ForeshadowingItem[] }>(readerPath(bookId, "/foreshadowing")).then(r => r.data),
   getTimeline: (bookId: string, options?: { limit?: number; offset?: number }) =>
     apiClient.get<TimelineResponse>(readerPath(bookId, "/timeline"), { params: { limit: options?.limit ?? 100, offset: options?.offset ?? 0, include: "chapters,character_tracks,thread_tracks,relationship_markers" } }).then(r => r.data),
+  getEvents: (bookId: string, options?: { chapter?: number; limit?: number; offset?: number }) =>
+    apiClient.get<BookEventsPaginated>(readerPath(bookId, "/events"), {
+      params: {
+        ...(options?.chapter ? { chapter: options.chapter } : {}),
+        limit: options?.limit ?? 50,
+        offset: options?.offset ?? 0,
+      },
+    }).then(r => r.data),
   thematicSearch: (bookId: string, q: string) =>
     apiClient.get<{ results: ThematicSearchResult[] }>(readerPath(bookId, "/thematic-search"), { params: { q } }).then(r => r.data),
   getRelationshipEvolution: (bookId: string, chapter: number) =>

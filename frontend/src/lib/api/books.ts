@@ -165,6 +165,8 @@ export const booksApi = {
       invalidateReaderCache(id)
       return r.data
     }),
+  getRestoreStatus: (id: string, versionId: string) =>
+    apiClient.get<import("@/types/book").ChapterVersionRestoreStatus>(bookPath(id, `/chapter-versions/${versionId}/restore-status`)).then(r => r.data),
   getSceneVersions: (id: string, sceneId: string, limit = 12) =>
     apiClient.get<SceneVersion[]>(bookPath(id, `/scenes/${sceneId}/versions`), { params: { limit } }).then(r => r.data),
   createSceneSnapshot: (id: string, sceneId: string, note?: string) =>
@@ -427,6 +429,24 @@ export const booksApi = {
     }),
   demoteCharacter: (bookId: string, characterId: string) =>
     apiClient.post<{ demoted: string; candidate_id: string }>(bookPath(bookId, `/characters/${characterId}/demote`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
+  approveCharacter: (bookId: string, characterId: string) =>
+    apiClient.post<{ approved: string }>(bookPath(bookId, `/characters/${characterId}/approve`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
+  rejectCharacter: (bookId: string, characterId: string) =>
+    apiClient.post<{ rejected: string }>(bookPath(bookId, `/characters/${characterId}/reject`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
+  repairRelationships: (bookId: string) =>
+    apiClient.post<import("@/types/character").RelationshipRepairResult>(bookPath(bookId, "/relationships/repair")).then(r => {
       invalidateBookCache(bookId)
       invalidateReaderCache(bookId)
       return r.data

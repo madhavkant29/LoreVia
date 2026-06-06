@@ -72,6 +72,8 @@ export const worldBuildingApi = {
     apiClient.post<{ accepted: string; remaining: number }>(`/intelligence/${worldElementId}/world-building/accept-suggestion`, payload).then(r => r.data),
   listNotes: (bookId: string) =>
     apiClient.get<WorldNote[]>(worldBuildingPath(bookId, "/world-building/notes")).then(r => r.data),
+  getNotesByChapter: (bookId: string, chapterNumber: number) =>
+    apiClient.get<WorldNote[]>(worldBuildingPath(bookId, `/world-building/notes/by-chapter/${chapterNumber}`)).then(r => r.data),
   createNote: (
     bookId: string,
     payload: {
