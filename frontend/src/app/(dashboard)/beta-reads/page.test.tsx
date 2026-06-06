@@ -84,8 +84,8 @@ afterEach(() => {
 })
 
 async function renderPage() {
-  const module = await import("./page")
-  const Page = module.default
+  const pageModule = await import("./page")
+  const Page = pageModule.default
 
   container = document.createElement("div")
   document.body.appendChild(container)
