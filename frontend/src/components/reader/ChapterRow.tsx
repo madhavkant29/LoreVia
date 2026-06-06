@@ -2,6 +2,7 @@
 
 import { memo } from "react"
 import { ChapterStatusChip } from "@/components/reader/ChapterStatusChip"
+import { chapterKindShortLabel } from "@/lib/utils/chapterLabels"
 import type { ChapterListItem } from "@/types/reader"
 
 type ChapterRowProps = {
@@ -39,7 +40,8 @@ function buildMetadata(chapter: ChapterListItem) {
 }
 
 export const ChapterRow = memo(function ChapterRow({ chapter, unitLabel, isDark, readBusy, deleteBusy = false, onOpen, onToggleRead, onDelete }: ChapterRowProps) {
-  const title = chapter.title || `${unitLabel} ${chapter.number}`
+  const kindLabel = chapterKindShortLabel(chapter.chapter_kind, chapter.number, unitLabel === "Scene" ? "Sc." : "Ch.")
+  const title = chapter.title || kindLabel
   const metadata = buildMetadata(chapter)
 
   return (
@@ -64,7 +66,7 @@ export const ChapterRow = memo(function ChapterRow({ chapter, unitLabel, isDark,
 
           <div className="min-w-0">
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-sky-300/80" : "text-stone-500"}`}>
-              {unitLabel} {chapter.number}
+              {kindLabel}
             </p>
             <h2 className={`mt-2 truncate font-serif text-[2rem] leading-none tracking-[-0.03em] ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
           </div>

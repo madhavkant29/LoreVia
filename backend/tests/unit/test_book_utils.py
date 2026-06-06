@@ -20,6 +20,7 @@ from app.utils.book_utils import (
     _build_knowledge_timeline,
     _build_narration_signature,
     _describe_narration_shift,
+    _select_genre_checks,
     build_chapter_title_from_summary,
     build_emotional_arc_payload,
     build_book_processing_payload,
@@ -37,6 +38,7 @@ from app.utils.book_utils import (
     build_scene_chapter_import_text,
     markdown_to_html,
     manuscript_html_to_text,
+    normalize_chapter_kind,
     normalize_chapter_title,
     normalize_imported_chapters,
     normalize_scene_metadata,
@@ -771,6 +773,53 @@ def test_resolve_upload_format_and_work_type_infers_and_preserves_technical_form
     assert resolve_upload_format_and_work_type("novel.pdf") == ("pdf", "novel")
 
 
+def test_normalize_chapter_kind_accepts_supported_front_and_back_matter():
+    assert normalize_chapter_kind("Preface") == "preface"
+    assert normalize_chapter_kind("table of contents") == "toc"
+    assert normalize_chapter_kind("acknowledgements") == "acknowledgments"
+    assert normalize_chapter_kind("unknown-heading") == "chapter"
+    assert normalize_chapter_kind(None) == "chapter"
+
+
+def test_select_genre_checks_includes_ranked_findings():
+    checks = _select_genre_checks(
+        "Fantasy",
+        [
+            {
+                "id": "finding-1",
+                "category": "confusion",
+                "title": "Lore term overload",
+                "description": "Several world terms arrive in one scene.",
+                "severity": "medium",
+            },
+            {
+                "id": "finding-2",
+                "category": "voice",
+                "title": "Modern diction drift",
+                "description": "The setting voice sounds too modern.",
+                "severity": "medium",
+            },
+        ],
+    )
+
+    assert len(checks) == 1
+    assert checks[0]["label"] == "Fantasy"
+    assert [item["id"] for item in checks[0]["findings"]] == ["finding-1", "finding-2"]
+
+
+def test_normalize_imported_chapters_preserves_section_type_as_chapter_kind():
+    normalized = normalize_imported_chapters(
+        [{"number": 1, "title": "Preface", "text": "Before the story.", "section_type": "preface"}],
+        chapter_number=None,
+        start_number=1,
+        replace_existing=False,
+        chunk_long_documents=False,
+        preserve_exact_structure=False,
+    )
+
+    assert normalized[0]["chapter_kind"] == "preface"
+
+
 def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_structure_is_preserved():
     long_text = "\n\n".join([
         " ".join(["opening"] * 1800),
@@ -791,6 +840,27 @@ def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_struc
     assert normalized[0]["title"] == "Chapter I"
     assert "(Part 1)" not in normalized[0]["title"]
     assert normalized[0]["text"] == long_text
+    assert normalized[0]["chapter_kind"] == "chapter"
+
+
+def test_normalize_imported_chapters_uses_chapter_kind_for_split_parts():
+    long_text = "\n\n".join([
+        " ".join(["front"] * 1800),
+        " ".join(["matter"] * 1800),
+    ])
+
+    normalized = normalize_imported_chapters(
+        [{"number": 1, "title": "Preface", "text": long_text, "section_type": "preface"}],
+        chapter_number=None,
+        start_number=1,
+        replace_existing=False,
+        chunk_long_documents=True,
+        preserve_exact_structure=False,
+    )
+
+    assert len(normalized) == 2
+    assert [chapter["chapter_kind"] for chapter in normalized] == ["chapter", "chapter"]
+
 
 
 def test_normalize_imported_chapters_keeps_images_with_matching_markers_when_split():

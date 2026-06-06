@@ -514,6 +514,7 @@ async def import_manuscript_content(
                 text=next_text,
                 html=job.get("html") if isinstance(job.get("html"), str) else None,
                 description=str(job.get("description") or "") or None,
+                chapter_kind=str(job.get("chapter_kind") or ""),
                 content_version=int(job.get("content_version") or 1),
             )
             if not should_auto_reprocess:
@@ -528,6 +529,7 @@ async def import_manuscript_content(
                     "text": next_text,
                     "html": job.get("html"),
                     "description": job.get("description"),
+                    "chapter_kind": job.get("chapter_kind"),
                     "images": list(job.get("images") or []),
                     "content_version": int(job.get("content_version") or 1),
                 },

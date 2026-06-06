@@ -901,6 +901,7 @@ class RevisionGenreCheckOut(BaseModel):
     label: str
     checks: list[str] = Field(default_factory=list)
     rationale: str
+    findings: list[RevisionActionItemOut] = Field(default_factory=list)
 
 
 class RevisionPlanPassOut(BaseModel):

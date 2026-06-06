@@ -56,7 +56,7 @@ from app.services.character_identity.resolver import (
     resolve_character_mention,
 )
 from app.utils.billing_utils import has_paid_reading_access
-from app.utils.book_utils import parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
+from app.utils.book_utils import normalize_chapter_kind, parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
 from app.utils.character_utils import (
     CHARACTER_APPROVAL_APPROVED,
     CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
@@ -718,6 +718,7 @@ async def _process_chapter(
                 content_version=int(ch_data.get("content_version") or 1),
                 title=ch_data.get("title"),
                 description=ch_data.get("description"),
+                chapter_kind=normalize_chapter_kind(ch_data.get("chapter_kind") or ch_data.get("section_type")),
                 s3_key=s3_key,
                 word_count=_count_words(ch_data.get("text", "")),
                 processed=True,
@@ -732,6 +733,10 @@ async def _process_chapter(
                 chapter_changed = True
             if ch_data.get("description") and chapter.description != ch_data["description"]:
                 chapter.description = ch_data["description"]
+                chapter_changed = True
+            next_chapter_kind = normalize_chapter_kind(ch_data.get("chapter_kind") or ch_data.get("section_type"))
+            if next_chapter_kind != chapter.chapter_kind:
+                chapter.chapter_kind = next_chapter_kind
                 chapter_changed = True
             if not chapter.processed:
                 chapter.processed = True
@@ -1727,6 +1732,7 @@ async def _ensure_chapter_stub(db, book, ch_data: dict, *, s3_key: str, existing
                 number=ch_data["number"],
                 title=ch_data.get("title"),
                 description=ch_data.get("description"),
+                chapter_kind=normalize_chapter_kind(ch_data.get("chapter_kind") or ch_data.get("section_type")),
                 s3_key=s3_key,
                 token_count=count_tokens(ch_data["text"]),
                 word_count=_count_words(ch_data.get("text", "")),
@@ -1742,6 +1748,10 @@ async def _ensure_chapter_stub(db, book, ch_data: dict, *, s3_key: str, existing
         changed = True
     if ch_data.get("description") and (not existing.description or not existing.description.strip()):
         existing.description = ch_data["description"]
+        changed = True
+    next_chapter_kind = normalize_chapter_kind(ch_data.get("chapter_kind") or ch_data.get("section_type"))
+    if next_chapter_kind != existing.chapter_kind:
+        existing.chapter_kind = next_chapter_kind
         changed = True
     if ch_data.get("text") and not existing.token_count:
         existing.token_count = count_tokens(ch_data["text"])

@@ -378,6 +378,7 @@ class Chapter(Base):
     structure_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     title: Mapped[str | None] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(String)
+    chapter_kind: Mapped[str] = mapped_column(String, nullable=False, default="chapter", server_default="chapter", index=True)
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer)
     word_count: Mapped[int | None] = mapped_column(Integer)

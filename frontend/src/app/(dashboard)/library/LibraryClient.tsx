@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { useRef } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { startTransition, Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
@@ -23,14 +23,6 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
 import type { NextBestAction, RecentActivityItem } from "@/types/ux"
-
-const UpcomingBetaReadsCard = dynamic(
-  () => import("@/components/library/UpcomingBetaReadsCard").then((module) => module.UpcomingBetaReadsCard),
-  {
-    ssr: false,
-    loading: () => <Skeleton variant="card" className="min-h-[12rem] rounded-sm" />,
-  }
-)
 
 const UploadModal = dynamic(
   () => import("@/components/modals/UploadModal").then((module) => module.UploadModal),
@@ -263,8 +255,6 @@ export function LibraryClient() {
   const [menuBookId, setMenuBookId] = useState<string | null>(null)
   const [pinnedIds, setPinnedIds] = useState<Record<string, boolean>>({})
   const [pinsReady, setPinsReady] = useState(false)
-  const [showBetaReadsCard, setShowBetaReadsCard] = useState(false)
-  const [betaReadMetric, setBetaReadMetric] = useState({ count: 0, ready: false })
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const {
@@ -316,26 +306,6 @@ export function LibraryClient() {
   }, [pinnedIds, pinsReady])
 
   useEffect(() => {
-    if (showBetaReadsCard) return
-
-    const schedule =
-      typeof window.requestIdleCallback === "function"
-        ? window.requestIdleCallback.bind(window)
-        : ((callback: IdleRequestCallback) =>
-            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 150))
-    const cancel =
-      typeof window.cancelIdleCallback === "function"
-        ? window.cancelIdleCallback.bind(window)
-        : window.clearTimeout.bind(window)
-
-    const handle = schedule(() => {
-      startTransition(() => setShowBetaReadsCard(true))
-    })
-
-    return () => cancel(handle)
-  }, [showBetaReadsCard])
-
-  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target
       const typingTarget = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
@@ -349,7 +319,10 @@ export function LibraryClient() {
   }, [])
 
   const normalizedSearch = search.trim().toLowerCase()
-  const visibleBooks = useMemo(() => books.filter((book) => !book.hidden_at), [books])
+  const visibleBooks = useMemo(
+    () => books.filter((book) => !book.hidden_at && book.access_class !== "reader_collaborator"),
+    [books]
+  )
 
   const { filteredBooks, explicitPinned, fallbackPinned, pinnedBooks, pinnedBookIds, allProjectBooks } = useMemo(() => {
     const filtered = visibleBooks
@@ -447,10 +420,6 @@ export function LibraryClient() {
   }, [hasAnyProjects, visibleBooks])
   const filterSummary =
     modeFilter === "all" && statusFilter === "all" && !showArchived ? "Filter" : "Filtered"
-
-  const handleBetaReadMetricChange = useCallback((count: number, ready: boolean) => {
-    setBetaReadMetric((current) => (current.count === count && current.ready === ready ? current : { count, ready }))
-  }, [])
 
   async function handleArchive(bookId: string, archived: boolean) {
     setBusyBookId(bookId)
@@ -570,11 +539,9 @@ export function LibraryClient() {
           <MetricStrip
             isDark={isDark}
             loading={loading}
-            betaReady={betaReadMetric.ready}
             totalProjects={libraryMetrics.totalProjects}
             activeDrafts={libraryMetrics.activeDrafts}
             processing={libraryMetrics.processing}
-            betaReads={betaReadMetric.count}
           />
 
           <section className={`rounded-sm border p-3 sm:p-4 ${surfaceClass}`}>
@@ -743,14 +710,6 @@ export function LibraryClient() {
               </div>
             </div>
           </section>
-
-          <Suspense fallback={<BetaReadPanelSkeleton isDark={isDark} />}>
-            {showBetaReadsCard ? (
-              <UpcomingBetaReadsCard isDark={isDark} onCountChange={handleBetaReadMetricChange} />
-            ) : (
-              <BetaReadPanelSkeleton isDark={isDark} />
-            )}
-          </Suspense>
 
           <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
             <RecentActivityList
@@ -1044,24 +1003,20 @@ function NextActionPanel({
 function MetricStrip({
   isDark,
   loading,
-  betaReady,
   totalProjects,
   activeDrafts,
   processing,
-  betaReads,
 }: {
   isDark: boolean
   loading: boolean
-  betaReady: boolean
   totalProjects: number
   activeDrafts: number
   processing: number
-  betaReads: number
 }) {
   const shellClass = isDark ? "border-white/[0.08] bg-[#101b24]" : "border-stone-200 bg-white"
 
   return (
-    <section className={`grid overflow-hidden rounded-sm border ${shellClass} md:grid-cols-2 xl:grid-cols-4`}>
+    <section className={`grid overflow-hidden rounded-sm border ${shellClass} md:grid-cols-3`}>
       <MetricCell
         isDark={isDark}
         loading={loading}
@@ -1088,15 +1043,6 @@ function MetricStrip({
         label="Processing"
         value={processing}
         detail="AI analysis in progress"
-      />
-      <MetricCell
-        isDark={isDark}
-        loading={!betaReady}
-        tone="amber"
-        icon={<GroupIcon />}
-        label="Beta reads"
-        value={betaReads}
-        detail="Assigned right now"
       />
     </section>
   )
@@ -1144,25 +1090,6 @@ function MetricCell({
         </p>
       </div>
     </div>
-  )
-}
-
-function BetaReadPanelSkeleton({ isDark }: { isDark: boolean }) {
-  return (
-    <section className={`rounded-sm border p-5 ${isDark ? "border-white/[0.08] bg-[#101b24]" : "border-stone-200 bg-white"}`} role="status" aria-label="Loading upcoming beta reads" aria-busy="true">
-      <span className="sr-only">Loading upcoming beta reads</span>
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-start gap-4">
-          <Skeleton variant="circle" className="h-11 w-11 rounded-md" />
-          <div className="space-y-2">
-            <Skeleton variant="text" className="h-3 w-32" />
-            <Skeleton variant="text" className="h-5 w-56" />
-            <Skeleton variant="text" className="h-4 w-72 max-w-full" />
-          </div>
-        </div>
-        <Skeleton variant="text" className="h-11 w-40 rounded-sm" />
-      </div>
-    </section>
   )
 }
 

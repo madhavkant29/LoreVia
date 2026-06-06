@@ -666,7 +666,7 @@ export default function CollaborationPage() {
                         isDark={isDark}
                       />
                     <div
-                      className={`mt-2 grid h-11 grid-cols-3 rounded-md border p-1 text-sm ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
+                      className={`mt-2 grid min-h-[4rem] grid-cols-[1.15fr_1fr_0.9fr] gap-3 rounded-none border p-3 text-sm ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
                       role="group"
                       aria-label="Beta read scope"
                     >
@@ -677,7 +677,7 @@ export default function CollaborationPage() {
                             key={option.value}
                             type="button"
                             onClick={() => setBetaForm((current) => ({ ...current, scopeKind: option.value }))}
-                            className={`rounded-md px-3 text-sm font-medium transition ${
+                            className={`flex min-h-[2.5rem] min-w-0 items-center justify-center rounded-none px-3 py-2 text-center text-sm font-medium leading-tight transition ${
                               isActive
                                 ? isDark
                                   ? "bg-violet-500 text-white"

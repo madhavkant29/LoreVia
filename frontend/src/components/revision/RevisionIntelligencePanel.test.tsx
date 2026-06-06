@@ -50,9 +50,41 @@ describe("RevisionIntelligencePanel", () => {
     expect(view.textContent).not.toContain("Mark as fixed")
     expect(view.textContent).not.toContain("Convert to task")
   })
+
+  it("expands genre-specific findings when a genre card is clicked", () => {
+    const view = renderPanel()
+
+    const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("Fantasy"))
+    act(() => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(view.textContent).toContain("Lore pressure around the archive terms.")
+  })
+
+  it("opens timeline matrices from the story-map timeline summary and expands hidden threads", () => {
+    const view = renderPanel("story-map", buildRevisionWithTimelineThreads())
+
+    const hiddenButton = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("1 more timeline thread hidden"))
+    act(() => {
+      hiddenButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(view.textContent).toContain("Show fewer timeline threads.")
+    expect(view.textContent).toContain("Family obligation")
+
+    const timelineButton = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("Gregor's transformation into a vermin"))
+    act(() => {
+      timelineButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(view.textContent).toContain("Gregor's transformation into a vermin timeline")
+    expect(view.textContent).toContain("Grete")
+    expect(view.textContent).toContain("Ch 3")
+  })
 })
 
-function renderPanel(variant: "full" | "preview" | "story-map" = "full") {
+function renderPanel(variant: "full" | "preview" | "story-map" = "full", revision: RevisionIntelligence = buildRevision()) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -60,7 +92,7 @@ function renderPanel(variant: "full" | "preview" | "story-map" = "full") {
     root?.render(
       <RevisionIntelligencePanel
         bookId="book-1"
-        revision={buildRevision()}
+        revision={revision}
         writerWorkspace={null}
         isDark={false}
         onRevisionChange={vi.fn()}
@@ -94,7 +126,25 @@ function buildRevision(): RevisionIntelligence {
     },
     change_impacts: [topItem],
     confusion_map: [],
-    genre_checks: [],
+    genre_checks: [
+      {
+        genre: "fantasy",
+        label: "Fantasy",
+        checks: ["magic system consistency"],
+        rationale: "LoreVia is weighting fantasy-specific checks.",
+        findings: [
+          {
+            id: "genre-1",
+            category: "confusion",
+            title: "Lore pressure around the archive terms.",
+            description: "Readers get multiple invented terms at once.",
+            severity: "medium",
+            chapter_ref: 3,
+            status: "pending",
+          },
+        ],
+      },
+    ],
     knowledge_matrix: [
       {
         fact: "Hidden fact",
@@ -125,5 +175,101 @@ function buildRevision(): RevisionIntelligence {
     revision_plan: [{ title: "Pass 1", summary: "Fix continuity.", items: [topItem] }],
     scene_advice: [],
     voice_alerts: [],
+  }
+}
+
+function buildRevisionWithTimelineThreads(): RevisionIntelligence {
+  const revision = buildRevision()
+
+  return {
+    ...revision,
+    knowledge_timeline: [
+      {
+        fact: "Gregor's transformation into a vermin",
+        rows: [
+          {
+            character_name: "Gregor",
+            chapter_learned: 1,
+            source: "Immediate lived experience",
+            cells: [
+              { chapter_number: 1, state: "learned" },
+              { chapter_number: 2, state: "known" },
+              { chapter_number: 3, state: "known" },
+            ],
+          },
+          {
+            character_name: "Grete",
+            chapter_learned: null,
+            source: "No earlier evidence surfaced yet",
+            cells: [
+              { chapter_number: 1, state: "unknown" },
+              { chapter_number: 2, state: "unknown" },
+              { chapter_number: 3, state: "unknown" },
+            ],
+          },
+        ],
+        warning: "Grete still lacks an explicit handoff before later scenes depend on this fact.",
+      },
+      {
+        fact: "Gregor's struggle for survival",
+        rows: [
+          {
+            character_name: "Gregor",
+            chapter_learned: 1,
+            source: "Tracked through manuscript evidence",
+            cells: [
+              { chapter_number: 1, state: "learned" },
+              { chapter_number: 2, state: "known" },
+            ],
+          },
+        ],
+        warning: null,
+      },
+      {
+        fact: "Gregor's obligation to his family",
+        rows: [
+          {
+            character_name: "Gregor",
+            chapter_learned: 1,
+            source: "Tracked through manuscript evidence",
+            cells: [
+              { chapter_number: 1, state: "learned" },
+              { chapter_number: 2, state: "known" },
+            ],
+          },
+        ],
+        warning: null,
+      },
+      {
+        fact: "Concern for family obligations",
+        rows: [
+          {
+            character_name: "Mr. Samsa",
+            chapter_learned: 2,
+            source: "Tracked through manuscript evidence",
+            cells: [
+              { chapter_number: 1, state: "unknown" },
+              { chapter_number: 2, state: "learned" },
+            ],
+          },
+        ],
+        warning: null,
+      },
+      {
+        fact: "Family obligation",
+        rows: [
+          {
+            character_name: "Mrs. Samsa",
+            chapter_learned: null,
+            source: "No earlier evidence surfaced yet",
+            cells: [
+              { chapter_number: 1, state: "unknown" },
+              { chapter_number: 2, state: "unknown" },
+            ],
+          },
+        ],
+        warning: null,
+      },
+    ],
   }
 }

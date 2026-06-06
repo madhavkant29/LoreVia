@@ -270,9 +270,13 @@ export function RevisionIntelligencePanel({
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
   const [showKnowledgeDetails, setShowKnowledgeDetails] = useState(false)
+  const [selectedGenreLabel, setSelectedGenreLabel] = useState<string | null>(null)
+  const [selectedTimelineFact, setSelectedTimelineFact] = useState<string | null>(null)
+  const [showAllTimelineSummaries, setShowAllTimelineSummaries] = useState(false)
 
   const board = writerWorkspace?.revision_board ?? { items: [], last_generated_at: null }
   const today = useMemo(() => todayDateValue(), [])
+  const activeTimelineFact = revision.knowledge_timeline.find((fact) => fact.fact === selectedTimelineFact) ?? null
 
   const persistWorkspace = async (
     nextWorkspacePatch: Partial<WriterWorkspace>,
@@ -508,18 +512,37 @@ export function RevisionIntelligencePanel({
               isDark={isDark}
             >
               <div className="space-y-3">
-                {revision.knowledge_timeline.slice(0, 4).map((fact) => {
+                {(showAllTimelineSummaries ? revision.knowledge_timeline : revision.knowledge_timeline.slice(0, 4)).map((fact) => {
                   const learnedCount = fact.rows.filter((row) => row.chapter_learned).length
                   const unknownCount = Math.max(0, fact.rows.length - learnedCount)
+                  const isActive = selectedTimelineFact === fact.fact
                   return (
-                    <div key={`timeline-summary-${fact.fact}`} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
+                    <button
+                      type="button"
+                      key={`timeline-summary-${fact.fact}`}
+                      onClick={() => setSelectedTimelineFact((current) => current === fact.fact ? null : fact.fact)}
+                      className={`w-full rounded-md border p-4 text-left transition ${isDark ? "border-white/[0.06] bg-[#101720] hover:bg-[#162230]" : "border-slate-200 bg-white hover:bg-slate-50"} ${isActive ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+                    >
                       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact}</p>
                       <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{learnedCount} known handoff{learnedCount === 1 ? "" : "s"} / {unknownCount} unknown</p>
-                    </div>
+                    </button>
                   )
                 })}
                 {revision.knowledge_timeline.length > 4 ? (
-                  <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{revision.knowledge_timeline.length - 4} more timeline thread{revision.knowledge_timeline.length - 4 === 1 ? "" : "s"} hidden.</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowAllTimelineSummaries((current) => !current)}
+                    className={`text-left text-xs font-medium transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"}`}
+                  >
+                    {showAllTimelineSummaries
+                      ? "Show fewer timeline threads."
+                      : `${revision.knowledge_timeline.length - 4} more timeline thread${revision.knowledge_timeline.length - 4 === 1 ? "" : "s"} hidden.`}
+                  </button>
+                ) : null}
+                {activeTimelineFact ? (
+                  <div className="pt-2">
+                    <TimelineMatrix fact={activeTimelineFact} isDark={isDark} />
+                  </div>
                 ) : null}
               </div>
             </SectionFrame>
@@ -607,15 +630,34 @@ export function RevisionIntelligencePanel({
           >
             <div className="space-y-3">
               {revision.genre_checks.map((genreCheck) => (
-                <div key={genreCheck.label} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
-                  <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{genreCheck.label}</p>
-                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{genreCheck.rationale}</p>
+                <button
+                  type="button"
+                  key={genreCheck.label}
+                  onClick={() => setSelectedGenreLabel((current) => current === genreCheck.label ? null : genreCheck.label)}
+                  className={`w-full rounded-md border p-4 text-left transition ${isDark ? "border-white/[0.06] bg-[#101720] hover:bg-[#162230]" : "border-slate-200 bg-white hover:bg-slate-50"} ${selectedGenreLabel === genreCheck.label ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{genreCheck.label}</p>
+                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{genreCheck.rationale}</p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"}`}>{genreCheck.findings.length}</span>
+                  </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {genreCheck.checks.map((check) => (
                       <span key={check} className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}>{check}</span>
                     ))}
                   </div>
-                </div>
+                  {selectedGenreLabel === genreCheck.label ? (
+                    <div className="mt-4 border-t border-white/10 pt-4">
+                      {renderActionSummaryList(
+                        genreCheck.findings,
+                        "No specific genre-weighted findings are surfaced right now.",
+                        3,
+                      )}
+                    </div>
+                  ) : null}
+                </button>
               ))}
             </div>
           </SectionFrame>

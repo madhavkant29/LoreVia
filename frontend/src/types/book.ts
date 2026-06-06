@@ -752,6 +752,7 @@ export interface RevisionGenreCheck {
   label: string
   checks: string[]
   rationale: string
+  findings: RevisionActionItem[]
 }
 
 export interface RevisionPlanPass {

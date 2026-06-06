@@ -839,6 +839,46 @@ async def delete_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), cu
     return await book_out(db, book, current_user.id)
 
 
+# ─── Cover management ─────────────────────────────────────────────────────────
+
+@router.put("/{book_id}/cover", response_model=BookOut)
+async def update_book_cover(
+    book_id: uuid.UUID,
+    cover_file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    raw = await _read_upload_bounded(cover_file, MAX_COVER_UPLOAD_BYTES, "Cover image")
+    if not raw:
+        raise HTTPException(400, "Cover file is empty")
+    suffix, content_type = _validate_cover_magic(raw)
+    book.cover_s3_key = await asyncio.to_thread(
+        storage.upload_binary,
+        f"covers/{current_user.id}/{uuid.uuid4()}.{suffix}",
+        raw,
+        content_type,
+    )
+    await db.commit()
+    await db.refresh(book)
+    await mark_book_cache_dirty(str(book.id))
+    return await book_out(db, book, current_user.id)
+
+
+@router.delete("/{book_id}/cover", response_model=BookOut)
+async def remove_book_cover(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    book.cover_s3_key = None
+    await db.commit()
+    await db.refresh(book)
+    await mark_book_cache_dirty(str(book.id))
+    return await book_out(db, book, current_user.id)
+
+
 # ─── Public asset endpoints (not router-decorated; used directly by router.py) ─
 
 async def get_book_cover_public(book_id: uuid.UUID, token: str = Query(...), db: AsyncSession = Depends(get_db)):

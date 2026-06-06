@@ -19,7 +19,7 @@ const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
   {
     ssr: false,
-    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
+    loading: () => <div className="rounded-none border border-white/[0.065] bg-[#0d141c] p-4" />,
   }
 )
 
@@ -35,7 +35,7 @@ const FINAL_RATING_OPTIONS = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1] as const
 
 function StatPill({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
   return (
-    <div className={`rounded-xl border px-3 py-2 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
+    <div className={`rounded-none border px-3 py-2 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
       <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{value}</p>
     </div>
@@ -320,14 +320,14 @@ export default function BetaFeedbackPage() {
           {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
 
           {loading ? (
-            <section className={`rounded-md border p-6 text-sm ${isDark ? "border-white/[0.065] bg-[#0d141c] text-slate-400" : "border-slate-200/70 bg-white text-slate-500"}`}>
+            <section className={`rounded-none border p-6 text-sm ${isDark ? "border-white/[0.065] bg-[#0d141c] text-slate-400" : "border-slate-200/70 bg-white text-slate-500"}`}>
               Loading beta feedback workspace...
             </section>
           ) : null}
 
           {!loading && isAuthorView ? (
             <section className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-              <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
+              <div className={`rounded-none border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
                 <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Create beta read</h2>
                 <div className="mt-5 grid gap-3">
                   <LabeledField label="Reader email" detail="Invite the account that should receive read-only beta access." isDark={isDark}>
@@ -335,7 +335,7 @@ export default function BetaFeedbackPage() {
                       value={readerEmail}
                       onChange={(event) => setReaderEmail(event.target.value)}
                       aria-label="Reader email"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                     />
                   </LabeledField>
                   <LabeledField label="Task label" detail="Name the pass so the reader knows what kind of feedback you want." isDark={isDark}>
@@ -343,7 +343,7 @@ export default function BetaFeedbackPage() {
                       value={taskLabel}
                       onChange={(event) => setTaskLabel(event.target.value)}
                       aria-label="Task label"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                     />
                   </LabeledField>
                   <LabeledField label="Scope" detail="Choose whether this beta read covers the full manuscript or a narrowed packet." isDark={isDark}>
@@ -351,7 +351,7 @@ export default function BetaFeedbackPage() {
                       value={scopeKind}
                       onChange={(event) => setScopeKind(event.target.value)}
                       aria-label="Scope"
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                     >
                       <option value="full_book">Full book</option>
                       <option value="chapter_range">Chapter range</option>
@@ -367,7 +367,7 @@ export default function BetaFeedbackPage() {
                           value={chapterStart}
                           onChange={(event) => setChapterStart(event.target.value)}
                           aria-label="From chapter"
-                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                          className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                         />
                       </LabeledField>
                       <LabeledField label="Through chapter" isDark={isDark}>
@@ -377,7 +377,7 @@ export default function BetaFeedbackPage() {
                           value={chapterEnd}
                           onChange={(event) => setChapterEnd(event.target.value)}
                           aria-label="Through chapter"
-                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                          className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                         />
                       </LabeledField>
                     </div>
@@ -391,7 +391,7 @@ export default function BetaFeedbackPage() {
                         value={windowDays}
                         onChange={(event) => setWindowDays(event.target.value)}
                         aria-label="Window days"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                        className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                       />
                     </LabeledField>
                   </div>
@@ -404,7 +404,7 @@ export default function BetaFeedbackPage() {
                         value={requiredProgressPct}
                         onChange={(event) => setRequiredProgressPct(event.target.value)}
                         aria-label="Progress percent"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                        className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                       />
                     </LabeledField>
                     <LabeledField label="Comments" isDark={isDark}>
@@ -414,7 +414,7 @@ export default function BetaFeedbackPage() {
                         value={requiredCommentCount}
                         onChange={(event) => setRequiredCommentCount(event.target.value)}
                         aria-label="Required comments"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                        className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                       />
                     </LabeledField>
                     <LabeledField label="Review items" isDark={isDark}>
@@ -424,7 +424,7 @@ export default function BetaFeedbackPage() {
                         value={requiredFeedbackItemCount}
                         onChange={(event) => setRequiredFeedbackItemCount(event.target.value)}
                         aria-label="Required review items"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                        className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                       />
                     </LabeledField>
                   </div>
@@ -434,7 +434,7 @@ export default function BetaFeedbackPage() {
                       onChange={(event) => setAuthorQuestionsText(event.target.value)}
                       rows={5}
                       aria-label="Author questions"
-                      className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                      className={`rounded-none border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                     />
                   </LabeledField>
                 </div>
@@ -450,13 +450,13 @@ export default function BetaFeedbackPage() {
                   type="button"
                   onClick={() => void createAssignment()}
                   disabled={saving || !readerEmail.trim() || !taskLabel.trim()}
-                  className={`mt-6 inline-flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-amber-500 text-slate-950 hover:bg-amber-400 disabled:bg-amber-500/40 disabled:text-slate-900/70" : "bg-amber-500 text-slate-950 hover:bg-amber-400 disabled:bg-amber-200 disabled:text-slate-700"}`}
+                  className={`mt-6 inline-flex h-11 w-full items-center justify-center rounded-none px-4 text-sm font-semibold transition ${isDark ? "bg-amber-500 text-slate-950 hover:bg-amber-400 disabled:bg-amber-500/40 disabled:text-slate-900/70" : "bg-amber-500 text-slate-950 hover:bg-amber-400 disabled:bg-amber-200 disabled:text-slate-700"}`}
                 >
                   {saving ? "Saving..." : "Create beta read"}
                 </button>
               </div>
 
-              <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
+              <div className={`rounded-none border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Assignments</h2>
                   <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{authorAssignments.length} total</span>
@@ -467,14 +467,14 @@ export default function BetaFeedbackPage() {
                       type="button"
                       key={assignment.id}
                       onClick={() => void refreshAuthorDetail(assignment.id)}
-                      className={`block w-full rounded-md border p-4 text-left transition ${authorDetail?.assignment.id === assignment.id ? (isDark ? "border-amber-400/60 bg-amber-400/10" : "border-amber-400 bg-amber-50") : (isDark ? "border-white/[0.06] bg-[#101720] hover:bg-white/[0.05]" : "border-slate-200 bg-slate-50 hover:bg-white")}`}
+                      className={`block w-full rounded-none border p-4 text-left transition ${authorDetail?.assignment.id === assignment.id ? (isDark ? "border-amber-400/60 bg-amber-400/10" : "border-amber-400 bg-amber-50") : (isDark ? "border-white/[0.06] bg-[#101720] hover:bg-white/[0.05]" : "border-slate-200 bg-slate-50 hover:bg-white")}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{assignment.reader_email}</p>
                           <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{assignment.task_label}</p>
                         </div>
-                        <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${assignment.view_bucket === "completed" ? "bg-emerald-500/10 text-emerald-400" : assignment.view_bucket === "missed" ? "bg-rose-500/10 text-rose-400" : "bg-sky-500/10 text-sky-400"}`}>
+                        <span className={`rounded-none px-2.5 py-1 text-3xs font-semibold ${assignment.view_bucket === "completed" ? "bg-emerald-500/10 text-emerald-400" : assignment.view_bucket === "missed" ? "bg-rose-500/10 text-rose-400" : "bg-sky-500/10 text-sky-400"}`}>
                           {assignment.status_label}
                         </span>
                       </div>
@@ -485,14 +485,14 @@ export default function BetaFeedbackPage() {
                       </div>
                     </button>
                   )) : (
-                    <div className={`rounded-md border border-dashed p-5 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+                    <div className={`rounded-none border border-dashed p-5 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
                       No beta read assignments yet.
                     </div>
                   )}
                 </div>
 
                 {authorDetail ? (
-                  <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                  <div className={`mt-5 rounded-none border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Selected assignment</p>
@@ -516,7 +516,7 @@ export default function BetaFeedbackPage() {
                       <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Author questions</p>
                       <div className="mt-3 space-y-2">
                         {authorDetail.author_questions.length > 0 ? authorDetail.author_questions.map((question) => (
-                          <div key={question.id} className={`rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.02] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
+                          <div key={question.id} className={`rounded-none border px-3 py-2 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.02] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
                             <div className="flex items-center justify-between gap-3">
                               <span>{question.prompt}</span>
                               <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{question.answer_count} answers</span>
@@ -531,14 +531,14 @@ export default function BetaFeedbackPage() {
                         onChange={(event) => setExtraQuestionsText(event.target.value)}
                         rows={3}
                         aria-label="Additional author questions"
-                        className={`mt-3 w-full rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
+                        className={`mt-3 w-full rounded-none border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-amber-400" : "border-slate-200 bg-white text-slate-900 focus:border-amber-400"}`}
                       />
                       <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Add more questions, one per line.</p>
                       <button
                         type="button"
                         onClick={() => void appendQuestions()}
                         disabled={saving || parseQuestionLines(extraQuestionsText).length === 0}
-                        className={`mt-3 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15 disabled:bg-white/5 disabled:text-slate-500" : "bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500"}`}
+                        className={`mt-3 inline-flex h-10 items-center justify-center rounded-none px-4 text-sm font-semibold transition ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15 disabled:bg-white/5 disabled:text-slate-500" : "bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500"}`}
                       >
                         Add questions
                       </button>
@@ -551,13 +551,13 @@ export default function BetaFeedbackPage() {
 
           {!loading && canLeaveFeedback && readerDetail ? (
             <section className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-              <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
+              <div className={`rounded-none border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Your beta read</h2>
                     <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{readerDetail.assignment.task_label}</p>
                   </div>
-                  <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold ${readerDetail.assignment.submission_allowed ? "bg-emerald-500/10 text-emerald-400" : "bg-sky-500/10 text-sky-400"}`}>
+                  <span className={`rounded-none px-2.5 py-1 text-3xs font-semibold ${readerDetail.assignment.submission_allowed ? "bg-emerald-500/10 text-emerald-400" : "bg-sky-500/10 text-sky-400"}`}>
                     {readerDetail.assignment.status_label}
                   </span>
                 </div>
@@ -569,11 +569,11 @@ export default function BetaFeedbackPage() {
                   <StatPill label="Review items" value={`${readerDetail.assignment.feedback_item_count}/${readerDetail.assignment.required_feedback_item_count}`} isDark={isDark} />
                 </div>
 
-                <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                <div className={`mt-5 rounded-none border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Author questions</p>
                   <div className="mt-3 space-y-2">
                     {readerDetail.author_questions.length > 0 ? readerDetail.author_questions.map((question) => (
-                      <div key={question.id} className={`rounded-md border px-3 py-2 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.02] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
+                      <div key={question.id} className={`rounded-none border px-3 py-2 text-sm ${isDark ? "border-white/[0.06] bg-white/[0.02] text-slate-200" : "border-slate-200 bg-white text-slate-700"}`}>
                         {question.prompt}
                       </div>
                     )) : (
@@ -589,7 +589,7 @@ export default function BetaFeedbackPage() {
                       <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{activeFeedbackKind?.detail}</p>
                     </div>
                     {readerDetail.assignment.state === "active" ? (
-                      <button type="button" onClick={() => void startAssignment()} className={`rounded-md px-3 py-2 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-900 text-white"}`}>
+                      <button type="button" onClick={() => void startAssignment()} className={`rounded-none px-3 py-2 text-xs font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-900 text-white"}`}>
                         Start
                       </button>
                     ) : null}
@@ -598,7 +598,7 @@ export default function BetaFeedbackPage() {
                     <select
                       value={feedbackKind}
                       onChange={(event) => setFeedbackKind(event.target.value)}
-                      className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                      className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
                     >
                       {FEEDBACK_KIND_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
@@ -612,7 +612,7 @@ export default function BetaFeedbackPage() {
                           value={feedbackChapter}
                           onChange={(event) => setFeedbackChapter(event.target.value)}
                           aria-label="Feedback chapter number"
-                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                          className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
                         />
                       </LabeledField>
                       <LabeledField label="Linked question" isDark={isDark}>
@@ -620,7 +620,7 @@ export default function BetaFeedbackPage() {
                           value={selectedQuestionId}
                           onChange={(event) => setSelectedQuestionId(event.target.value)}
                           aria-label="Linked author question"
-                          className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                          className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
                         >
                           <option value="">No linked author question</option>
                           {readerDetail.author_questions.map((question) => (
@@ -634,7 +634,7 @@ export default function BetaFeedbackPage() {
                         value={feedbackReaction}
                         onChange={(event) => setFeedbackReaction(event.target.value)}
                         aria-label="Reaction label"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                        className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
                       />
                     </LabeledField>
                     <LabeledField label="Anchor text" detail="Quote the passage or marker this feedback refers to." isDark={isDark}>
@@ -642,7 +642,7 @@ export default function BetaFeedbackPage() {
                         value={feedbackAnchor}
                         onChange={(event) => setFeedbackAnchor(event.target.value)}
                         aria-label="Anchor text"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                        className={`h-11 rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
                       />
                     </LabeledField>
                     <LabeledField label="Feedback body" detail="Write what landed, dragged, confused you, or directly answers the author." isDark={isDark}>
@@ -651,14 +651,14 @@ export default function BetaFeedbackPage() {
                         onChange={(event) => setFeedbackBody(event.target.value)}
                         rows={5}
                         aria-label="Feedback body"
-                        className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
+                        className={`rounded-none border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-sky-400" : "border-slate-200 bg-white text-slate-900 focus:border-sky-400"}`}
                       />
                     </LabeledField>
                     <button
                       type="button"
                       onClick={() => void createFeedbackItem()}
                       disabled={saving}
-                      className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-sky-400 text-slate-950 hover:bg-sky-300 disabled:bg-sky-400/40 disabled:text-slate-900/70" : "bg-sky-600 text-white hover:bg-sky-500 disabled:bg-sky-200 disabled:text-slate-500"}`}
+                      className={`inline-flex h-11 items-center justify-center rounded-none px-4 text-sm font-semibold transition ${isDark ? "bg-sky-400 text-slate-950 hover:bg-sky-300 disabled:bg-sky-400/40 disabled:text-slate-900/70" : "bg-sky-600 text-white hover:bg-sky-500 disabled:bg-sky-200 disabled:text-slate-500"}`}
                     >
                       Save feedback item
                     </button>
@@ -666,7 +666,7 @@ export default function BetaFeedbackPage() {
                 </div>
               </div>
 
-              <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
+              <div className={`rounded-none border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
                 <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Review trail</h2>
                 <div className="mt-5 grid gap-3 sm:grid-cols-4">
                   <StatPill label="Answers" value={`${readerDetail.feedback_summary.answer_count}`} isDark={isDark} />
@@ -676,7 +676,7 @@ export default function BetaFeedbackPage() {
                 </div>
                 <div className="mt-5 space-y-3">
                   {readerDetail.feedback_items.length > 0 ? readerDetail.feedback_items.map((item) => (
-                    <div key={item.id} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                    <div key={item.id} className={`rounded-none border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{formatFeedbackKindLabel(item.kind)}</p>
@@ -696,13 +696,13 @@ export default function BetaFeedbackPage() {
                       {item.body ? <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{item.body}</p> : null}
                     </div>
                   )) : (
-                    <div className={`rounded-md border border-dashed p-5 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+                    <div className={`rounded-none border border-dashed p-5 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
                       No structured feedback saved yet.
                     </div>
                   )}
                 </div>
 
-                <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                <div className={`mt-5 rounded-none border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
                   <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Final review</p>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                     Submit a written review and a 1 to 5 rating in 0.5 steps to finish this assignment cleanly. Stronger-rated books rise in discovery for future readers.
@@ -710,7 +710,7 @@ export default function BetaFeedbackPage() {
                   <select
                     value={finalRating}
                     onChange={(event) => setFinalRating(event.target.value)}
-                    className={`mt-4 h-11 w-full rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-emerald-400" : "border-slate-200 bg-white text-slate-900 focus:border-emerald-400"}`}
+                    className={`mt-4 h-11 w-full rounded-none border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-emerald-400" : "border-slate-200 bg-white text-slate-900 focus:border-emerald-400"}`}
                   >
                     {FINAL_RATING_OPTIONS.map((rating) => (
                       <option key={rating} value={rating.toString()}>{`${rating.toFixed(1)} / 5`}</option>
@@ -721,14 +721,14 @@ export default function BetaFeedbackPage() {
                     onChange={(event) => setFinalReview(event.target.value)}
                     rows={6}
                     aria-label="Final review"
-                    className={`mt-4 w-full rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-emerald-400" : "border-slate-200 bg-white text-slate-900 focus:border-emerald-400"}`}
+                    className={`mt-4 w-full rounded-none border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#0d141c] text-slate-100 focus:border-emerald-400" : "border-slate-200 bg-white text-slate-900 focus:border-emerald-400"}`}
                   />
                   <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Summarize what hooked you, what felt predictable, what confused you, and who you cared about most.</p>
                   <button
                     type="button"
                     onClick={() => void submitReview()}
                     disabled={saving || !finalReview.trim()}
-                    className={`mt-4 inline-flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300 disabled:bg-emerald-400/40 disabled:text-slate-900/70" : "bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-emerald-200 disabled:text-slate-500"}`}
+                    className={`mt-4 inline-flex h-11 w-full items-center justify-center rounded-none px-4 text-sm font-semibold transition ${isDark ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300 disabled:bg-emerald-400/40 disabled:text-slate-900/70" : "bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-emerald-200 disabled:text-slate-500"}`}
                   >
                     Submit review
                   </button>
@@ -738,7 +738,7 @@ export default function BetaFeedbackPage() {
           ) : null}
 
           {!loading && !isAuthorView && !readerDetail ? (
-            <section className={`rounded-md border p-6 text-sm ${isDark ? "border-white/[0.065] bg-[#0d141c] text-slate-400" : "border-slate-200/70 bg-white text-slate-500"}`}>
+            <section className={`rounded-none border p-6 text-sm ${isDark ? "border-white/[0.065] bg-[#0d141c] text-slate-400" : "border-slate-200/70 bg-white text-slate-500"}`}>
               No active beta read was found for this book on your account yet.
             </section>
           ) : null}

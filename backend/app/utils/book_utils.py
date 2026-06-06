@@ -15,7 +15,7 @@ import re
 import statistics
 import uuid
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -810,6 +810,50 @@ def story_unit_label(
     return f"{label} {number}"
 
 
+_CHAPTER_KIND_LABELS: dict[str, str] = {
+    "chapter": "",
+    "preface": "Preface",
+    "introduction": "Introduction",
+    "foreword": "Foreword",
+    "prologue": "Prologue",
+    "epilogue": "Epilogue",
+    "appendix": "Appendix",
+    "acknowledgments": "Acknowledgments",
+    "afterword": "Afterword",
+    "dedication": "Dedication",
+    "toc": "Table of Contents",
+    "index": "Index",
+    "title_page": "Title Page",
+    "copyright": "Copyright",
+}
+
+_CHAPTER_KIND_ALIASES: dict[str, str] = {
+    "acknowledgements": "acknowledgments",
+    "contents": "toc",
+    "table_of_contents": "toc",
+}
+
+_SUPPORTED_CHAPTER_KINDS = frozenset(_CHAPTER_KIND_LABELS)
+
+
+def chapter_kind_label(chapter_kind: str | None, number: int | None = None) -> str:
+    if not chapter_kind or chapter_kind == "chapter":
+        if number is not None:
+            return f"Chapter {number}"
+        return "Chapter"
+    return _CHAPTER_KIND_LABELS.get(chapter_kind, chapter_kind.replace("_", " ").title())
+
+
+def normalize_chapter_kind(value: str | None) -> str:
+    if not value:
+        return "chapter"
+    normalized = "_".join(str(value).strip().lower().replace("-", "_").split())
+    normalized = _CHAPTER_KIND_ALIASES.get(normalized, normalized)
+    if normalized in _SUPPORTED_CHAPTER_KINDS:
+        return normalized
+    return "chapter"
+
+
 def _normalize_processing_state(raw: dict | None) -> dict | None:
     source = raw if isinstance(raw, dict) else {}
 
@@ -1465,7 +1509,78 @@ def _build_knowledge_timeline(
     return timeline
 
 
-def _select_genre_checks(genre: str | None) -> list[dict[str, Any]]:
+def _revision_item_text(item: Mapping[str, Any]) -> str:
+    return " ".join(
+        str(item.get(field) or "").strip().lower()
+        for field in ("title", "description", "recommendation", "source_label", "category")
+    )
+
+
+def _genre_match_score(normalized_genre: str, item: Mapping[str, Any]) -> int:
+    category = str(item.get("category") or "").strip().lower()
+    haystack = _revision_item_text(item)
+    score = 0
+
+    if "fantasy" in normalized_genre or "historical" in normalized_genre or "epic" in normalized_genre:
+        if category == "confusion":
+            score += 3
+        if category == "impact":
+            score += 2
+        if any(marker in haystack for marker in ("lore", "world", "setting", "faction", "term", "kingdom", "magic", "era", "politic")):
+            score += 3
+    if "sci-fi" in normalized_genre or "science fiction" in normalized_genre or "litrpg" in normalized_genre:
+        if category in {"confusion", "impact"}:
+            score += 3
+        if any(marker in haystack for marker in ("technology", "system", "science", "future", "colony", "rule", "power", "stat")):
+            score += 3
+    if "romance" in normalized_genre:
+        if category == "voice":
+            score += 3
+        if category in {"scene", "impact"}:
+            score += 2
+        if any(marker in haystack for marker in ("relationship", "emotion", "conflict", "payoff", "arc", "chemistry")):
+            score += 3
+    if "mystery" in normalized_genre or "thriller" in normalized_genre:
+        if category == "impact":
+            score += 3
+        if category == "confusion":
+            score += 2
+        if any(marker in haystack for marker in ("clue", "timeline", "alibi", "reveal", "suspect", "evidence")):
+            score += 3
+    if "horror" in normalized_genre:
+        if category == "voice":
+            score += 3
+        if category in {"impact", "scene"}:
+            score += 2
+        if any(marker in haystack for marker in ("threat", "dread", "ominous", "creature", "haunt", "fear")):
+            score += 3
+    if "young adult" in normalized_genre or normalized_genre == "ya":
+        if category == "voice":
+            score += 3
+        if category == "scene":
+            score += 2
+        if any(marker in haystack for marker in ("voice", "emotion", "peer", "coming-of-age", "age")):
+            score += 3
+    if "web novel" in normalized_genre or "webnovel" in normalized_genre:
+        if category in {"impact", "confusion"}:
+            score += 2
+        if any(marker in haystack for marker in ("recap", "reintroduction", "arc", "power", "cast")):
+            score += 3
+
+    return score
+
+
+def _select_genre_findings(normalized_genre: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranked = [
+        (_genre_match_score(normalized_genre, item), index, item)
+        for index, item in enumerate(items)
+    ]
+    ranked = [entry for entry in ranked if entry[0] > 0]
+    ranked.sort(key=lambda entry: (-entry[0], entry[1]))
+    return [dict(item) for _, _, item in ranked[:3]]
+
+
+def _select_genre_checks(genre: str | None, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized = " ".join((genre or "").split()).strip().lower()
     if not normalized:
         return []
@@ -1484,6 +1599,7 @@ def _select_genre_checks(genre: str | None) -> list[dict[str, Any]]:
                 "label": label,
                 "checks": list(config["checks"]),
                 "rationale": f"LoreVia is weighting revision checks toward the story promises and failure modes that usually matter most in {label.lower()} manuscripts.",
+                "findings": _select_genre_findings(normalized, items),
             }
         )
     return selected[:3]
@@ -2053,7 +2169,7 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
             "recent_edit_label": recent_edit_label,
         },
         "change_impacts": change_impacts,
-        "genre_checks": _select_genre_checks(book.genre),
+        "genre_checks": _select_genre_checks(book.genre, active_items),
         "revision_plan": revision_plan,
         "knowledge_matrix": knowledge_matrix[:3],
         "knowledge_timeline": knowledge_timeline,
@@ -6636,6 +6752,7 @@ async def persist_editor_chapter_content(
     text: str,
     html: str | None,
     description: str | None = None,
+    chapter_kind: str | None = None,
     content_version: int = 1,
 ) -> Chapter:
     storage_key = f"chapters/{book.id}/{chapter_number}.txt"
@@ -6654,6 +6771,7 @@ async def persist_editor_chapter_content(
             number=chapter_number,
             title=title,
             description=description,
+            chapter_kind=normalize_chapter_kind(chapter_kind),
             s3_key=stored_key,
             token_count=token_count,
             word_count=word_count,
@@ -6667,6 +6785,7 @@ async def persist_editor_chapter_content(
 
     chapter.title = title or chapter.title
     chapter.description = description or chapter.description
+    chapter.chapter_kind = normalize_chapter_kind(chapter_kind)
     chapter.s3_key = stored_key
     chapter.token_count = token_count
     chapter.word_count = word_count
@@ -6918,6 +7037,7 @@ def normalize_imported_chapters(
             continue
         title = _clean_optional_text(" ".join(str(chapter.get("title") or "").split()).strip())
         description = _clean_optional_text(" ".join(str(chapter.get("description") or "").split()).strip())
+        chapter_kind = normalize_chapter_kind(chapter.get("chapter_kind") or chapter.get("section_type"))
         html = clean_manuscript_html(chapter.get("html")) if chapter.get("html") else None
         images = list(chapter.get("images") or [])
         desired_number = chapter_number if replace_existing and chapter_number else running_number
@@ -6933,6 +7053,7 @@ def normalize_imported_chapters(
                 "text": part,
                 "html": html if len(parts) == 1 else manuscript_text_to_html(part),
                 "description": description,
+                "chapter_kind": chapter_kind if len(parts) == 1 else "chapter",
                 "images": images if len(parts) == 1 else _filter_import_images_for_text(part, images),
                 "scene_heading": chapter.get("scene_heading"),
                 "scene_number": chapter.get("scene_number"),

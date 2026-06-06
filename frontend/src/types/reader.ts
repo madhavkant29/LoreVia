@@ -72,9 +72,26 @@ export interface SearchResult {
   relevance: number
 }
 
+export type ChapterKind =
+  | "chapter"
+  | "preface"
+  | "introduction"
+  | "foreword"
+  | "prologue"
+  | "epilogue"
+  | "appendix"
+  | "acknowledgments"
+  | "afterword"
+  | "dedication"
+  | "toc"
+  | "index"
+  | "title_page"
+  | "copyright"
+
 export interface ChapterListItem {
   number: number
   title: string | null
+  chapter_kind?: ChapterKind
   processed: boolean
   intelligence_available?: boolean
   read: boolean
@@ -179,6 +196,7 @@ export interface BetaReadAssignmentCreateInput {
 export interface SummaryCollectionItem {
   chapter_number: number
   chapter_title: string | null
+  chapter_kind?: ChapterKind
   read: boolean
   available: boolean
   content: string | null

@@ -169,9 +169,6 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
   await expect(page.getByRole("button", { name: /open manuscript: sky of ash/i })).toBeVisible()
   await page.keyboard.press("Escape")
 
-  await expect(page.getByText("Upcoming Beta Reads")).toBeVisible()
-  await expect(page.getByText("Complete reviews before the deadline")).toBeVisible()
-  await expect(page.getByText("Chapter 12 feedback - Seraphina Vale")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.getByRole("button", { name: /^new project$/i }).click()
   await expect(page.getByRole("heading", { name: /upload book/i })).toBeVisible()

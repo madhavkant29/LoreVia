@@ -3,9 +3,11 @@
 import React, { useState } from "react"
 
 import { RecallCard } from "@/components/intelligence/RecallCard"
+import { CoverEditOverlay } from "@/components/ui/CoverEditOverlay"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
 import { useRecall } from "@/lib/hooks/useRecall"
 import { cn } from "@/lib/utils/text"
+import { chapterKindLabel } from "@/lib/utils/chapterLabels"
 import {
   buildReaderChapterPreview,
   estimateRemainingReadingMinutes,
@@ -62,6 +64,7 @@ export function ReaderOverview({
   onContinueReading,
 }: ReaderOverviewProps) {
   const [searchQuery, setSearchQuery] = useState("")
+  const [coverUrlOverride, setCoverUrlOverride] = useState<string | null>(null)
   const { recall, lastChapter, show: showRecall, dismiss: dismissRecall } = useRecall(bookId)
   const chapters = chapterList?.chapters ?? []
   const continueChapter = progress?.current_chapter ?? bookmark?.chapter ?? 1
@@ -215,10 +218,18 @@ export function ReaderOverview({
           <div className={cn("pointer-events-none absolute -left-8 top-6 h-32 w-32 rounded-full blur-3xl", isDark ? "bg-teal-500/10" : "bg-teal-100/70")} />
           <div className="grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]">
             <SmartBookCover
-              src={book.cover_url}
+              src={coverUrlOverride !== null ? coverUrlOverride : book.cover_url}
               title={book.title}
               isDark={isDark}
               className={cn("aspect-[0.72] overflow-hidden rounded-lg border", isDark ? "border-white/10 bg-[#0a0d13]" : "border-slate-200 bg-slate-50")}
+              overlay={
+                <CoverEditOverlay
+                  bookId={bookId}
+                  isDark={isDark}
+                  hasCover={Boolean(coverUrlOverride !== null ? coverUrlOverride : book.cover_url)}
+                  onCoverUpdated={(updated) => setCoverUrlOverride(updated.cover_url ?? null)}
+                />
+              }
             />
 
             <div className="min-w-0">
@@ -323,8 +334,8 @@ export function ReaderOverview({
                   )}
                 >
                   <div className="min-w-0">
-                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isCurrent ? "text-teal-400" : isDark ? "text-slate-500" : "text-slate-400")}>{chapterUnit} {chapter.number}</p>
-                    <p className="mt-1 break-words text-sm font-semibold leading-6">{chapter.title || `${chapterUnit} ${chapter.number}`}</p>
+                    <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", isCurrent ? "text-teal-400" : isDark ? "text-slate-500" : "text-slate-400")}>{chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}</p>
+                    <p className="mt-1 break-words text-sm font-semibold leading-6">{chapter.title || chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}</p>
                   </div>
                   <span className={cn("text-xs font-semibold", isCurrent ? "text-teal-400" : chapter.read ? "text-emerald-400" : isDark ? "text-slate-500" : "text-slate-400")}>
                     {isCurrent ? "Reading" : chapter.read ? "Complete" : "Unread"}
@@ -421,7 +432,7 @@ export function ReaderOverview({
             {previewChapters.length > 0 ? previewChapters.map((chapter) => {
               const isCurrent = chapter.number === continueChapter
               const isNext = nextChapter?.number === chapter.number
-              return (
+                return (
                 <button
                   key={chapter.number}
                   type="button"
@@ -436,9 +447,9 @@ export function ReaderOverview({
                   <div className="min-w-0">
                     <p className={cn("flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]", isCurrent ? (isDark ? "text-teal-200" : "text-teal-800") : isDark ? "text-slate-500" : "text-slate-400")}>
                       <span className={cn("h-1.5 w-1.5 rounded-full", isCurrent ? "bg-teal-400" : chapter.read ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-slate-300")} />
-                      {chapterUnit} {chapter.number}
+                      {chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}
                     </p>
-                    <p className="mt-1 break-words text-sm font-medium leading-6">{chapter.title || `${chapterUnit} ${chapter.number}`}</p>
+                    <p className="mt-1 break-words text-sm font-medium leading-6">{chapter.title || chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}</p>
                   </div>
                   <div className="shrink-0 text-right text-xs">
                     {isCurrent ? (

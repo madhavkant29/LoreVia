@@ -41,7 +41,7 @@ describe("ChapterList", () => {
     })
 
     expect(view.textContent).toContain("Chapters")
-    expect(view.textContent).toContain("Chapter 3")
+    expect(view.textContent).toContain("Ch. 3")
     expect(view.textContent).toContain("River of Glass")
     expect(view.textContent).toContain("Processing")
     expect(view.textContent).toContain("Processed")
@@ -80,7 +80,7 @@ describe("ChapterList", () => {
       ],
     })
 
-    expect(view.textContent).toContain("Chapter 8")
+    expect(view.textContent).toContain("Ch. 8")
     expect(view.textContent).toContain("Queued")
     expect(view.textContent).toContain("Unread")
     expect(view.textContent).toContain("Intel Locked")

@@ -885,6 +885,19 @@ export const booksApi = {
       invalidateBookCache(bookId)
       return r.data
     }),
+  updateCover: (bookId: string, coverFile: File) => {
+    const form = new FormData()
+    form.append("cover_file", coverFile)
+    return apiClient.put<Book>(bookPath(bookId, "/cover"), form).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    })
+  },
+  deleteCover: (bookId: string) =>
+    apiClient.delete<Book>(bookPath(bookId, "/cover")).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
   reprocessChapter: (bookId: string, chapterNumber: number) =>
     apiClient.post<{
       book_id: string

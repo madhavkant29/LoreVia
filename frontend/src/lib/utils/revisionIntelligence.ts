@@ -42,6 +42,10 @@ export function patchRevisionIntelligenceItem(
   const nextRevision = {
     ...revision,
     change_impacts: revision.change_impacts.map(patchItem),
+    genre_checks: revision.genre_checks.map((genreCheck) => ({
+      ...genreCheck,
+      findings: genreCheck.findings.map(patchItem),
+    })),
     revision_plan: revision.revision_plan.map((revisionPass) => ({
       ...revisionPass,
       items: revisionPass.items.map(patchItem),
@@ -56,6 +60,7 @@ export function patchRevisionIntelligenceItem(
     ...nextRevision.scene_advice,
     ...nextRevision.confusion_map,
     ...nextRevision.voice_alerts,
+    ...nextRevision.genre_checks.flatMap((genreCheck) => genreCheck.findings),
     ...nextRevision.revision_plan.flatMap((revisionPass) => revisionPass.items),
   ]) {
     uniqueItems.set(item.id, item)

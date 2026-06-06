@@ -12,6 +12,7 @@ interface SmartBookCoverProps {
   isDark?: boolean
   className?: string
   imageClassName?: string
+  overlay?: React.ReactNode
 }
 
 export function SmartBookCover({
@@ -20,6 +21,7 @@ export function SmartBookCover({
   isDark = false,
   className,
   imageClassName,
+  overlay,
 }: SmartBookCoverProps) {
   const [failed, setFailed] = useState(false)
 
@@ -55,6 +57,7 @@ export function SmartBookCover({
           </div>
         </div>
       )}
+      {overlay}
     </div>
   )
 }
