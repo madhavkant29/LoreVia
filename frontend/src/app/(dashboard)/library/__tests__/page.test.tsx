@@ -74,6 +74,13 @@ vi.mock("@/lib/query/cacheKeys", () => ({
   booksListCacheKey: () => "books-list",
 }))
 
+vi.mock("@/lib/stores/authStore", () => ({
+  useAuthStore: (selector?: ((s: { user: { id: string }; hydrated: boolean }) => unknown) | undefined) => {
+    const state = { user: { id: "test-user" }, hydrated: true }
+    return typeof selector === "function" ? selector(state) : state
+  },
+}))
+
 vi.mock("@/lib/stores/preferencesStore", () => ({
   usePreferencesStore: () => ({ theme: "dark" }),
 }))

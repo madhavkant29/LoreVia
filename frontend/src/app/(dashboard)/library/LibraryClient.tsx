@@ -19,6 +19,7 @@ import { Tooltip } from "@/components/ui/Tooltip"
 import { LibraryWorkspaceHeader } from "@/components/library/LibraryWorkspaceHeader"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
@@ -236,6 +237,8 @@ export function LibraryClient() {
   const router = useRouter()
   const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
+  const authUser = useAuthStore((s) => s.user)
+  const authReady = useAuthStore((s) => s.hydrated)
   const isDark = theme === "dark"
 
   const [showUpload, setShowUpload] = useState(false)
@@ -266,6 +269,7 @@ export function LibraryClient() {
     queryKey: asQueryKey(booksListCacheKey(true)),
     queryFn: () => booksApi.list(true),
     staleTime: 20_000,
+    enabled: authReady && !!authUser,
     refetchInterval: (query) => {
       const items = (query.state.data as Book[] | undefined) ?? []
       const hasProcessingBook = items.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
@@ -506,17 +510,41 @@ export function LibraryClient() {
     setInteractiveReady(true)
   }, [])
 
+  if (!authReady || !authUser) {
+    return (
+      <div className={`min-h-screen transition-colors duration-300 ${pageBackground}`}>
+        <div className="w-full pb-20">
+          <div className="mx-auto max-w-7xl space-y-7 px-4 pt-8">
+            <div className={`h-10 w-48 rounded-sm ${isDark ? "bg-white/5" : "bg-stone-100"}`} />
+            <div className="grid gap-4 md:grid-cols-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className={`h-28 rounded-sm border ${isDark ? "border-white/5 bg-white/[0.03]" : "border-stone-200 bg-white"}`} />
+              ))}
+            </div>
+            <div className="grid gap-4 xl:grid-cols-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className={`h-64 rounded-sm border ${isDark ? "border-white/5 bg-white/[0.03]" : "border-stone-200 bg-white"}`} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (booksError) {
     return (
       <div className={`min-h-screen transition-colors duration-300 ${pageBackground}`}>
         <div className="w-full pb-20">
-          <ErrorCard
-            title="Failed to load library"
-            message="Something went wrong while loading your library. Check your connection and try again."
-            onRetry={() => refetch()}
-            isDark={isDark}
-            variant="full"
-          />
+          <div className="mx-auto max-w-7xl px-4 pt-8">
+            <ErrorCard
+              title="Failed to load library"
+              message="Something went wrong while loading your library. Check your connection and try again."
+              onRetry={() => refetch()}
+              isDark={isDark}
+              variant="full"
+            />
+          </div>
         </div>
       </div>
     )
