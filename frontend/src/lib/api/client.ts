@@ -56,6 +56,9 @@ async function refreshAccessToken(): Promise<boolean> {
         headers: csrfToken ? { [AUTH_CSRF_HEADER_NAME]: csrfToken } : undefined,
       })
       .then(() => {
+        if (typeof document !== "undefined") {
+          document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
+        }
         if (process.env.NODE_ENV !== "production") {
           console.log("[api-client] refreshAccessToken — success")
         }

@@ -65,6 +65,7 @@ function LoginInner() {
         setError("Could not load your account. Please try again.")
         return
       }
+      document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
       setUser(user)
       router.push(resolveSafeAuthNextPath(searchParams.get("next")) as Route)
     } catch (error) {
