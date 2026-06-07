@@ -264,6 +264,30 @@ def test_manuscript_docx_uses_front_matter_for_title_page():
     assert "A. Writer" in text
     assert "writer@example.com" in text
     assert "Chapter 1" in text
+    assert "Table of Contents" not in text
+
+
+def test_manuscript_docx_adds_toc_field_when_requested():
+    raw = manuscript_docx(
+        title="Atlas",
+        chapters=[
+            {"number": 1, "title": "Opening", "text": "First paragraph."},
+            {"number": 2, "title": "Chapter 2", "text": "Second paragraph."},
+        ],
+        scenes=[],
+        include_toc=True,
+    )
+    doc = Document(BytesIO(raw))
+    text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+
+    with ZipFile(BytesIO(raw)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+
+    assert "Table of Contents" in text
+    assert "Update this table in Word to refresh page numbers." in text
+    assert r"TOC \f \h \z" in document_xml
+    assert 'TC "Chapter 1: Opening" \\l 1' in document_xml
+    assert 'TC "Chapter 2" \\l 1' in document_xml
 
 
 def test_manuscript_docx_applies_selected_old_style_font():
@@ -427,6 +451,79 @@ def test_manuscript_pdf_compiled_preserves_scene_break_order(monkeypatch):
     assert "Third paragraph." in paragraph_text
     assert paragraph_text.index("***") > paragraph_text.index("First paragraph.Line two.")
     assert paragraph_text.index("Second paragraph.") > paragraph_text.index("***")
+
+
+def test_manuscript_pdf_compiled_adds_toc_entries_when_requested(monkeypatch):
+    captured: dict[str, object] = {}
+    original_template = reportlab.platypus.SimpleDocTemplate
+
+    class FakeCanvas:
+        def saveState(self) -> None:
+            return None
+
+        def restoreState(self) -> None:
+            return None
+
+        def setFont(self, *_args) -> None:
+            return None
+
+        def setTitle(self, _value: str) -> None:
+            return None
+
+        def setAuthor(self, _value: str) -> None:
+            return None
+
+        def setSubject(self, _value: str) -> None:
+            return None
+
+        def setCreator(self, _value: str) -> None:
+            return None
+
+        def drawRightString(self, *_args) -> None:
+            return None
+
+        def getPageNumber(self) -> int:
+            return 7
+
+    class FakeDoc:
+        def __init__(self, buffer, **kwargs):
+            self.buffer = buffer
+            self.page = 7
+            self.pagesize = kwargs["pagesize"]
+            self.rightMargin = kwargs["rightMargin"]
+
+        def notify(self, kind, data) -> None:
+            captured.setdefault("notifications", []).append((kind, data))
+
+        def multiBuild(self, story, onFirstPage=None, onLaterPages=None):
+            captured["method"] = "multiBuild"
+            captured["story"] = story
+            if onFirstPage is not None:
+                onFirstPage(FakeCanvas(), self)
+            for item in story:
+                self.afterFlowable(item)
+
+    monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", FakeDoc)
+    try:
+        manuscript_pdf_compiled(
+            title="Atlas",
+            chapters=[
+                {"number": 1, "title": "Opening", "text": "First paragraph."},
+                {"number": 2, "title": "Chapter 2", "text": "Second paragraph."},
+            ],
+            scenes=[],
+            include_toc=True,
+        )
+    finally:
+        monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", original_template)
+
+    story = captured["story"]
+    paragraph_text = [item.getPlainText() for item in story if hasattr(item, "getPlainText")]
+
+    assert captured["method"] == "multiBuild"
+    assert "Table of Contents" in paragraph_text
+    assert ("TOCEntry", (0, "Chapter 1: Opening", 7)) in captured["notifications"]
+    assert ("TOCEntry", (0, "Chapter 2", 7)) in captured["notifications"]
 
 
 def test_manuscript_epub_compiled_preserves_scene_breaks_and_line_breaks():

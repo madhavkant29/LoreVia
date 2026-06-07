@@ -415,6 +415,30 @@ def test_build_book_processing_payload_normalizes_postgres_text_timestamps():
     assert payload["pipeline"]["analysis"]["updated_at"] == "2026-06-06T05:11:51.272085Z"
 
 
+def test_build_book_processing_payload_nulls_invalid_timestamps():
+    payload = build_book_processing_payload(
+        type(
+            "DummyBook",
+            (),
+            {
+                "writer_workspace": {
+                    "processing": {
+                        "status": "processing",
+                        "stage": "analysis",
+                        "updated_at": "not a timestamp",
+                        "pipeline": {
+                            "extraction": {"status": "running", "updated_at": "also not a timestamp"},
+                        },
+                    }
+                }
+            },
+        )()
+    )
+
+    assert payload["updated_at"] is None
+    assert payload["pipeline"]["extraction"]["updated_at"] is None
+
+
 def test_estimate_readability_returns_basic_metrics():
     metrics = estimate_readability("This is a short sentence. This is another one.")
 

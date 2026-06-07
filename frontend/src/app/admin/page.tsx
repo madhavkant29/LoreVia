@@ -7,11 +7,17 @@ import type {
   AdminAuditEvent,
   AdminBillingStatus,
   AdminContentReport,
+  AdminCreatorStrike,
+  AdminMetrics,
   AdminPrincipal,
+  AdminPublicBookCreateOut,
   AdminPublicShare,
+  AdminQueueDepth,
+  AdminRateLimitState,
   AdminRefundReview,
   AdminScope,
   AdminSession,
+  AdminSubscriptionMetrics,
 } from "@/types/admin"
 
 const SCOPE_OPTIONS: AdminScope[] = ["moderation_admin", "billing_admin", "super_admin"]
@@ -50,6 +56,9 @@ export default function AdminPage() {
   const [refunds, setRefunds] = useState<AdminRefundReview[]>([])
   const [principals, setPrincipals] = useState<AdminPrincipal[]>([])
   const [audit, setAudit] = useState<AdminAuditEvent[]>([])
+  const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
+  const [queueDepth, setQueueDepth] = useState<AdminQueueDepth | null>(null)
+  const [subscriptionMetrics, setSubscriptionMetrics] = useState<AdminSubscriptionMetrics | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -63,6 +72,11 @@ export default function AdminPage() {
     if (hasScope(currentSession, "billing_admin")) {
       tasks.push(adminApi.billingStatus().then(setBillingStatus))
       tasks.push(adminApi.refunds().then(setRefunds))
+      tasks.push(adminApi.subscriptionMetrics().then(setSubscriptionMetrics))
+    }
+    if (hasScope(currentSession, "super_admin")) {
+      tasks.push(adminApi.metrics().then(setMetrics))
+      tasks.push(adminApi.queueDepth().then(setQueueDepth))
     }
     if (currentSession.is_owner) {
       tasks.push(adminApi.access().then(setPrincipals))
@@ -138,10 +152,48 @@ export default function AdminPage() {
           <AdminMetric label="Admin principals" value={String(principals.length)} />
         </section>
 
+        {hasScope(session, "super_admin") ? (
+          <section className="grid gap-6 lg:grid-cols-2">
+            <PlatformMetricsPanel metrics={metrics} />
+            <QueueDepthPanel queueDepth={queueDepth} />
+          </section>
+        ) : null}
+
+        {hasScope(session, "super_admin") ? (
+          <RateLimitPanel
+            disabled={isPending}
+            onLookup={(userId) => adminApi.getRateLimit(userId)}
+            onSave={(userId, override) =>
+              runAction(() => adminApi.setRateLimit(userId, override), "Rate limit overrides updated.")
+            }
+          />
+        ) : null}
+
         {message ? <div className="rounded-lg border border-[#b8c7b8] bg-white px-4 py-3 text-sm">{message}</div> : null}
 
         {session.requires_step_up ? (
           <StepUpPanel onSubmit={(password) => runAction(() => adminApi.stepUp(password).then(() => adminApi.session().then(setSession)), "Admin verification complete.")} />
+        ) : null}
+
+        {hasScope(session, "moderation_admin") && !session.requires_step_up ? (
+          <CreatorStrikePanel
+            disabled={isPending}
+            onSubmit={(userId, body) =>
+              runAction(() => adminApi.addStrike(userId, body), "Creator strike applied.")
+            }
+          />
+        ) : null}
+
+        {hasScope(session, "moderation_admin") && !session.requires_step_up ? (
+          <PublicDemoBookPanel
+            disabled={isPending}
+            onCreate={(body) =>
+              runAction(() => adminApi.createPublicDemoBook(body), "Public demo book created.")
+            }
+            onAppend={(bookId, body) =>
+              runAction(() => adminApi.appendPublicDemoChapter(bookId, body), "Chapter appended to demo book.")
+            }
+          />
         ) : null}
 
         <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
@@ -174,6 +226,19 @@ export default function AdminPage() {
             />
           ) : null}
         </section>
+
+        {hasScope(session, "billing_admin") ? (
+          <SubscriptionMetricsPanel
+            metrics={subscriptionMetrics}
+            disabled={isPending}
+            onRefresh={(startDate, endDate, reactivationWindow) =>
+              runAction(
+                () => adminApi.subscriptionMetrics({ start_date: startDate, end_date: endDate, reactivation_window_days: reactivationWindow }).then(setSubscriptionMetrics),
+                "Subscription metrics refreshed.",
+              )
+            }
+          />
+        ) : null}
 
         {session.is_owner ? (
           <section className="grid gap-6 lg:grid-cols-2">
@@ -454,6 +519,593 @@ function AuditPanel({ events }: { events: AdminAuditEvent[] }) {
           </div>
         ))}
       </div>
+    </section>
+  )
+}
+
+function RateLimitPanel({
+  disabled,
+  onLookup,
+  onSave,
+}: {
+  disabled: boolean
+  onLookup: (userId: string) => Promise<AdminRateLimitState>
+  onSave: (userId: string, override: { search_per_hour: number | null; summary_per_hour: number | null; chat_per_day: number | null; api_per_minute: number | null }) => void
+}) {
+  const [lookupUserId, setLookupUserId] = useState("")
+  const [result, setResult] = useState<AdminRateLimitState | null>(null)
+  const [searchPerHour, setSearchPerHour] = useState("")
+  const [summaryPerHour, setSummaryPerHour] = useState("")
+  const [chatPerDay, setChatPerDay] = useState("")
+  const [apiPerMinute, setApiPerMinute] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [lookupError, setLookupError] = useState<string | null>(null)
+
+  function selectResult(state: AdminRateLimitState) {
+    setResult(state)
+    setSearchPerHour(state.override.search_per_hour?.toString() ?? "")
+    setSummaryPerHour(state.override.summary_per_hour?.toString() ?? "")
+    setChatPerDay(state.override.chat_per_day?.toString() ?? "")
+    setApiPerMinute(state.override.api_per_minute?.toString() ?? "")
+    setLookupError(null)
+  }
+
+  function parseField(value: string): number | null {
+    if (!value.trim()) return null
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  async function handleLookup() {
+    if (!lookupUserId) return
+    setLoading(true)
+    setLookupError(null)
+    try {
+      const state = await onLookup(lookupUserId)
+      selectResult(state)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Lookup failed."
+      setLookupError(detail)
+      setResult(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <h2 className="text-xl font-semibold">Rate Limits</h2>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          User ID
+          <input
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={lookupUserId}
+            onChange={(event) => setLookupUserId(event.target.value)}
+            placeholder="UUID"
+          />
+        </label>
+        <button
+          disabled={disabled || !lookupUserId || loading}
+          className="self-end rounded-md border border-[#1f615d] bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          onClick={() => { handleLookup().catch(() => {}) }}
+        >
+          {loading ? "Loading..." : "Lookup"}
+        </button>
+      </div>
+      {lookupError ? <p className="mt-3 text-sm text-[#a2382b]">{lookupError}</p> : null}
+      {result ? (
+        <div className="mt-5">
+          <p className="text-sm text-[#617065]">Email: <span className="font-medium text-[#1c261f]">{result.email}</span></p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+              Search / hour
+              <input
+                type="number"
+                className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+                value={searchPerHour}
+                onChange={(event) => setSearchPerHour(event.target.value)}
+                placeholder="Default"
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+              Summary / hour
+              <input
+                type="number"
+                className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+                value={summaryPerHour}
+                onChange={(event) => setSummaryPerHour(event.target.value)}
+                placeholder="Default"
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+              Chat / day
+              <input
+                type="number"
+                className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+                value={chatPerDay}
+                onChange={(event) => setChatPerDay(event.target.value)}
+                placeholder="Default"
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+              API / minute
+              <input
+                type="number"
+                className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+                value={apiPerMinute}
+                onChange={(event) => setApiPerMinute(event.target.value)}
+                placeholder="Default"
+              />
+            </label>
+          </div>
+          <button
+            disabled={disabled}
+            className="mt-4 rounded-md border border-[#1f615d] bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            onClick={() =>
+              onSave(result.user_id, {
+                search_per_hour: parseField(searchPerHour),
+                summary_per_hour: parseField(summaryPerHour),
+                chat_per_day: parseField(chatPerDay),
+                api_per_minute: parseField(apiPerMinute),
+              })
+            }
+          >
+            Save overrides
+          </button>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function CreatorStrikePanel({
+  disabled,
+  onSubmit,
+}: {
+  disabled: boolean
+  onSubmit: (userId: string, body: {
+    book_id?: string | null
+    report_id?: string | null
+    strike_type: string
+    severity: string
+    reason: string
+  }) => void
+}) {
+  const [userId, setUserId] = useState("")
+  const [strikeType, setStrikeType] = useState("")
+  const [severity, setSeverity] = useState("medium")
+  const [reason, setReason] = useState("")
+  const [bookId, setBookId] = useState("")
+  const [reportId, setReportId] = useState("")
+
+  return (
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <h2 className="text-xl font-semibold">Creator Strikes</h2>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          User ID
+          <input
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={userId}
+            onChange={(event) => setUserId(event.target.value)}
+            placeholder="UUID"
+          />
+        </label>
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          Severity
+          <select
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={severity}
+            onChange={(event) => setSeverity(event.target.value)}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          Strike type
+          <input
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={strikeType}
+            onChange={(event) => setStrikeType(event.target.value)}
+            placeholder="e.g. copyright, plagiarism"
+          />
+        </label>
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          Book ID (optional)
+          <input
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={bookId}
+            onChange={(event) => setBookId(event.target.value)}
+            placeholder="UUID"
+          />
+        </label>
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          Report ID (optional)
+          <input
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={reportId}
+            onChange={(event) => setReportId(event.target.value)}
+            placeholder="UUID"
+          />
+        </label>
+      </div>
+      <label className="mt-3 grid gap-1 text-sm font-medium text-[#46534a]">
+        Required reason
+        <textarea
+          className="min-h-20 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
+      </label>
+      <button
+        disabled={disabled || !userId || !strikeType || !reason}
+        className="mt-4 rounded-md border border-[#e8c4c0] bg-[#fff3f1] px-4 py-2 text-sm font-semibold text-[#a2382b] disabled:opacity-50"
+        onClick={() =>
+          onSubmit(userId, {
+            strike_type: strikeType,
+            severity,
+            reason,
+            book_id: bookId || null,
+            report_id: reportId || null,
+          })
+        }
+      >
+        Apply strike
+      </button>
+    </section>
+  )
+}
+
+function PublicDemoBookPanel({
+  disabled,
+  onCreate,
+  onAppend,
+}: {
+  disabled: boolean
+  onCreate: (body: { title: string; author?: string | null; genre?: string | null; description?: string | null; chapters: { title: string; text: string; description?: string | null }[] }) => void
+  onAppend: (bookId: string, body: { title: string; text: string; description?: string | null }) => void
+}) {
+  type ChapterDraft = { title: string; text: string; description: string }
+  const [title, setTitle] = useState("")
+  const [author, setAuthor] = useState("")
+  const [genre, setGenre] = useState("")
+  const [description, setDescription] = useState("")
+  const [chapters, setChapters] = useState<ChapterDraft[]>([{ title: "", text: "", description: "" }])
+  const [appendBookId, setAppendBookId] = useState("")
+  const [appendTitle, setAppendTitle] = useState("")
+  const [appendText, setAppendText] = useState("")
+  const [appendDescription, setAppendDescription] = useState("")
+
+  function updateChapter(index: number, field: keyof ChapterDraft, value: string) {
+    setChapters((current) => {
+      const next = [...current]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
+  }
+
+  function removeChapter(index: number) {
+    if (chapters.length <= 1) return
+    setChapters((current) => current.filter((_, i) => i !== index))
+  }
+
+  function addChapter() {
+    setChapters((current) => [...current, { title: "", text: "", description: "" }])
+  }
+
+  function canCreate() {
+    return title.trim() && chapters.length > 0 && chapters.some((c) => c.title.trim() && c.text.trim())
+  }
+
+  function handleCreate() {
+    onCreate({
+      title: title.trim(),
+      author: author.trim() || null,
+      genre: genre.trim() || null,
+      description: description.trim() || null,
+      chapters: chapters.map((c) => ({
+        title: c.title.trim(),
+        text: c.text,
+        description: c.description.trim() || null,
+      })),
+    })
+  }
+
+  function canAppend() {
+    return appendBookId.trim() && appendTitle.trim() && appendText.trim()
+  }
+
+  function handleAppend() {
+    onAppend(appendBookId.trim(), {
+      title: appendTitle.trim(),
+      text: appendText,
+      description: appendDescription.trim() || null,
+    })
+  }
+
+  return (
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <h2 className="text-xl font-semibold">Public Demo Books</h2>
+
+      <div className="mt-5 border-t border-[#edf0eb] pt-5">
+        <h3 className="text-lg font-semibold">Create New Demo Book</h3>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Title
+            <input
+              className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Author (optional)
+            <input
+              className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={author}
+              onChange={(event) => setAuthor(event.target.value)}
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Genre (optional)
+            <input
+              className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={genre}
+              onChange={(event) => setGenre(event.target.value)}
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Description (optional)
+            <input
+              className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="mt-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-[#46534a]">Chapters ({chapters.length})</p>
+            <button
+              type="button"
+              className="rounded-md border border-[#bdd5c1] bg-[#eff8f0] px-3 py-1 text-sm text-[#1f6b3a]"
+              onClick={addChapter}
+            >
+              + Add chapter
+            </button>
+          </div>
+          <div className="mt-3 space-y-4">
+            {chapters.map((chapter, index) => (
+              <div key={index} className="rounded-md border border-[#edf0eb] bg-[#fbfcfa] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#657166]">Chapter {index + 1}</p>
+                  {chapters.length > 1 ? (
+                    <button
+                      type="button"
+                      className="text-xs text-[#a2382b]"
+                      onClick={() => removeChapter(index)}
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+                <label className="mt-2 grid gap-1 text-sm font-medium text-[#46534a]">
+                  Chapter title
+                  <input
+                    className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+                    value={chapter.title}
+                    onChange={(event) => updateChapter(index, "title", event.target.value)}
+                  />
+                </label>
+                <label className="mt-2 grid gap-1 text-sm font-medium text-[#46534a]">
+                  Chapter text
+                  <textarea
+                    className="min-h-24 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+                    value={chapter.text}
+                    onChange={(event) => updateChapter(index, "text", event.target.value)}
+                  />
+                </label>
+                <label className="mt-2 grid gap-1 text-sm font-medium text-[#46534a]">
+                  Description (optional)
+                  <input
+                    className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+                    value={chapter.description}
+                    onChange={(event) => updateChapter(index, "description", event.target.value)}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button
+          disabled={disabled || !canCreate()}
+          className="mt-4 rounded-md border border-[#1f615d] bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          onClick={handleCreate}
+        >
+          Create public demo book
+        </button>
+      </div>
+
+      <div className="mt-6 border-t border-[#edf0eb] pt-5">
+        <h3 className="text-lg font-semibold">Append Chapter to Demo Book</h3>
+        <div className="mt-3 grid gap-3">
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Book ID
+            <input
+              className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={appendBookId}
+              onChange={(event) => setAppendBookId(event.target.value)}
+              placeholder="UUID"
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Chapter title
+            <input
+              className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={appendTitle}
+              onChange={(event) => setAppendTitle(event.target.value)}
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Chapter text
+            <textarea
+              className="min-h-32 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={appendText}
+              onChange={(event) => setAppendText(event.target.value)}
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+            Description (optional)
+            <input
+              className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+              value={appendDescription}
+              onChange={(event) => setAppendDescription(event.target.value)}
+            />
+          </label>
+        </div>
+        <button
+          disabled={disabled || !canAppend()}
+          className="mt-4 rounded-md border border-[#1f615d] bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          onClick={handleAppend}
+        >
+          Append chapter
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function PlatformMetricsPanel({ metrics }: { metrics: AdminMetrics | null }) {
+  if (!metrics) return null
+  return (
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <h2 className="text-xl font-semibold">Platform Overview</h2>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <AdminMetric label="Users" value={metrics.users.toLocaleString()} />
+        <AdminMetric label="Books" value={metrics.books.toLocaleString()} />
+        <AdminMetric label="Characters" value={metrics.characters.toLocaleString()} />
+        <AdminMetric label="Chunks Indexed" value={metrics.chunks_indexed.toLocaleString()} />
+        <AdminMetric label="Summaries Cached" value={metrics.summaries_cached.toLocaleString()} />
+        <AdminMetric label="Redis Memory" value={`${metrics.redis_memory_mb} MB`} />
+      </div>
+    </section>
+  )
+}
+
+function QueueDepthPanel({ queueDepth }: { queueDepth: AdminQueueDepth | null }) {
+  if (!queueDepth) return null
+  const queues: { label: string; value: number }[] = [
+    { label: "Extraction", value: queueDepth.extraction },
+    { label: "Analysis", value: queueDepth.analysis },
+    { label: "Embedding", value: queueDepth.embedding },
+    { label: "Intelligence", value: queueDepth.intelligence },
+  ]
+  const max = Math.max(...queues.map((q) => q.value), 1)
+  return (
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <h2 className="text-xl font-semibold">Worker Queues</h2>
+      <div className="mt-4 space-y-3">
+        {queues.map((queue) => (
+          <div key={queue.label}>
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium text-[#46534a]">{queue.label}</span>
+              <span className="text-[#617065]">{queue.value.toLocaleString()}</span>
+            </div>
+            <div className="mt-1 h-3 rounded-full bg-[#edf0eb]">
+              <div
+                className="h-3 rounded-full bg-[#1f615d] transition-all"
+                style={{ width: `${Math.min((queue.value / max) * 100, 100).toFixed(0)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SubscriptionMetricsPanel({
+  metrics,
+  disabled,
+  onRefresh,
+}: {
+  metrics: AdminSubscriptionMetrics | null
+  disabled: boolean
+  onRefresh: (startDate: string, endDate: string, reactivationWindow: number) => void
+}) {
+  const today = new Date().toISOString().slice(0, 10)
+  const thirtyDaysAgo = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10)
+  const [startDate, setStartDate] = useState(thirtyDaysAgo)
+  const [endDate, setEndDate] = useState(today)
+  const [reactivationWindow, setReactivationWindow] = useState(30)
+
+  function formatRate(value: number | null | undefined): string {
+    if (value == null) return "—"
+    return `${(value * 100).toFixed(1)}%`
+  }
+
+  return (
+    <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <h2 className="text-xl font-semibold">Subscription Metrics</h2>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          Start
+          <input
+            type="date"
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={startDate}
+            onChange={(event) => setStartDate(event.target.value)}
+          />
+        </label>
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          End
+          <input
+            type="date"
+            className="rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={endDate}
+            onChange={(event) => setEndDate(event.target.value)}
+          />
+        </label>
+        <label className="grid gap-1 text-sm font-medium text-[#46534a]">
+          Reactivation window (days)
+          <input
+            type="number"
+            className="w-24 rounded-md border border-[#c9d2c8] px-3 py-2 text-sm font-normal text-[#1f2a22]"
+            value={reactivationWindow}
+            min={1}
+            max={365}
+            onChange={(event) => setReactivationWindow(Number(event.target.value))}
+          />
+        </label>
+        <button
+          disabled={disabled || !startDate || !endDate}
+          className="self-end rounded-md border border-[#1f615d] bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          onClick={() => onRefresh(startDate, endDate, reactivationWindow)}
+        >
+          Refresh
+        </button>
+      </div>
+      {metrics ? (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <AdminMetric label="Cohort" value={`${metrics.cohort_start} → ${metrics.cohort_end}`} />
+          <AdminMetric label="Trial Starts" value={metrics.trial_starts.toLocaleString()} />
+          <AdminMetric label="Trial → Paid" value={`${metrics.trial_to_paid_conversions.toLocaleString()} (${formatRate(metrics.trial_to_paid_rate)})`} />
+          <AdminMetric label="Cancellations" value={metrics.cancellation_events.toLocaleString()} />
+          <AdminMetric label="Resolved" value={metrics.resolved_cancellation_events.toLocaleString()} />
+          <AdminMetric label="Unresolved" value={metrics.unresolved_cancellation_events.toLocaleString()} />
+          <AdminMetric label="Reactivated" value={metrics.reactivated_after_cancellation.toLocaleString()} />
+          <AdminMetric label="Churned" value={metrics.churned_after_cancellation.toLocaleString()} />
+          <AdminMetric label="Churn Rate" value={formatRate(metrics.post_cancel_churn_rate)} />
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-[#617065]">Select a date range and refresh to load metrics.</p>
+      )}
     </section>
   )
 }

@@ -31,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/quotes", label: "Quotes", icon: QuotesIcon },
   { href: "/stats", label: "Stats", icon: StatsIcon },
   { href: "/series", label: "Series", icon: SeriesIcon },
+  { href: "/beta-reads", label: "Beta Reads", icon: BetaReadsIcon },
   { href: "/upgrade", label: "Pricing", icon: PricingIcon, group: "secondary" },
   { href: "/settings", label: "Settings", icon: SettingsIcon, group: "secondary" },
 ]
@@ -331,6 +332,14 @@ function SeriesIcon(className = "h-5 w-5") {
       <rect x="5" y="5" width="6" height="6" rx="1.5" />
       <rect x="13" y="13" width="6" height="6" rx="1.5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M11 8h2.5A2.5 2.5 0 0116 10.5V13" />
+    </svg>
+  )
+}
+
+function BetaReadsIcon(className = "h-5 w-5") {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
     </svg>
   )
 }

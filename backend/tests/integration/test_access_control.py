@@ -591,10 +591,11 @@ async def test_collaboration_manuscript_export_respects_selected_chapter_scope(c
 
     captured: dict[str, object] = {}
 
-    def _fake_manuscript_docx(*, title, chapters, scenes, preset, front_matter, font_family):
+    def _fake_manuscript_docx(*, title, chapters, scenes, preset, front_matter, font_family, include_toc):
         captured["title"] = title
         captured["chapters"] = chapters
         captured["font_family"] = font_family
+        captured["include_toc"] = include_toc
         return b"docx-bytes"
 
     monkeypatch.setattr("app.api.v1.routes.books.exports.manuscript_docx", _fake_manuscript_docx)

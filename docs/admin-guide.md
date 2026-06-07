@@ -41,9 +41,9 @@ After bootstrap, owner admins grant or revoke access from `/admin`. Admin access
 
 ## Permission Scopes
 
-- `moderation_admin`: public-share review, content reports, book hide/remove/restore actions, and creator strikes.
-- `billing_admin`: billing visibility and refund review workflows.
-- `super_admin`: product tier changes and operational system views.
+- `moderation_admin`: public-share review, content reports, book hide/remove/restore actions, creator strikes, and public demo book management.
+- `billing_admin`: billing visibility, refund review workflows, and subscription metrics.
+- `super_admin`: product tier changes, operational system views (platform metrics, queue depth), and rate limit management.
 - Owner admin: grant and revoke admin access and view admin audit history.
 
 Owner status is separate from scopes. Use owner access only for people trusted to manage admin privileges.
@@ -126,6 +126,94 @@ Checklist:
 - Confirm the audit event.
 
 Never set `users.tier` to `admin`. Admin access belongs only in `admin_principals`.
+
+## Platform Monitoring (super_admin)
+
+These read-only views show aggregate platform health.
+
+### Platform Metrics
+
+Access: `GET /admin/metrics` (super_admin)
+
+Available at `/admin` under the **Platform Overview** card. Displays:
+- Total users, books, characters
+- Indexed chunks and cached summaries count
+- Redis memory usage in MB
+
+### Queue Depth
+
+Access: `GET /admin/queue-depth` (super_admin)
+
+Available at `/admin` under the **Worker Queues** card. Shows relative depth of extraction, analysis, embedding, and intelligence queues as bar charts. Useful for spotting worker backlogs.
+
+### Subscription Metrics
+
+Access: `GET /admin/subscription-metrics` (billing_admin)
+
+Available at `/admin` under the **Subscription Metrics** card. Requires a date range and optional reactivation-window parameter. Displays:
+- Cohort start/end dates
+- Trial starts, trial-to-paid conversions and rate
+- Cancellations (resolved, unresolved, total)
+- Reactivated and churned post-cancellation counts with churn rate
+
+## Rate Limit Management (super_admin)
+
+Access:
+- `GET /admin/rate-limits/{user_id}` (super_admin)
+- `PUT /admin/rate-limits/{user_id}` (super_admin + CSRF)
+
+Available at `/admin` under the **Rate Limits** card. Enter a user UUID to look up their current limits and default baselines. Override fields (leave blank to keep platform default):
+- Search per hour
+- Summary per hour
+- Chat per day
+- API per minute
+
+Override values persist until cleared. Lookup shows the user email for confirmation. Save requires CSRF validation (Bearer token bypasses this; cookie-based sessions need the `x-admin-csrf-token` header).
+
+## Creator Strikes (moderation_admin + step-up)
+
+Access: `POST /admin/users/{id}/strikes` (moderation_admin + CSRF + step-up)
+
+Available at `/admin` under the **Creator Strikes** card. Requires step-up verification before the form is visible.
+
+Fields:
+- User ID (required) — target user UUID
+- Severity (dropdown) — low, medium, high, critical
+- Strike type (required) — e.g. `copyright`, `plagiarism`, `harassment`
+- Book ID (optional) — related book UUID
+- Report ID (optional) — related content report UUID
+- Reason (required) — detailed justification
+
+Click **Apply strike** to record. The strike is logged in the audit trail. Step-up must be completed within the same session (10-minute Redis TTL).
+
+## Public Demo Book Management (moderation_admin + step-up)
+
+Access:
+- `POST /admin/public-books/manual` (moderation_admin + CSRF + step-up)
+- `POST /admin/public-books/{id}/chapters` (moderation_admin + CSRF + step-up)
+
+Available at `/admin` under the **Public Demo Books** card. Requires step-up verification before the form is visible.
+
+### Create a Demo Book
+
+Fields:
+- Title (required)
+- Author (optional)
+- Genre (optional)
+- Description (optional)
+- Chapters — add one or more with title (required), text (required), and description (optional)
+
+Click **Create public demo book** to publish.
+
+### Append a Chapter
+
+Fields:
+- Book ID (required) — existing demo book UUID
+- Chapter title (required)
+- Chapter text (required)
+- Description (optional)
+
+Click **Append chapter** to add. Both endpoints require CSRF and step-up.
 
 ## Granting and Revoking Admin Access
 

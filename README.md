@@ -16,6 +16,9 @@ The app is built as a full-stack system with asynchronous processing so that ing
 
 ## Core Features
 
+- `Admin Operations Console`
+  Platform monitoring (metrics, queue depth, subscription metrics), rate limit management, creator strikes, public demo book tooling, public-share moderation, book hide/remove/restore, refund reviews, admin access management, and audit review. See [docs/admin-guide.md](/C:/Users/madha/.vscode/prod/LoreVia2/docs/admin-guide.md) for scope requirements and operational procedures.
+
 - `Manuscript Upload and Parsing`
   Upload PDF, EPUB, DOCX, DOC, or text-based manuscript files and turn them into chapter-aware, searchable drafting material.
 

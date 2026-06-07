@@ -76,6 +76,9 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   const [showAllSuggestions, setShowAllSuggestions] = useState(false)
   const [showAllElements, setShowAllElements] = useState(false)
   const [showAllWikiEntries, setShowAllWikiEntries] = useState(false)
+  const [chapterFilter, setChapterFilter] = useState("")
+  const [chapterNotes, setChapterNotes] = useState<WorldNote[] | null>(null)
+  const [loadingChapterNotes, setLoadingChapterNotes] = useState(false)
 
   const { data: documents = [], isLoading: loadingDocuments, refetch: refetchDocuments } = useQuery<WorldBuildingDocument[]>({
     queryKey: [`worldbuilding:${bookId}:documents`],
@@ -139,6 +142,32 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
     const addressed = notes.filter((note) => note.status === "addressed")
     return { open, addressed }
   }, [notes])
+
+  const displayedNotes = chapterNotes ?? notes
+  const groupedDisplayed = useMemo(() => {
+    const open = displayedNotes.filter((note) => note.status !== "addressed")
+    const addressed = displayedNotes.filter((note) => note.status === "addressed")
+    return { open, addressed }
+  }, [displayedNotes])
+
+  async function handleFetchNotesByChapter() {
+    const chapter = Number(chapterFilter)
+    if (!Number.isFinite(chapter) || chapter < 1) return
+    setLoadingChapterNotes(true)
+    try {
+      const result = await worldBuildingApi.getNotesByChapter(bookId, chapter)
+      setChapterNotes(result)
+    } catch {
+      setChapterNotes([])
+    } finally {
+      setLoadingChapterNotes(false)
+    }
+  }
+
+  function handleClearChapterFilter() {
+    setChapterFilter("")
+    setChapterNotes(null)
+  }
   const wikiTypeSummary = useMemo(() => {
     return wikiEntries.reduce<Record<string, number>>((summary, entry) => {
       const key = entry.entry_type || "entry"
@@ -1237,9 +1266,27 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
             description="Track open cleanup notes and addressed items."
             isDark={isDark}
             action={(
-              <button type="button" onClick={() => void refetchNotes()} className={secondaryButtonClass(isDark)}>
-                Refresh notes
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="number"
+                  className={`w-20 rounded-md border px-2 py-1.5 text-xs ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                  placeholder="Ch."
+                  value={chapterFilter}
+                  onChange={(event) => setChapterFilter(event.target.value)}
+                  min={1}
+                />
+                <button type="button" disabled={loadingChapterNotes} onClick={() => void handleFetchNotesByChapter()} className={secondaryButtonClass(isDark)}>
+                  {loadingChapterNotes ? "Loading..." : "Filter by chapter"}
+                </button>
+                {chapterNotes !== null ? (
+                  <button type="button" onClick={handleClearChapterFilter} className={secondaryButtonClass(isDark)}>
+                    Show all
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => void refetchNotes()} className={secondaryButtonClass(isDark)}>
+                  Refresh notes
+                </button>
+              </div>
             )}
           >
             {loadingNotes ? (
@@ -1248,10 +1295,10 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
               <div className="grid gap-4 lg:grid-cols-2">
                 <BacklogColumn
                   label="Open Notes"
-                  count={groupedNotes.open.length}
+                  count={groupedDisplayed.open.length}
                   isDark={isDark}
                   emptyTitle="No open world gap notes right now."
-                  items={groupedNotes.open.map((note) => (
+                  items={groupedDisplayed.open.map((note) => (
                     <NoteCard
                       key={note.id}
                       note={note}
@@ -1265,10 +1312,10 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                 />
                 <BacklogColumn
                   label="Addressed Notes"
-                  count={groupedNotes.addressed.length}
+                  count={groupedDisplayed.addressed.length}
                   isDark={isDark}
                   emptyTitle="No resolved notes yet."
-                  items={groupedNotes.addressed.map((note) => (
+                  items={groupedDisplayed.addressed.map((note) => (
                     <NoteCard
                       key={note.id}
                       note={note}

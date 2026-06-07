@@ -1226,6 +1226,7 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     book = _book(user_id=user.id, title="Atlas Draft")
     chapter = SimpleNamespace(number=1, title="One", s3_key="chapters/1.json")
     compiled_calls: list[dict[str, object]] = []
+    docx_calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
@@ -1239,7 +1240,7 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     monkeypatch.setattr(books, "manuscript_pdf_compiled", lambda **kwargs: compiled_calls.append({"format": "pdf", **kwargs}) or b"pdf")
     monkeypatch.setattr(books, "manuscript_epub_compiled", lambda **kwargs: compiled_calls.append({"format": "epub", **kwargs}) or b"epub")
     monkeypatch.setattr(books, "manuscript_vault_zip", lambda **_kwargs: b"zip")
-    monkeypatch.setattr(books, "manuscript_docx", lambda **_kwargs: b"docx")
+    monkeypatch.setattr(books, "manuscript_docx", lambda **kwargs: docx_calls.append(kwargs) or b"docx")
 
     db = _FakeDB(execute_values=[_Result(all_rows=[])])
     with pytest.raises(HTTPException) as exc:
@@ -1267,6 +1268,18 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     assert [call["format"] for call in compiled_calls] == ["pdf", "epub"]
     assert all(call["chapters"] == [{"number": 1, "title": "One", "text": "Body", "html": None}] for call in compiled_calls)
     assert all(call["font_family"] == "serif" for call in compiled_calls)
+    assert all(call["include_toc"] is False for call in compiled_calls)
+    assert docx_calls[-1]["include_toc"] is False
+
+    db = _FakeDB(execute_values=[_Result(all_rows=[(1, "One", "chapters/1.json")])])
+    await books.export_manuscript(
+        book.id,
+        format="docx",
+        include_toc=True,
+        db=db,
+        current_user=user,
+    )
+    assert docx_calls[-1]["include_toc"] is True
 
     cover_book = _book(user_id=user.id, cover_s3_key="covers/atlas.png")
     monkeypatch.setattr(books, "ensure_book_cover", _async_value(None))

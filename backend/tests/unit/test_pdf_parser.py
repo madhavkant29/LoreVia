@@ -43,6 +43,13 @@ def test_extract_heading_handles_short_standalone_roman_numerals():
     assert _extract_heading("VI.") == "VI"
 
 
+def test_extract_heading_rejects_page_number_only_lines():
+    assert _extract_heading(
+        "100",
+        next_text="This line begins the next page of prose with enough words to look substantial.",
+    ) is None
+
+
 def test_extract_heading_handles_named_section():
     assert _extract_heading("Scene Second") == "Scene Second"
 
@@ -350,6 +357,60 @@ def test_normalize_chapters_passes_section_type_through():
     ]
     normalized = _normalize_chapters(chapters, split_large_chapters=False, total_pages=5)
     assert normalized[0]["section_type"] == "prologue"
+
+
+def test_normalize_chapters_drops_title_page_and_numeric_page_sections():
+    chapters = [
+        {
+            "title": "TOME 2: LES ABYSSES",
+            "text_parts": ["Les chroniques legendaires d'Animaris TOME 2: LES ABYSSES Du meme auteur"],
+            "images": [],
+            "section_type": "part",
+        },
+        {
+            "title": "100",
+            "text_parts": ["A short page fragment that should not become a chapter."],
+            "images": [],
+            "section_type": "unknown",
+        },
+        {
+            "title": "Chapitre 1: SCYLLA",
+            "text_parts": ["Cet Ulysse qui a accoste sur mon ile."],
+            "images": [],
+            "section_type": "chapter",
+        },
+    ]
+
+    normalized = _normalize_chapters(chapters, split_large_chapters=False, total_pages=130)
+
+    assert [chapter["title"] for chapter in normalized] == ["Chapitre 1: SCYLLA"]
+
+
+def test_normalize_chapters_removes_front_matter_before_embedded_story_heading():
+    chapters = [
+        {
+            "title": "123",
+            "text_parts": [
+                "Chapitre 34: CHARON..................... 127 "
+                "Preface Texte de la preface. "
+                "Avantpropos Texte de l'avant-propos. "
+                "Chapitre 1: SCYLLA Cet Ulysse qui a accoste sur mon ile. "
+                "Chapitre 2: LE CHANGEFORME Je chutais dans une eau glaciale."
+            ],
+            "images": [],
+            "section_type": "unknown",
+        },
+    ]
+
+    normalized = _normalize_chapters(chapters, split_large_chapters=False, total_pages=130)
+
+    assert [chapter["title"] for chapter in normalized] == [
+        "Chapitre 1: SCYLLA",
+        "Chapitre 2: LE CHANGEFORME",
+    ]
+    assert "Preface" not in normalized[0]["text"]
+    assert "Avantpropos" not in normalized[0]["text"]
+    assert "Cet Ulysse" in normalized[0]["text"]
 
 
 def test_build_parser_diagnostics_includes_language_info():

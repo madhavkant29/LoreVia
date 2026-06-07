@@ -3,11 +3,22 @@ import type {
   AdminAuditEvent,
   AdminBillingStatus,
   AdminContentReport,
+  AdminCreatorStrike,
+  AdminCreatorStrikeBody,
+  AdminMetrics,
   AdminPrincipal,
+  AdminPublicBookCreateOut,
+  AdminPublicBookManualIn,
+  AdminPublicChapterAppendOut,
+  AdminPublicChapterIn,
   AdminPublicShare,
+  AdminQueueDepth,
+  AdminRateLimitOverride,
+  AdminRateLimitState,
   AdminRefundReview,
   AdminScope,
   AdminSession,
+  AdminSubscriptionMetrics,
 } from "@/types/admin"
 
 export const adminApi = {
@@ -37,4 +48,18 @@ export const adminApi = {
     apiClient.post(`/admin/books/${bookId}/restore`, { reason }).then((r) => r.data),
   updateTier: (userId: string, tier: string) =>
     apiClient.put(`/admin/users/${userId}/tier`, { tier }).then((r) => r.data),
+  metrics: () => apiClient.get<AdminMetrics>("/admin/metrics").then((r) => r.data),
+  queueDepth: () => apiClient.get<AdminQueueDepth>("/admin/queue-depth").then((r) => r.data),
+  subscriptionMetrics: (params?: { start_date?: string; end_date?: string; reactivation_window_days?: number }) =>
+    apiClient.get<AdminSubscriptionMetrics>("/admin/subscription-metrics", { params }).then((r) => r.data),
+  getRateLimit: (userId: string) =>
+    apiClient.get<AdminRateLimitState>(`/admin/rate-limits/${userId}`).then((r) => r.data),
+  setRateLimit: (userId: string, body: AdminRateLimitOverride) =>
+    apiClient.put<{ ok: boolean; user_id: string }>(`/admin/rate-limits/${userId}`, body).then((r) => r.data),
+  addStrike: (userId: string, body: AdminCreatorStrikeBody) =>
+    apiClient.post<AdminCreatorStrike>(`/admin/users/${userId}/strikes`, body).then((r) => r.data),
+  createPublicDemoBook: (body: AdminPublicBookManualIn) =>
+    apiClient.post<AdminPublicBookCreateOut>("/admin/public-books/manual", body).then((r) => r.data),
+  appendPublicDemoChapter: (bookId: string, body: AdminPublicChapterIn) =>
+    apiClient.post<AdminPublicChapterAppendOut>(`/admin/public-books/${bookId}/chapters`, body).then((r) => r.data),
 }

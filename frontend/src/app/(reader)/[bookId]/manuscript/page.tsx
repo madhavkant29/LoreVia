@@ -270,6 +270,7 @@ function ManuscriptPageInner() {
   const [compileFormat, setCompileFormat] = useState<"pdf" | "docx" | "epub" | "vault">("docx")
   const [includeSceneMetadataOnImport, setIncludeSceneMetadataOnImport] = useState(true)
   const [includeSceneMetadataOnExport, setIncludeSceneMetadataOnExport] = useState(true)
+  const [includeTableOfContentsOnExport, setIncludeTableOfContentsOnExport] = useState(false)
   const [showEditorSettings, setShowEditorSettings] = useState(false)
   const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
   const [fullBookLoading, setFullBookLoading] = useState(false)
@@ -1018,6 +1019,7 @@ function ManuscriptPageInner() {
 
   const restoreSnapshot = async (versionId: string) => {
     setRestoringVersionId(versionId)
+    let pollTimer: ReturnType<typeof setInterval> | null = null
     try {
       const restored = await booksApi.restoreChapterVersion(bookId, versionId)
       setSelectedChapter(restored.chapter_number)
@@ -1038,8 +1040,24 @@ function ManuscriptPageInner() {
       await runAutomaticChecks(restored.chapter_number, restored.text)
       await loadWorkspaceTree()
       setStatusMessage(`Restored chapter ${restored.chapter_number} from snapshot.`)
-    } finally {
+      pollTimer = setInterval(async () => {
+        try {
+          const status = await booksApi.getRestoreStatus(bookId, versionId)
+          if (status.restore_status === "done" || status.restore_status === "failed") {
+            if (pollTimer) clearInterval(pollTimer)
+            setRestoringVersionId(null)
+            if (status.restore_status === "failed") {
+              setStatusMessage(status.restore_error ?? "Restore failed.")
+            }
+          }
+        } catch {
+          if (pollTimer) clearInterval(pollTimer)
+          setRestoringVersionId(null)
+        }
+      }, 1500)
+    } catch {
       setRestoringVersionId(null)
+      if (pollTimer) clearInterval(pollTimer)
     }
   }
 
@@ -2158,7 +2176,7 @@ function ManuscriptPageInner() {
     setExporting(format)
     try {
       const preset = writerWorkspace?.publishing.active_preset ?? "standard_manuscript"
-      const blob = await booksApi.exportManuscript(bookId, format, preset, includeSceneMetadataOnExport)
+      const blob = await booksApi.exportManuscript(bookId, format, preset, includeSceneMetadataOnExport, "serif", includeTableOfContentsOnExport)
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
@@ -2587,6 +2605,7 @@ function ManuscriptPageInner() {
                   open={showExportMenu}
                   activePreset={writerWorkspace?.publishing.active_preset ?? "standard_manuscript"}
                   exporting={exporting}
+                  includeTableOfContents={includeTableOfContentsOnExport}
                   onToggle={() => setShowExportMenu((value) => !value)}
                   onPresetChange={(nextPreset) => {
                     void saveWorkspace({
@@ -2596,6 +2615,7 @@ function ManuscriptPageInner() {
                       },
                     }, { silent: true })
                   }}
+                  onIncludeTableOfContentsChange={setIncludeTableOfContentsOnExport}
                   onPrint={() => {
                     setShowExportMenu(false)
                     printManuscript()
@@ -4332,6 +4352,8 @@ function ManuscriptPageInner() {
           fullBookWordCount={fullBookWordCount}
           includeSceneMetadataOnExport={includeSceneMetadataOnExport}
           onIncludeSceneMetadataOnExportChange={setIncludeSceneMetadataOnExport}
+          includeTableOfContentsOnExport={includeTableOfContentsOnExport}
+          onIncludeTableOfContentsOnExportChange={setIncludeTableOfContentsOnExport}
           onUpdateFrontMatter={updateFrontMatter}
           exporting={exporting}
           workspaceSaving={workspaceSaving}

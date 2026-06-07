@@ -2,10 +2,15 @@ from app.workers.celery_app import celery_app
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
 from app.services.chapter_recovery_service import repair_chapter_payload_from_source
 from app.utils.ingestion_utils import (
+    LLM_USAGE_LIMIT_MAX_RETRIES,
+    LLM_USAGE_LIMIT_RETRY_SECONDS,
     extract_queue_wait_ms,
+    get_processing_started_at,
     is_book_hidden,
+    is_llm_usage_limit_error,
     is_retryable_processing_error,
     load_processing_chapter_payload,
+    update_book_processing_state,
 )
 from app.utils.worker_async_utils import run_worker_coro
 
@@ -54,6 +59,8 @@ def process_chapter_task(
         version_uuid = uuid.UUID(chapter_version_id) if chapter_version_id else None
         queue_wait_ms = extract_queue_wait_ms(getattr(self.request, "headers", None))
         async with AsyncSessionLocal() as db:
+            book = None
+            chapter_payload = None
             try:
                 if version_uuid is not None and ChapterVersion is not None:
                     version = await db.get(ChapterVersion, version_uuid)
@@ -149,6 +156,39 @@ def process_chapter_task(
                         version.restore_completed_at = datetime.now(UTC)
                         await db.commit()
             except Exception as exc:
+                if is_llm_usage_limit_error(exc) and book is not None:
+                    await db.rollback()
+                    book = await db.get(Book, uuid.UUID(book_id))
+                    if book is None:
+                        raise
+                    processing = book.writer_workspace.get("processing") if isinstance(book.writer_workspace, dict) else {}
+                    completed_value = processing.get("chapters_completed") if isinstance(processing, dict) else None
+                    total_value = processing.get("chapters_total") if isinstance(processing, dict) else None
+                    completed_chapters = (
+                        int(completed_value)
+                        if isinstance(completed_value, (int, float)) and int(completed_value) >= 0
+                        else max(int(chapter_num) - 1, 0)
+                    )
+                    total_chapters = (
+                        int(total_value)
+                        if isinstance(total_value, (int, float)) and int(total_value) > 0
+                        else book.total_chapters
+                    )
+                    book.status = "processing"
+                    book.writer_workspace = update_book_processing_state(
+                        book,
+                        status="processing",
+                        stage="usage_limited",
+                        total_chapters=total_chapters,
+                        completed_chapters=completed_chapters,
+                        started_at=get_processing_started_at(book),
+                        queue_wait_ms=queue_wait_ms,
+                        chapter_number=chapter_num,
+                        chapter_title=chapter_payload.get("title") if isinstance(chapter_payload, dict) else None,
+                        last_error=str(getattr(exc, "detail", None) or exc),
+                    )
+                    await db.commit()
+                    raise
                 if version_uuid is not None and ChapterVersion is not None:
                     await db.rollback()
                     version = await db.get(ChapterVersion, version_uuid)
@@ -161,6 +201,15 @@ def process_chapter_task(
     try:
         run_worker_coro(_run())
     except Exception as exc:
+        if is_llm_usage_limit_error(exc):
+            retries = int(getattr(self.request, "retries", 0) or 0)
+            if retries >= LLM_USAGE_LIMIT_MAX_RETRIES:
+                return {"paused": "llm_usage_limit"}
+            raise self.retry(
+                exc=exc,
+                countdown=LLM_USAGE_LIMIT_RETRY_SECONDS,
+                max_retries=LLM_USAGE_LIMIT_MAX_RETRIES,
+            )
         retryable = is_retryable_processing_error(exc)
         retries = int(getattr(self.request, "retries", 0) or 0)
         max_retries = self.max_retries if isinstance(self.max_retries, int) else 3

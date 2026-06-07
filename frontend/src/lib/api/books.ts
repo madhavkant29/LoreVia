@@ -165,6 +165,8 @@ export const booksApi = {
       invalidateReaderCache(id)
       return r.data
     }),
+  getRestoreStatus: (id: string, versionId: string) =>
+    apiClient.get<import("@/types/book").ChapterVersionRestoreStatus>(bookPath(id, `/chapter-versions/${versionId}/restore-status`)).then(r => r.data),
   getSceneVersions: (id: string, sceneId: string, limit = 12) =>
     apiClient.get<SceneVersion[]>(bookPath(id, `/scenes/${sceneId}/versions`), { params: { limit } }).then(r => r.data),
   createSceneSnapshot: (id: string, sceneId: string, note?: string) =>
@@ -427,6 +429,24 @@ export const booksApi = {
     }),
   demoteCharacter: (bookId: string, characterId: string) =>
     apiClient.post<{ demoted: string; candidate_id: string }>(bookPath(bookId, `/characters/${characterId}/demote`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
+  approveCharacter: (bookId: string, characterId: string) =>
+    apiClient.post<{ approved: string }>(bookPath(bookId, `/characters/${characterId}/approve`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
+  rejectCharacter: (bookId: string, characterId: string) =>
+    apiClient.post<{ rejected: string }>(bookPath(bookId, `/characters/${characterId}/reject`)).then(r => {
+      invalidateBookCache(bookId)
+      invalidateReaderCache(bookId)
+      return r.data
+    }),
+  repairRelationships: (bookId: string) =>
+    apiClient.post<import("@/types/character").RelationshipRepairResult>(bookPath(bookId, "/relationships/repair")).then(r => {
       invalidateBookCache(bookId)
       invalidateReaderCache(bookId)
       return r.data
@@ -848,10 +868,11 @@ export const booksApi = {
     format: "pdf" | "docx" | "epub" | "vault" = "docx",
     preset: "standard_manuscript" | "trade_paperback" | "kdp_paperback" = "standard_manuscript",
     includeSceneMetadata = true,
-    fontFamily = "serif"
+    fontFamily = "serif",
+    includeToc = false
   ) =>
     apiClient.get<Blob>(bookPath(bookId, "/manuscript/export"), {
-      params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily },
+      params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily, include_toc: includeToc },
       responseType: "blob",
     }).then(r => r.data),
   delete: (id: string) => apiClient.delete<Book>(bookPath(id)).then(r => {

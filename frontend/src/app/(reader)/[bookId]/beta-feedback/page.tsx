@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
+import type { Route } from "next"
 
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { betaReadsApi } from "@/lib/api/betaReads"
@@ -64,37 +65,48 @@ function LabeledField({
 
 export default function BetaFeedbackPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const router = useRouter()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const [status, setStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const extractError = (error: unknown, fallback: string): string =>
+    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback
   const [selectedAuthorAssignmentId, setSelectedAuthorAssignmentId] = useState<string | null>(null)
 
-  const { data: book = null, isLoading: bookLoading } = useQuery<Book | null>({
+  const { data: book = null, isLoading: bookLoading, isError: bookError } = useQuery<Book | null>({
     queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
     queryFn: () => booksApi.get(bookId),
   })
+
+  useEffect(() => {
+    if (bookError) {
+      router.replace("/library")
+    }
+  }, [bookError, router])
   const {
     data: authorAssignments = [],
     isLoading: authorAssignmentsLoading,
     refetch: refetchAuthorAssignments,
   } = useQuery<BetaReadAssignment[]>({
     queryKey: asQueryKey(`beta-feedback:${bookId}:author-assignments`),
-    queryFn: () => betaReadsApi.listBookAssignments(bookId).catch(() => []),
+    queryFn: () => betaReadsApi.listBookAssignments(bookId),
   })
   const {
     data: myAssignments = [],
     isLoading: myAssignmentsLoading,
+    isError: myAssignmentsError,
   } = useQuery<BetaReadAssignment[]>({
     queryKey: asQueryKey(`beta-feedback:${bookId}:my-assignments`),
-    queryFn: () => betaReadsApi.listMine().catch(() => []),
+    queryFn: () => betaReadsApi.listMine(),
   })
   const {
     data: authorDetail = null,
     refetch: refetchAuthorDetail,
   } = useQuery<BetaReadAssignmentDetail | null>({
     queryKey: selectedAuthorAssignmentId ? asQueryKey(`beta-feedback:${bookId}:author-detail:${selectedAuthorAssignmentId}`) : ["beta-feedback:author-detail:none"],
-    queryFn: () => betaReadsApi.getBookAssignmentDetail(bookId, selectedAuthorAssignmentId as string).catch(() => null),
+    queryFn: () => betaReadsApi.getBookAssignmentDetail(bookId, selectedAuthorAssignmentId as string),
     enabled: Boolean(selectedAuthorAssignmentId),
   })
   const primaryReaderAssignment = useMemo(() => selectPrimaryAssignment(myAssignments, bookId), [bookId, myAssignments])
@@ -103,7 +115,7 @@ export default function BetaFeedbackPage() {
     refetch: refetchReaderDetail,
   } = useQuery<BetaReadAssignmentDetail | null>({
     queryKey: primaryReaderAssignment ? asQueryKey(`beta-feedback:${bookId}:reader-detail:${primaryReaderAssignment.id}`) : ["beta-feedback:reader-detail:none"],
-    queryFn: () => betaReadsApi.getMineDetail(primaryReaderAssignment?.id as string).catch(() => null),
+    queryFn: () => betaReadsApi.getMineDetail(primaryReaderAssignment?.id as string),
     enabled: Boolean(primaryReaderAssignment?.id),
   })
   const loading = bookLoading || authorAssignmentsLoading || myAssignmentsLoading
@@ -128,6 +140,8 @@ export default function BetaFeedbackPage() {
   const [selectedQuestionId, setSelectedQuestionId] = useState("")
   const [finalReview, setFinalReview] = useState("")
   const [finalRating, setFinalRating] = useState("4")
+  const [requirementsModal, setRequirementsModal] = useState<string[] | null>(null)
+  const [successModal, setSuccessModal] = useState<{ title: string; message: string } | null>(null)
 
   useEffect(() => {
     if (authorAssignments.length === 0) {
@@ -177,8 +191,8 @@ export default function BetaFeedbackPage() {
       await refetchAuthorDetail()
       setReaderEmail("")
       setStatus("Beta read assignment created.")
-    } catch {
-      setStatus("Could not create this beta read assignment.")
+    } catch (error: unknown) {
+      setStatus(extractError(error, "Could not create this beta read assignment."))
     } finally {
       setSaving(false)
     }
@@ -195,8 +209,8 @@ export default function BetaFeedbackPage() {
       await refreshAuthorDetail(authorDetail.assignment.id)
       setExtraQuestionsText("")
       setStatus("Questions added.")
-    } catch {
-      setStatus("Could not add those questions.")
+    } catch (error: unknown) {
+      setStatus(extractError(error, "Could not add those questions."))
     } finally {
       setSaving(false)
     }
@@ -212,8 +226,8 @@ export default function BetaFeedbackPage() {
         setSelectedAuthorAssignmentId(assignments[0]?.id ?? null)
       }
       setStatus("Assignment revoked.")
-    } catch {
-      setStatus("Could not revoke this assignment.")
+    } catch (error: unknown) {
+      setStatus(extractError(error, "Could not revoke this assignment."))
     } finally {
       setSaving(false)
     }
@@ -227,8 +241,8 @@ export default function BetaFeedbackPage() {
       await betaReadsApi.start(readerDetail.assignment.id)
       await refreshReaderDetail(readerDetail.assignment.id)
       setStatus("Beta read started.")
-    } catch {
-      setStatus("Could not start this beta read.")
+    } catch (error: unknown) {
+      setStatus(extractError(error, "Could not start this beta read."))
     } finally {
       setSaving(false)
     }
@@ -248,13 +262,15 @@ export default function BetaFeedbackPage() {
         body: feedbackBody || null,
       })
       await refreshReaderDetail(readerDetail.assignment.id)
+      setFeedbackKind("chapter_comment")
+      setFeedbackChapter("1")
       setFeedbackReaction("")
       setFeedbackAnchor("")
       setFeedbackBody("")
       setSelectedQuestionId("")
-      setStatus("Feedback saved.")
-    } catch {
-      setStatus("Could not save that feedback item.")
+      setSuccessModal({ title: "Feedback saved", message: "Your feedback item has been added to this beta read." })
+    } catch (error: unknown) {
+      setStatus(extractError(error, "Could not save that feedback item."))
     } finally {
       setSaving(false)
     }
@@ -268,8 +284,8 @@ export default function BetaFeedbackPage() {
       await betaReadsApi.deleteFeedbackItem(readerDetail.assignment.id, feedbackItemId)
       await refreshReaderDetail(readerDetail.assignment.id)
       setStatus("Feedback removed.")
-    } catch {
-      setStatus("Could not remove that feedback item.")
+    } catch (error: unknown) {
+      setStatus(extractError(error, "Could not remove that feedback item."))
     } finally {
       setSaving(false)
     }
@@ -277,14 +293,37 @@ export default function BetaFeedbackPage() {
 
   const submitReview = async () => {
     if (!readerDetail || !finalReview.trim()) return
+
+    const issues: string[] = []
+    const a = readerDetail.assignment
+    if (a.comment_count < a.required_comment_count) {
+      issues.push(`Leave at least ${a.required_comment_count} comment${a.required_comment_count === 1 ? "" : "s"} (you have ${a.comment_count})`)
+    }
+    if (a.feedback_item_count < a.required_feedback_item_count) {
+      issues.push(`Add at least ${a.required_feedback_item_count} feedback item${a.required_feedback_item_count === 1 ? "" : "s"} (you have ${a.feedback_item_count})`)
+    }
+    if (a.progress_pct < a.required_progress_pct) {
+      issues.push(`Finish ${a.required_progress_pct}% of the assigned reading (you are at ${a.progress_pct}%)`)
+    }
+    if (readerDetail.author_questions.length > 0 && readerDetail.feedback_summary.answer_count < readerDetail.author_questions.length) {
+      const remaining = readerDetail.author_questions.length - readerDetail.feedback_summary.answer_count
+      issues.push(`Answer all ${readerDetail.author_questions.length} of the author's question${readerDetail.author_questions.length === 1 ? "" : "s"} (${remaining} unanswered)`)
+    }
+    if (issues.length > 0) {
+      setRequirementsModal(issues)
+      return
+    }
+
     setSaving(true)
     setStatus(null)
     try {
       await betaReadsApi.submitReview(readerDetail.assignment.id, finalReview.trim(), Number(finalRating))
       await refreshReaderDetail(readerDetail.assignment.id)
-      setStatus("Review submitted.")
-    } catch {
-      setStatus("Could not submit this review yet.")
+      setFinalReview("")
+      setFinalRating("4")
+      setSuccessModal({ title: "Review submitted", message: "Your final review and rating have been submitted. Thank you for your feedback!" })
+    } catch (error: unknown) {
+      setStatus(extractError(error, "Could not submit this review yet."))
     } finally {
       setSaving(false)
     }
@@ -293,6 +332,7 @@ export default function BetaFeedbackPage() {
   const activeFeedbackKind = FEEDBACK_KIND_OPTIONS.find((option) => option.value === feedbackKind)
 
   return (
+    <>
     <div className={`min-h-screen ${isDark ? "bg-[#070b10] text-slate-100" : "bg-[#f7f7fb] text-slate-950"}`}>
       <div className="mx-auto grid max-w-[94rem] gap-5 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-8">
         <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
@@ -459,7 +499,12 @@ export default function BetaFeedbackPage() {
               <div className={`rounded-none border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <h2 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Assignments</h2>
-                  <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{authorAssignments.length} total</span>
+                  <div className="flex items-center gap-3">
+                    <button type="button" onClick={() => router.push(`/${bookId}/collaboration` as Route)} className={`text-xs font-semibold transition ${isDark ? "text-amber-400 hover:text-amber-300" : "text-amber-600 hover:text-amber-500"}`}>
+                      View feedback
+                    </button>
+                    <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{authorAssignments.length} total</span>
+                  </div>
                 </div>
                 <div className="mt-5 space-y-3">
                   {authorAssignments.length > 0 ? authorAssignments.map((assignment) => (
@@ -737,7 +782,11 @@ export default function BetaFeedbackPage() {
             </section>
           ) : null}
 
-          {!loading && !isAuthorView && !readerDetail ? (
+          {!loading && !isAuthorView && myAssignmentsError ? (
+            <section className={`rounded-none border p-6 text-sm ${isDark ? "border-white/[0.065] bg-red-900/20 text-red-400" : "border-red-200 bg-red-50 text-red-600"}`}>
+              Could not load your beta read data. Please check your connection and try again.
+            </section>
+          ) : !loading && !isAuthorView && !readerDetail ? (
             <section className={`rounded-none border p-6 text-sm ${isDark ? "border-white/[0.065] bg-[#0d141c] text-slate-400" : "border-slate-200/70 bg-white text-slate-500"}`}>
               No active beta read was found for this book on your account yet.
             </section>
@@ -745,5 +794,71 @@ export default function BetaFeedbackPage() {
         </main>
       </div>
     </div>
+
+    {requirementsModal ? (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4 py-6" role="presentation" onClick={() => setRequirementsModal(null)}>
+        <section
+          aria-modal="true"
+          role="dialog"
+          aria-labelledby="requirements-modal-title"
+          className="w-full max-w-md rounded-lg border border-[rgba(var(--border),0.9)] bg-[rgb(var(--card))] p-6 text-[rgb(var(--card-foreground))] shadow-[var(--shadow-modal)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="app-eyebrow">Requirements not met</p>
+          <h2 id="requirements-modal-title" className="mt-3 text-2xl font-semibold tracking-tight">
+            Complete these before submitting
+          </h2>
+          <ul className="mt-5 space-y-3">
+            {requirementsModal.map((issue) => (
+              <li key={issue} className={`flex items-start gap-2.5 rounded-none border px-3.5 py-2.5 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-300" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+                <span>{issue}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-6 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setRequirementsModal(null)}
+              className={`rounded-none px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-slate-200 text-slate-950 hover:bg-white" : "bg-slate-900 text-white hover:bg-slate-800"}`}
+            >
+              Got it
+            </button>
+          </div>
+        </section>
+      </div>
+    ) : null}
+
+    {successModal ? (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4 py-6" role="presentation" onClick={() => setSuccessModal(null)}>
+        <section
+          aria-modal="true"
+          role="dialog"
+          aria-labelledby="success-modal-title"
+          className="w-full max-w-md rounded-lg border border-[rgba(var(--border),0.9)] bg-[rgb(var(--card))] p-6 text-[rgb(var(--card-foreground))] shadow-[var(--shadow-modal)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="app-eyebrow">Success</p>
+          <h2 id="success-modal-title" className="mt-3 text-2xl font-semibold tracking-tight">
+            {successModal.title}
+          </h2>
+          <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            {successModal.message}
+          </p>
+          <div className="mt-6 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setSuccessModal(null)}
+              className={`rounded-none px-5 py-2.5 text-sm font-semibold transition ${isDark ? "bg-slate-200 text-slate-950 hover:bg-white" : "bg-slate-900 text-white hover:bg-slate-800"}`}
+            >
+              Got it
+            </button>
+          </div>
+        </section>
+      </div>
+    ) : null}
+    </>
   )
 }

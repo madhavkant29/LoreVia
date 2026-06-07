@@ -66,11 +66,13 @@ async def export_manuscript(
     format: str = Query("docx", pattern="^(pdf|docx|epub|vault)$"),
     preset: str = Query("standard_manuscript", pattern="^(standard_manuscript|trade_paperback|kdp_paperback)$"),
     include_scene_metadata: bool = Query(True),
+    include_toc: bool = Query(False),
     font_family: str = Query("serif", pattern="^(serif|sans|mono|italian-old-style|eb-garamond)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     selected_font = normalize_export_font_family(font_family)
+    include_toc_enabled = include_toc is True
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if collaborator and not collaboration_can_export(collaborator):
         raise HTTPException(403, "This share cannot export the manuscript.")
@@ -126,6 +128,7 @@ async def export_manuscript(
             preset=preset,
             front_matter=cast(dict | None, front_matter),
             font_family=selected_font,
+            include_toc=include_toc_enabled,
         )
         return Response(
             content=raw,
@@ -140,6 +143,7 @@ async def export_manuscript(
             preset=preset,
             front_matter=cast(dict | None, front_matter),
             font_family=selected_font,
+            include_toc=include_toc_enabled,
         )
         return Response(
             content=raw,
@@ -174,6 +178,7 @@ async def export_manuscript(
         preset=preset,
         front_matter=cast(dict | None, front_matter),
         font_family=selected_font,
+        include_toc=include_toc_enabled,
     )
     return Response(
         content=raw,

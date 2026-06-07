@@ -2173,7 +2173,7 @@ function buildAdminSession(admin: AdminMode) {
         is_admin: true,
         scopes: ["moderation_admin", "billing_admin", "super_admin"],
         is_owner: true,
-        requires_step_up: true,
+        requires_step_up: false,
         session_expires_at: null,
       }
     default:
@@ -2216,6 +2216,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       },
     )
   }
+  await page.context().clearCookies()
   await page.context().addCookies(cookies)
   user.username = defaultUsername
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))

@@ -1577,6 +1577,11 @@ def _chapter_heading_lines(chapter: dict[str, Any]) -> tuple[str, str | None]:
     return default_heading, None
 
 
+def _manuscript_toc_label(chapter: dict[str, Any]) -> str:
+    chapter_heading, chapter_subtitle = _chapter_heading_lines(chapter)
+    return f"{chapter_heading}: {chapter_subtitle}" if chapter_subtitle else chapter_heading
+
+
 def _scene_heading_lines(scene: dict[str, Any], index: int) -> tuple[str, str | None]:
     chapter_number = scene.get("chapter_number")
     chapter_suffix = f" (Chapter {chapter_number})" if isinstance(chapter_number, int) and chapter_number > 0 else ""
@@ -1596,6 +1601,7 @@ def manuscript_docx(
     preset: str = "standard_manuscript",
     front_matter: dict | None = None,
     font_family: str | None = None,
+    include_toc: bool = False,
 ) -> bytes:
     from io import BytesIO
 
@@ -1641,6 +1647,28 @@ def manuscript_docx(
     run._r.append(fld_text)
     run._r.append(fld_end)
 
+    def _append_field(paragraph: Any, instruction: str, placeholder: str | None = None) -> None:
+        run = paragraph.add_run()
+        field_begin = OxmlElement("w:fldChar")
+        field_begin.set(qn("w:fldCharType"), "begin")
+        field_text = OxmlElement("w:instrText")
+        field_text.set(qn("xml:space"), "preserve")
+        field_text.text = instruction
+        run._r.append(field_begin)
+        run._r.append(field_text)
+        if placeholder:
+            field_separate = OxmlElement("w:fldChar")
+            field_separate.set(qn("w:fldCharType"), "separate")
+            run._r.append(field_separate)
+            paragraph.add_run(placeholder)
+        field_end = OxmlElement("w:fldChar")
+        field_end.set(qn("w:fldCharType"), "end")
+        end_run = paragraph.add_run()
+        end_run._r.append(field_end)
+
+    def _field_quote(value: str) -> str:
+        return value.replace('"', "'")
+
     contact = doc.add_paragraph()
     contact.alignment = WD_ALIGN_PARAGRAPH.LEFT
     for value in [front["author_name"] or front["display_author"], front["contact_email"], front["contact_phone"], front["contact_address"]]:
@@ -1664,6 +1692,16 @@ def manuscript_docx(
     author_p = doc.add_paragraph()
     author_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     author_p.add_run(front["display_author"] or " ")
+
+    if include_toc:
+        doc.add_page_break()
+        for _ in range(2):
+            doc.add_paragraph("")
+        toc_heading = doc.add_paragraph()
+        toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        toc_heading.add_run("Table of Contents").bold = True
+        toc_field = doc.add_paragraph()
+        _append_field(toc_field, r"TOC \f \h \z", "Update this table in Word to refresh page numbers.")
 
     def _add_optional_page(heading: str, content: str) -> None:
         doc.add_page_break()
@@ -1711,6 +1749,8 @@ def manuscript_docx(
             doc.add_paragraph("")
         chapter_heading = doc.add_paragraph()
         chapter_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if include_toc:
+            _append_field(chapter_heading, f'TC "{_field_quote(_manuscript_toc_label(chapter))}" \\l 1')
         chapter_heading.add_run(chapter_heading_text)
         if chapter_subtitle:
             chapter_title_p = doc.add_paragraph()
@@ -1894,6 +1934,7 @@ def manuscript_pdf_compiled(
     preset: str = "standard_manuscript",
     front_matter: dict | None = None,
     font_family: str | None = None,
+    include_toc: bool = False,
 ) -> bytes:
     from io import BytesIO
 
@@ -1901,6 +1942,7 @@ def manuscript_pdf_compiled(
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
+    from reportlab.platypus.tableofcontents import TableOfContents
 
     def escaped(value: str) -> str:
         return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -1910,7 +1952,19 @@ def manuscript_pdf_compiled(
     page_size = {"A4": A4, "A5": A5, "LETTER": LETTER}[str(export_preset["pdf_page_size"])]
     left_margin, right_margin, top_margin, bottom_margin = cast(tuple[float, float, float, float], export_preset["pdf_margins"])
     buffer = BytesIO()
-    doc = SimpleDocTemplate(
+    class ManuscriptPdfTemplate(SimpleDocTemplate):
+        def afterFlowable(self, flowable) -> None:
+            if not include_toc:
+                return
+            if not isinstance(flowable, Paragraph) or getattr(flowable.style, "name", "") != "ChapterHeading":
+                return
+            toc_label = getattr(flowable, "_lorevia_toc_label", None)
+            if not toc_label:
+                return
+            self.notify("TOCEntry", (0, toc_label, self.page))
+
+    template_class = ManuscriptPdfTemplate if include_toc else SimpleDocTemplate
+    doc = template_class(
         buffer,
         pagesize=page_size,
         leftMargin=left_margin * inch,
@@ -1925,6 +1979,7 @@ def manuscript_pdf_compiled(
     centered = ParagraphStyle("CenteredBody", parent=body, alignment=1, firstLineIndent=0)
     chapter_heading = ParagraphStyle("ChapterHeading", parent=styles["Heading2"], fontName=pdf_bold, fontSize=14, alignment=1, leading=18)
     title_style = ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontName=pdf_bold, fontSize=18, alignment=1, leading=24)
+    toc_entry_style = ParagraphStyle("ManuscriptTOCEntry", parent=styles["BodyText"], fontName=pdf_regular, fontSize=11, leading=18)
 
     story: list[Any] = []
     contact_lines = [line for line in [front["author_name"] or front["display_author"], front["contact_email"], front["contact_phone"], front["contact_address"]] if line]
@@ -1937,6 +1992,15 @@ def manuscript_pdf_compiled(
         story.append(Paragraph(escaped(front["subtitle"]), centered))
     story.append(Spacer(1, 0.3 * inch))
     story.append(Paragraph(escaped(front["display_author"] or " "), centered))
+
+    if include_toc:
+        toc = TableOfContents()
+        toc.levelStyles = [toc_entry_style]
+        story.append(PageBreak())
+        story.append(Spacer(1, 0.6 * inch))
+        story.append(Paragraph("Table of Contents", chapter_heading))
+        story.append(Spacer(1, 0.3 * inch))
+        story.append(toc)
 
     def _optional_page(heading: str, content: str) -> None:
         story.append(PageBreak())
@@ -1969,7 +2033,10 @@ def manuscript_pdf_compiled(
         story.append(PageBreak())
         chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter)
         story.append(Spacer(1, 2.2 * inch))
-        story.append(Paragraph(escaped(chapter_heading_text), chapter_heading))
+        heading_paragraph = Paragraph(escaped(chapter_heading_text), chapter_heading)
+        if include_toc:
+            setattr(heading_paragraph, "_lorevia_toc_label", _manuscript_toc_label(chapter))
+        story.append(heading_paragraph)
         if chapter_subtitle:
             story.append(Paragraph(escaped(chapter_subtitle), centered))
             story.append(Spacer(1, 0.1 * inch))
@@ -2008,7 +2075,10 @@ def manuscript_pdf_compiled(
         )
         canvas.restoreState()
 
-    doc.build(story, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages)
+    if include_toc:
+        doc.multiBuild(story, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages)
+    else:
+        doc.build(story, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages)
     return buffer.getvalue()
 
 
@@ -2020,6 +2090,7 @@ def manuscript_epub_compiled(
     preset: str = "standard_manuscript",
     front_matter: dict | None = None,
     font_family: str | None = None,
+    include_toc: bool = False,
 ) -> bytes:
     from ebooklib import epub
     from html import escape
@@ -2043,6 +2114,8 @@ def manuscript_epub_compiled(
             f"body {{ font-family: {_export_font_epub_stack(font_family)}; font-size: 12pt; line-height: 2; margin: 8%; }} "
             "h1, h2 { text-align: center; } "
             ".title-page, .end-marker { text-align: center; margin-top: 20%; } "
+            ".toc-page { page-break-before: always; } "
+            ".toc-page ol { line-height: 1.8; } "
             ".scene-break { text-align: center; letter-spacing: 0.2em; } "
             ".first-paragraph { text-indent: 0; } "
             "p { text-indent: 1.5em; margin: 0 0 1em; }"
@@ -2085,6 +2158,20 @@ def manuscript_epub_compiled(
     book.add_item(title_page)
     spine.append(title_page)
     toc_entries.append(title_page)
+
+    if include_toc:
+        toc_item = epub.EpubHtml(title="Table of Contents", file_name="table-of-contents.xhtml", lang="en")
+        toc_items = []
+        for chapter in chapters:
+            chapter_number = chapter.get("number")
+            toc_items.append(
+                f"<li><a href='chapter-{chapter_number}.xhtml'>{escape(_manuscript_toc_label(chapter))}</a></li>"
+            )
+        toc_item.content = "<section class='toc-page'><h1>Table of Contents</h1><ol>" + "".join(toc_items) + "</ol></section>"
+        toc_item.add_item(stylesheet)
+        book.add_item(toc_item)
+        spine.append(toc_item)
+        toc_entries.append(toc_item)
 
     optional_sections: list[tuple[str, str]] = []
     if front["include_dedication"] and front["dedication"]:

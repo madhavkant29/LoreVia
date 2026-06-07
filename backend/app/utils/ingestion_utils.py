@@ -14,6 +14,7 @@ from app.models.book import Book, Chapter
 from app.core.storage import download_book, upload_text
 from app.utils.book_utils import (
     deserialize_manuscript_content,
+    normalize_processing_timestamp,
     normalize_writer_workspace,
     serialize_manuscript_content,
 )
@@ -28,6 +29,8 @@ READING_CHAPTER_MIN_TAIL_WORDS = 2000
 ANALYSIS_INFLIGHT_TTL_SECONDS = 20 * 60      # Must exceed analysis time_limit (15 min) by >= 5 min
 EXTRACTION_INFLIGHT_TTL_SECONDS = 30 * 60    # Must exceed extraction time_limit (25 min) by >= 5 min
 CHAPTER_RECOVERY_INFLIGHT_TTL_SECONDS = 15 * 60
+LLM_USAGE_LIMIT_RETRY_SECONDS = 30 * 60
+LLM_USAGE_LIMIT_MAX_RETRIES = 10
 
 
 @dataclass(frozen=True)
@@ -229,7 +232,9 @@ def _clean_pipeline_stage(raw: dict[str, Any] | None) -> dict[str, Any] | None:
         payload["total_chapters"] = int(total)
     updated_at = source.get("updated_at")
     if updated_at:
-        payload["updated_at"] = str(updated_at).strip()
+        normalized_updated_at = normalize_processing_timestamp(updated_at)
+        if normalized_updated_at:
+            payload["updated_at"] = normalized_updated_at
     eta_seconds = source.get("eta_seconds")
     if isinstance(eta_seconds, (int, float)) and int(eta_seconds) >= 0:
         payload["eta_seconds"] = int(eta_seconds)
@@ -387,6 +392,7 @@ def update_book_processing_state(
     chapter_title: str | None = None,
     last_error: str | None = None,
     parser_diagnostics: dict[str, Any] | None = None,
+    progress_pct: float | None = None,
 ) -> dict:
     processing_started_at = started_at or get_processing_started_at(book) or datetime.now(UTC)
     effective_parser_diagnostics = parser_diagnostics if parser_diagnostics is not None else current_parser_diagnostics(book)
@@ -402,6 +408,8 @@ def update_book_processing_state(
         last_error=last_error,
         parser_diagnostics=effective_parser_diagnostics,
     )
+    if isinstance(progress_pct, (int, float)) and math.isfinite(float(progress_pct)):
+        processing_state["progress_pct"] = round(max(0.0, min(100.0, float(progress_pct))), 1)
     workspace = book.writer_workspace if isinstance(book.writer_workspace, dict) else {}
     current_processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
     active_rebuild_run_id = current_processing.get("rebuild_run_id") if isinstance(current_processing, dict) else None
@@ -702,3 +710,13 @@ def is_retryable_processing_error(exc: BaseException) -> bool:
         "gateway timeout",
     )
     return any(marker in message for marker in retryable_markers)
+
+
+def is_llm_usage_limit_error(exc: BaseException) -> bool:
+    status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(exc, "status_code", None)
+    if status_code != 429:
+        return False
+
+    detail = getattr(exc, "detail", None)
+    message = " ".join(str(detail if detail is not None else exc).lower().split())
+    return "token limit exceeded" in message and "window" in message
