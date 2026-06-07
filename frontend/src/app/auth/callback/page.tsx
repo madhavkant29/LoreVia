@@ -36,6 +36,9 @@ export default function AuthCallbackPage() {
     }
 
     const finishSignIn = async () => {
+      // Clear any stale dead-session flag from a previous failed attempt
+      // before doing any OAuth work, so new login cookies won't be nuked.
+      document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
       try {
         if (!supabase) {
           fail("Google sign-in is not configured.")
