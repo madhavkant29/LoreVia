@@ -71,10 +71,12 @@ export default function AuthCallbackPage() {
             "Completing sign-in",
           )
           if (error) {
-            fail("Could not complete Google sign-in.")
+            console.error("Supabase exchangeCodeForSession error:", error)
+            fail(`Could not complete Google sign-in: ${error.message || "Unknown error"}`)
             return
           }
           session = data.session
+          console.log("Got Supabase session:", { hasSession: !!session, email: session?.user?.email })
         }
 
         if (!session) {
@@ -86,10 +88,12 @@ export default function AuthCallbackPage() {
         if (active) {
           setStatus("Signing you into LoreVia...")
         }
+        console.log("Calling backend with token:", session.access_token.substring(0, 20) + "...")
         const user = await withTimeout(
           authApi.loginWithSupabaseToken(session.access_token, getOrCreateDeviceId(), acceptedTerms),
           "Signing you into LoreVia",
         )
+        console.log("Backend response:", { hasUser: !!user, email: user?.email })
         if (!active) return
 
         if (!user) {
