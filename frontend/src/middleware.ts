@@ -265,6 +265,10 @@ export function isPrivatePageRoute(pathname: string) {
 }
 
 function hasAuthCookie(request: NextRequest) {
+  // If the frontend interceptor determined the session is dead, do NOT treat
+  // stale cookie bytes as valid auth — this breaks the /login ↔ /library loop.
+  if (request.cookies.get("lorevia_session_dead")?.value === "1") return false
+
   return AUTH_COOKIE_NAMES.some((cookieName) => Boolean(request.cookies.get(cookieName)?.value))
 }
 
@@ -324,6 +328,20 @@ export function middleware(request: NextRequest) {
   }
 
   const isAuthenticated = hasAuthCookie(request)
+
+  // When the frontend interceptor signals that cookies are dead, scrub them
+  // at the server level so the loop ends permanently (not just for 30 s).
+  if (request.cookies.get("lorevia_session_dead")?.value === "1") {
+    const response = isPrivatePageRoute(request.nextUrl.pathname)
+      ? buildLoginRedirect(request)
+      : NextResponse.next()
+    for (const name of AUTH_COOKIE_NAMES) {
+      response.cookies.set(name, "", { maxAge: 0, path: "/" })
+    }
+    response.cookies.set("lorevia_session_dead", "", { maxAge: 0, path: "/" })
+    return applySecurityHeaders(request, response)
+  }
+
   if (!isAuthenticated && isPrivatePageRoute(request.nextUrl.pathname)) {
     return applySecurityHeaders(request, buildLoginRedirect(request))
   }
