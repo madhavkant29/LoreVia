@@ -313,6 +313,13 @@ async def oauth_supabase(
 ):
     device_id = resolve_device_id_optional(request, body.device_id)
     if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+        log.error(
+            "supabase_oauth_config_missing",
+            extra={
+                "has_url": bool(settings.SUPABASE_URL),
+                "has_key": bool(settings.SUPABASE_SERVICE_KEY),
+            },
+        )
         raise HTTPException(503, "OAuth sign-in is not configured")
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -323,14 +330,20 @@ async def oauth_supabase(
                     "Authorization": f"Bearer {body.token}",
                 },
             )
+    except httpx.TimeoutException:
+        log.exception("Supabase OAuth verification timed out")
+        raise HTTPException(503, "OAuth verification timed out. Please try again.")
     except httpx.HTTPError:
         log.exception("Supabase OAuth verification request failed")
         raise HTTPException(503, "OAuth verification is temporarily unavailable")
 
     if verification_response.status_code != 200:
         log.warning(
-            "Supabase OAuth verification failed: %s",
-            verification_response.status_code,
+            "Supabase OAuth verification failed",
+            extra={
+                "status_code": verification_response.status_code,
+                "response_text": verification_response.text[:500] if verification_response.text else None,
+            },
         )
         raise HTTPException(401, f"Invalid sign-in token ({verification_response.status_code})")
 
@@ -365,6 +378,13 @@ async def oauth_supabase(
             )
             raise HTTPException(409, "This email is already linked to another account.")
         if not existing:
+            log.info(
+                "supabase_oauth_no_user_found",
+                extra={
+                    "supabase_auth_id": str(supabase_auth_id),
+                    "email": email,
+                },
+            )
             raise HTTPException(
                 401,
                 "No account found for this Google login. Please create an account first via the Register page.",

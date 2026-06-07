@@ -5,6 +5,8 @@ const MISSING_ACCOUNT_OR_METHOD_MESSAGE =
   "No account found for that sign-in. Create one if you're new to LoreVia, or use the same sign-in method you originally chose, like Google."
 const INVALID_CREDENTIALS_MESSAGE = "Invalid email or password."
 const TEMPORARY_SIGN_IN_MESSAGE = "Sign-in was temporarily unavailable. Please try again."
+const OAUTH_CONFIG_MESSAGE = "Google sign-in is currently unavailable. Please try email/password sign-in or contact support."
+const OAUTH_TIMEOUT_MESSAGE = "Google sign-in timed out. Please check your connection and try again."
 
 function deviceAccountLimitMessage(accountCount: number): string {
   const label = accountCount === 1 ? "account" : "accounts"
@@ -28,8 +30,21 @@ export function normalizeLoginError(error: string | null | undefined, status?: n
 
   if (!detail) {
     if (status === 401) return MISSING_ACCOUNT_OR_METHOD_MESSAGE
+    if (status === 503) return TEMPORARY_SIGN_IN_MESSAGE
     if (status && status >= 500) return TEMPORARY_SIGN_IN_MESSAGE
     return null
+  }
+
+  if (detail.includes("OAuth sign-in is not configured")) {
+    return OAUTH_CONFIG_MESSAGE
+  }
+
+  if (detail.includes("OAuth verification timed out")) {
+    return OAUTH_TIMEOUT_MESSAGE
+  }
+
+  if (detail.includes("OAuth verification is temporarily unavailable")) {
+    return TEMPORARY_SIGN_IN_MESSAGE
   }
 
   if (isTemporaryOriginError(detail) || (status && status >= 500)) {
