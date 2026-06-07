@@ -178,6 +178,13 @@ export default function BookOverviewPage() {
     },
     refetchIntervalInBackground: false,
   })
+
+  useEffect(() => {
+    if (overviewQuery.isError) {
+      router.replace("/library")
+    }
+  }, [overviewQuery.isError, router])
+
   const resolvedBookMode = overviewQuery.data?.book.workspace_shell ?? overviewQuery.data?.book.mode ?? bookMode
   const resolvedCollaborationRole = overviewQuery.data?.book.collaboration_role ?? null
   const resolvedCollaborationPermissions = overviewQuery.data?.book.collaboration_permissions ?? null

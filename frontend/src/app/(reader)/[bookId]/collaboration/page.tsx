@@ -13,7 +13,7 @@ import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { parseQuestionLines } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment } from "@/types/betaRead"
-import type { Book, BookCollaborator, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
+import type { Book, BookCollaborator, CollaboratorActivity, CollaboratorActivityItem, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
 import type { BetaReadAssignmentCreateInput } from "@/types/reader"
 
 const AuthorToolsNav = dynamic(
@@ -212,7 +212,7 @@ export default function CollaborationPage() {
     chapterEnd: null,
     windowDays: 3,
     requiredProgressPct: 100,
-    requiredCommentCount: 3,
+    requiredCommentCount: 1,
     requiredFeedbackItemCount: 1,
     requireFinalFeedback: true,
     authorQuestions: ["What confused you most?", "Which moment landed best?"],
@@ -234,19 +234,59 @@ export default function CollaborationPage() {
   )
 
   useEffect(() => {
-    if (!selectedCollaboratorId && sortedCollaborators.length > 0) {
-      setSelectedCollaboratorId(sortedCollaborators[0].id)
-      return
-    }
     if (selectedCollaboratorId && !sortedCollaborators.some((collaborator) => collaborator.id === selectedCollaboratorId)) {
-      setSelectedCollaboratorId(sortedCollaborators[0]?.id ?? null)
+      setSelectedCollaboratorId(null)
     }
   }, [selectedCollaboratorId, sortedCollaborators])
 
-  const collaboratorActivityQuery = useQuery<CollaboratorActivity | null>({
-    queryKey: selectedCollaboratorId ? asQueryKey(`collaboration:${bookId}:collaborator-activity:${selectedCollaboratorId}`) : ["collaboration:activity:none"],
-    queryFn: () => selectedCollaboratorId ? booksApi.getCollaboratorActivity(bookId, selectedCollaboratorId) : Promise.resolve(null),
-    enabled: Boolean(selectedCollaboratorId),
+  const activityQuery = useQuery<{
+    items: CollaboratorActivityItem[]
+    assignments: BetaReadAssignment[]
+    chapter_comment_count: number
+    annotation_count: number
+    latest_activity_at: string | null
+  } | null>({
+    queryKey: selectedCollaboratorId
+      ? asQueryKey(`collaboration:${bookId}:collaborator-activity:${selectedCollaboratorId}`)
+      : asQueryKey(`collaboration:${bookId}:all-activity`),
+    queryFn: async () => {
+      if (selectedCollaboratorId) {
+        const result = await booksApi.getCollaboratorActivity(bookId, selectedCollaboratorId)
+        return {
+          items: result.items,
+          assignments: result.assignments,
+          chapter_comment_count: result.chapter_comment_count,
+          annotation_count: result.annotation_count,
+          latest_activity_at: result.latest_activity_at ?? null,
+        }
+      }
+      const results = await Promise.all(
+        sortedCollaborators.map((c) =>
+          booksApi.getCollaboratorActivity(bookId, c.id).catch(() => null)
+        )
+      )
+      const items: CollaboratorActivityItem[] = []
+      let chapterCommentCount = 0
+      let annotationCount = 0
+      const assignments: BetaReadAssignment[] = []
+      for (const r of results) {
+        if (r) {
+          items.push(...r.items)
+          chapterCommentCount += r.chapter_comment_count
+          annotationCount += r.annotation_count
+          assignments.push(...r.assignments)
+        }
+      }
+      items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      return {
+        items,
+        assignments,
+        chapter_comment_count: chapterCommentCount,
+        annotation_count: annotationCount,
+        latest_activity_at: items[0]?.created_at ?? null,
+      }
+    },
+    enabled: Boolean(selectedCollaboratorId) || sortedCollaborators.length > 0,
   })
 
   const activeRoleDetail = roleMeta(role)?.detail ?? ""
@@ -321,6 +361,7 @@ export default function CollaborationPage() {
     try {
       await booksApi.updateCollaborator(bookId, collaborator.id, { inviteStatus: "revoked" })
       await refetchCollaborators()
+      setSelectedCollaboratorId(null)
       setStatus("Share revoked.")
     } catch {
       setStatus("Could not revoke this share.")
@@ -380,7 +421,7 @@ export default function CollaborationPage() {
                   ref={emailInputRef}
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                  className={`h-11 border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                 />
                 <FieldLabel
                   htmlFor="collaborator-display-name"
@@ -393,7 +434,7 @@ export default function CollaborationPage() {
                   ref={displayNameInputRef}
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                  className={`h-11 border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                 />
                 <FieldLabel
                   htmlFor="collaborator-role"
@@ -405,7 +446,7 @@ export default function CollaborationPage() {
                   id="collaborator-role"
                   value={role}
                   onChange={(event) => onRoleChange(event.target.value as CollaborationRole)}
-                  className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                  className={`h-11 border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                 >
                   {ROLE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -455,7 +496,7 @@ export default function CollaborationPage() {
                       disabled={!permissions.can_view_selected_chapters_only}
                       value={scope.chapter_start ?? ""}
                       onChange={(event) => updateScope({ chapter_start: event.target.value ? Number(event.target.value) : null })}
-                      className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                      className={`mt-2 h-11 w-full border px-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                     />
                   </label>
                   <label className="text-xs font-semibold">
@@ -466,7 +507,7 @@ export default function CollaborationPage() {
                       disabled={!permissions.can_view_selected_chapters_only}
                       value={scope.chapter_end ?? ""}
                       onChange={(event) => updateScope({ chapter_end: event.target.value ? Number(event.target.value) : null })}
-                      className={`mt-2 h-11 w-full rounded-md border px-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
+                      className={`mt-2 h-11 w-full border px-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-violet-400" : "border-slate-200 bg-white text-slate-900 focus:border-violet-400"}`}
                     />
                   </label>
                 </div>
@@ -547,73 +588,104 @@ export default function CollaborationPage() {
               </div>
 
               <div className={`mt-5 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Collaborator activity</h3>
-                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                      {selectedCollaborator
-                        ? `Recent activity from ${selectedCollaborator.display_name || selectedCollaborator.email}.`
-                        : "Select a collaborator to inspect their chapter comments and feedback history."}
-                    </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Collaborator activity</h3>
+                      <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                        {selectedCollaborator
+                          ? `Recent activity from ${selectedCollaborator.display_name || selectedCollaborator.email}.`
+                          : `Activity from all ${sortedCollaborators.length} collaborator${sortedCollaborators.length === 1 ? "" : "s"}.`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {selectedCollaboratorId ? (
+                        <button type="button" onClick={() => setSelectedCollaboratorId(null)} className={`text-sm font-semibold tracking-wide uppercase ${isDark ? "text-teal-300" : "text-teal-700"}`}>
+                          All
+                        </button>
+                      ) : null}
+                      {activityQuery.data?.latest_activity_at ? (
+                        <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                          Last active {new Date(activityQuery.data.latest_activity_at).toLocaleString()}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
-                  {collaboratorActivityQuery.data?.latest_activity_at ? (
-                    <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                      Last active {new Date(collaboratorActivityQuery.data.latest_activity_at).toLocaleString()}
-                    </span>
-                  ) : null}
-                </div>
 
-                {selectedCollaboratorId && collaboratorActivityQuery.isLoading ? (
+                {activityQuery.isLoading ? (
                   <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Loading activity...</p>
                 ) : null}
 
-                {selectedCollaboratorId && !collaboratorActivityQuery.isLoading && collaboratorActivityQuery.data ? (
+                {!activityQuery.isLoading && activityQuery.data ? (
                   <div className="mt-4 space-y-4">
                     <div className="grid gap-3 sm:grid-cols-3">
                       <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}>
                         <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Assignments</p>
-                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{collaboratorActivityQuery.data.assignments.length}</p>
+                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{activityQuery.data.assignments.length}</p>
                       </div>
                       <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}>
                         <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Chapter comments</p>
-                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{collaboratorActivityQuery.data.chapter_comment_count}</p>
+                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{activityQuery.data.chapter_comment_count}</p>
                       </div>
                       <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-[#0d141c]" : "border-slate-200 bg-white"}`}>
                         <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Annotations</p>
-                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{collaboratorActivityQuery.data.annotation_count}</p>
+                        <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{activityQuery.data.annotation_count}</p>
                       </div>
                     </div>
 
-                    <div className="space-y-3">
-                      {collaboratorActivityQuery.data.items.length > 0 ? collaboratorActivityQuery.data.items.map((item) => (
-                        <article
-                          key={item.id}
-                          className={`rounded-md border px-4 py-4 ${isDark ? "border-white/[0.06] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
-                        >
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                              <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{item.title}</p>
-                              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                                {item.chapter_number ? `Chapter ${item.chapter_number}${item.chapter_title ? ` - ${item.chapter_title}` : ""}` : item.kind.replace(/_/g, " ")}
-                              </p>
+                    <div className="space-y-5">
+                      {activityQuery.data.items.length > 0 ? (() => {
+                        const groups = new Map<number | null, typeof activityQuery.data.items>()
+                        for (const item of activityQuery.data.items) {
+                          const key = item.chapter_number ?? null
+                          if (!groups.has(key)) groups.set(key, [])
+                          groups.get(key)!.push(item)
+                        }
+                        const sorted = [...groups.entries()].sort(([a], [b]) => {
+                          if (a === null) return 1
+                          if (b === null) return -1
+                          return a - b
+                        })
+                        return sorted.map(([chapter, items]) => (
+                          <div key={chapter ?? "general"}>
+                            <h4 className={`mb-2 text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {chapter != null
+                                ? `Chapter ${chapter}${items[0].chapter_title ? ` - ${items[0].chapter_title}` : ""}`
+                                : "General"}
+                            </h4>
+                            <div className="space-y-2">
+                              {items.map((item) => (
+                                <article
+                                  key={item.id}
+                                  className={`rounded-md border px-4 py-4 ${isDark ? "border-white/[0.06] bg-[#0d141c]" : "border-slate-200 bg-white"}`}
+                                >
+                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{item.title}</p>
+                                      <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                                        {item.chapter_number ? `Chapter ${item.chapter_number}${item.chapter_title ? ` - ${item.chapter_title}` : ""}` : item.kind.replace(/_/g, " ")}
+                                      </p>
+                                    </div>
+                                    <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                                      {new Date(item.created_at).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  {item.body ? (
+                                    <p className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{item.body}</p>
+                                  ) : null}
+                                </article>
+                              ))}
                             </div>
-                            <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                              {new Date(item.created_at).toLocaleString()}
-                            </span>
                           </div>
-                          {item.body ? (
-                            <p className={`mt-3 whitespace-pre-wrap text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{item.body}</p>
-                          ) : null}
-                        </article>
-                      )) : (
+                        ))
+                      })() : (
                         <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>No activity recorded yet.</p>
                       )}
                     </div>
                   </div>
                 ) : null}
 
-                {!selectedCollaboratorId ? (
-                  <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>No collaborator selected.</p>
+                {sortedCollaborators.length === 0 ? (
+                  <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>No collaborators yet.</p>
                 ) : null}
               </div>
             </div>

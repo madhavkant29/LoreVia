@@ -94,6 +94,7 @@ export function Navbar() {
     { href: "/quotes", label: "Quotes" },
     { href: "/stats", label: "Stats" },
     { href: "/series", label: "Series" },
+    { href: "/beta-reads", label: "Beta Reads" },
     { href: "/upgrade", label: "Pricing" },
     { href: "/settings", label: "Settings" },
   ]

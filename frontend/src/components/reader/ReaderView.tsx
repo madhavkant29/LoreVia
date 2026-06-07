@@ -2,6 +2,7 @@
 import dynamic from "next/dynamic"
 import { useState, useEffect, useRef, useMemo } from "react"
 import type { Route } from "next"
+import { useRouter } from "next/navigation"
 
 import { useReader } from "@/lib/hooks/useReader"
 import { isReaderFontFamily, type ReaderFontFamily } from "@/lib/utils/readerTypography"
@@ -41,8 +42,15 @@ const ReaderChapterFeedback = dynamic(
 )
 
 export function ReaderView({ bookId, chapterNum }: Props) {
+  const router = useRouter()
   const { data, loading, error, tap, contextResult, contextLoading, clearContext, saveProgress } = useReader(bookId, chapterNum)
   const { setTheme: setAppTheme } = usePreferencesStore()
+
+  useEffect(() => {
+    if (error) {
+      router.replace("/library")
+    }
+  }, [error, router])
   const [showSummary, setShowSummary] = useState(false)
   const [showFeedbackPanel, setShowFeedbackPanel] = useState(false)
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null)
