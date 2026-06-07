@@ -45,6 +45,7 @@ export function AuthBootstrap() {
         }
         if (me) {
           debug("setting user", me.id)
+          document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
           setUser(me)
         } else {
           debug("no session — hydrating then redirecting")

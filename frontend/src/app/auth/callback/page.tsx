@@ -93,6 +93,7 @@ export default function AuthCallbackPage() {
           return
         }
         window.sessionStorage.removeItem("lorevia-oauth-accepted-terms")
+        document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
         setUser(user)
         if (user.username) {
           window.sessionStorage.removeItem(PENDING_OAUTH_USER_KEY)
