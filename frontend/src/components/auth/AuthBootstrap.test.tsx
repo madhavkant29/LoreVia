@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 const usePathnameMock = vi.hoisted(() => vi.fn())
+const useRouterMock = vi.hoisted(() => vi.fn(() => ({ replace: vi.fn(), push: vi.fn() })))
 const meMock = vi.hoisted(() => vi.fn())
 const refreshMock = vi.hoisted(() => vi.fn())
 const shouldSkipAuthBootstrapMock = vi.hoisted(() => vi.fn())
@@ -10,6 +11,7 @@ const useAuthStoreMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/navigation", () => ({
   usePathname: usePathnameMock,
+  useRouter: useRouterMock,
 }))
 
 vi.mock("@/lib/api/auth", () => ({

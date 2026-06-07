@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 
 import { authApi } from "@/lib/api/auth"
+import { clearAuthCookies } from "@/lib/api/client"
 import { billingApi } from "@/lib/api/billing"
 import { emailApi } from "@/lib/api/email"
 import { tierLabel } from "@/lib/billing/plans"
@@ -103,6 +104,7 @@ export default function SettingsPage() {
     }
 
     logout()
+    clearAuthCookies()
     router.replace("/login")
   }
 

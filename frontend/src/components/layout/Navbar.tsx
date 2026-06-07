@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/Button"
 import { authApi } from "@/lib/api/auth"
+import { clearAuthCookies } from "@/lib/api/client"
 import { booksApi } from "@/lib/api/books"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { ChatLauncher } from "@/components/layout/ChatLauncher"
@@ -46,6 +47,7 @@ export function Navbar() {
       // ignore logout errors
     }
     logout()
+    clearAuthCookies()
     setMobileMenuOpen(false)
     setProfileMenuOpen(false)
     router.replace("/login")

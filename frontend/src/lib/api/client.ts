@@ -13,7 +13,16 @@ const AUTH_CSRF_COOKIE_NAME = "lorevia_csrf"
 const AUTH_CSRF_HEADER_NAME = "X-CSRF-Token"
 const ADMIN_CSRF_COOKIE_NAME = "lorevia_admin_csrf"
 const ADMIN_CSRF_HEADER_NAME = "X-Admin-CSRF-Token"
+const AUTH_COOKIE_NAMES = ["lorevia_access_token", "lorevia_refresh_token", "lorevia_csrf"]
 const SAFE_HTTP_METHODS = new Set(["get", "head", "options"])
+
+export function clearAuthCookies() {
+  if (typeof document === "undefined") return
+  for (const name of AUTH_COOKIE_NAMES) {
+    document.cookie = `${name}=; Max-Age=0; Path=/; Domain=${window.location.hostname}; Secure; SameSite=Lax`
+    document.cookie = `${name}=; Max-Age=0; Path=/; Secure; SameSite=Lax`
+  }
+}
 
 function readCookie(name: string) {
   if (typeof document === "undefined") return null
@@ -102,6 +111,7 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest)
       }
       if (typeof window !== "undefined") {
+        clearAuthCookies()
         window.location.replace("/login")
       }
     }

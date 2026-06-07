@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
 import { shouldSkipAuthBootstrap } from "@/lib/routes"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -10,6 +10,7 @@ export function AuthBootstrap() {
   const { user, setUser, setHydrated, logout } = useAuthStore()
   const ran = useRef(false)
   const pathname = usePathname()
+  const router = useRouter()
 
   useEffect(() => {
     if (shouldSkipAuthBootstrap(pathname)) {
@@ -19,6 +20,10 @@ export function AuthBootstrap() {
 
     if (ran.current) return
     ran.current = true
+
+    const redirectLogin = () => {
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`)
+    }
 
     const restore = async () => {
       try {
@@ -31,9 +36,11 @@ export function AuthBootstrap() {
           setUser(me)
         } else {
           setHydrated()
+          redirectLogin()
         }
       } catch {
         logout()
+        redirectLogin()
       }
     }
 
@@ -49,8 +56,10 @@ export function AuthBootstrap() {
           return
         }
         logout()
+        redirectLogin()
       } catch {
         logout()
+        redirectLogin()
       }
     }
 
@@ -61,7 +70,7 @@ export function AuthBootstrap() {
     }
 
     void restore()
-  }, [pathname, user, setHydrated, setUser, logout])
+  }, [pathname, user, setHydrated, setUser, logout, router])
 
   return null
 }
