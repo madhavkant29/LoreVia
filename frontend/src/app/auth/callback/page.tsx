@@ -114,16 +114,26 @@ export default function AuthCallbackPage() {
       } catch (error) {
         if (axios.isAxiosError(error)) {
           const detail = error.response?.data?.detail
+          const status = error.response?.status
+          
+          console.error("OAuth sign-in failed:", {
+            status,
+            detail,
+            hasSession: !!session,
+            email: session?.user?.email,
+          })
+          
           if (typeof detail === "string" && detail.trim()) {
-            fail(normalizeLoginError(detail, error.response?.status) ?? "OAuth sign-in failed.")
+            fail(normalizeLoginError(detail, status) ?? "OAuth sign-in failed.")
             return
           }
-          if (error.response?.status && error.response.status >= 500) {
-            fail(normalizeLoginError(null, error.response.status) ?? "OAuth sign-in failed.")
+          if (status && status >= 500) {
+            fail(normalizeLoginError(null, status) ?? "OAuth sign-in failed.")
             return
           }
         }
         if (error instanceof Error) {
+          console.error("OAuth error:", error)
           fail(error.message || "OAuth sign-in failed.")
           return
         }
