@@ -39,6 +39,7 @@ export default function AuthCallbackPage() {
       // Clear any stale dead-session flag from a previous failed attempt
       // before doing any OAuth work, so new login cookies won't be nuked.
       document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
+      let session: import("@supabase/supabase-js").Session | null = null
       try {
         if (!supabase) {
           fail("Google sign-in is not configured.")
@@ -59,7 +60,7 @@ export default function AuthCallbackPage() {
         if (active) {
           setStatus("Checking your session...")
         }
-        let session = (await withTimeout(supabase.auth.getSession(), "Checking your session")).data.session
+        session = (await withTimeout(supabase.auth.getSession(), "Checking your session")).data.session
 
         if (!session && code) {
           if (active) {
