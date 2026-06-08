@@ -24,14 +24,49 @@ export default function RegisterPage() {
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [validatingSession, setValidatingSession] = useState(false)
   const router = useRouter()
   const user = useAuthStore(s => s.user)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
 
   useEffect(() => {
-    if (user) router.replace("/library")
+    // Verify session is actually valid before redirecting to prevent
+    // issues with stale cached user data causing unwanted redirects
+    if (user) {
+      setValidatingSession(true)
+      authApi.me()
+        .then((validUser) => {
+          if (validUser) {
+            router.replace("/library")
+          } else {
+            // Session expired, clear stale user
+            useAuthStore.getState().logout()
+            setValidatingSession(false)
+          }
+        })
+        .catch(() => {
+          // Session invalid, clear stale user
+          useAuthStore.getState().logout()
+          setValidatingSession(false)
+        })
+    }
   }, [user, router])
+
+  // Show loading state while validating existing session
+  if (validatingSession) {
+    return (
+      <div className={`rounded-lg border p-8 ${
+        isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
+      }`}>
+        <div className="flex items-center justify-center py-12">
+          <div className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+            Checking session...
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
