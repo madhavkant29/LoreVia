@@ -26,6 +26,7 @@ function LoginInner() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [validatingSession, setValidatingSession] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -35,7 +36,26 @@ function LoginInner() {
   const isDark = theme === "dark"
 
   useEffect(() => {
-    if (user) router.replace("/library")
+    // Verify session is actually valid before redirecting to prevent
+    // issues with stale cached user data causing unwanted redirects
+    if (user) {
+      setValidatingSession(true)
+      authApi.me()
+        .then((validUser) => {
+          if (validUser) {
+            router.replace("/library")
+          } else {
+            // Session expired, clear stale user
+            useAuthStore.getState().logout()
+            setValidatingSession(false)
+          }
+        })
+        .catch(() => {
+          // Session invalid, clear stale user
+          useAuthStore.getState().logout()
+          setValidatingSession(false)
+        })
+    }
   }, [user, router])
 
   useEffect(() => {
@@ -88,6 +108,23 @@ function LoginInner() {
       ? "border-white/[0.08] bg-white/[0.04] text-slate-100 focus:border-white/20 focus:ring-white/10"
       : "border-stone-200 bg-white text-stone-900 focus:border-stone-300 focus:ring-stone-100",
   ].join(" ")
+
+  // Show loading state while validating existing session
+  if (validatingSession) {
+    return (
+      <main>
+        <div className={`rounded-lg border p-8 ${
+          isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
+        }`}>
+          <div className="flex items-center justify-center py-12">
+            <div className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+              Checking session...
+            </div>
+          </div>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main>
