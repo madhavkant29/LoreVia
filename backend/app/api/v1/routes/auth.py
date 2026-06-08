@@ -378,17 +378,58 @@ async def oauth_supabase(
             )
             raise HTTPException(409, "This email is already linked to another account.")
         if not existing:
-            log.info(
-                "supabase_oauth_no_user_found",
-                extra={
-                    "supabase_auth_id": str(supabase_auth_id),
-                    "email": email,
-                },
-            )
-            raise HTTPException(
-                401,
-                "No account found for this Google login. Please create an account first via the Register page.",
-            )
+            # If accepted_terms is True, this is a registration flow from the /register page
+            # Create a new account for this Google user
+            if body.accepted_terms:
+                log.info(
+                    "supabase_oauth_creating_new_user",
+                    extra={
+                        "supabase_auth_id": str(supabase_auth_id),
+                        "email": email,
+                    },
+                )
+                try:
+                    existing = User(
+                        email=email,
+                        supabase_auth_id=supabase_auth_id,
+                        email_verified_at=datetime.now(UTC),
+                        password_hash=hash_password(secrets.token_urlsafe(32)),
+                    )
+                    db.add(existing)
+                    await db.flush()
+                    
+                    if device_id is not None:
+                        try:
+                            await link_device_to_user_if_allowed(db, existing.id, device_id, strict=True)
+                        except DeviceTrialLimitError as e:
+                            await db.rollback()
+                            raise HTTPException(429, str(e))
+                    
+                    await db.commit()
+                    await db.refresh(existing)
+                    await _schedule_trial_email_events_best_effort(db, existing)
+                    await _record_login_activity(db, existing, device_id=device_id)
+                    await db.commit()
+                    await db.refresh(existing)
+                    
+                    user_out, access_token, refresh_token = await _mint_token_pair(existing, db)
+                    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+                except Exception:
+                    await db.rollback()
+                    raise
+            else:
+                # This is a login attempt from /login page, but no account exists
+                log.info(
+                    "supabase_oauth_no_user_found",
+                    extra={
+                        "supabase_auth_id": str(supabase_auth_id),
+                        "email": email,
+                    },
+                )
+                raise HTTPException(
+                    401,
+                    "No account found for this Google login. Please create an account first via the Register page.",
+                )
 
         if device_id is not None:
             try:

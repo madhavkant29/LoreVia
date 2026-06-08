@@ -1,9 +1,8 @@
 "use client"
-import dynamic from "next/dynamic"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { GoogleOAuthButtonShell } from "@/components/auth/GoogleOAuthButtonShell"
+import { GoogleOAuthButton } from "@/components/auth/GoogleOAuthButton"
 import { authApi } from "@/lib/api/auth"
 import { validateRegisterPassword, validateRegisterUsername } from "@/lib/auth/registerValidation"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -16,14 +15,6 @@ function generateStrongPassword() {
   crypto.getRandomValues(buffer)
   return Array.from(buffer, (value) => alphabet[value % alphabet.length]).join("")
 }
-
-const GoogleOAuthButton = dynamic(
-  () => import("@/components/auth/GoogleOAuthButton").then((module) => module.GoogleOAuthButton),
-  {
-    ssr: false,
-    loading: () => <GoogleOAuthButtonShell className="mb-6" disabled />,
-  }
-)
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("")

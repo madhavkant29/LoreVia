@@ -1,12 +1,11 @@
 "use client"
 
-import dynamic from "next/dynamic"
 import { Suspense, useEffect, useState } from "react"
 import type { Route } from "next"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import axios from "axios"
-import { GoogleOAuthButtonShell } from "@/components/auth/GoogleOAuthButtonShell"
+import { GoogleOAuthButton } from "@/components/auth/GoogleOAuthButton"
 import { authApi } from "@/lib/api/auth"
 import { normalizeLoginError, shouldShowCreateAccountCta } from "@/lib/auth/loginMessages"
 import { resolveSafeAuthNextPath } from "@/lib/routes"
@@ -21,14 +20,6 @@ export default function LoginPage() {
     </Suspense>
   )
 }
-
-const GoogleOAuthButton = dynamic(
-  () => import("@/components/auth/GoogleOAuthButton").then((module) => module.GoogleOAuthButton),
-  {
-    ssr: false,
-    loading: () => <GoogleOAuthButtonShell disabled />,
-  }
-)
 
 function LoginInner() {
   const [email, setEmail] = useState("")
