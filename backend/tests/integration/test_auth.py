@@ -219,7 +219,8 @@ async def test_supabase_oauth_allows_existing_user_without_terms(client, db, mon
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_rejects_new_user_even_with_accepted_terms(client, monkeypatch):
+async def test_supabase_oauth_creates_account_with_accepted_terms(client, db, monkeypatch):
+    """Test that OAuth registration creates a new account when accepted_terms=True"""
     supabase_auth_id = uuid.uuid4()
 
     class FakeResponse:
@@ -251,8 +252,248 @@ async def test_supabase_oauth_rejects_new_user_even_with_accepted_terms(client, 
         json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-create-device0001"},
     )
 
+    assert response.status_code == 200
+    body = response.json()
+    assert body["email"] == "oauth-created@lorevia.app"
+    assert body["email_verified"] is True
+    
+    # Verify the user was created in the database
+    created_user = (await db.execute(sa.select(User).where(User.email == "oauth-created@lorevia.app"))).scalar()
+    assert created_user is not None
+    assert created_user.supabase_auth_id == supabase_auth_id
+    assert created_user.email_verified_at is not None
+    
+    # Verify device was linked
+    device_trial = (await db.execute(sa.select(DeviceTrial).where(DeviceTrial.user_id == created_user.id))).scalar()
+    assert device_trial is not None
+    
+    # Verify login activity was recorded
+    login_activity = (await db.execute(sa.select(UserLoginActivity).where(UserLoginActivity.user_id == created_user.id))).scalar()
+    assert login_activity is not None
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_registration_sets_correct_fields(client, db, monkeypatch):
+    """Test that OAuth registration sets all required fields correctly"""
+    supabase_auth_id = uuid.uuid4()
+    email = "oauth-fields-check@lorevia.app"
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": str(supabase_auth_id), "email": email, "email_confirmed_at": "2026-05-01T00:00:00Z"}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-fields-device01"},
+    )
+
+    assert response.status_code == 200
+
+    # Verify all critical fields
+    created_user = (await db.execute(sa.select(User).where(User.email == email))).scalar()
+    assert created_user is not None
+    assert created_user.email == email
+    assert created_user.supabase_auth_id == supabase_auth_id
+    assert created_user.email_verified_at is not None
+    
+    # Verify auth cookies are set in response
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    assert any("lorevia_access_token" in header for header in set_cookie_headers)
+    assert any("lorevia_refresh_token" in header for header in set_cookie_headers)
+    assert any("lorevia_device_id=oauth-fields-device01" in header for header in set_cookie_headers)
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_login_rejects_nonexistent_user_without_terms(client, monkeypatch):
+    """Test that OAuth login flow rejects users who don't exist when accepted_terms=False"""
+    supabase_auth_id = uuid.uuid4()
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": str(supabase_auth_id), "email": "oauth-login-reject@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-login-reject-device01"},
+    )
+
     assert response.status_code == 401
     assert "Register page" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_registration_respects_device_trial_limit(client, db, monkeypatch):
+    """Test that OAuth registration enforces device trial limits"""
+    shared_device_id = "oauth-trial-limit-device01"
+    shared_device_hash = hashlib.sha256(shared_device_id.encode("utf-8")).hexdigest()
+
+    # Create two existing users on the same device
+    for i in range(2):
+        user = User(
+            email=f"oauth-trial-user{i}@lorevia.app",
+            username=f"oauthtrialuser{i}",
+            password_hash=hash_password("SafePass123!@#"),
+            legal_accepted_at=datetime.now(UTC),
+            legal_version="2026-04",
+            email_verified_at=datetime.now(UTC),
+        )
+        db.add(user)
+        await db.flush()
+        db.add(DeviceTrial(user_id=user.id, device_id_hash=shared_device_hash))
+    await db.commit()
+
+    # Try to create a third user via OAuth on the same device
+    supabase_auth_id = uuid.uuid4()
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": str(supabase_auth_id), "email": "oauth-trial-third@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": True, "device_id": shared_device_id},
+    )
+
+    assert response.status_code == 429
+    assert "maximum of 2 accounts" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_prevents_registration_login_confusion(client, db, monkeypatch):
+    """
+    Integration test ensuring OAuth registration and login flows are properly separated.
+    This prevents the bug where users clicking Google sign-in on /register page
+    would see "create an account" error even though they were trying to register.
+    """
+    supabase_auth_id_register = uuid.uuid4()
+    supabase_auth_id_login = uuid.uuid4()
+
+    class FakeResponseRegister:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": str(supabase_auth_id_register), "email": "oauth-flow-test@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+
+    class FakeResponseLogin:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": str(supabase_auth_id_login), "email": "oauth-different-user@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+
+    responses = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers):
+            return responses.pop(0)
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
+
+    # Scenario 1: User clicks Google sign-in on /register page (accepted_terms=True)
+    # This should CREATE a new account
+    responses.append(FakeResponseRegister())
+    register_response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-flow-register-device01"},
+    )
+    assert register_response.status_code == 200
+    assert register_response.json()["email"] == "oauth-flow-test@lorevia.app"
+    
+    # Verify account was created
+    created_user = (await db.execute(sa.select(User).where(User.email == "oauth-flow-test@lorevia.app"))).scalar()
+    assert created_user is not None
+
+    # Scenario 2: Different user clicks Google sign-in on /login page (accepted_terms=False)
+    # This should REJECT since they don't have an account
+    responses.append(FakeResponseLogin())
+    login_response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-flow-login-device01"},
+    )
+    assert login_response.status_code == 401
+    assert "Register page" in login_response.json()["detail"]
+
+    # Scenario 3: The first user now tries to log in from /login page (accepted_terms=False)
+    # This should SUCCEED because they have an account
+    responses.append(FakeResponseRegister())
+    returning_login_response = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-flow-returning-device01"},
+    )
+    assert returning_login_response.status_code == 200
+    assert returning_login_response.json()["email"] == "oauth-flow-test@lorevia.app"
 
 
 @pytest.mark.asyncio
@@ -855,7 +1096,8 @@ async def test_login_sets_device_cookie_and_records_device_id(client, db):
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_rejects_new_user_before_device_trial_check(client, monkeypatch):
+async def test_supabase_oauth_registration_respects_device_limit_when_at_capacity(client, monkeypatch):
+    """Test that OAuth registration enforces device trial limits even when accepted_terms=True"""
     class FakeResponse:
         status_code = 200
 
@@ -909,8 +1151,8 @@ async def test_supabase_oauth_rejects_new_user_before_device_trial_check(client,
         json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-used-device0001"},
     )
 
-    assert response.status_code == 401
-    assert "Register page" in response.json()["detail"]
+    assert response.status_code == 429
+    assert "maximum of 2 accounts" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
