@@ -1829,12 +1829,11 @@ async def test_public_asset_endpoints_respect_public_mode_kill_switch(monkeypatc
     assert exc.value.status_code == 503
 
     with pytest.raises(HTTPException) as exc:
-        await books.get_book_cover_public(book.id, token="ok", db=_FakeDB())
-    assert exc.value.status_code == 503
-
-    with pytest.raises(HTTPException) as exc:
         await books.get_book_character_card_public(book.id, character.id, token="ok", db=_FakeDB())
     assert exc.value.status_code == 503
+
+    # get_book_cover_public is not gated by PUBLIC_MODE_ENABLED because it also
+    # serves authenticated cover requests via the token-based proxy (CSP-safe).
 
 
 @pytest.mark.asyncio

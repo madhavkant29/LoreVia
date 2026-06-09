@@ -30,7 +30,7 @@ from sqlalchemy.orm import aliased, selectinload
 
 from app.core.config import settings
 from app.core.security import create_asset_token
-from app.core.storage import delete_object, download_book, get_presigned_url, move_object, upload_binary, upload_text
+from app.core.storage import delete_object, download_book, move_object, upload_binary, upload_text
 from app.models.book import (
     Book,
     BookCollaborator,
@@ -6430,9 +6430,6 @@ async def book_out(
 def cover_url_for_book(book: Book) -> str | None:
     if not book.cover_s3_key:
         return None
-    presigned = get_presigned_url(book.cover_s3_key)
-    if presigned:
-        return presigned
     token = create_asset_token(str(book.user_id), f"book-cover:{book.id}", expires_minutes=120)
     return f"{settings.API_V1_PREFIX}/books/{book.id}/cover?token={token}"
 

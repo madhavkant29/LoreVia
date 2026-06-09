@@ -898,7 +898,6 @@ async def remove_book_cover(
 # ─── Public asset endpoints (not router-decorated; used directly by router.py) ─
 
 async def get_book_cover_public(book_id: uuid.UUID, token: str = Query(...), db: AsyncSession = Depends(get_db)):
-    ensure_public_mode_enabled()
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(404, "Book not found")
@@ -918,7 +917,11 @@ async def get_book_cover_public(book_id: uuid.UUID, token: str = Query(...), db:
 
     raw = await asyncio.to_thread(storage.download_book, book.cover_s3_key)
     media_type = mimetypes.guess_type(book.cover_s3_key)[0] or "image/png"
-    return Response(content=raw, media_type=media_type)
+    return Response(
+        content=raw,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 async def get_book_character_card_public(
