@@ -1,5 +1,6 @@
 import logging
 import secrets
+from typing import Optional
 import uuid
 from datetime import UTC, datetime
 
@@ -308,7 +309,7 @@ async def oauth_supabase(
     request: Request,
     body: SupabaseOAuthBody,
     response: Response,
-    background_tasks: BackgroundTasks = None,
+    background_tasks: Optional[BackgroundTasks] = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
@@ -564,7 +565,7 @@ async def verify_email(
     request: Request,
     body: VerifyEmailBody,
     response: Response,
-    background_tasks: BackgroundTasks = None,
+    background_tasks: Optional[BackgroundTasks] = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_password),
 ):
