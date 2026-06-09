@@ -297,13 +297,27 @@ async def analyse_chapter(
                 log.info("analysed_chapter %s %s", chapter_id, results)
             return {"chapter_id": chapter_id, "summaries": results}
         except Exception as exc:
-            chapter.analysis_state = build_analysis_chapter_state(
-                chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
-                status="failed",
-                last_error=public_error_message(500),
-            )
-            await _refresh_book_analysis_pipeline(db, book)
-            await db.commit()
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            try:
+                fresh_chapter = await db.get(Chapter, chapter.id)
+                if fresh_chapter is not None:
+                    fresh_chapter.analysis_state = build_analysis_chapter_state(
+                        fresh_chapter.analysis_state if isinstance(fresh_chapter.analysis_state, dict) else None,
+                        status="failed",
+                        last_error=public_error_message(500),
+                    )
+                    fresh_book = await db.get(Book, fresh_chapter.book_id)
+                    if fresh_book is not None:
+                        await _refresh_book_analysis_pipeline(db, fresh_book)
+                await db.commit()
+            except Exception:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
             raise
         finally:
             await cache_del(inflight_key)

@@ -137,6 +137,8 @@ async def repair_chapter_payload_from_source(
             await db.commit()
             return False
 
+        if not chapter.s3_key:
+            chapter.s3_key = f"chapters/{book.id}/{chapter.number}.txt"
         repaired_html = fallback.get("html")
         await asyncio.to_thread(
             upload_text,
