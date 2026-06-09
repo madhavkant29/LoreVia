@@ -45,7 +45,7 @@ jobs:
         python-version: '3.12'
 
     - name: Cache pip dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
@@ -131,26 +131,22 @@ jobs:
         cd frontend
         npm ci
 
+    - name: Cache Playwright browsers
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+
     - name: Install Playwright browser
       run: |
         cd frontend
         npx playwright install --with-deps chromium
 
-    - name: Run frontend unit tests
+    - name: Run frontend unit tests and type checking
       run: |
         cd frontend
         npm run test
-
-    - name: Run type checking
-      run: |
-        cd frontend
         npm run type-check
-
-    - name: Run ESLint (warning mode)
-      run: |
-        cd frontend
-        npm run lint
-      continue-on-error: true
 
     - name: Build application
       run: |

@@ -147,6 +147,7 @@ export function buildContentSecurityPolicy(nonce: string) {
   const posthogOrigin = getOrigin(process.env.NEXT_PUBLIC_POSTHOG_HOST) ?? "https://eu.i.posthog.com"
   const supabaseOrigin = getOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL)
   const supabaseWebSocketOrigin = toWebSocketOrigin(supabaseOrigin)
+  const mediaOrigin = getOrigin(process.env.NEXT_PUBLIC_MEDIA_ORIGIN)
 
   const scriptSources = new Set([
     "'self'",
@@ -178,7 +179,7 @@ export function buildContentSecurityPolicy(nonce: string) {
     posthogOrigin,
   ])
 
-  for (const origin of [apiOrigin, supabaseOrigin]) {
+  for (const origin of [apiOrigin, supabaseOrigin, mediaOrigin]) {
     if (origin) {
       imageSources.add(origin)
       connectSources.add(origin)

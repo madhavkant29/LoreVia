@@ -576,6 +576,8 @@ function ManuscriptPageInner() {
     }
     return stats
   }, [bookDrafts, chapterListItems])
+  const chapterIndexFormat = writerWorkspace?.index_format ?? "arabic"
+  const formatChapterHeading = (chapterNumber: number, title: string) => `${chapterNumber}. ${title.trim() || `Chapter ${formatIndex(chapterNumber, chapterIndexFormat)}`}`
   const activeChapterDisplayTitle = chapterTitle.trim() || chapterListItems.find((chapter) => chapter.number === activeChapterNumber)?.title?.trim() || `Chapter ${activeChapterNumber}`
   const activeChapterHeading = `${activeChapterNumber}. ${activeChapterDisplayTitle}`
   const chapterPreviewSections = useMemo(() => ([
@@ -585,7 +587,7 @@ function ManuscriptPageInner() {
       title: activeChapterDisplayTitle,
       html,
     },
-  ]), [activeChapterDisplayTitle, activeChapterNumber, html])
+  ]), [activeChapterDisplayTitle, activeChapterNumber, html, chapterIndexFormat])
   const fullBookPreviewSections = useMemo(() => {
     if (editorMode !== "book" || draftSurfaceMode !== "paged") return []
     return (chapterList?.chapters ?? [])
@@ -598,7 +600,7 @@ function ManuscriptPageInner() {
           html: draft.html,
         }
       })
-  }, [bookDrafts, chapterList, draftSurfaceMode, editorMode])
+  }, [bookDrafts, chapterList, draftSurfaceMode, editorMode, chapterIndexFormat])
   const chapterPageSummaryLabel = draftSurfaceMode === "paged"
     ? `${chapterPreviewPageCount} preview page${chapterPreviewPageCount === 1 ? "" : "s"}`
     : `~${chapterApproxPages} pages`
@@ -1257,9 +1259,6 @@ function ManuscriptPageInner() {
       window.localStorage.removeItem(buildManuscriptAutosaveKey(bookId, chapterNumber))
     }
   }
-
-  const chapterIndexFormat = writerWorkspace?.index_format ?? "arabic"
-  const formatChapterHeading = (chapterNumber: number, title: string) => `${chapterNumber}. ${title.trim() || `Chapter ${formatIndex(chapterNumber, chapterIndexFormat)}`}`
 
   const parseChapterHeading = (value: string, fallbackNumber: number, fallbackTitle: string) => {
     const trimmed = value.trim()
