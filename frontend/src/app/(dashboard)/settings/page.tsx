@@ -104,6 +104,8 @@ export default function SettingsPage() {
     }
 
     logout()
+    // Set session dead marker BEFORE clearing cookies so middleware knows to redirect properly
+    document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
     clearAuthCookies()
     router.replace("/login")
   }
