@@ -221,7 +221,7 @@ async def preview_upload_endpoint(
     if not file.filename:
         raise HTTPException(400, "No file")
 
-    raw = await _read_upload_bounded(file, settings.MANUSCRIPT_UPLOAD_MAX_BYTES, "Manuscript preview")
+    raw = await _read_upload_bounded(file, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript preview")
     fmt, resolved_work_type = resolve_upload_format_and_work_type(
         file.filename,
         normalize_book_work_type(work_type, default="novel"),

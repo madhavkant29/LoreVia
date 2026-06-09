@@ -73,6 +73,7 @@ from app.utils.auth_cookies import (
     set_auth_cookies,
     set_device_cookie,
 )
+from app.utils.cookie_utils import auth_cookie_secure
 from app.utils.auth_csrf import enforce_cookie_csrf
 from app.utils.auth_utils import (
     current_token_version,
@@ -620,6 +621,15 @@ async def logout(
     current_user.token_version = next_token_version(current_user)
     await db.commit()
     clear_auth_cookies(response)
+    # Set session_dead marker so frontend middleware knows not to redirect /login → /library
+    response.set_cookie(
+        key="lorevia_session_dead",
+        value="1",
+        max_age=30,
+        path="/",
+        secure=auth_cookie_secure(),
+        samesite="lax",
+    )
     return {"ok": True}
 
 

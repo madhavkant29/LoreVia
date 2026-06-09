@@ -97,16 +97,16 @@ export default function SettingsPage() {
   }
 
   const handleLogout = async () => {
-    try {
-      await authApi.logout()
-    } catch {
-      // ignore logout errors
-    }
-
+    // Clear client state IMMEDIATELY before API call to prevent race conditions
     logout()
-    // Set session dead marker BEFORE clearing cookies so middleware knows to redirect properly
     document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
     clearAuthCookies()
+    
+    // Then make the API call in background (don't await)
+    authApi.logout().catch(() => {
+      // ignore logout errors - client state already cleared
+    })
+    
     router.replace("/login")
   }
 
