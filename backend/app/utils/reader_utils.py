@@ -14,7 +14,7 @@ from typing import Any
 
 import bleach  # type: ignore[import-untyped]
 from fastapi import HTTPException
-from sqlalchemy import desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -890,15 +890,45 @@ async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -
 
 # ─── Media helpers ────────────────────────────────────────────────────────────
 
-async def serialize_chapter_media(db: AsyncSession, chapter_id: uuid.UUID) -> list[dict]:
-    rows = (await db.execute(
+MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
+
+
+async def serialize_chapter_media(
+    db: AsyncSession,
+    chapter_id: uuid.UUID,
+    book_id: uuid.UUID | None = None,
+    chapter_text: str | None = None,
+) -> list[dict]:
+    query = (
         select(ChapterMedia, Book.user_id)
         .join(Book, Book.id == ChapterMedia.book_id)
         .where(ChapterMedia.chapter_id == chapter_id)
         .order_by(ChapterMedia.sort_order, ChapterMedia.created_at)
-    )).all()
+    )
+    if book_id and chapter_text:
+        markers = set(MEDIA_MARKER_RE.findall(chapter_text))
+        if markers:
+            query = (
+                select(ChapterMedia, Book.user_id)
+                .join(Book, Book.id == ChapterMedia.book_id)
+                .where(
+                    or_(
+                        ChapterMedia.chapter_id == chapter_id,
+                        and_(
+                            ChapterMedia.book_id == book_id,
+                            ChapterMedia.marker.in_(list(markers)),
+                        ),
+                    )
+                )
+                .order_by(ChapterMedia.sort_order, ChapterMedia.created_at)
+            )
+    rows = (await db.execute(query)).all()
+    seen_markers: set[str] = set()
     items: list[dict] = []
     for row, user_id in rows:
+        if row.marker in seen_markers:
+            continue
+        seen_markers.add(row.marker)
         token = create_asset_token(str(user_id), f"chapter-media:{row.id}", expires_minutes=120)
         item = {
             "id": str(row.id),
