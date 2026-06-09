@@ -2218,6 +2218,27 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   }
   await page.context().clearCookies()
   await page.context().addCookies(cookies)
+  
+  // Populate sessionStorage with the user object to match authenticated session state.
+  // This prevents a race condition on the login page: the page checks if a user exists
+  // in the auth store (from sessionStorage) to decide whether to redirect. Without this,
+  // the cookies are set but sessionStorage is empty, so the page doesn't know to redirect.
+  // We wrap in try-catch because sessionStorage isn't accessible until the page navigates.
+  try {
+    if (session === "authenticated") {
+      await page.evaluate((userData) => {
+        window.sessionStorage.setItem("lorevia-auth-user", JSON.stringify(userData))
+      }, user)
+    } else {
+      await page.evaluate(() => {
+        window.sessionStorage.removeItem("lorevia-auth-user")
+      })
+    }
+  } catch (error) {
+    // SessionStorage not accessible yet (no document context)
+    // This is fine - the auth bootstrap will handle hydration after navigation
+  }
+  
   user.username = defaultUsername
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))

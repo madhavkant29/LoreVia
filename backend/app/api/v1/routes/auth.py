@@ -213,9 +213,8 @@ async def _issue_email_verification(user: User) -> tuple[bool, str]:
     return await deliver_verification_email(user.email, token)
 
 
-def _schedule_onboarding_email(background_tasks: BackgroundTasks | None, email: str) -> None:
-    if background_tasks is not None:
-        background_tasks.add_task(send_onboarding_email, email)
+def _schedule_onboarding_email(background_tasks: BackgroundTasks, email: str) -> None:
+    background_tasks.add_task(send_onboarding_email, email)
 
 
 @router.post("/register", response_model=RegisterOut, status_code=201)
@@ -309,7 +308,6 @@ async def oauth_supabase(
     request: Request,
     body: SupabaseOAuthBody,
     response: Response,
-    background_tasks: Optional[BackgroundTasks] = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
@@ -565,7 +563,7 @@ async def verify_email(
     request: Request,
     body: VerifyEmailBody,
     response: Response,
-    background_tasks: Optional[BackgroundTasks] = None,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_password),
 ):
