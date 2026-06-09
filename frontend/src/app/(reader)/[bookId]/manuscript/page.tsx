@@ -45,6 +45,7 @@ import {
 } from "@/lib/utils/manuscriptAnnotations"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "@/lib/utils/richText"
+import { formatIndex } from "@/lib/utils/chapterLabels"
 import { moveSceneIdToIndex, reorderWorkspaceSceneTree } from "@/lib/utils/sceneWorkspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
@@ -580,7 +581,7 @@ function ManuscriptPageInner() {
   const chapterPreviewSections = useMemo(() => ([
     {
       id: `chapter-preview-${activeChapterNumber}`,
-      eyebrow: `Chapter ${activeChapterNumber}`,
+      eyebrow: `Chapter ${formatIndex(activeChapterNumber, chapterIndexFormat)}`,
       title: activeChapterDisplayTitle,
       html,
     },
@@ -592,7 +593,7 @@ function ManuscriptPageInner() {
         const draft = bookDrafts[chapter.number] ?? { title: chapter.title || `Chapter ${chapter.number}`, text: "", html: textToHtml("") }
         return {
           id: `book-preview-${chapter.number}`,
-          eyebrow: `Chapter ${chapter.number}`,
+          eyebrow: `Chapter ${formatIndex(chapter.number, chapterIndexFormat)}`,
           title: draft.title || chapter.title || `Chapter ${chapter.number}`,
           html: draft.html,
         }
@@ -1257,7 +1258,8 @@ function ManuscriptPageInner() {
     }
   }
 
-  const formatChapterHeading = (chapterNumber: number, title: string) => `${chapterNumber}. ${title.trim() || `Chapter ${chapterNumber}`}`
+  const chapterIndexFormat = writerWorkspace?.index_format ?? "arabic"
+  const formatChapterHeading = (chapterNumber: number, title: string) => `${chapterNumber}. ${title.trim() || `Chapter ${formatIndex(chapterNumber, chapterIndexFormat)}`}`
 
   const parseChapterHeading = (value: string, fallbackNumber: number, fallbackTitle: string) => {
     const trimmed = value.trim()
@@ -2800,10 +2802,10 @@ function ManuscriptPageInner() {
                         className="min-w-0 flex-1 text-left focus:outline-none focus:ring-2 focus:ring-sky-400/40"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <p className="font-semibold">Chapter {chapter.number}</p>
+                          <p className="font-semibold">Chapter {formatIndex(chapter.number, chapterIndexFormat)}</p>
                           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${active ? "bg-teal-300" : chapter.processed ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-stone-300"}`} />
                         </div>
-                        <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${chapter.number}`}</p>
+                        <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${formatIndex(chapter.number, chapterIndexFormat)}`}</p>
                         <p className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowScenes.length} scene{rowScenes.length === 1 ? "" : "s"} - {rowReadingTime}</p>
                         <p className={`mt-2 text-3xs ${needsReprocess ? isDark ? "text-amber-200" : "text-amber-700" : isDark ? "text-slate-500" : "text-stone-500"}`}>
                           {rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} - {needsReprocess ? "Needs reprocess" : dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}
@@ -3216,6 +3218,27 @@ function ManuscriptPageInner() {
                         </button>
                       </div>
                     ) : null}
+                    {showEditorSettings ? (
+                      <div className={`mt-4 inline-flex items-center gap-2 rounded-sm border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                        <span>Index format</span>
+                          <select
+                            value={writerWorkspace?.index_format ?? "arabic"}
+                            onChange={(e) => {
+                              const fmt = e.target.value
+                              setWriterWorkspace((prev) => prev ? { ...prev, index_format: fmt } : prev)
+                              void saveWorkspace({ index_format: fmt })
+                              refetchWorkspaceTree()
+                            }}
+                            className={`rounded-sm border px-2 py-1 font-semibold outline-none ${isDark ? "border-white/[0.08] bg-black/70 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                        >
+                          <option value="arabic">1, 2, 3</option>
+                          <option value="roman-upper">I, II, III</option>
+                          <option value="roman-lower">i, ii, iii</option>
+                          <option value="alpha-upper">A, B, C</option>
+                          <option value="alpha-lower">a, b, c</option>
+                        </select>
+                      </div>
+                    ) : null}
                     {autosaveMetaLabel(activeChapterNumber) ? <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{autosaveMetaLabel(activeChapterNumber)}</p> : null}
                   </div>
                   <div className={`sticky top-[8.25rem] z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
@@ -3295,7 +3318,7 @@ function ManuscriptPageInner() {
                       <div className={`border-b px-5 py-5 sm:px-7 ${isDark ? "border-white/10 bg-[#111721]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0 flex-1">
-                            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {chapter.number}</p>
+                            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapter {formatIndex(chapter.number, chapterIndexFormat)}</p>
                             <input
                               key={`book-heading-${chapter.number}-${draft.title}`}
                               type="text"

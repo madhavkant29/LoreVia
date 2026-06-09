@@ -14,6 +14,7 @@ from app.engine.character.profile_builder import build_description
 from app.models.book import Book
 from app.models.character import Character
 from app.utils.book_utils import clean_manuscript_html, story_unit_label, story_unit_name
+from app.utils.index_format import format_index
 from app.utils.character_utils import (
     append_unique_summary,
     character_status,
@@ -1602,25 +1603,27 @@ def _is_special_chapter_heading(title: object | None) -> bool:
     return bool(re.match(r"^(prologue|epilogue)\b", cleaned))
 
 
-def _chapter_heading_lines(chapter: dict[str, Any]) -> tuple[str, str | None]:
+def _chapter_heading_lines(chapter: dict[str, Any], index_format: str = "arabic") -> tuple[str, str | None]:
     chapter_number = chapter.get("number")
     chapter_title = _clean_line(chapter.get("title"))
+    fmt_num = format_index(chapter_number, index_format) if chapter_number is not None else ""
     if _is_special_chapter_heading(chapter_title):
-        return chapter_title or f"Chapter {chapter_number}", None
-    default_heading = f"Chapter {chapter_number}"
+        return chapter_title or f"Chapter {fmt_num}", None
+    default_heading = f"Chapter {fmt_num}"
     if chapter_title and chapter_title.lower() != default_heading.lower():
         return default_heading, chapter_title
     return default_heading, None
 
 
-def _manuscript_toc_label(chapter: dict[str, Any]) -> str:
-    chapter_heading, chapter_subtitle = _chapter_heading_lines(chapter)
+def _manuscript_toc_label(chapter: dict[str, Any], index_format: str = "arabic") -> str:
+    chapter_heading, chapter_subtitle = _chapter_heading_lines(chapter, index_format)
     return f"{chapter_heading}: {chapter_subtitle}" if chapter_subtitle else chapter_heading
 
 
-def _scene_heading_lines(scene: dict[str, Any], index: int) -> tuple[str, str | None]:
+def _scene_heading_lines(scene: dict[str, Any], index: int, index_format: str = "arabic") -> tuple[str, str | None]:
     chapter_number = scene.get("chapter_number")
-    chapter_suffix = f" (Chapter {chapter_number})" if isinstance(chapter_number, int) and chapter_number > 0 else ""
+    fmt_num = format_index(chapter_number, index_format) if isinstance(chapter_number, int) and chapter_number > 0 else ""
+    chapter_suffix = f" (Chapter {fmt_num})" if fmt_num else ""
     scene_title = _clean_line(scene.get("title")) or f"Scene {index}"
     return f"Scene #{index}{chapter_suffix}", scene_title
 
@@ -1638,6 +1641,7 @@ def manuscript_docx(
     front_matter: dict | None = None,
     font_family: str | None = None,
     include_toc: bool = False,
+    index_format: str = "arabic",
 ) -> bytes:
     from io import BytesIO
 
@@ -1780,13 +1784,13 @@ def manuscript_docx(
 
     for chapter in chapters:
         doc.add_page_break()
-        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter)
+        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter, index_format)
         for _ in range(4):
             doc.add_paragraph("")
         chapter_heading = doc.add_paragraph()
         chapter_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
         if include_toc:
-            _append_field(chapter_heading, f'TC "{_field_quote(_manuscript_toc_label(chapter))}" \\l 1')
+            _append_field(chapter_heading, f'TC "{_field_quote(_manuscript_toc_label(chapter, index_format))}" \\l 1')
         chapter_heading.add_run(chapter_heading_text)
         if chapter_subtitle:
             chapter_title_p = doc.add_paragraph()
@@ -1796,7 +1800,7 @@ def manuscript_docx(
 
     for index, scene in enumerate(scenes or [], start=1):
         doc.add_page_break()
-        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index)
+        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index, index_format)
         for _ in range(4):
             doc.add_paragraph("")
         scene_heading = doc.add_paragraph()
@@ -1971,6 +1975,7 @@ def manuscript_pdf_compiled(
     front_matter: dict | None = None,
     font_family: str | None = None,
     include_toc: bool = False,
+    index_format: str = "arabic",
 ) -> bytes:
     from io import BytesIO
 
@@ -2067,11 +2072,11 @@ def manuscript_pdf_compiled(
 
     for chapter in chapters:
         story.append(PageBreak())
-        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter)
+        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter, index_format)
         story.append(Spacer(1, 2.2 * inch))
         heading_paragraph = Paragraph(escaped(chapter_heading_text), chapter_heading)
         if include_toc:
-            setattr(heading_paragraph, "_lorevia_toc_label", _manuscript_toc_label(chapter))
+            setattr(heading_paragraph, "_lorevia_toc_label", _manuscript_toc_label(chapter, index_format))
         story.append(heading_paragraph)
         if chapter_subtitle:
             story.append(Paragraph(escaped(chapter_subtitle), centered))
@@ -2079,7 +2084,7 @@ def manuscript_pdf_compiled(
         _append_body_text(str(chapter.get("text") or ""))
 
     for index, scene in enumerate(scenes or [], start=1):
-        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index)
+        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index, index_format)
         story.append(PageBreak())
         story.append(Spacer(1, 2.2 * inch))
         story.append(Paragraph(escaped(scene_heading_text), chapter_heading))
@@ -2127,6 +2132,7 @@ def manuscript_epub_compiled(
     front_matter: dict | None = None,
     font_family: str | None = None,
     include_toc: bool = False,
+    index_format: str = "arabic",
 ) -> bytes:
     from ebooklib import epub
     from html import escape
@@ -2201,7 +2207,7 @@ def manuscript_epub_compiled(
         for chapter in chapters:
             chapter_number = chapter.get("number")
             toc_items.append(
-                f"<li><a href='chapter-{chapter_number}.xhtml'>{escape(_manuscript_toc_label(chapter))}</a></li>"
+                f"<li><a href='chapter-{chapter_number}.xhtml'>{escape(_manuscript_toc_label(chapter, index_format))}</a></li>"
             )
         toc_item.content = "<section class='toc-page'><h1>Table of Contents</h1><ol>" + "".join(toc_items) + "</ol></section>"
         toc_item.add_item(stylesheet)
@@ -2229,7 +2235,7 @@ def manuscript_epub_compiled(
 
     for chapter in chapters:
         chapter_number = chapter.get("number")
-        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter)
+        chapter_heading_text, chapter_subtitle = _chapter_heading_lines(chapter, index_format)
         item = epub.EpubHtml(
             title=chapter_subtitle or chapter_heading_text,
             file_name=f"chapter-{chapter_number}.xhtml",
@@ -2246,7 +2252,7 @@ def manuscript_epub_compiled(
         toc_entries.append(item)
 
     for index, scene in enumerate(scenes or [], start=1):
-        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index)
+        scene_heading_text, scene_subtitle = _scene_heading_lines(scene, index, index_format)
         item = epub.EpubHtml(
             title=scene_subtitle or scene_heading_text,
             file_name=f"scene-{index}.xhtml",
@@ -2288,6 +2294,7 @@ def manuscript_vault_zip(
     notes: list[dict],
     front_matter: dict | None = None,
     font_family: str | None = None,
+    index_format: str = "arabic",
 ) -> bytes:
     import io
     import zipfile
@@ -2313,7 +2320,8 @@ def manuscript_vault_zip(
         )
         for chapter in chapters:
             chapter_number = int(chapter.get("number") or 0)
-            chapter_title = _clean_line(chapter.get("title")) or f"Chapter {chapter_number}"
+            fmt_num = format_index(chapter_number, index_format)
+            chapter_title = _clean_line(chapter.get("title")) or f"Chapter {fmt_num}"
             archive.writestr(
                 f"{root}/chapters/Chapter {chapter_number:02d}.md",
                 f"# {chapter_title}\n\n{str(chapter.get('text') or '').strip()}\n",

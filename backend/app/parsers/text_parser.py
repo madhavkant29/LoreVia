@@ -31,6 +31,26 @@ MIN_BODY_WORDS_AFTER_HEADING = 100
 # chapter-split result. Below this, return a single-chapter fallback.
 MIN_VALID_HEADINGS = 2
 
+# Maximum words in a clean chapter title. Titles exceeding this after
+# the heading keyword+number are likely contaminated with body text.
+MAX_TITLE_WORDS = 12
+
+# Regex to match just the heading keyword + number (for extracting clean
+# titles from lines that may also contain body text after the heading).
+_HEADING_BASE_RE = re.compile(
+    r"^(?:chapter|ch\.?|part|volume|vol\.?|book|act|episode|section|scene)\s+"
+    r"(?:\d+[a-z]?|[ivxlcdm]+|[a-z]{1,3})",
+    re.IGNORECASE,
+)
+
+# Date patterns that indicate body text following a heading on the same line.
+_DATE_PATTERN = re.compile(
+    r"(?<!\w)(\d{1,2})\s+"
+    r"(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)",
+    re.IGNORECASE,
+)
+
 
 def parse_text_chapters(
     text: str,
@@ -117,19 +137,83 @@ def parse_text_chapters(
     chapters: list[dict] = []
     for i, (idx, heading, stype) in enumerate(valid_headings):
         next_idx = valid_headings[i + 1][0] if i + 1 < len(valid_headings) else len(lines)
-        body_lines = lines[idx + 1 : next_idx]
         # Reconstruct the chapter text from original (untrimmed) raw_lines
         raw_body = raw_lines[idx + 1 : next_idx]
+
+        # Extract a clean title from the heading line, recovering any body
+        # text that was merged onto the same line (common in some ebooks).
+        clean_title, extra_body = _extract_clean_heading(heading)
+        if extra_body:
+            raw_body.insert(0, extra_body)
         chapter_text = "\n".join(raw_body).strip()
 
         chapters.append({
-            "title": heading,
+            "title": clean_title,
             "text": chapter_text,
             "number": i + 1,
             "section_type": stype,
         })
 
     return chapters
+
+
+def _extract_clean_heading(line: str) -> tuple[str, str]:
+    """Extract a clean chapter title from a heading line.
+
+    When PDF text extraction or plain-text formatting merges body text
+    onto the same line as the chapter heading, the full line becomes an
+    over-long title. This function splits the line into a clean title
+    (heading keyword + number + optional short descriptive text) and any
+    body text that followed on the same line.
+
+    Returns:
+        (clean_title, extra_body_text) — extra_body_text is empty when the
+        line contained only a clean heading.
+    """
+    m = _HEADING_BASE_RE.match(line)
+    if not m:
+        return line, ""
+
+    base = m.group(0).strip()
+    rest = line[m.end():].strip()
+    if not rest:
+        return base, ""
+
+    # Check for a separator (colon, period, dash) that may introduce a title
+    sep_match = re.match(r"\s*[:.\-]\s*", rest)
+    if sep_match:
+        after_sep = rest[sep_match.end():]
+        # Look for body-text indicators in the text after the separator
+        body_pos = _find_body_text_start(after_sep)
+        if body_pos is not None:
+            title_text = after_sep[:body_pos].strip()
+            extra = after_sep[body_pos:].strip()
+            if title_text:
+                return f"{base}{sep_match.group(0)}{title_text}", extra
+            return base, rest
+        # No body-text indicator — it may be a clean multi-word title
+        words = after_sep.split()
+        if len(words) <= MAX_TITLE_WORDS:
+            return line, ""
+        # Title is suspiciously long; keep only the separator + short portion
+        title_text = " ".join(words[:MAX_TITLE_WORDS])
+        extra = " ".join(words[MAX_TITLE_WORDS:])
+        return f"{base}{sep_match.group(0)}{title_text}", extra
+
+    # No separator found — the rest is body text on the same line
+    return base, rest
+
+
+def _find_body_text_start(text: str) -> int | None:
+    """Find where body text starts after a heading's title portion.
+
+    Looks for patterns like dates ("5 May") that signal the title has
+    ended and body prose has begun.
+    """
+    m = _DATE_PATTERN.search(text)
+    if m:
+        return m.start()
+    return None
 
 
 def _count_words(text: str) -> int:
