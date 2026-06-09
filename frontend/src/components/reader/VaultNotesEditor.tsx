@@ -232,6 +232,7 @@ export function VaultNotesEditor({
   const [findWithinNote, setFindWithinNote] = useState("")
   const [replaceWithinNote, setReplaceWithinNote] = useState("")
   const [secondaryPanelsEnabled, setSecondaryPanelsEnabled] = useState(false)
+  const [firstLineIndent, setFirstLineIndent] = useState(false)
   const [notesSelectionMenu, setNotesSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
   const [addCharacterText, setAddCharacterText] = useState("")
@@ -1211,6 +1212,16 @@ export function VaultNotesEditor({
                             </button>
                           </Tooltip>
                         ))}
+                        <Tooltip content="Toggle paragraph indent">
+                          <button
+                            type="button"
+                            aria-label="Toggle paragraph indent"
+                            onClick={() => setFirstLineIndent((value) => !value)}
+                            className={`${markdownButtonClass(isDark)} ${firstLineIndent ? (isDark ? "bg-emerald-400/15 text-emerald-200" : "bg-emerald-100 text-emerald-800") : ""}`}
+                          >
+                            ¶ Indent
+                          </button>
+                        </Tooltip>
                       </div>
                       <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                         <input
@@ -1241,6 +1252,7 @@ export function VaultNotesEditor({
                         onMouseUp={(event) => syncNotesSelectionMenu(event)}
                         onKeyUp={() => syncNotesSelectionMenu()}
                         spellCheck={false}
+                        style={{ textIndent: firstLineIndent ? "1.5em" : "0" }}
                         className={`min-h-[42rem] w-full resize-none border-0 px-4 py-5 font-mono text-base leading-8 outline-none ${
                           isDark
                             ? "bg-[#0a1323] text-slate-100"

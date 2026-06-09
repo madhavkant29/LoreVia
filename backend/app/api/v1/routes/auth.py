@@ -1,5 +1,6 @@
 import logging
 import secrets
+from typing import Optional
 import uuid
 from datetime import UTC, datetime
 
@@ -73,6 +74,7 @@ from app.utils.auth_cookies import (
     set_auth_cookies,
     set_device_cookie,
 )
+from app.utils.cookie_utils import auth_cookie_secure
 from app.utils.auth_csrf import enforce_cookie_csrf
 from app.utils.auth_utils import (
     current_token_version,
@@ -211,9 +213,8 @@ async def _issue_email_verification(user: User) -> tuple[bool, str]:
     return await deliver_verification_email(user.email, token)
 
 
-def _schedule_onboarding_email(background_tasks: BackgroundTasks | None, email: str) -> None:
-    if background_tasks is not None:
-        background_tasks.add_task(send_onboarding_email, email)
+def _schedule_onboarding_email(background_tasks: BackgroundTasks, email: str) -> None:
+    background_tasks.add_task(send_onboarding_email, email)
 
 
 @router.post("/register", response_model=RegisterOut, status_code=201)
@@ -307,7 +308,6 @@ async def oauth_supabase(
     request: Request,
     body: SupabaseOAuthBody,
     response: Response,
-    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_login),
 ):
@@ -563,7 +563,7 @@ async def verify_email(
     request: Request,
     body: VerifyEmailBody,
     response: Response,
-    background_tasks: BackgroundTasks = None,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_auth_password),
 ):
@@ -620,6 +620,15 @@ async def logout(
     current_user.token_version = next_token_version(current_user)
     await db.commit()
     clear_auth_cookies(response)
+    # Set session_dead marker so frontend middleware knows not to redirect /login → /library
+    response.set_cookie(
+        key="lorevia_session_dead",
+        value="1",
+        max_age=30,
+        path="/",
+        secure=auth_cookie_secure(),
+        samesite="lax",
+    )
     return {"ok": True}
 
 

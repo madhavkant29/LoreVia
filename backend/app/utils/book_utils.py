@@ -30,7 +30,7 @@ from sqlalchemy.orm import aliased, selectinload
 
 from app.core.config import settings
 from app.core.security import create_asset_token
-from app.core.storage import download_book, get_presigned_url, upload_binary, upload_text
+from app.core.storage import delete_object, download_book, get_presigned_url, move_object, upload_binary, upload_text
 from app.models.book import (
     Book,
     BookCollaborator,
@@ -45,6 +45,7 @@ from app.models.book import (
     NoteSeriesLink,
     NoteTag,
     NovelScene,
+    PublicBookAnalyticsEvent,
     VaultNote,
     VaultNoteSource,
     SceneVersion,
@@ -52,7 +53,7 @@ from app.models.book import (
     Series,
     SeriesBook,
 )
-from app.models.beta_read import BetaReadAssignment, BetaReadAssignmentState
+from app.models.beta_read import BetaReadAssignment, BetaReadAssignmentState, BetaReadFeedbackItem
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.character import (
     CharacterCandidate,
@@ -73,7 +74,7 @@ from app.models.intelligence import (
 )
 from app.models.progress import ReadingProgress
 from app.models.tag import CustomTag
-from app.models.user import User
+from app.models.user import User, UserWritingActivity
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
     extract_dialogue_samples_by_character,
@@ -290,6 +291,40 @@ REVISION_KEYWORD_STOPWORDS = CHAPTER_TITLE_STOPWORDS | {
 }
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
+
+
+def _normalize_unicode_replacements(text: str) -> str:
+    """
+    Replace Unicode replacement characters and common encoding artifacts with
+    appropriate ASCII/Unicode equivalents to prevent black squares in exports.
+    """
+    if not text:
+        return text
+    
+    replacements = {
+        "\uFFFD": "",  # Unicode replacement character (black diamond/square)
+        "\u25A0": "",  # Black square
+        "\u25AA": "",  # Black small square
+        "\u2022": "*",  # Bullet → asterisk
+        "\u2013": "-",  # En dash
+        "\u2014": "--",  # Em dash
+        "\u2018": "'",  # Left single quote
+        "\u2019": "'",  # Right single quote / apostrophe
+        "\u201C": '"',  # Left double quote
+        "\u201D": '"',  # Right double quote
+        "\u2026": "...",  # Ellipsis
+        "\u00A0": " ",  # Non-breaking space
+        "\uFB00": "ff",  # Latin ligature ff
+        "\uFB01": "fi",  # Latin ligature fi
+        "\uFB02": "fl",  # Latin ligature fl
+        "\uFB03": "ffi",  # Latin ligature ffi
+        "\uFB04": "ffl",  # Latin ligature ffl
+    }
+    
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    return text
 
 
 def _clean_text(value: object | None) -> str:
@@ -6693,7 +6728,7 @@ def manuscript_text_to_html(text: str) -> str:
 
 def clean_manuscript_html(html: str | None) -> str:
     cleaner = CSSSanitizer(allowed_css_properties=cast(Any, MANUSCRIPT_ALLOWED_STYLES))
-    return str(bleach.clean(
+    cleaned = str(bleach.clean(
         str(html or "").strip(),
         tags=cast(Any, MANUSCRIPT_ALLOWED_TAGS),
         attributes=cast(Any, MANUSCRIPT_ALLOWED_ATTRIBUTES),
@@ -6701,6 +6736,7 @@ def clean_manuscript_html(html: str | None) -> str:
         css_sanitizer=cast(Any, cleaner),
         strip=True,
     ))
+    return _normalize_unicode_replacements(cleaned)
 
 
 def manuscript_html_to_text(html: str | None) -> str:
@@ -6856,6 +6892,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
         from docx import Document
         doc = Document(BytesIO(raw))
         text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
+        text = _normalize_unicode_replacements(text)
         if split_into_chapters:
             from app.parsers.text_parser import parse_text_chapters
             return parse_text_chapters(text, title=stem)
@@ -6870,6 +6907,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
             from docx import Document
             doc = Document(BytesIO(raw))
             text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
+            text = _normalize_unicode_replacements(text)
             return [{"title": stem, "text": text, "number": 1}]
         except Exception:
             raise HTTPException(
@@ -6877,7 +6915,8 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
                 "Legacy .doc files require additional system dependencies. Please convert to .docx format."
             )
     if lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain"):
-        text = raw.decode("utf-8", errors="ignore")
+        text = raw.decode("utf-8", errors="replace")
+        text = _normalize_unicode_replacements(text)
         if lower.endswith(".md"):
             # Convert markdown to HTML for proper rendering
             html = markdown_to_html(text)
@@ -7138,6 +7177,7 @@ def build_import_preview(
     This function is synchronous; callers should wrap in asyncio.to_thread() if needed.
     """
     from app.parsers.heading_patterns import classify_heading_type
+    from app.parsers.text_parser import parse_text_chapters
     from app.schemas.section import ImportPreview, SectionMeta
 
     preview = ImportPreview()
@@ -7191,7 +7231,8 @@ def build_import_preview(
             paragraph.text for paragraph in doc.paragraphs[:30] if paragraph.text.strip()
         )
     elif format_name in ("txt", "md", "fountain"):
-        sample_text = raw.decode("utf-8", errors="ignore")[:5000]
+        sample_text = raw.decode("utf-8", errors="replace")[:5000]
+        sample_text = _normalize_unicode_replacements(sample_text)
 
     # Auto-detect language if not provided
     if language is None and sample_text:
@@ -7222,15 +7263,15 @@ def build_import_preview(
     elif format_name in ("docx", "doc"):
         from io import BytesIO
         from docx import Document
-        from app.parsers.text_parser import parse_text_chapters
         doc = Document(BytesIO(raw))
         text = "\n".join(
             paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()
         )
+        text = _normalize_unicode_replacements(text)
         chapters = parse_text_chapters(text, language=language)
     elif format_name in ("txt", "md", "fountain"):
-        text = raw.decode("utf-8", errors="ignore")
-        from app.parsers.text_parser import parse_text_chapters
+        text = raw.decode("utf-8", errors="replace")
+        text = _normalize_unicode_replacements(text)
         chapters = parse_text_chapters(text, language=language)
     else:
         raise ValueError(f"Unsupported format for preview: {format_name}")
@@ -8000,6 +8041,104 @@ async def _repair_progress_after_chapter_delete(
             progress.current_chapter = previous[-1] if previous else fallback_chapter
 
 
+async def _renumber_chapters_after_delete(
+    db: AsyncSession,
+    *,
+    book: Book,
+    deleted_chapter_number: int,
+) -> None:
+    chapters_to_renumber = (
+        await db.execute(
+            select(Chapter)
+            .where(Chapter.book_id == book.id, Chapter.number > deleted_chapter_number)
+            .order_by(Chapter.number.asc())
+        )
+    ).scalars().all()
+
+    for chapter in chapters_to_renumber:
+        old_number = chapter.number
+        new_number = old_number - 1
+
+        old_key = chapter.s3_key
+        new_key = _chapter_storage_key(book.id, new_number)
+        if old_key and old_key != new_key:
+            try:
+                chapter.s3_key = await asyncio.to_thread(move_object, old_key, new_key)
+            except Exception:
+                chapter.s3_key = new_key
+
+        chapter.number = new_number
+
+        for table, col in [
+            (NovelScene, "chapter_number"),
+            (ManuscriptAnnotation, "chapter_number"),
+            (BookNote, "chapter_number"),
+            (WorldNote, "chapter_number"),
+            (QuoteEntry, "chapter_number"),
+            (CharacterCandidate, "chapter_number"),
+            (CharacterMention, "chapter_number"),
+            (CharacterSuppression, "chapter_number"),
+            (CharacterRelationshipCandidate, "chapter_number"),
+            (BetaReadFeedbackItem, "chapter_number"),
+            (UserWritingActivity, "chapter_number"),
+            (PublicBookAnalyticsEvent, "chapter_number"),
+        ]:
+            await db.execute(
+                update(table)
+                .where(
+                    table.book_id == book.id,
+                    getattr(table, col) == old_number,
+                )
+                .values(**{col: new_number})
+            )
+
+        await db.execute(
+            update(NovelScene).where(
+                NovelScene.book_id == book.id,
+                NovelScene.origin_chapter_number == old_number,
+            ).values(origin_chapter_number=new_number)
+        )
+
+        await db.execute(
+            update(CharacterRelationship).where(
+                CharacterRelationship.book_id == book.id,
+                CharacterRelationship.from_chapter == old_number,
+            ).values(from_chapter=new_number)
+        )
+        await db.execute(
+            update(CharacterRelationship).where(
+                CharacterRelationship.book_id == book.id,
+                CharacterRelationship.to_chapter == old_number,
+            ).values(to_chapter=new_number)
+        )
+
+        character_ids_subq = select(Character.id).where(Character.book_id == book.id)
+        await db.execute(
+            update(CharacterState)
+            .where(
+                CharacterState.character_id.in_(character_ids_subq),
+                CharacterState.at_chapter == old_number,
+            )
+            .values(at_chapter=new_number)
+        )
+
+    progress_rows = (
+        await db.execute(select(ReadingProgress).where(ReadingProgress.book_id == book.id))
+    ).scalars().all()
+    for progress in progress_rows:
+        progress.chapters_read = [
+            n - 1 if n > deleted_chapter_number else n
+            for n in sorted(set(progress.chapters_read or []))
+        ]
+        if progress.current_chapter and progress.current_chapter > deleted_chapter_number:
+            progress.current_chapter -= 1
+
+    max_remaining = await db.scalar(
+        select(func.max(Chapter.number)).where(Chapter.book_id == book.id)
+    )
+    book.total_chapters = int(max_remaining) if max_remaining is not None else 0
+
+
 async def delete_chapter(
     db: AsyncSession,
     *,
@@ -8157,7 +8296,6 @@ async def delete_chapter(
             .order_by(Chapter.number.asc())
         )
     ).scalars().all()
-    book.total_chapters = int(max(remaining_numbers)) if remaining_numbers else 0
     book.total_chunks = await db.scalar(
         select(func.count()).select_from(BookChunk).where(BookChunk.book_id == book.id)
     )
@@ -8167,6 +8305,7 @@ async def delete_chapter(
         chapter_number=chapter_number,
         remaining_numbers=[int(number) for number in remaining_numbers],
     )
+    await _renumber_chapters_after_delete(db, book=book, deleted_chapter_number=chapter_number)
     await _recompute_character_chapter_aggregates(
         db,
         book_id=book.id,

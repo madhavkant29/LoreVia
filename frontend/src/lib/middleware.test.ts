@@ -78,7 +78,7 @@ describe("middleware CSP", () => {
     )
   })
 
-  it("redirects authenticated users away from auth entry pages", () => {
+  it("allows authenticated users to visit auth entry pages to validate their session", () => {
     Object.assign(process.env, { NODE_ENV: "development" })
 
     const request = new NextRequest("https://getlorevia.com/login?next=%2Fstats", {
@@ -88,7 +88,9 @@ describe("middleware CSP", () => {
     })
     const response = middleware(request)
 
-    expect(response.headers.get("location")).toBe("https://getlorevia.com/library")
+    // Should NOT redirect - let the auth page validate the session client-side
+    // This prevents redirect loops when users have stale/expired sessions
+    expect(response.headers.get("location")).toBeNull()
   })
 
   it("allows public pages for authenticated and unauthenticated users", () => {

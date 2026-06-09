@@ -193,6 +193,37 @@ def download_book(key: str) -> bytes:
     return s3.get_object(Bucket=settings.S3_BUCKET, Key=key)["Body"].read()
 
 
+def delete_object(key: str) -> None:
+    if is_local_storage():
+        path = _local_path(key)
+        if path.exists():
+            path.unlink()
+    else:
+        s3 = _get_s3_client()
+        s3.delete_object(Bucket=settings.S3_BUCKET, Key=key)
+
+
+def move_object(src_key: str, dst_key: str) -> str:
+    """Move an object from src_key to dst_key, returning dst_key."""
+    if src_key == dst_key:
+        return dst_key
+    if is_local_storage():
+        src_path = _local_path(src_key)
+        dst_path = _local_path(dst_key)
+        if src_path.exists():
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            src_path.rename(dst_path)
+    else:
+        s3 = _get_s3_client()
+        s3.copy_object(
+            Bucket=settings.S3_BUCKET,
+            CopySource={"Bucket": settings.S3_BUCKET, "Key": src_key},
+            Key=dst_key,
+        )
+        s3.delete_object(Bucket=settings.S3_BUCKET, Key=src_key)
+    return dst_key
+
+
 def get_presigned_url(key: str, expires: int = 3600) -> str | None:
     if is_local_storage():
         return None

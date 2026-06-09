@@ -134,6 +134,7 @@ export default function ScenesPage() {
   const [showBrowserOnMobile, setShowBrowserOnMobile] = useState(true)
   const [showInspectorOnMobile, setShowInspectorOnMobile] = useState(false)
   const [showWritingTools, setShowWritingTools] = useState(false)
+  const [firstLineIndent, setFirstLineIndent] = useState(false)
   const [selectionMenu, setSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
   const [addCharacterText, setAddCharacterText] = useState("")
@@ -500,6 +501,8 @@ export default function ScenesPage() {
                           saving={saving}
                           canSave={Boolean(title.trim() && body.trim())}
                           hasSelectedScene={Boolean(selectedScene)}
+                          firstLineIndent={firstLineIndent}
+                          onToggleFirstLineIndent={() => setFirstLineIndent((value) => !value)}
                           onHtmlChange={(nextHtml, nextText) => {
                             setHtmlBody(nextHtml)
                             setBody(nextText)
@@ -928,6 +931,8 @@ function SceneEditorPanel({
   saving,
   canSave,
   hasSelectedScene,
+  firstLineIndent,
+  onToggleFirstLineIndent,
   onHtmlChange,
   onDelete,
   onSave,
@@ -940,6 +945,8 @@ function SceneEditorPanel({
   saving: boolean
   canSave: boolean
   hasSelectedScene: boolean
+  firstLineIndent: boolean
+  onToggleFirstLineIndent: () => void
   onHtmlChange: (nextHtml: string, nextText: string) => void
   onDelete: () => void
   onSave: () => void
@@ -960,13 +967,23 @@ function SceneEditorPanel({
       </div>
 
       <div className="overflow-hidden">
-        <div className={isDark ? "bg-[#0d1726]" : "bg-stone-50/70"}>
+        <div className={`flex items-center justify-between gap-2 ${isDark ? "bg-[#0d1726]" : "bg-stone-50/70"}`}>
           <EditorToolbar editorKey="scene-workspace-editor" isDark={isDark} compact />
+          <div className="flex items-center gap-1 pr-2">
+            <button
+              type="button"
+              onClick={onToggleFirstLineIndent}
+              className={`rounded-full px-2.5 py-1.5 text-3xs font-semibold transition ${isDark ? "text-slate-300 hover:bg-white/[0.07]" : "text-stone-600 hover:bg-stone-100"}`}
+            >
+              {firstLineIndent ? "Indent on" : "Indent off"}
+            </button>
+          </div>
         </div>
         <RichTextEditor
           editorKey="scene-workspace-editor"
           html={htmlBody}
           onChange={onHtmlChange}
+          style={{ textIndent: firstLineIndent ? "1.5em" : "0" }}
           className={`min-h-[24rem] px-5 py-4 font-serif text-base leading-8 outline-none sm:min-h-[30rem] ${isDark ? "text-slate-100" : "text-stone-900"}`}
         />
       </div>

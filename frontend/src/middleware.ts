@@ -347,9 +347,12 @@ export function middleware(request: NextRequest) {
     return applySecurityHeaders(request, buildLoginRedirect(request))
   }
 
-  if (isAuthenticated && isAuthEntryRoute(request.nextUrl.pathname)) {
-    return applySecurityHeaders(request, buildAuthenticatedRedirect(request))
-  }
+  // REMOVED: Automatic redirect from /login or /register to /library when auth cookies exist.
+  // This was causing redirect loops when users had stale/expired sessions.
+  // Instead, let the auth pages validate the session and redirect if truly authenticated.
+  // if (isAuthenticated && isAuthEntryRoute(request.nextUrl.pathname)) {
+  //   return applySecurityHeaders(request, buildAuthenticatedRedirect(request))
+  // }
 
   // Initialize Supabase client for session management (auth routes and authenticated pages)
   let supabaseResponse = NextResponse.next()

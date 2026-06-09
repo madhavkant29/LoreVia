@@ -211,7 +211,9 @@ async def resolve_reader_chapter_payload(
             stored_text_content = None
             stored_html_content = None
 
-    stored_media = await serialize_chapter_media(db, chapter.id)
+    stored_media = await serialize_chapter_media(
+        db, chapter.id, book_id=book.id, chapter_text=stored_text_content
+    )
     fallback_payload = None
     needs_source_recovery = chapter_needs_source_recovery(
         book=book,
