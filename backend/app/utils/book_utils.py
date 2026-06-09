@@ -7177,6 +7177,7 @@ def build_import_preview(
     This function is synchronous; callers should wrap in asyncio.to_thread() if needed.
     """
     from app.parsers.heading_patterns import classify_heading_type
+    from app.parsers.text_parser import parse_text_chapters
     from app.schemas.section import ImportPreview, SectionMeta
 
     preview = ImportPreview()
@@ -7262,7 +7263,6 @@ def build_import_preview(
     elif format_name in ("docx", "doc"):
         from io import BytesIO
         from docx import Document
-        from app.parsers.text_parser import parse_text_chapters
         doc = Document(BytesIO(raw))
         text = "\n".join(
             paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()
