@@ -1,7 +1,10 @@
+"use client"
+
 import Link from "next/link"
 import type { Route } from "next"
 import type { UrlObject } from "url"
 
+import { AuthLink } from "@/components/auth/AuthLink"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 
 const navItems: Array<{ label: string; href: Route | UrlObject }> = [
@@ -35,18 +38,18 @@ export function MarketingHeader() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
+          <AuthLink
             href="/login"
             className="hidden px-4 py-2 text-sm font-medium text-[#c9d1cb] transition hover:text-white sm:inline-flex"
           >
             Sign in
-          </Link>
-          <Link
-            href={ctaHref}
+          </AuthLink>
+          <AuthLink
+            href="/register"
             className="inline-flex items-center justify-center rounded-md bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#25756f]"
           >
             Start free
-          </Link>
+          </AuthLink>
         </div>
       </div>
     </header>

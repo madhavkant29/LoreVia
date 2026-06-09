@@ -5,6 +5,7 @@ import type { Route } from "next"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import axios from "axios"
+import { AuthLink } from "@/components/auth/AuthLink"
 import { GoogleOAuthButton } from "@/components/auth/GoogleOAuthButton"
 import { authApi } from "@/lib/api/auth"
 import { normalizeLoginError, shouldShowCreateAccountCta } from "@/lib/auth/loginMessages"
@@ -45,13 +46,15 @@ function LoginInner() {
           if (validUser) {
             router.replace("/library")
           } else {
-            // Session expired, clear stale user
+            // Session expired, clear stale user and set marker for middleware
+            document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
             useAuthStore.getState().logout()
             setValidatingSession(false)
           }
         })
         .catch(() => {
-          // Session invalid, clear stale user
+          // Session invalid, clear stale user and set marker for middleware
+          document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
           useAuthStore.getState().logout()
           setValidatingSession(false)
         })
@@ -233,14 +236,14 @@ function LoginInner() {
 
         <p className={`mt-7 text-center text-sm ${isDark ? "text-slate-500" : "text-stone-400"}`}>
           No account?{" "}
-          <Link
+          <AuthLink
             href="/register"
             className={`font-medium transition hover:underline ${
               isDark ? "text-slate-200 hover:text-white" : "text-stone-700 hover:text-stone-950"
             }`}
           >
             Create one
-          </Link>
+          </AuthLink>
         </p>
       </div>
     </main>

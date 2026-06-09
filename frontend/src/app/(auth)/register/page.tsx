@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { AuthLink } from "@/components/auth/AuthLink"
 import { GoogleOAuthButton } from "@/components/auth/GoogleOAuthButton"
 import { authApi } from "@/lib/api/auth"
 import { validateRegisterPassword, validateRegisterUsername } from "@/lib/auth/registerValidation"
@@ -40,13 +41,15 @@ export default function RegisterPage() {
           if (validUser) {
             router.replace("/library")
           } else {
-            // Session expired, clear stale user
+            // Session expired, clear stale user and set marker for middleware
+            document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
             useAuthStore.getState().logout()
             setValidatingSession(false)
           }
         })
         .catch(() => {
-          // Session invalid, clear stale user
+          // Session invalid, clear stale user and set marker for middleware
+          document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
           useAuthStore.getState().logout()
           setValidatingSession(false)
         })
@@ -258,7 +261,9 @@ export default function RegisterPage() {
 
       <p className={`mt-5 text-center text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
         Have an account?{" "}
-        <Link href="/login" className={`font-medium hover:underline ${isDark ? "text-white" : "text-stone-900"}`}>Sign in</Link>
+        <AuthLink href="/login" className={`font-medium hover:underline ${isDark ? "text-white" : "text-stone-900"}`}>
+          Sign in
+        </AuthLink>
       </p>
     </div>
   )
