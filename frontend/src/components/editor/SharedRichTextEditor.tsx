@@ -228,6 +228,26 @@ function ToolbarButton({
   )
 }
 
+function ToolbarButtonInDropdown({
+  title,
+  className,
+  onClick,
+  children,
+}: {
+  title: string
+  className: string
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <Tooltip content={title} side="bottom">
+      <button type="button" aria-label={title} title={title} onClick={onClick} className={className}>
+        {children}
+      </button>
+    </Tooltip>
+  )
+}
+
 export function EditorToolbar({
   isDark,
   compact = false,
@@ -336,28 +356,36 @@ export function EditorToolbar({
           <summary aria-label="More formatting controls" className={`${buttonClass} list-none cursor-pointer`}>More</summary>
           <div className={`absolute right-0 top-full z-30 mt-2 grid w-64 gap-2 rounded-md border p-3 ${isDark ? "border-white/10 bg-[#0d1117]" : "border-stone-200 bg-white"}`}>
             <div className="grid grid-cols-2 gap-2">
-              <select aria-label="Text color" className={selectClass} defaultValue={COLOR_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().setColor(colorValue(event.target.value)).run())}>
-                {COLOR_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
-              </select>
-              <select aria-label="Highlight color" className={selectClass} defaultValue={HIGHLIGHT_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().toggleHighlight({ color: colorValue(event.target.value) }).run())}>
-                {HIGHLIGHT_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
-              </select>
-              <select aria-label="Line height" className={selectClass} defaultValue="1.8" onChange={(event) => run((instance) => focusedRichTextChain(instance).setLineHeight(event.target.value).run())}>
-                {LINE_HEIGHT_OPTIONS.map((value) => <option key={value} value={value}>{value} lh</option>)}
-              </select>
-              <select aria-label="Paragraph spacing" className={selectClass} defaultValue="0.8rem" onChange={(event) => run((instance) => focusedRichTextChain(instance).setParagraphSpacing(event.target.value).run())}>
-                {PARAGRAPH_SPACING_OPTIONS.map((value) => <option key={value} value={value}>{value} gap</option>)}
-              </select>
+              <Tooltip content="Text color">
+                <select aria-label="Text color" title="Text color" className={selectClass} defaultValue={COLOR_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().setColor(colorValue(event.target.value)).run())}>
+                  {COLOR_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
+                </select>
+              </Tooltip>
+              <Tooltip content="Highlight color">
+                <select aria-label="Highlight color" title="Highlight color" className={selectClass} defaultValue={HIGHLIGHT_OPTIONS[0]} onChange={(event) => run((instance) => instance.chain().focus().toggleHighlight({ color: colorValue(event.target.value) }).run())}>
+                  {HIGHLIGHT_OPTIONS.map((color) => <option key={color} value={color}>{color}</option>)}
+                </select>
+              </Tooltip>
+              <Tooltip content="Line height">
+                <select aria-label="Line height" title="Line height" className={selectClass} defaultValue="1.8" onChange={(event) => run((instance) => focusedRichTextChain(instance).setLineHeight(event.target.value).run())}>
+                  {LINE_HEIGHT_OPTIONS.map((value) => <option key={value} value={value}>{value} lh</option>)}
+                </select>
+              </Tooltip>
+              <Tooltip content="Paragraph spacing">
+                <select aria-label="Paragraph spacing" title="Paragraph spacing" className={selectClass} defaultValue="0.8rem" onChange={(event) => run((instance) => focusedRichTextChain(instance).setParagraphSpacing(event.target.value).run())}>
+                  {PARAGRAPH_SPACING_OPTIONS.map((value) => <option key={value} value={value}>{value} gap</option>)}
+                </select>
+              </Tooltip>
             </div>
             <div className="flex flex-wrap gap-1">
-              <ToolbarButton title="Clear formatting" onClick={() => run((instance) => instance.chain().focus().unsetAllMarks().clearNodes().run())} className={buttonClass}>Clear</ToolbarButton>
-              <ToolbarButton title="Checklist" onClick={() => run((instance) => instance.chain().focus().toggleTaskList().run())} className={buttonClass}>[ ]</ToolbarButton>
-              <ToolbarButton title="Quote" onClick={() => run((instance) => instance.chain().focus().toggleBlockquote().run())} className={buttonClass}>Quote</ToolbarButton>
-              <ToolbarButton title="Justify" onClick={() => run((instance) => instance.chain().focus().setTextAlign("justify").run())} className={buttonClass}>Justify</ToolbarButton>
-              <ToolbarButton title="Divider" onClick={() => run((instance) => instance.chain().focus().setHorizontalRule().run())} className={buttonClass}>Rule</ToolbarButton>
-              <ToolbarButton title="Scene break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "sceneBreak" }).run())} className={buttonClass}>***</ToolbarButton>
-              <ToolbarButton title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</ToolbarButton>
-              <ToolbarButton title="First-line indent" onClick={() => run((instance) => focusedRichTextChain(instance).setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</ToolbarButton>
+              <ToolbarButtonInDropdown title="Clear formatting" onClick={() => run((instance) => instance.chain().focus().unsetAllMarks().clearNodes().run())} className={buttonClass}>Clear</ToolbarButtonInDropdown>
+              <ToolbarButtonInDropdown title="Checklist" onClick={() => run((instance) => instance.chain().focus().toggleTaskList().run())} className={buttonClass}>[ ]</ToolbarButtonInDropdown>
+              <ToolbarButtonInDropdown title="Quote" onClick={() => run((instance) => instance.chain().focus().toggleBlockquote().run())} className={buttonClass}>Quote</ToolbarButtonInDropdown>
+              <ToolbarButtonInDropdown title="Justify" onClick={() => run((instance) => instance.chain().focus().setTextAlign("justify").run())} className={buttonClass}>Justify</ToolbarButtonInDropdown>
+              <ToolbarButtonInDropdown title="Divider" onClick={() => run((instance) => instance.chain().focus().setHorizontalRule().run())} className={buttonClass}>Rule</ToolbarButtonInDropdown>
+              <ToolbarButtonInDropdown title="Scene break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "sceneBreak" }).run())} className={buttonClass}>***</ToolbarButtonInDropdown>
+              <ToolbarButtonInDropdown title="Page break" onClick={() => run((instance) => instance.chain().focus().insertContent({ type: "pageBreak" }).run())} className={buttonClass}>Page</ToolbarButtonInDropdown>
+              <ToolbarButtonInDropdown title="First-line indent" onClick={() => run((instance) => focusedRichTextChain(instance).setFirstLineIndent("1.5em").run())} className={buttonClass}>Indent</ToolbarButtonInDropdown>
             </div>
           </div>
         </details>

@@ -751,6 +751,7 @@ class WriterWorkspaceOut(BaseModel):
     structure_tree: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
     reprocess: ReprocessMetadataOut = Field(default_factory=ReprocessMetadataOut)
     processing: BookProcessingOut | None = None
+    index_format: str = "arabic"
 
 
 class WordCountGoalsBody(BaseModel):
@@ -880,6 +881,7 @@ class WriterWorkspaceBody(BaseModel):
     manuscript_layout: ManuscriptLayoutBody | None = None
     structure_tree: list[WorkspaceStructureNodeBody] | None = None
     reprocess: ReprocessMetadataBody | None = None
+    index_format: str | None = None
 
 
 class RevisionActionItemOut(BaseModel):

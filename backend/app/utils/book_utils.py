@@ -30,7 +30,7 @@ from sqlalchemy.orm import aliased, selectinload
 
 from app.core.config import settings
 from app.core.security import create_asset_token
-from app.core.storage import delete_object, download_book, get_presigned_url, move_object, upload_binary, upload_text
+from app.core.storage import delete_object, download_book, move_object, upload_binary, upload_text
 from app.models.book import (
     Book,
     BookCollaborator,
@@ -75,6 +75,7 @@ from app.models.intelligence import (
 from app.models.progress import ReadingProgress
 from app.models.tag import CustomTag
 from app.models.user import User, UserWritingActivity
+from app.utils.index_format import format_index, INDEX_FORMATS
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
     extract_dialogue_samples_by_character,
@@ -519,6 +520,7 @@ DEFAULT_WRITER_WORKSPACE = {
         "last_generated_at": None,
     },
     "revision_recent_edits": [],
+    "index_format": "arabic",
     "reprocess": {
         "auto_reprocess_enabled": True,
         "pending_chapters": [],
@@ -836,13 +838,14 @@ def story_unit_label(
     fallback: str = "-",
     short: bool = False,
     lowercase: bool = False,
+    index_format: str = "arabic",
 ) -> str:
     if not number:
         return fallback
     label = "Sc." if short and story_unit_name(book_or_work_type, lowercase=True) == "scene" else None
     if label is None:
         label = "Ch." if short else story_unit_name(book_or_work_type, lowercase=lowercase)
-    return f"{label} {number}"
+    return f"{label} {format_index(number, index_format)}"
 
 
 _CHAPTER_KIND_LABELS: dict[str, str] = {
@@ -871,10 +874,10 @@ _CHAPTER_KIND_ALIASES: dict[str, str] = {
 _SUPPORTED_CHAPTER_KINDS = frozenset(_CHAPTER_KIND_LABELS)
 
 
-def chapter_kind_label(chapter_kind: str | None, number: int | None = None) -> str:
+def chapter_kind_label(chapter_kind: str | None, number: int | None = None, index_format: str = "arabic") -> str:
     if not chapter_kind or chapter_kind == "chapter":
         if number is not None:
-            return f"Chapter {number}"
+            return f"Chapter {format_index(number, index_format)}"
         return "Chapter"
     return _CHAPTER_KIND_LABELS.get(chapter_kind, chapter_kind.replace("_", " ").title())
 
@@ -1295,6 +1298,10 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
     payload["revision_recent_edits"] = _normalize_revision_recent_edits(source.get("revision_recent_edits") or [])
     payload["processing"] = _normalize_processing_state(source.get("processing")) if isinstance(source.get("processing"), dict) else None
     payload["reprocess"] = normalize_reprocess_metadata(source.get("reprocess") if isinstance(source.get("reprocess"), dict) else None)
+
+    index_fmt = source.get("index_format")
+    if isinstance(index_fmt, str) and index_fmt in INDEX_FORMATS:
+        payload["index_format"] = index_fmt
 
     return payload
 
@@ -5530,6 +5537,7 @@ async def build_manuscript_workspace_tree(
     collaborator: BookCollaborator | None = None,
 ) -> dict[str, Any]:
     workspace = build_writer_workspace_payload(book)
+    index_fmt: str = workspace.get("index_format") or "arabic"
     chapter_rows = list((
         await db.execute(
             select(Chapter.id, Chapter.number, Chapter.title, Chapter.structure_version)
@@ -5598,10 +5606,11 @@ async def build_manuscript_workspace_tree(
             }
         )
     for chapter_id, chapter_number, chapter_title, structure_version in chapter_rows:
+        fmt_num = format_index(int(chapter_number), index_fmt)
         scene_groups.append(
             {
                 "id": f"chapter-scenes-{chapter_number}",
-                "label": f"Chapter {chapter_number}: {chapter_title or f'Chapter {chapter_number}'}",
+                "label": f"Chapter {fmt_num}: {chapter_title or f'Chapter {fmt_num}'}",
                 "chapter_number": int(chapter_number),
                 "structure_version": int(structure_version or 0),
                 "collapsed_by_default": False,
@@ -5613,7 +5622,7 @@ async def build_manuscript_workspace_tree(
     scene_breadcrumbs = {
         str(scene.id): [
             {"id": f"book-{book.id}", "label": book.title, "kind": "book"},
-            {"id": f"chapter-{scene.chapter_number}", "label": f"Chapter {scene.chapter_number}: {chapter_title_by_number.get(int(scene.chapter_number or 0)) or f'Chapter {scene.chapter_number}'}", "kind": "chapter"},
+            {"id": f"chapter-{scene.chapter_number}", "label": f"Chapter {format_index(int(scene.chapter_number or 0), index_fmt)}: {chapter_title_by_number.get(int(scene.chapter_number or 0)) or f'Chapter {format_index(int(scene.chapter_number or 0), index_fmt)}'}", "kind": "chapter"},
             {"id": str(scene.id), "label": scene.title, "kind": "scene"},
         ]
         for scene in scenes
@@ -5635,7 +5644,7 @@ async def build_manuscript_workspace_tree(
             "children": [
                 {
                     "id": f"chapter-{int(number)}",
-                    "label": chapter_title or f"Chapter {int(number)}",
+                    "label": chapter_title or f"Chapter {format_index(int(number), index_fmt)}",
                     "kind": "chapter",
                     "chapter_number": int(number),
                     "children": [
@@ -6421,9 +6430,6 @@ async def book_out(
 def cover_url_for_book(book: Book) -> str | None:
     if not book.cover_s3_key:
         return None
-    presigned = get_presigned_url(book.cover_s3_key)
-    if presigned:
-        return presigned
     token = create_asset_token(str(book.user_id), f"book-cover:{book.id}", expires_minutes=120)
     return f"{settings.API_V1_PREFIX}/books/{book.id}/cover?token={token}"
 

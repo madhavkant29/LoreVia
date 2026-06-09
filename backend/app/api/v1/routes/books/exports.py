@@ -113,6 +113,7 @@ async def export_manuscript(
 
     workspace = build_writer_workspace_payload(book)
     front_matter = workspace.get("manuscript_front_matter") if isinstance(workspace, dict) else None
+    index_format: str = (workspace.get("index_format") or "arabic") if isinstance(workspace, dict) else "arabic"
     manuscript_scenes = [
         scene
         for scene in await list_novel_scenes(db, book=book, collaborator=collaborator)
@@ -129,6 +130,7 @@ async def export_manuscript(
             front_matter=cast(dict | None, front_matter),
             font_family=selected_font,
             include_toc=include_toc_enabled,
+            index_format=index_format,
         )
         return Response(
             content=raw,
@@ -144,6 +146,7 @@ async def export_manuscript(
             front_matter=cast(dict | None, front_matter),
             font_family=selected_font,
             include_toc=include_toc_enabled,
+            index_format=index_format,
         )
         return Response(
             content=raw,
@@ -164,6 +167,7 @@ async def export_manuscript(
             notes=notes,
             front_matter=cast(dict | None, front_matter),
             font_family=selected_font,
+            index_format=index_format,
         )
         return Response(
             content=raw,
@@ -179,6 +183,7 @@ async def export_manuscript(
         front_matter=cast(dict | None, front_matter),
         font_family=selected_font,
         include_toc=include_toc_enabled,
+        index_format=index_format,
     )
     return Response(
         content=raw,

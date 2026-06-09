@@ -91,12 +91,15 @@ function renderPage() {
   return client
 }
 
-async function flushUi() {
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
+async function waitForContent(text: string, timeout = 2000) {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    if (container?.textContent?.includes(text)) return
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  throw new Error(`Timed out waiting for "${text}"`)
 }
 
 beforeEach(() => {
@@ -162,11 +165,7 @@ afterEach(() => {
 describe("VoiceConsistencyPage", () => {
   it("defaults to auto-detect and sends the selected character when focused", async () => {
     renderPage()
-    await flushUi()
-    await flushUi()
-    await flushUi()
-
-    expect(container?.textContent).toContain("Auto-detect from passage")
+    await waitForContent("Auto-detect from passage")
 
     const selects = container?.querySelectorAll("select")
     const characterSelect = selects?.[1] as HTMLSelectElement
@@ -189,7 +188,7 @@ describe("VoiceConsistencyPage", () => {
       chapterNum: 1,
       characterId: "char-gregor",
     })
-    expect(container?.textContent).toContain("Focused review: Gregor")
+    await waitForContent("Focused review: Gregor")
     expect(container?.textContent).toContain("Dialogue could not be confidently attributed to Gregor; the review used the full submitted passage instead.")
   })
 })

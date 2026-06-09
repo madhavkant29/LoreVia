@@ -723,6 +723,7 @@ export interface WriterWorkspace {
   structure_tree?: WorkspaceStructureNode[]
   reprocess?: ReprocessMetadata
   processing?: BookProcessing | null
+  index_format?: string
 }
 
 export interface ReprocessMetadata {

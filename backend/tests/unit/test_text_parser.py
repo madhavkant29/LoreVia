@@ -1,4 +1,8 @@
-from app.parsers.text_parser import MIN_BODY_WORDS_AFTER_HEADING, parse_text_chapters
+from app.parsers.text_parser import (
+    MIN_BODY_WORDS_AFTER_HEADING,
+    parse_text_chapters,
+    _extract_clean_heading,
+)
 
 # ── Basic splitting ────────────────────────────────────────────────────────
 
@@ -222,3 +226,94 @@ def test_chapter_boundary_preserves_blank_lines():
 def test_min_body_words_constant():
     assert MIN_BODY_WORDS_AFTER_HEADING > 0
     assert MIN_BODY_WORDS_AFTER_HEADING < 1000
+
+
+# ── Title truncation (body text merged onto heading line) ──────────────────
+
+def test_clean_title_unchanged():
+    """A clean heading line with no body text remains intact."""
+    title, extra = _extract_clean_heading("Chapter 1")
+    assert title == "Chapter 1"
+    assert extra == ""
+
+
+def test_clean_title_with_separator_unchanged():
+    """A heading with a separator and short title stays as-is."""
+    title, extra = _extract_clean_heading("Chapter 1: The Beginning")
+    assert title == "Chapter 1: The Beginning"
+    assert extra == ""
+
+
+def test_clean_title_with_period_separator_unchanged():
+    title, extra = _extract_clean_heading("Chapter 1. The Beginning")
+    assert title == "Chapter 1. The Beginning"
+    assert extra == ""
+
+
+def test_clean_dash_separator_unchanged():
+    title, extra = _extract_clean_heading("Chapter 1 - The Beginning")
+    assert title == "Chapter 1 - The Beginning"
+    assert extra == ""
+
+
+def test_truncates_body_text_at_date_pattern():
+    """Body text starting with a date ('5 May') after the title is stripped."""
+    title, extra = _extract_clean_heading(
+        "CHAPTER II.—JONATHAN HARKERS JOURNAL continued 5 May.—I must have "
+        "been asleep for certainly if I had been fully awake"
+    )
+    assert "5 May" not in title
+    assert title == "CHAPTER II.—JONATHAN HARKERS JOURNAL continued"
+    assert extra.startswith("5 May")
+
+
+def test_truncates_body_text_with_day_first_date():
+    title, extra = _extract_clean_heading(
+        "CHAPTER 3.—MINA HARKER'S JOURNAL continued 3 June.—It was a dark and stormy night"
+    )
+    assert "3 June" not in title
+    assert "June" in extra
+    assert title == "CHAPTER 3.—MINA HARKER'S JOURNAL continued"
+
+
+def test_short_title_within_word_limit_stays():
+    """A multi-word title within MAX_TITLE_WORDS is kept whole."""
+    title, extra = _extract_clean_heading(
+        "Chapter 5: A Very Long Descriptive Title About Dragons"
+    )
+    assert title == "Chapter 5: A Very Long Descriptive Title About Dragons"
+    assert extra == ""
+
+
+def test_body_text_recovered_in_chapter():
+    """Body text on the heading line is prepended to the chapter body."""
+    body = "had been awake I must have noticed." + " work " * 120
+    heading = "CHAPTER II.—JONATHAN HARKERS JOURNAL continued 5 May.—I must have been asleep for certainly if I"
+    text = f"{heading}\n{body}\n\nCHAPTER III\n{'text ' * 120}"
+    chapters = parse_text_chapters(text, language="en")
+    assert len(chapters) == 2
+    # The body text that was on the heading line should be in the chapter body
+    assert chapters[0]["text"].startswith("5 May")
+    assert "I must have been asleep" in chapters[0]["text"]
+
+
+def test_no_date_truncates_at_word_limit():
+    """Without a date pattern, over-long titles are truncated at word limit."""
+    long_title = " ".join(f"word{i}" for i in range(20))
+    title, extra = _extract_clean_heading(
+        f"Chapter 10: {long_title}"
+    )
+    # Should truncate to MAX_TITLE_WORDS (12) words after the separator
+    words_after_sep = title.split(": ", 1)[1].split()
+    assert len(words_after_sep) <= 12
+    assert extra  # has leftover body text
+
+
+
+def test_no_separator_returns_base_heading():
+    """When no separator follows the heading number, rest is treated as body."""
+    title, extra = _extract_clean_heading(
+        "CHAPTER II JONATHAN HARKER'S JOURNAL continued 5 May"
+    )
+    assert title == "CHAPTER II"
+    assert "JONATHAN" in extra
