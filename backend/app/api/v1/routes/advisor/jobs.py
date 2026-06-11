@@ -30,6 +30,7 @@ from app.services.advisor_jobs_service import (
     mark_advisor_job_failed,
     serialize_advisor_job,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.advisor_utils import (
     SERIES_CONTINUITY_SYSTEM,
     build_series_story_context,
@@ -114,6 +115,7 @@ async def series_advisor_message(
     series = await db.get(Series, series_id)
     if not series or series.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     if not body.messages:
         raise HTTPException(400, detail="messages list is empty")
@@ -138,6 +140,7 @@ async def series_advisor_message_stream(
     series = await db.get(Series, series_id)
     if not series or series.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     if not body.messages:
         raise HTTPException(400, detail="messages list is empty")
@@ -171,6 +174,7 @@ async def series_advisor_message_status(
     series = await db.get(Series, series_id)
     if not series or series.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
     if job is None:

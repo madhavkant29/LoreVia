@@ -10,6 +10,7 @@ type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
 type CharacterBibleMode = "default" | "review-only"
 type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads"
+type UserTierMode = "author" | "free"
 
 type MockOptions = {
   session?: SessionMode
@@ -18,6 +19,7 @@ type MockOptions = {
   voiceConsistency?: VoiceConsistencyMode
   characterBible?: CharacterBibleMode
   manuscriptProcessing?: ManuscriptProcessingMode
+  userTier?: UserTierMode
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
@@ -81,7 +83,7 @@ const book = {
   public_description: "A storm-lashed fantasy about a gate city, a vanished oath, and the cost of holding the wall.",
   copyright_warning: false,
   archived_at: null,
-  hidden_at: null,
+  hidden_at: null as string | null,
   created_at: "2026-05-07T12:00:00Z",
   progress_pct: 64,
   chapters_read_count: 2,
@@ -498,6 +500,17 @@ const publicBooks: PublicBook[] = [
     },
   },
 ]
+
+const publicUploadsOverview = {
+  total_public_books: publicBooks.length,
+  total_authors: new Set(publicBooks.map((book) => book.author_username || book.author)).size,
+  total_visible_chapters: publicBooks.reduce((total, book) => total + (book.analytics?.chapter_count ?? book.total_chapters ?? 0), 0),
+  total_visible_words: publicBooks.reduce((total, book) => total + (book.analytics?.total_words ?? 0), 0),
+  uploads_last_30_days: publicBooks.length,
+  genre_breakdown: [{ label: "Epic Fantasy", count: 1 }],
+  work_type_breakdown: [{ label: "Novel", count: 1 }],
+  recent_uploads: publicBooks,
+}
 
 const publicBookDetails = {
   "public-book-1": {
@@ -1053,9 +1066,9 @@ const chapterList = {
   read_upto: 2,
   current_chapter: 2,
   chapters: [
-    { number: 1, title: "Ashfall", processed: true, intelligence_available: true, read: true },
-    { number: 2, title: "The Ember Gate", processed: true, intelligence_available: true, read: true },
-    { number: 3, title: "River of Glass", processed: false, intelligence_available: false, read: false },
+    { number: 1, title: "Ashfall", word_count: 10400, processed: true, intelligence_available: true, read: true },
+    { number: 2, title: "The Ember Gate", word_count: 11200, processed: true, intelligence_available: true, read: true },
+    { number: 3, title: "River of Glass", word_count: 9900, processed: false, intelligence_available: false, read: false },
   ],
 }
 
@@ -1466,6 +1479,22 @@ const writerWorkspace = {
     include_acknowledgments: false,
     include_epigraph: false,
     include_prologue: false,
+  },
+  novel_preface: "A short note before the ash gates open.",
+  novel_front_matter: {
+    dedication: "",
+    acknowledgements: "",
+    copyright_page: "",
+    about_author: "",
+    series_book_list: "",
+  },
+  novel_epub_metadata: {
+    publisher: "",
+    language: "en",
+    isbn: "",
+    description: "",
+    series_name: "",
+    series_number: "",
   },
   revision_board: {
     items: [],
@@ -2188,6 +2217,21 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const characterBibleMode = options.characterBible ?? "default"
   const manuscriptProcessingMode = options.manuscriptProcessing ?? "default"
+  book.hidden_at = null
+  book.is_public = false
+  const mockUser = {
+    ...user,
+    username: defaultUsername,
+    ...(options.userTier === "free"
+      ? {
+          tier: "free",
+          plan_tier: "free",
+          tier_label: "Free",
+          trial_active: false,
+          trial_ends_at: null,
+        }
+      : {}),
+  }
   const adminCookieMode = admin === "none" ? "guest" : admin
   const cookies = [
     {
@@ -2228,7 +2272,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     if (session === "authenticated") {
       await page.evaluate((userData) => {
         window.sessionStorage.setItem("lorevia-auth-user", JSON.stringify(userData))
-      }, user)
+      }, mockUser)
     } else {
       await page.evaluate(() => {
         window.sessionStorage.removeItem("lorevia-auth-user")
@@ -2239,7 +2283,6 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     // This is fine - the auth bootstrap will handle hydration after navigation
   }
   
-  user.username = defaultUsername
   publicForumPosts = JSON.parse(JSON.stringify(initialPublicForumPosts))
   publicForumComments = JSON.parse(JSON.stringify(initialPublicForumComments))
   collaborators.splice(0, collaborators.length, ...JSON.parse(JSON.stringify(initialCollaborators)))
@@ -2260,7 +2303,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   let mockVaultNotes = JSON.parse(JSON.stringify(vaultNotes))
   let mockManuscriptAnnotations = JSON.parse(JSON.stringify(manuscriptAnnotations))
   let mockEmailPreferences: EmailPreferences = {
-    email: user.email,
+    email: mockUser.email,
     product_updates: true,
     marketing: true,
     unsubscribed_all: false,
@@ -2292,15 +2335,35 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     const method = route.request().method()
 
     if (path === "/api/v1/auth/me" && method === "GET") {
-      return session === "authenticated" ? json(route, user) : json(route, { detail: "Unauthorized" }, 401)
+      return session === "authenticated" ? json(route, mockUser) : json(route, { detail: "Unauthorized" }, 401)
+    }
+
+    if (path === "/api/v1/auth/me/data-export" && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/zip",
+        headers: {
+          "Content-Disposition": 'attachment; filename="lorevia-data-export.zip"',
+        },
+        body: "mock lorevia data export",
+      })
+    }
+
+    if (path === "/api/v1/auth/me" && method === "DELETE") {
+      return json(route, {
+        ok: true,
+        deletion_status: "pending_hard_delete",
+        scheduled_for: "2026-06-14T00:00:00Z",
+        provider_followup_required: false,
+      })
     }
 
     if (path === "/api/v1/auth/refresh" && method === "POST") {
-      return session === "authenticated" ? json(route, user) : json(route, { detail: "Unauthorized" }, 401)
+      return session === "authenticated" ? json(route, mockUser) : json(route, { detail: "Unauthorized" }, 401)
     }
 
     if (path === "/api/v1/auth/login" && method === "POST") {
-      return login === "success" ? json(route, user) : json(route, { detail: "Invalid credentials" }, 401)
+      return login === "success" ? json(route, mockUser) : json(route, { detail: "Invalid credentials" }, 401)
     }
 
     if (path === "/api/v1/auth/logout" && method === "POST") {
@@ -2451,8 +2514,8 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       if (!nextUsername || nextUsername.length < 3) {
         return json(route, { detail: "Username must be 3-32 characters" }, 400)
       }
-      user.username = nextUsername
-      return json(route, user)
+      mockUser.username = nextUsername
+      return json(route, mockUser)
     }
 
     if (path === "/api/v1/email/preferences" && method === "GET") {
@@ -2502,7 +2565,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books" && method === "GET") {
-      return json(route, [book])
+      return json(route, book.hidden_at ? [] : [book])
     }
 
     if (path === "/api/v1/books/stats" && method === "GET") {
@@ -2530,6 +2593,17 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         })
       }
       return json(route, mockBook)
+    }
+
+    if (path === "/api/v1/books/book-1/permanent" && method === "DELETE") {
+      book.hidden_at = "2026-05-15T00:00:00Z"
+      book.is_public = false
+      return json(route, {
+        ok: true,
+        book_id: "book-1",
+        deletion_request_id: "deletion-request-1",
+        status: "pending",
+      })
     }
 
     if (path === "/api/v1/books/book-1/manuscript/reprocess" && method === "POST") {
@@ -2928,6 +3002,51 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         ...(body ?? {}),
       }
       return json(route, mockWriterWorkspace)
+    }
+
+    if (path === "/api/v1/books/book-1/novel/preface" && method === "PUT") {
+      const body = route.request().postDataJSON() as { preface?: string } | null
+      mockWriterWorkspace = {
+        ...mockWriterWorkspace,
+        novel_preface: body?.preface ?? "",
+      }
+      return json(route, { preface: mockWriterWorkspace.novel_preface })
+    }
+
+    if (path === "/api/v1/books/book-1/novel/settings" && method === "PUT") {
+      const body = route.request().postDataJSON() as {
+        preface?: string
+        front_matter?: typeof writerWorkspace.novel_front_matter
+        epub_metadata?: typeof writerWorkspace.novel_epub_metadata
+      } | null
+      mockWriterWorkspace = {
+        ...mockWriterWorkspace,
+        novel_preface: body?.preface ?? "",
+        novel_front_matter: body?.front_matter ?? writerWorkspace.novel_front_matter,
+        novel_epub_metadata: body?.epub_metadata ?? writerWorkspace.novel_epub_metadata,
+      }
+      return json(route, {
+        preface: mockWriterWorkspace.novel_preface,
+        front_matter: mockWriterWorkspace.novel_front_matter,
+        epub_metadata: mockWriterWorkspace.novel_epub_metadata,
+      })
+    }
+
+    if (path === "/api/v1/books/book-1/novel/export" && method === "GET") {
+      const targetUrl = new URL(route.request().url())
+      const format = targetUrl.searchParams.get("format") ?? "pdf"
+      const contentType = format === "epub"
+        ? "application/epub+zip"
+        : format === "docx"
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "application/pdf"
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": contentType,
+        },
+        body: Buffer.from(`mock novel ${format}`),
+      })
     }
 
     if (path === "/api/v1/books/book-1/emotional-arc" && method === "GET") {
@@ -3551,6 +3670,10 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/public/books" && method === "GET") {
       return json(route, publicBooks)
+    }
+
+    if (path === "/api/v1/public/analytics" && method === "GET") {
+      return json(route, publicUploadsOverview)
     }
 
     if (path === "/api/v1/public/rankings/uploads" && method === "GET") {

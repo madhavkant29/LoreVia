@@ -22,32 +22,33 @@ const marketingPricingContent = pricingTiers.map((tier) => ({
   ...tier,
   subtitle:
     tier.name === "Free"
-      ? "For trying LoreVia with one manuscript."
+      ? "For keeping access after the trial."
       : tier.name === "Author"
         ? "For active drafting, revision, and continuity work."
         : "For series, worldbuilding, and multi-book continuity.",
   bullets:
     tier.name === "Free"
       ? [
-          "Single-project entry point",
-          "Explore the core workspace",
-          "Basic continuity and recall workflows",
-          "Join author-invited beta reads",
+          "Read existing projects",
+          "Export manuscript and novel files",
+          "1 Story Advisor turn per week",
+          "Join invited beta reads",
+          "Author tools only during the trial",
         ]
       : tier.name === "Author"
         ? [
             "Everything in Free",
-            "Unlimited drafts",
-            "Advanced continuity scans",
-            "Chapter-grounded Q&A",
-            "Version history and snapshots",
+            "15 uploads",
+            "30 Story Advisor turns per day",
+            "30 continuity and editorial scans per day",
+            "Manuscript editor, notes, summaries, and search",
           ]
         : [
             "Everything in Author",
+            "Unlimited uploads",
+            "60 Story Advisor turns per day",
+            "60 continuity and editorial scans per day",
             "Multi-book continuity",
-            "Advanced worldbuilding support",
-            "Series-aware story memory",
-            "Early access to new features",
           ],
   cta:
     tier.name === "Free"

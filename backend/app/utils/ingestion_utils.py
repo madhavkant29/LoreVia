@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.book import Book, Chapter
+from app.models.user import User
 from app.core.storage import download_book, upload_text
 from app.utils.book_utils import (
     deserialize_manuscript_content,
@@ -437,8 +438,17 @@ def update_book_processing_state(
 
 
 async def is_book_hidden(db: AsyncSession, book_id: uuid.UUID) -> bool:
-    hidden_at = await db.scalar(select(Book.hidden_at).where(Book.id == book_id))
-    return hidden_at is not None
+    row = (
+        await db.execute(
+            select(Book.hidden_at, User.deletion_status, User.deleted_at)
+            .join(User, User.id == Book.user_id)
+            .where(Book.id == book_id)
+        )
+    ).first()
+    if not row:
+        return True
+    hidden_at, deletion_status, deleted_at = row
+    return hidden_at is not None or (deletion_status or "active") != "active" or deleted_at is not None
 
 
 async def mark_book_processing_cancelled(

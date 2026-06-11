@@ -92,6 +92,7 @@ export interface ChapterListItem {
   number: number
   title: string | null
   chapter_kind?: ChapterKind
+  word_count?: number | null
   processed: boolean
   intelligence_available?: boolean
   read: boolean
@@ -272,6 +273,10 @@ export interface RelationshipTimelineMarker {
   title: string
   chapter_number: number
   detail: string | null
+  type?: string | null
+  shared_labels?: string[]
+  character_a_to_b_labels?: string[]
+  character_b_to_a_labels?: string[]
 }
 
 export interface TimelineResponse {
@@ -300,6 +305,10 @@ export interface RelationshipEvolutionPair {
     type: string
     description: string | null
     sentiment: number | null
+    shared_labels?: string[]
+    character_a_to_b_labels?: string[]
+    character_b_to_a_labels?: string[]
+    label_evidence?: Record<string, unknown>
   }>
 }
 
@@ -319,6 +328,10 @@ export interface RelationshipGraphEdge {
   sentiment?: number | null
   from_chapter?: number | null
   to_chapter?: number | null
+  shared_labels?: string[]
+  character_a_to_b_labels?: string[]
+  character_b_to_a_labels?: string[]
+  label_evidence?: Record<string, unknown>
 }
 
 export interface RelationshipGraph {

@@ -5,10 +5,14 @@ import { useQuery } from "@tanstack/react-query"
 
 import {
   WorkspaceEmptyState,
+  WorkspaceHeader,
   WorkspacePage,
+  WorkspacePanel,
 } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
+import { useAuthStore } from "@/lib/stores/authStore"
 import {
   HEATMAP_WEEKDAY_LABELS,
   buildSecondaryStats,
@@ -21,9 +25,12 @@ import { cn } from "@/lib/utils/text"
 import type { UserStats, WritingEntry, WritingPeriodStat } from "@/types/book"
 
 export default function StatsPage() {
+  const userTier = useAuthStore((state) => state.user?.tier)
+  const canUseAuthorTools = canUseAuthorFeatures(userTier)
   const { data: stats = null, isLoading: loading } = useQuery<UserStats | null>({
     queryKey: asQueryKey(booksStatsCacheKey()),
     queryFn: () => booksApi.getStats(),
+    enabled: canUseAuthorTools,
   })
 
   const writingCards = useMemo(() => (stats ? buildWritingCards(stats.writing) : []), [stats])
@@ -33,6 +40,18 @@ export default function StatsPage() {
   return (
     <WorkspacePage className="min-h-0 bg-transparent">
       <div className="space-y-8 pb-12">
+        {!canUseAuthorTools ? (
+          <WorkspacePanel tone="strong" className="p-6 sm:p-8">
+            <WorkspaceHeader
+              eyebrow="Author feature"
+              title="Stats require an active trial or paid plan."
+              description="Free accounts can read and export owned projects, plus use one Story Advisor turn each week."
+            />
+          </WorkspacePanel>
+        ) : null}
+
+        {canUseAuthorTools ? (
+          <>
         <section className="overflow-hidden rounded-lg border-2 border-slate-200 bg-white p-6 dark:border-slate-700/70 dark:bg-[#10171d] sm:p-8 lg:p-10">
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-center">
             <div className="min-w-0">
@@ -174,6 +193,8 @@ export default function StatsPage() {
             </section>
           </>
         )}
+          </>
+        ) : null}
       </div>
     </WorkspacePage>
   )

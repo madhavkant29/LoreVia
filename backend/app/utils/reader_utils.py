@@ -44,7 +44,6 @@ from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.models.progress import ReadingProgress
-from app.services.summary_service import get_or_generate_summary
 from app.utils.book_utils import (
     build_book_access_context,
     collaboration_allows_chapter,
@@ -648,6 +647,7 @@ async def build_chapter_list_payload(
                     "number": number,
                     "title": f"Chapter {number}",
                     "chapter_kind": "chapter",
+                    "word_count": None,
                     "processed": False,
                     "intelligence_available": True,
                     "read": number in read_set,
@@ -680,6 +680,7 @@ async def build_chapter_list_payload(
                 "number": chapter.number,
                 "title": chapter.title,
                 "chapter_kind": getattr(chapter, "chapter_kind", "chapter"),
+                "word_count": getattr(chapter, "word_count", None),
                 "processed": chapter.processed,
                 "intelligence_available": intelligence_map.get(chapter.number, True),
                 "read": access.workspace_shell == "author" or chapter.number in read_set,
@@ -699,6 +700,7 @@ async def build_summary_collection_payload(
     collaborator=None,
     progress: ReadingProgress | None = None,
     intelligence_map: dict[int, bool] | None = None,
+    enqueue_missing_analysis: bool = False,
 ) -> dict[str, Any]:
     if progress is None:
         progress = (
@@ -742,20 +744,34 @@ async def build_summary_collection_payload(
         str(row[0]): {"content": row[1], "key_events": row[2] or []}
         for row in summary_rows
     }
+    missing_summary_chapters = [
+        chapter
+        for chapter in chapters
+        if str(chapter.id) not in summary_by_chapter_id
+    ]
+    detailed_summary_chapter_ids: set[uuid.UUID] = set()
+    if enqueue_missing_analysis and missing_summary_chapters:
+        detailed_summary_chapter_ids = set(
+            (
+                await db.execute(
+                    select(ChapterSummary.chapter_id).where(
+                        ChapterSummary.chapter_id.in_([chapter.id for chapter in missing_summary_chapters]),
+                        ChapterSummary.mode == "detailed",
+                    )
+                )
+            ).scalars().all()
+        )
 
     queued_chapter_ids: set[uuid.UUID] = set()
-    for chapter in chapters:
-        chapter_key = str(chapter.id)
-        if chapter_key in summary_by_chapter_id:
-            continue
-        if await queue_analysis_if_missing(db, chapter, current_user):
-            queued_chapter_ids.add(chapter.id)
-        summary_data = await get_or_generate_summary(db, book.id, chapter.number, "short")
-        if summary_data and summary_data.get("status") == "ready":
-            summary_by_chapter_id[chapter_key] = {
-                "content": summary_data["content"],
-                "key_events": summary_data.get("key_events") or [],
-            }
+    if enqueue_missing_analysis:
+        for chapter in missing_summary_chapters:
+            if await queue_analysis_if_missing(
+                db,
+                chapter,
+                current_user,
+                detailed_summary_chapter_ids=detailed_summary_chapter_ids,
+            ):
+                queued_chapter_ids.add(chapter.id)
 
     return {
         "read_upto": read_upto,
@@ -781,8 +797,17 @@ async def build_summary_collection_payload(
     }
 
 
-async def queue_analysis_if_missing(db: AsyncSession, chapter: Chapter, current_user=None) -> bool:
-    if await chapter_has_detailed_summary(db, chapter.id):
+async def queue_analysis_if_missing(
+    db: AsyncSession,
+    chapter: Chapter,
+    current_user=None,
+    *,
+    detailed_summary_chapter_ids: set[uuid.UUID] | None = None,
+) -> bool:
+    if detailed_summary_chapter_ids is None:
+        if await chapter_has_detailed_summary(db, chapter.id):
+            return False
+    elif chapter.id in detailed_summary_chapter_ids:
         return False
     analysis_state = chapter.analysis_state if isinstance(chapter.analysis_state, dict) else {}
     if str(analysis_state.get("status") or "").strip() in {"queued", "running"}:
@@ -1016,8 +1041,18 @@ def timeline_relationship_detail(
     character_b: str,
     rel_type: str | None,
     description: str | None,
+    shared_labels: object | None = None,
+    character_a_to_b_labels: object | None = None,
+    character_b_to_a_labels: object | None = None,
 ) -> tuple[str, str]:
-    relation = (rel_type or "connection").replace("_", " ")
+    from app.utils.relationship_utils import normalize_relationship_labels, relationship_label_display
+
+    labels = (
+        normalize_relationship_labels(character_a_to_b_labels)
+        + normalize_relationship_labels(character_b_to_a_labels)
+        + normalize_relationship_labels(shared_labels)
+    )
+    relation = ", ".join(relationship_label_display(label) for label in labels[:4]) or (rel_type or "connection").replace("_", " ")
     title = f"{character_a} and {character_b}"
     if description and description.strip():
         return title, description.strip()

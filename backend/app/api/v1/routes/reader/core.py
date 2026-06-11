@@ -21,7 +21,7 @@ from app.schemas.reader import SaveQuoteBody
 from app.services.chapter_recovery_service import resolve_reader_chapter_payload
 from app.services.summary_service import get_or_generate_summary
 from app.utils.beta_read_utils import list_chapter_beta_feedback
-from app.utils.billing_utils import summary_mode_allowed
+from app.utils.billing_utils import require_author_access, summary_mode_allowed
 from app.utils.book_utils import (
     collaboration_allows_chapter,
     collaboration_can_copy_manuscript,
@@ -226,6 +226,8 @@ async def smart_tap(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_allows_chapter(collaborator, chapter):
         raise HTTPException(403, "This share does not include that chapter.")
+    if collaborator is None:
+        require_author_access(current_user)
 
     # Check if book has embeddings (processing complete)
     chunk_count = await db.scalar(
@@ -307,11 +309,15 @@ async def smart_tap(
                 continue
             summary = relationship_summary_for_character(rel, char.name, counterpart_name, char.name)
             if summary:
+                label_signature = ":".join(
+                    ",".join(str(item) for item in (getattr(rel, field, None) or []))
+                    for field in ("shared_labels", "character_a_to_b_labels", "character_b_to_a_labels")
+                )
                 append_unique_summary(
                     rel_summaries,
                     rel_keys,
                     str(char.id),
-                    f"{rel.rel_type}:{counterpart_name}".lower(),
+                    f"{rel.rel_type}:{rel.from_chapter}:{rel.to_chapter}:{label_signature}:{counterpart_name}".lower(),
                     summary,
                 )
 
@@ -331,6 +337,10 @@ async def smart_tap(
                     "type": r.rel_type,
                     "sentiment": r.sentiment,
                     "description": r.description,
+                    "shared_labels": list(getattr(r, "shared_labels", None) or []),
+                    "character_a_to_b_labels": list(getattr(r, "character_a_to_b_labels", None) or []),
+                    "character_b_to_a_labels": list(getattr(r, "character_b_to_a_labels", None) or []),
+                    "label_evidence": dict(getattr(r, "label_evidence", None) or {}),
                 }
                 for r in rels
             ],
@@ -373,6 +383,8 @@ async def get_summary(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_allows_chapter(collaborator, chapter_num):
         raise HTTPException(403, "This share does not include that chapter.")
+    if collaborator is None:
+        require_author_access(current_user)
 
     if mode not in ("short", "detailed", "key_points"):
         raise HTTPException(400, "Invalid mode")
@@ -428,6 +440,8 @@ async def search(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_allows_chapter(collaborator, chapter):
         raise HTTPException(403, "This share does not include that chapter.")
+    if collaborator is None:
+        require_author_access(current_user)
 
     cache_key = key_search_results(f"{current_user.id}:{book_id}", q, chapter)
     cached = await cache_get(cache_key)
@@ -497,6 +511,8 @@ async def get_summary_collection(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
     return await build_summary_collection_payload(
         db,
         book=book,
@@ -514,6 +530,8 @@ async def thematic_search(
     _=Depends(rate_limit_search),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
 
     read_set = await summary_visible_chapter_set(db, book, current_user, collaborator)
     if collaborator is not None:
@@ -579,6 +597,7 @@ async def save_quote(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
     quote_text = _clean_text(body.quote_text)
     if not quote_text:
         raise HTTPException(400, "Quote text is required")

@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 
 import { LegalContactBlock, LegalPageShell, LegalRightRail } from "@/components/legal/LegalPageShell"
-import { LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
+import { DELETION_REQUEST_EMAIL, LEGAL_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
 
 export const metadata: Metadata = {
@@ -24,6 +24,7 @@ const sections = [
     title: "Use the support inbox for product and billing help",
     paragraphs: [
       `The support inbox at ${SUPPORT_EMAIL} is the main path for user help. Use it for account access problems, billing portal issues, refund review requests, bug reports, feature questions, manuscript workflow confusion, or anything else tied to how the product is behaving for you.`,
+      `To request deletion of your account or manuscript data, email ${DELETION_REQUEST_EMAIL}.`,
       "When you report a product issue, include enough context for a human to act on it. Helpful reports usually mention the account email, the page or feature involved, what you expected to happen, what actually happened, and whether the issue is repeatable.",
     ],
   },

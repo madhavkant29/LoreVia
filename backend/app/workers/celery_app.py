@@ -172,6 +172,11 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/15"),
             "kwargs": {"limit": 100},
         },
+        "maintenance-process-data-deletion-requests-hourly": {
+            "task": "maintenance_tasks.process_data_deletion_requests",
+            "schedule": crontab(minute=20),
+            "kwargs": {"limit": 50},
+        },
         "maintenance-cleanup-expired-advisor-jobs-hourly": {
             "task": "maintenance_tasks.cleanup_expired_advisor_jobs",
             "schedule": crontab(minute=30),

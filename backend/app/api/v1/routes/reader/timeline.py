@@ -27,6 +27,7 @@ from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotT
 from app.models.progress import ReadingProgress
 from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
 from app.schemas.reader import PlotThreadOut, UpdatePlotThreadBody
+from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import (
     collaboration_allows_chapter,
     get_book_with_collaboration_access,
@@ -37,7 +38,6 @@ from app.utils.reader_utils import (
     dedupe_timeline_events,
     is_valid_timeline_character,
     list_plot_threads,
-    queue_analysis_if_missing,
     summary_visible_chapter_set,
     timeline_character_detail,
     timeline_plot_thread_span,
@@ -127,6 +127,7 @@ async def get_reader_events(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     progress_result = await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
@@ -192,6 +193,8 @@ async def get_foreshadowing_highlights(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
 
     read_set = await summary_visible_chapter_set(db, book, current_user, collaborator)
     if collaborator is not None:
@@ -215,15 +218,6 @@ async def get_foreshadowing_highlights(
     if items:
         return {"items": items}
 
-    chapters = (
-        await db.execute(
-            select(Chapter)
-            .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)))
-            .order_by(Chapter.number)
-        )
-    ).scalars().all()
-    for chapter in chapters:
-        await queue_analysis_if_missing(db, chapter, current_user)
     return {"items": items}
 
 
@@ -242,6 +236,8 @@ async def get_timeline(
     if offset < 0:
         raise HTTPException(400, "offset must be >= 0")
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
 
     use_cache = parse_csv_param(include) is None
     if use_cache:
@@ -399,7 +395,15 @@ async def get_timeline(
             b_name = character_lookup.get(rel.character_b_id)
             if not a_name or not b_name:
                 continue
-            title, detail = timeline_relationship_detail(a_name, b_name, rel.rel_type, rel.description)
+            title, detail = timeline_relationship_detail(
+                a_name,
+                b_name,
+                rel.rel_type,
+                rel.description,
+                getattr(rel, "shared_labels", None),
+                getattr(rel, "character_a_to_b_labels", None),
+                getattr(rel, "character_b_to_a_labels", None),
+            )
             if want_events:
                 events.append({
                     "chapter_number": rel.from_chapter,
@@ -414,6 +418,10 @@ async def get_timeline(
                     "title": title,
                     "chapter_number": rel.from_chapter,
                     "detail": detail,
+                    "type": rel.rel_type,
+                    "shared_labels": list(getattr(rel, "shared_labels", None) or []),
+                    "character_a_to_b_labels": list(getattr(rel, "character_a_to_b_labels", None) or []),
+                    "character_b_to_a_labels": list(getattr(rel, "character_b_to_a_labels", None) or []),
                 })
 
     if want_events:
@@ -455,6 +463,7 @@ async def get_plot_threads(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
     return await list_plot_threads(db, book_id, chapter)
 
 
@@ -469,6 +478,7 @@ async def save_plot_thread_note(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     thread = await update_plot_thread_note(db, book_id, thread_id, body.note, body.status)
     if thread is None:
@@ -486,6 +496,7 @@ async def memory_recall(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
     book_title = book.title
 
     cache_key = key_memory_recall(str(current_user.id), str(book_id))

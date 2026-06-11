@@ -2,7 +2,7 @@ import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import type { Book, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
+import type { Book, PreWritingCheck, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
 
 vi.mock("@/components/revision/RevisionIntelligencePanel", () => ({
@@ -195,6 +195,7 @@ function renderDashboard({
         weeklyLoginActivity={[true, false, true, true, false, false, true]}
         dailyWords={1200}
         dailyTarget={1500}
+        userStats={buildUserStats()}
         saveState="idle"
         saveMessage={null}
         onModeChange={() => {}}
@@ -241,9 +242,45 @@ function buildChapters(): ChapterListResponse {
     chapters: Array.from({ length: 10 }, (_, index) => ({
       number: index + 1,
       title: `Chapter ${index + 1}`,
+      word_count: 3000 + index * 100,
       processed: true,
       read: index < 8,
     })),
+  }
+}
+
+function buildUserStats(): UserStats {
+  return {
+    public: {
+      total_books_read: 2,
+      total_words_read: 120000,
+    },
+    private: {
+      total_uploads: 4,
+      total_token_consumption: 0,
+      total_chapters_tracked: 12,
+      saved_quotes: 3,
+    },
+    writing: {
+      today: { words: 1200, target_words: 1500, progress_pct: 80 },
+      this_week: { words: 6400, target_words: 10500, progress_pct: 61 },
+      this_month: { words: 18000, target_words: null, progress_pct: null },
+      this_year: { words: 62000, target_words: null, progress_pct: null },
+      last_24_hours: { words: 1200, target_words: null, progress_pct: null },
+      last_7_days: { words: 6400, target_words: null, progress_pct: null },
+      last_30_days: { words: 18000, target_words: null, progress_pct: null },
+      last_year: { words: 62000, target_words: null, progress_pct: null },
+      heatmap: [
+        { date: "2026-05-14", words: 900 },
+        { date: "2026-05-15", words: 0 },
+        { date: "2026-05-16", words: 1400 },
+        { date: "2026-05-17", words: 1200 },
+        { date: "2026-05-18", words: 800 },
+        { date: "2026-05-19", words: 900 },
+        { date: "2026-05-20", words: 1200 },
+      ],
+      entries_today: [{ book_id: "book-1", chapter_number: 10, title: "Chapter 10", words: 1200 }],
+    },
   }
 }
 
@@ -396,6 +433,7 @@ function buildWorkspace(): WriterWorkspace {
       include_epigraph: false,
       include_prologue: false,
     },
+    novel_preface: "",
     revision_board: {
       items: [],
       last_generated_at: null,

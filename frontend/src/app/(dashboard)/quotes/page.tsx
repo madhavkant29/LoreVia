@@ -12,7 +12,9 @@ import {
   WorkspacePanel,
 } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, booksQuotesCacheKey } from "@/lib/query/cacheKeys"
+import { useAuthStore } from "@/lib/stores/authStore"
 import type { SavedQuote } from "@/types/book"
 
 function formatQuoteChapter(quote: SavedQuote) {
@@ -23,10 +25,13 @@ function formatQuoteChapter(quote: SavedQuote) {
 }
 
 export default function QuotesPage() {
+  const userTier = useAuthStore((state) => state.user?.tier)
+  const canUseAuthorTools = canUseAuthorFeatures(userTier)
   const [query, setQuery] = useState("")
   const { data: quotes = [], isLoading: loading } = useQuery<SavedQuote[]>({
     queryKey: asQueryKey(booksQuotesCacheKey()),
     queryFn: () => booksApi.listQuotes(),
+    enabled: canUseAuthorTools,
     staleTime: 45_000,
   })
 
@@ -61,6 +66,18 @@ export default function QuotesPage() {
   return (
     <WorkspacePage className="min-h-0 bg-transparent">
       <div className="space-y-8 pb-12">
+        {!canUseAuthorTools ? (
+          <WorkspacePanel tone="strong" className="p-6 sm:p-8">
+            <WorkspaceHeader
+              eyebrow="Author feature"
+              title="Saved quotes require an active trial or paid plan."
+              description="Free accounts can read and export owned projects, plus use one Story Advisor turn each week."
+            />
+          </WorkspacePanel>
+        ) : null}
+
+        {canUseAuthorTools ? (
+          <>
         <WorkspacePanel tone="strong" className="p-6 sm:p-8">
           <WorkspaceHeader
             eyebrow="Saved quotes"
@@ -173,6 +190,8 @@ export default function QuotesPage() {
             ))}
           </div>
         )}
+          </>
+        ) : null}
       </div>
     </WorkspacePage>
   )

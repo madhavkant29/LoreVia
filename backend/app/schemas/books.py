@@ -215,6 +215,17 @@ class BookModeBody(BaseModel):
     mode: str
 
 
+class PermanentBookDeletionBody(BaseModel):
+    confirmation_text: str
+
+
+class PermanentBookDeletionOut(BaseModel):
+    ok: bool = True
+    book_id: uuid.UUID
+    deletion_request_id: uuid.UUID
+    status: str
+
+
 class CharacterCreateBody(BaseModel):
     name: str
     first_chapter: int = Field(default=1, ge=1)
@@ -257,6 +268,10 @@ class RelationshipCreateBody(BaseModel):
     description: str | None = None
     from_chapter: int = Field(default=1, ge=1)
     to_chapter: int | None = Field(default=None, ge=1)
+    shared_labels: list[str] = Field(default_factory=list)
+    character_a_to_b_labels: list[str] = Field(default_factory=list)
+    character_b_to_a_labels: list[str] = Field(default_factory=list)
+    label_evidence: dict | None = None
 
 
 class RelationshipUpdateBody(BaseModel):
@@ -265,6 +280,10 @@ class RelationshipUpdateBody(BaseModel):
     description: str | None = None
     from_chapter: int | None = None
     to_chapter: int | None = None
+    shared_labels: list[str] | None = None
+    character_a_to_b_labels: list[str] | None = None
+    character_b_to_a_labels: list[str] | None = None
+    label_evidence: dict | None = None
 
 
 class CharacterShareOut(BaseModel):
@@ -370,6 +389,10 @@ class RelationshipCandidateAcceptBody(BaseModel):
     description: str | None = None
     from_chapter: int | None = Field(default=None, ge=1)
     to_chapter: int | None = Field(default=None, ge=1)
+    shared_labels: list[str] | None = None
+    character_a_to_b_labels: list[str] | None = None
+    character_b_to_a_labels: list[str] | None = None
+    label_evidence: dict | None = None
 
 
 class ChapterReportCharacter(BaseModel):
@@ -688,6 +711,23 @@ class ManuscriptFrontMatterOut(BaseModel):
     include_prologue: bool = False
 
 
+class NovelFrontMatterOut(BaseModel):
+    dedication: str = ""
+    acknowledgements: str = ""
+    copyright_page: str = ""
+    about_author: str = ""
+    series_book_list: str = ""
+
+
+class NovelEpubMetadataOut(BaseModel):
+    publisher: str = ""
+    language: str = "en"
+    isbn: str = ""
+    description: str = ""
+    series_name: str = ""
+    series_number: str = ""
+
+
 class RevisionBoardItemStateOut(BaseModel):
     item_id: str
     status: str = "pending"
@@ -743,6 +783,9 @@ class WriterWorkspaceOut(BaseModel):
     templates: list[WritingTemplateOut]
     publishing: PublishingPresetOut
     manuscript_front_matter: ManuscriptFrontMatterOut
+    novel_preface: str = ""
+    novel_front_matter: NovelFrontMatterOut = Field(default_factory=NovelFrontMatterOut)
+    novel_epub_metadata: NovelEpubMetadataOut = Field(default_factory=NovelEpubMetadataOut)
     revision_board: RevisionBoardOut
     editor_preferences: EditorPreferencesOut = Field(default_factory=EditorPreferencesOut)
     reading_themes: ReadingThemesOut = Field(default_factory=ReadingThemesOut)
@@ -854,6 +897,23 @@ class ManuscriptFrontMatterBody(BaseModel):
     include_prologue: bool | None = None
 
 
+class NovelFrontMatterBody(BaseModel):
+    dedication: str | None = Field(default=None, max_length=100_000)
+    acknowledgements: str | None = Field(default=None, max_length=100_000)
+    copyright_page: str | None = Field(default=None, max_length=100_000)
+    about_author: str | None = Field(default=None, max_length=100_000)
+    series_book_list: str | None = Field(default=None, max_length=100_000)
+
+
+class NovelEpubMetadataBody(BaseModel):
+    publisher: str | None = Field(default=None, max_length=500)
+    language: str | None = Field(default=None, max_length=24)
+    isbn: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=20_000)
+    series_name: str | None = Field(default=None, max_length=500)
+    series_number: str | None = Field(default=None, max_length=64)
+
+
 class RevisionBoardItemStateBody(BaseModel):
     item_id: str
     status: str = "pending"
@@ -874,6 +934,9 @@ class WriterWorkspaceBody(BaseModel):
     templates: list[WritingTemplateBody] | None = None
     publishing: PublishingPresetBody | None = None
     manuscript_front_matter: ManuscriptFrontMatterBody | None = None
+    novel_preface: str | None = None
+    novel_front_matter: NovelFrontMatterBody | None = None
+    novel_epub_metadata: NovelEpubMetadataBody | None = None
     revision_board: RevisionBoardBody | None = None
     editor_preferences: EditorPreferencesBody | None = None
     reading_themes: ReadingThemesBody | None = None
@@ -882,6 +945,16 @@ class WriterWorkspaceBody(BaseModel):
     structure_tree: list[WorkspaceStructureNodeBody] | None = None
     reprocess: ReprocessMetadataBody | None = None
     index_format: str | None = None
+
+
+class NovelPrefaceBody(BaseModel):
+    preface: str = Field(default="", max_length=100_000)
+
+
+class NovelSettingsBody(BaseModel):
+    preface: str = Field(default="", max_length=100_000)
+    front_matter: NovelFrontMatterBody = Field(default_factory=NovelFrontMatterBody)
+    epub_metadata: NovelEpubMetadataBody = Field(default_factory=NovelEpubMetadataBody)
 
 
 class RevisionActionItemOut(BaseModel):

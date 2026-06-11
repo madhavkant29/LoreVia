@@ -12,15 +12,20 @@ import {
   WorkspacePanel,
 } from "@/components/ui/Workspace"
 import { booksApi } from "@/lib/api/books"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, booksNotesCacheKey } from "@/lib/query/cacheKeys"
+import { useAuthStore } from "@/lib/stores/authStore"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import type { BookNote } from "@/types/book"
 
 export default function NotesPage() {
+  const userTier = useAuthStore((state) => state.user?.tier)
+  const canUseAuthorTools = canUseAuthorFeatures(userTier)
   const [query, setQuery] = useState("")
   const { data: notes = [], isLoading: loading } = useQuery<BookNote[]>({
     queryKey: asQueryKey(booksNotesCacheKey()),
     queryFn: () => booksApi.listNotes(),
+    enabled: canUseAuthorTools,
     staleTime: 30_000,
   })
 
@@ -43,6 +48,18 @@ export default function NotesPage() {
   return (
     <WorkspacePage className="min-h-0 bg-transparent">
       <div className="space-y-8 pb-12">
+        {!canUseAuthorTools ? (
+          <WorkspacePanel tone="strong" className="p-6 sm:p-8">
+            <WorkspaceHeader
+              eyebrow="Author feature"
+              title="Notes require an active trial or paid plan."
+              description="Free accounts can read and export owned projects, plus use one Story Advisor turn each week."
+            />
+          </WorkspacePanel>
+        ) : null}
+
+        {canUseAuthorTools ? (
+          <>
         <WorkspacePanel tone="strong" className="p-6 sm:p-8">
           <WorkspaceHeader
             eyebrow="Story notes"
@@ -146,6 +163,8 @@ export default function NotesPage() {
             ))}
           </div>
         )}
+          </>
+        ) : null}
       </div>
     </WorkspacePage>
   )

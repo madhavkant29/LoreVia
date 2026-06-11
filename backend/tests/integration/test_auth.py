@@ -1365,13 +1365,16 @@ async def test_tier_limits_reflect_strict_free_plan(client, auth_headers):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["free_max_books"] == 1
+    assert payload["free_max_books"] == 0
     assert payload["free_total_token_budget"] == 150000
-    assert payload["free_search_per_day"] == 3
+    assert payload["free_search_per_day"] == 0
     assert payload["free_prediction_per_day"] == 1
-    assert payload["free_recall_per_day"] == 2
-    assert payload["free_advisor_per_day"] == 1
-    assert payload["free_continuity_per_day"] == 1
+    assert payload["free_recall_per_day"] == 0
+    assert payload["free_advisor_per_day"] == 0
+    assert payload["free_advisor_per_week"] == 1
+    assert payload["free_advisor_per_month"] == 4
+    assert payload["free_continuity_per_day"] == 0
+    assert payload["free_continuity_per_minute"] == 0
 
 
 @pytest.mark.asyncio

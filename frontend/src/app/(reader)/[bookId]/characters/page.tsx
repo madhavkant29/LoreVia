@@ -11,13 +11,13 @@ import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
+import { candidateAdjudicationBadges } from "@/lib/utils/characterAdjudication"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { CharacterEvidencePanel } from "@/components/reader/CharacterEvidencePanel"
 import { CharacterProfileRightRail, type CharacterHealth, type ConnectedRelationship, type SidebarTab } from "@/components/reader/CharacterProfileRightRail"
 import { CharacterProfileTabs, type CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
 import { CharacterWorkspaceHeader } from "@/components/reader/CharacterWorkspaceHeader"
 import { CharacterWorkspaceSidebarHeader } from "@/components/reader/CharacterWorkspaceSidebarHeader"
-import { FirstTimeTooltip } from "@/components/tooltips/FirstTimeTooltip"
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 import type { Book } from "@/types/book"
@@ -31,7 +31,7 @@ import type {
   CharacterShadowRecord,
   RelationshipGraph as RelationshipGraphData,
 } from "@/types/character"
-import type { ReadingProgress, SearchResult } from "@/types/reader"
+import type { ChapterListResponse, ReadingProgress, SearchResult } from "@/types/reader"
 
 const RelationshipGraph = dynamic(
   () => import("@/components/intelligence/RelationshipGraph"),
@@ -246,6 +246,11 @@ function formatRoleFilterLabel(role: Character["role"]) {
   return "unclassified"
 }
 
+function formatTraitLabel(key: string) {
+  if (key === "age") return "Age"
+  return key.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 function formatStatus(status: Character["status"]) {
   return status === "deceased" ? "Deceased" : "Active"
 }
@@ -348,9 +353,22 @@ function graphVisibilityReasonCopy(reason: string) {
 
 function visibleTraitEntries(character: Character | null) {
   if (!character) return []
-  return Object.entries(character.trait_state ?? {}).filter(([, trait]) => (
+  const entries = Object.entries(character.trait_state ?? {}).filter(([, trait]) => (
     trait && trait.confidence >= CONFIDENCE_THRESHOLDS.SHOW_IN_UI && trait.value
   ))
+  const seen = new Set(entries.map(([key]) => key))
+  const addLegacyTrait = (key: string, value: string | null | undefined) => {
+    const trimmed = value?.trim()
+    if (!trimmed || seen.has(key)) return
+    entries.push([key, { value: trimmed, confidence: 1, type: "objective" }])
+    seen.add(key)
+  }
+  addLegacyTrait("hair", character.hair)
+  addLegacyTrait("eyes", character.eyes)
+  addLegacyTrait("build", character.build)
+  addLegacyTrait("age", character.age_descriptor)
+  addLegacyTrait("distinguishing", character.distinguishing)
+  return entries
 }
 
 function missingTraitLabels(character: Character) {
@@ -372,6 +390,13 @@ function sentimentLabel(value: number | null | undefined) {
 function strengthValue(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return 32
   return Math.max(18, Math.min(100, Math.round((value + 1) * 50)))
+}
+
+function relationshipStrengthColor(value: number | null | undefined, isDark: boolean) {
+  if (typeof value !== "number" || Number.isNaN(value)) return isDark ? "bg-slate-500" : "bg-stone-400"
+  if (value >= 0.4) return "bg-teal-600"
+  if (value <= -0.4) return "bg-rose-500"
+  return isDark ? "bg-slate-500" : "bg-stone-400"
 }
 
 function growthTitle(event: NonNullable<Character["growth_events"]>[number]) {
@@ -507,13 +532,97 @@ function buildSelectedCharacterSummary(character: Character | null, connections:
     .join(" ")
 }
 
-function topStats(characterCount: number, relationshipCount: number, chapter: number, mergeSuggestionCount: number) {
+type CharacterBibleStat = {
+  label: string
+  value: string
+  detail?: string
+  tone: "default" | "teal" | "amber" | "rose" | "violet"
+  icon: "characters" | "relationships" | "chapter" | "merge" | "review"
+}
+
+function topStats({
+  characterCount,
+  reviewedCount,
+  flaggedCount,
+  duplicateCount,
+  unresolvedCount,
+}: {
+  characterCount: number
+  reviewedCount: number
+  flaggedCount: number
+  duplicateCount: number
+  unresolvedCount: number
+}): CharacterBibleStat[] {
+  const percent = (value: number) => characterCount > 0 ? `${Math.round((value / characterCount) * 100)}%` : "0%"
   return [
-    { label: "characters", value: String(characterCount) },
-    { label: "relationships", value: String(relationshipCount) },
-    { label: "chapter", value: String(chapter) },
-    { label: "merge suggestions", value: String(mergeSuggestionCount) },
+    { label: "Total characters", value: String(characterCount), tone: "default", icon: "characters" },
+    { label: "Reviewed", value: String(reviewedCount), detail: percent(reviewedCount), tone: "teal", icon: "review" },
+    { label: "Flagged", value: String(flaggedCount), detail: percent(flaggedCount), tone: "amber", icon: "chapter" },
+    { label: "Potential duplicates", value: String(duplicateCount), detail: percent(duplicateCount), tone: "violet", icon: "merge" },
+    { label: "Unresolved items", value: String(unresolvedCount), detail: "View", tone: "rose", icon: "review" },
   ]
+}
+
+function isReviewedCharacter(character: Character) {
+  return Boolean(
+    character.approval_state === "approved"
+    || character.approval_state === "protected"
+    || character.analysis_metadata?.user_curated
+    || character.is_manual,
+  )
+}
+
+function isFlaggedCharacter(character: Character, flags: string[]) {
+  return Boolean(
+    flags.length > 0
+    || character.approval_state === "pending_review"
+    || character.analysis_metadata?.needs_review
+    || (character.analysis_metadata?.quality_flags?.length ?? 0) > 0,
+  )
+}
+
+function reviewStatusLabel(character: Character, flags: string[]) {
+  if (isFlaggedCharacter(character, flags)) return "Flagged"
+  if (isReviewedCharacter(character)) return "Reviewed"
+  return "Unresolved"
+}
+
+function chapterSpanCount(character: Character) {
+  const first = character.first_chapter || 1
+  const last = character.last_seen_chapter ?? first
+  return Math.max(1, last - first + 1)
+}
+
+function bookCoverageLabel(character: Character, totalChapters: number | null | undefined) {
+  if (!totalChapters || totalChapters < 1) return "Coverage unknown"
+  return `${Math.min(100, Math.round((chapterSpanCount(character) / totalChapters) * 100))}% of book`
+}
+
+function chapterAppearanceLabel(chapter: number | null | undefined) {
+  if (typeof chapter !== "number" || chapter < 1) return "Chapter unknown"
+  return `Chapter ${chapter}`
+}
+
+function knownFacts(character: Character, connections: ConnectedRelationship[]) {
+  const facts: string[] = []
+  for (const [key, trait] of Object.entries(character.trait_state ?? {})) {
+    if (trait?.value && trait.confidence >= CONFIDENCE_THRESHOLDS.SHOW_IN_UI) {
+      facts.push(`${key.replaceAll("_", " ")}: ${trait.value}`)
+    }
+  }
+  if (character.goal) facts.push(`Goal: ${character.goal}`)
+  if (character.arc_type) facts.push(`Arc: ${character.arc_type}`)
+  if (connections.length > 0) facts.push(`${connections.length} relationship ${connections.length === 1 ? "link" : "links"} tracked`)
+  return facts.slice(0, 5)
+}
+
+function openQuestionsForCharacter(character: Character, connections: ConnectedRelationship[]) {
+  const questions: string[] = []
+  if (!character.goal && !character.arc_tracker?.goal) questions.push(`What does ${character.name} want most clearly?`)
+  if ((character.motivations ?? []).length === 0) questions.push("Which scene proves the motivation?")
+  if (connections.length === 0) questions.push("Which relationship should be linked first?")
+  if (!character.arc_summary) questions.push("What is the long-term arc summary?")
+  return questions.slice(0, 3)
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -725,54 +834,28 @@ function CharacterBibleSkeleton({ isDark, atmosphere }: { isDark: boolean; atmos
   )
 }
 
-function StatCard({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
-  const iconName = label.includes("merge")
-    ? "merge"
-    : label.includes("relationship")
-      ? "relationships"
-      : label.includes("chapter")
-        ? "chapter"
-        : "characters"
-  const tone = label.includes("merge")
-    ? "violet"
-    : label.includes("relationship")
-      ? "teal"
-      : label.includes("chapter")
-        ? "amber"
-        : "default"
-
+function StatCard({ stat, isDark }: { stat: CharacterBibleStat; isDark: boolean }) {
   return (
-    <div className={`min-h-[92px] rounded-md border px-4 py-3.5 ${isDark ? "border-white/10 bg-[#0b1018]" : "border-stone-200 bg-white/92"}`}>
+    <div className={`min-h-[82px] rounded-md border px-4 py-3 ${isDark ? "border-white/10 bg-[#0b1018]" : "border-stone-200 bg-white"}`}>
       <div className="flex items-start justify-between gap-3">
         <span className={`inline-flex h-9 w-9 items-center justify-center rounded-sm ${
-          tone === "violet"
+          stat.tone === "violet"
             ? isDark ? "bg-violet-500/12 text-violet-200" : "bg-violet-50 text-violet-700"
-            : tone === "teal"
+            : stat.tone === "teal"
               ? isDark ? "bg-teal-500/12 text-teal-200" : "bg-teal-50 text-teal-700"
-              : tone === "amber"
-                ? isDark ? "bg-sky-500/10 text-slate-200" : "bg-sky-50 text-sky-700"
+              : stat.tone === "amber"
+                ? isDark ? "bg-amber-500/12 text-amber-200" : "bg-amber-50 text-amber-700"
+                : stat.tone === "rose"
+                  ? isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"
                 : isDark ? "bg-white/[0.05] text-slate-200" : "bg-stone-100 text-stone-700"
         }`}>
-          <ShellIcon name={iconName} className="h-[18px] w-[18px]" />
+          <ShellIcon name={stat.icon} className="h-[18px] w-[18px]" />
         </span>
-        <span
-          className={`mt-1 inline-flex h-2.5 w-2.5 rounded-full ${
-            tone === "violet"
-              ? "bg-violet-400"
-              : tone === "teal"
-                ? "bg-teal-400"
-                : tone === "amber"
-                  ? "bg-teal-400"
-                  : isDark
-                    ? "bg-slate-600"
-                    : "bg-stone-300"
-          }`}
-          aria-hidden="true"
-        />
+        {stat.detail ? <span className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>{stat.detail}</span> : null}
       </div>
-      <div className="mt-4 flex items-end justify-between gap-3">
-        <p className={`text-[2.05rem] font-semibold leading-none tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+      <div className="mt-3">
+        <p className={`text-3xl font-semibold leading-none tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{stat.value}</p>
+        <p className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>{stat.label}</p>
       </div>
     </div>
   )
@@ -880,6 +963,10 @@ export default function CharactersPage() {
     queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
     queryFn: () => readerApi.getProgress(bookId).catch(() => null),
   })
+  const { data: chapterListData = null } = useQuery<ChapterListResponse | null>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
+    queryFn: () => readerApi.getChapterList(bookId).catch(() => null),
+  })
   const {
     data: charactersData = [],
     refetch: refetchCharacters,
@@ -915,7 +1002,11 @@ export default function CharactersPage() {
     refetch: refetchCharacterReview,
   } = useQuery<CharacterReviewResponse>({
     queryKey: asQueryKey(bookCacheKey(bookId, "character-review")),
-    queryFn: () => booksApi.getCharacterReview(bookId).catch(() => emptyReview),
+    queryFn: () => booksApi.getCharacterReview(bookId, {
+      includeQuarantined: true,
+      includePlaces: true,
+      includeRejected: false,
+    }).catch(() => emptyReview),
     enabled: reviewDataEnabled,
     staleTime: 60_000,
   })
@@ -925,7 +1016,7 @@ export default function CharactersPage() {
   const [graphData, setGraphData] = useState<RelationshipGraphData | null>(null)
   const loading = bookLoading || charactersLoading
   const error: string | null = null
-  const [theme] = useState<"light" | "dark">("dark")
+  const [theme] = useState<"light" | "dark">("light")
   const [search, setSearch] = useState("")
   const [selectedId, setSelectedId] = useState("")
   const [selectedMergeKey, setSelectedMergeKey] = useState("")
@@ -935,6 +1026,8 @@ export default function CharactersPage() {
   const [relationshipsEnabled, setRelationshipsEnabled] = useState(false)
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("insights")
   const [castFilter, setCastFilter] = useState<CastFilter>("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [roleFilter, setRoleFilter] = useState("all")
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profile")
   const [showAllCast, setShowAllCast] = useState(false)
   const [dismissedMergeKeys, setDismissedMergeKeys] = useState<string[]>([])
@@ -1026,6 +1119,19 @@ export default function CharactersPage() {
 
   const isDark = theme === "dark"
   const isAuthorMode = book?.mode === "author"
+  const chapterTitleByNumber = useMemo(() => {
+    const titles = new Map<number, string>()
+    for (const chapter of chapterListData?.chapters ?? []) {
+      if (chapter.title?.trim()) titles.set(chapter.number, chapter.title.trim())
+    }
+    return titles
+  }, [chapterListData])
+  const chapterAppearanceText = (chapter: number | null | undefined) => {
+    const label = chapterAppearanceLabel(chapter)
+    if (typeof chapter !== "number") return label
+    const title = chapterTitleByNumber.get(chapter)
+    return title ? `${label} / ${title}` : label
+  }
   const {
     data: identityDiagnostics = emptyIdentityDiagnostics,
     refetch: refetchIdentityDiagnostics,
@@ -1125,7 +1231,13 @@ export default function CharactersPage() {
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
   const pendingCandidates = useMemo(
-    () => (reviewData.candidates ?? []).filter((candidate) => candidate.status === "pending"),
+    () => (reviewData.candidates ?? []).filter((candidate) => (
+      candidate.status === "pending"
+      || (
+        candidate.status === "suppressed"
+        && ["place", "organization", "object", "title_or_role"].includes(candidate.adjudication_status ?? "")
+      )
+    )),
     [reviewData.candidates],
   )
   const pendingRelationshipCandidates = useMemo(
@@ -1237,24 +1349,31 @@ export default function CharactersPage() {
 
   const filteredChars = useMemo(() => chars.filter((char) => {
     const flags = flagsByCharacter.get(char.id) ?? []
+    const statusLabel = reviewStatusLabel(char, flags).toLowerCase()
     const haystack = [
       char.name,
       ...(char.aliases ?? []),
       char.description ?? "",
       char.arc_summary ?? "",
       ...(char.personality_tags ?? []),
+      statusLabel,
+      formatRoleFilterLabel(char.role),
       ...flags,
     ]
       .join(" ")
       .toLowerCase()
 
     if (deferredSearch && !haystack.includes(deferredSearch)) return false
+    if (statusFilter === "reviewed" && !isReviewedCharacter(char)) return false
+    if (statusFilter === "flagged" && !isFlaggedCharacter(char, flags)) return false
+    if (statusFilter === "unresolved" && (isReviewedCharacter(char) || isFlaggedCharacter(char, flags))) return false
+    if (roleFilter !== "all" && char.role !== roleFilter) return false
     if (castFilter === "all") return true
     if (castFilter === "main") return char.role === "mc" || char.role === "sc"
     if (castFilter === "minor") return char.role === "background" || !char.role
     if (castFilter === "duplicates") return mergeSuggestionIds.has(char.id)
     return flags.length > 0
-  }), [castFilter, chars, deferredSearch, flagsByCharacter, mergeSuggestionIds])
+  }), [castFilter, chars, deferredSearch, flagsByCharacter, mergeSuggestionIds, roleFilter, statusFilter])
 
   useEffect(() => {
     if (filteredChars.length === 0) {
@@ -1344,6 +1463,18 @@ export default function CharactersPage() {
     () => selectedCharacter ? connectionsByCharacter.get(selectedCharacter.id) ?? [] : [],
     [connectionsByCharacter, selectedCharacter],
   )
+  const selectedKnownFacts = useMemo(
+    () => selectedCharacter ? knownFacts(selectedCharacter, selectedConnections) : [],
+    [selectedCharacter, selectedConnections],
+  )
+  const selectedTraitEntries = useMemo(
+    () => visibleTraitEntries(selectedCharacter),
+    [selectedCharacter],
+  )
+  const selectedOpenQuestions = useMemo(
+    () => selectedCharacter ? openQuestionsForCharacter(selectedCharacter, selectedConnections) : [],
+    [selectedCharacter, selectedConnections],
+  )
   const hiddenGraphNodes = graphData?.hidden_nodes ?? []
   const selectedHiddenGraphRecord = useMemo(
     () => selectedCharacter ? hiddenGraphNodes.find((node) => node.id === selectedCharacter.id) ?? null : null,
@@ -1353,6 +1484,7 @@ export default function CharactersPage() {
     () => selectedCharacter ? flagsByCharacter.get(selectedCharacter.id) ?? [] : [],
     [flagsByCharacter, selectedCharacter],
   )
+  const selectedReviewStatus = selectedCharacter ? reviewStatusLabel(selectedCharacter, selectedFlags) : "Unresolved"
   const selectedHealth = useMemo(
     () => selectedCharacter ? healthByCharacter.get(selectedCharacter.id) ?? null : null,
     [healthByCharacter, selectedCharacter],
@@ -1392,6 +1524,22 @@ export default function CharactersPage() {
     : selectedMergeSuggestion ? charById.get(selectedMergeSuggestion.secondaryId) ?? null : null
   const selectedMergePrimaryEvidence = selectedMergePrimary ? evidenceCache[selectedMergePrimary.id]?.results ?? [] : []
   const selectedMergeSecondaryEvidence = selectedMergeSecondary ? evidenceCache[selectedMergeSecondary.id]?.results ?? [] : []
+  const dashboardStats = useMemo(() => {
+    let reviewedCount = 0
+    let flaggedCount = 0
+    for (const character of chars) {
+      const flags = flagsByCharacter.get(character.id) ?? []
+      if (isReviewedCharacter(character)) reviewedCount += 1
+      if (isFlaggedCharacter(character, flags)) flaggedCount += 1
+    }
+    return topStats({
+      characterCount: chars.length,
+      reviewedCount,
+      flaggedCount,
+      duplicateCount: mergeSuggestions.length,
+      unresolvedCount: pendingReviewItemCount,
+    })
+  }, [chars, flagsByCharacter, mergeSuggestions.length, pendingReviewItemCount])
 
   useEffect(() => {
     if (!editing) {
@@ -1878,6 +2026,19 @@ export default function CharactersPage() {
     }
   }
 
+  async function handleMarkCandidatePlace(candidate: CharacterCandidate) {
+    setCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      await booksApi.markCharacterCandidatePlace(bookId, candidate.id)
+      await refetchCharacterReview()
+    } catch {
+      setActionError("Could not mark this candidate as a place.")
+    } finally {
+      setCandidateActionId(null)
+    }
+  }
+
   async function handleDemoteSelectedCharacter() {
     if (!selectedCharacter) return
     setSaving(true)
@@ -2220,8 +2381,6 @@ export default function CharactersPage() {
     },
   ] : []
 
-  const stats = topStats(chars.length, graphData?.edges.length ?? 0, relationshipChapter, mergeSuggestions.length)
-
   const atmosphere = isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"
   const sidebarSummary =
     workspaceMode === "duplicates"
@@ -2238,12 +2397,6 @@ export default function CharactersPage() {
 
   return (
     <div className={`min-h-screen transition-colors ${atmosphere}`}>
-      <FirstTimeTooltip
-        storageKey="lorevia-character-bible-first-visit"
-        title="💡 Tip: Merge Duplicate Characters"
-        message="You can merge duplicate characters by clicking on the 3 dots menu (⋮) next to a character, then selecting 'Merge with another character' and choosing the second character you want to merge with."
-        isDark={isDark}
-      />
       <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8">
         <CharacterWorkspaceHeader
           title="Character Bible"
@@ -2251,9 +2404,9 @@ export default function CharactersPage() {
           onBack={() => router.back()}
           isDark={isDark}
           stats={(
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {stats.map((stat) => (
-                <StatCard key={stat.label} label={stat.label} value={stat.value} isDark={isDark} />
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+              {dashboardStats.map((stat) => (
+                <StatCard key={stat.label} stat={stat} isDark={isDark} />
               ))}
             </div>
           )}
@@ -2320,8 +2473,12 @@ export default function CharactersPage() {
                   isDark={isDark}
                   mode={workspaceMode}
                   onCastFilterChange={setCastFilter}
+                  onRoleFilterChange={setRoleFilter}
                   onSearchChange={setSearch}
+                  onStatusFilterChange={setStatusFilter}
+                  roleFilter={roleFilter}
                   search={search}
+                  statusFilter={statusFilter}
                   summary={sidebarSummary}
                 />
 
@@ -2331,7 +2488,8 @@ export default function CharactersPage() {
                     {visibleCastChars.map((char) => {
                       const isActive = selectedCharacter?.id === char.id
                       const flags = flagsByCharacter.get(char.id) ?? []
-                      const health = healthByCharacter.get(char.id)
+                      const statusLabel = reviewStatusLabel(char, flags)
+                      const statusTone = statusLabel === "Reviewed" ? "teal" : statusLabel === "Flagged" ? "amber" : "rose"
                       return (
                         <button
                           key={char.id}
@@ -2365,21 +2523,21 @@ export default function CharactersPage() {
                                       </span>
                                     ) : null}
                                   </div>
-                                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{relationshipCounts.get(char.id) ?? 0} ties</p>
+                                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{formatRole(char.role)}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className={`text-xs font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{health?.score ?? 0}%</span>
-                                  <span
-                                    className="inline-flex h-3.5 w-3.5 rounded-full border-2"
-                                    style={{
-                                      borderColor: health?.tone === "strong" ? "#22c55e" : health?.tone === "moderate" ? "#8b5cf6" : "#f59e0b",
-                                      backgroundColor: "transparent",
-                                    }}
-                                  />
+                                  <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold ${statusTone === "teal"
+                                    ? isDark ? "bg-teal-500/15 text-teal-100" : "bg-teal-50 text-teal-700"
+                                    : statusTone === "amber"
+                                      ? isDark ? "bg-amber-500/15 text-amber-100" : "bg-amber-50 text-amber-700"
+                                      : isDark ? "bg-rose-500/15 text-rose-100" : "bg-rose-50 text-rose-700"
+                                  }`}>
+                                    {statusLabel}
+                                  </span>
                                 </div>
                               </div>
                               <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                                {flags.length > 0 ? flags.slice(0, 2).join(" / ") : `${formatRoleFilterLabel(char.role)} / ${formatChapterRange(char.first_chapter, char.last_seen_chapter ?? null)}`}
+                                {chapterSpanCount(char)} {chapterSpanCount(char) === 1 ? "chapter" : "chapters"} / {relationshipCounts.get(char.id) ?? 0} ties
                               </p>
                             </div>
                           </div>
@@ -2477,12 +2635,19 @@ export default function CharactersPage() {
                             <div key={candidate.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
                               <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.proposed_name}</p>
                               <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter {candidate.chapter_number} · {candidate.confidence}%</p>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {candidateAdjudicationBadges(candidate).slice(0, 3).map((badge) => (
+                                  <span key={`${candidate.id}-${badge}`} className={`rounded-full px-2 py-1 text-[0.68rem] font-semibold ${isDark ? "bg-amber-400/12 text-amber-100" : "bg-amber-50 text-amber-700"}`}>
+                                    {badge}
+                                  </span>
+                                ))}
+                              </div>
                               <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{candidate.reason_codes[0] ?? "Needs review"}</p>
                               {workspaceMode !== "repair" ? (
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    disabled={candidateActionId === candidate.id}
+                                    disabled={candidateActionId === candidate.id || candidate.status !== "pending"}
                                     onClick={() => void handlePromoteCandidate(candidate)}
                                     className={actionButtonClasses(isDark)}
                                   >
@@ -2490,11 +2655,19 @@ export default function CharactersPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    disabled={candidateActionId === candidate.id || !selectedCharacter}
+                                    disabled={candidateActionId === candidate.id || candidate.status !== "pending" || !selectedCharacter}
                                     onClick={() => void handleAttachCandidate(candidate)}
                                     className={actionButtonClasses(isDark)}
                                   >
                                     Attach to selected
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={candidateActionId === candidate.id}
+                                    onClick={() => void handleMarkCandidatePlace(candidate)}
+                                    className={actionButtonClasses(isDark)}
+                                  >
+                                    Mark as place
                                   </button>
                                   <button
                                     type="button"
@@ -2766,6 +2939,10 @@ export default function CharactersPage() {
                         <SurfaceCard title="Identity" isDark={isDark}>
                           <dl className="grid gap-4 text-sm">
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Role</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{formatRole(selectedCharacter.role)}</dd>
+                            </div>
+                            <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
                               <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Aliases</dt>
                               <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.aliases.length > 0 ? selectedCharacter.aliases.join(", ") : "None recorded"}</dd>
                             </div>
@@ -2789,22 +2966,91 @@ export default function CharactersPage() {
                               </dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
-                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Role</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>{formatRole(selectedCharacter.role)}</dd>
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>First appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>
+                                {chapterAppearanceText(selectedCharacter.first_chapter)}
+                              </dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
-                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>First seen</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>Chapter {selectedCharacter.first_chapter}</dd>
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Last appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>
+                                {chapterAppearanceText(selectedCharacter.last_seen_chapter ?? selectedCharacter.first_chapter)}
+                              </dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
-                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Latest chapter</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.last_seen_chapter ? `Chapter ${selectedCharacter.last_seen_chapter}` : `Chapter ${selectedCharacter.first_chapter}`}</dd>
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Chapter count</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterSpanCount(selectedCharacter)} / {bookCoverageLabel(selectedCharacter, book?.total_chapters)}</dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
                               <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Status</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>{formatStatus(selectedCharacter.status)}</dd>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedReviewStatus}</dd>
                             </div>
                           </dl>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Traits and motivations" isDark={isDark}>
+                          <div className="space-y-4">
+                            <div>
+                              <p className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>Traits</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {selectedTraitEntries.length > 0 ? selectedTraitEntries.map(([key, trait]) => trait ? (
+                                  <span key={key} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.06] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                                    {formatTraitLabel(key)}: {trait.value}
+                                  </span>
+                                ) : null) : null}
+                                {(selectedCharacter.personality_tags?.length ?? 0) > 0 ? selectedCharacter.personality_tags.map((trait) => (
+                                  <span key={trait} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-teal-500/10 text-teal-100" : "bg-teal-50 text-teal-800"}`}>{trait}</span>
+                                )) : (
+                                  selectedTraitEntries.length === 0 ? <span className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Traits not recorded</span> : null
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>Motivations</p>
+                              {(selectedCharacter.motivations?.length ?? 0) > 0 ? (
+                                <ul className={`mt-2 space-y-1 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
+                                  {selectedCharacter.motivations.map((motivation) => <li key={motivation}>- {motivation}</li>)}
+                                </ul>
+                              ) : (
+                                <p className={isDark ? "mt-2 text-sm text-slate-400" : "mt-2 text-sm text-stone-500"}>Motivations not recorded</p>
+                              )}
+                            </div>
+                          </div>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Known facts" isDark={isDark}>
+                          {selectedKnownFacts.length > 0 ? (
+                            <ul className={`space-y-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
+                              {selectedKnownFacts.map((fact) => <li key={fact}>- {fact}</li>)}
+                            </ul>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Durable facts not recorded</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Notes and audit" isDark={isDark}>
+                          <div className="space-y-4 text-sm">
+                            <div>
+                              <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Notes</p>
+                              <p className={`mt-1 leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                                {selectedCharacter.analysis_metadata?.review_note || selectedCharacter.relationship_summaries?.[0] || "Reviewer note not recorded"}
+                              </p>
+                            </div>
+                            <dl className="grid grid-cols-3 gap-3">
+                              <div>
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Created</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.created_at ? new Date(selectedCharacter.created_at).toLocaleDateString() : "Not recorded"}</dd>
+                              </div>
+                              <div>
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Last updated</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.approval_updated_at ? new Date(selectedCharacter.approval_updated_at).toLocaleDateString() : "Not tracked"}</dd>
+                              </div>
+                              <div>
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Status</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedReviewStatus}</dd>
+                              </div>
+                            </dl>
+                          </div>
                         </SurfaceCard>
 
                         <SurfaceCard title="Graph visibility" isDark={isDark}>
@@ -3085,20 +3331,119 @@ export default function CharactersPage() {
                         <SurfaceCard title="Relationship table" isDark={isDark}>
                           {selectedConnections.length > 0 ? (
                             <div className="space-y-3">
+                              <div className={`hidden grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_120px_96px] gap-2 px-3 text-xs font-semibold uppercase tracking-wide md:grid ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                                <span>Character</span>
+                                <span>Relationship</span>
+                                <span>Dynamics</span>
+                                <span>Strength</span>
+                                <span>Evidence</span>
+                              </div>
                               {selectedConnections.map((edge, index) => (
-                                <div key={`${edge.source}-${edge.target}-${edge.type}-${index}`} className={`grid gap-2 rounded-xl border px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_120px_90px] ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <div key={`${edge.source}-${edge.target}-${edge.type}-${index}`} className={`grid gap-2 rounded-xl border px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_120px_96px] ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
                                   <div className="min-w-0">
                                     <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{edge.counterpartName}</p>
-                                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{edge.description || "Relationship evidence is still being summarized."}</p>
+                                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{typeof edge.from_chapter === "number" ? `Chapter ${edge.from_chapter}` : "Chapter evidence pending"} / {Math.max(1, Math.round(strengthValue(edge.sentiment) / 10))} mentions</p>
                                   </div>
                                   <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{formatRelationshipType(edge.type)}</div>
-                                  <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{sentimentLabel(edge.sentiment)}</div>
+                                  <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{edge.description || sentimentLabel(edge.sentiment)}</div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`h-2 flex-1 rounded-full ${isDark ? "bg-white/10" : "bg-stone-100"}`}>
+                                      <span className={`block h-2 rounded-full ${relationshipStrengthColor(edge.sentiment, isDark)}`} style={{ width: `${strengthValue(edge.sentiment)}%` }} />
+                                    </span>
+                                  </div>
                                   <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{typeof edge.from_chapter === "number" ? `Ch. ${edge.from_chapter}` : "No ch."}{edge.status === "ended" ? " • ended" : ""}</div>
                                 </div>
                               ))}
                             </div>
                           ) : (
                             <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No relationship links are visible for this character yet.</p>
+                          )}
+                        </SurfaceCard>
+                      </div>
+                    ) : null}
+
+                    {activeTab === "mentions" ? (
+                      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                        <SurfaceCard title="Mention summary" isDark={isDark}>
+                          <dl className="grid gap-3 text-sm">
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Total mentions</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.mention_count ?? 0}</dd>
+                            </div>
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>First appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterAppearanceText(selectedCharacter.first_chapter)}</dd>
+                            </div>
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Last appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterAppearanceText(selectedCharacter.last_seen_chapter ?? selectedCharacter.first_chapter)}</dd>
+                            </div>
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Chapter count</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterSpanCount(selectedCharacter)} / {bookCoverageLabel(selectedCharacter, book?.total_chapters)}</dd>
+                            </div>
+                          </dl>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Open questions" isDark={isDark}>
+                          {selectedOpenQuestions.length > 0 ? (
+                            <ul className={`space-y-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
+                              {selectedOpenQuestions.map((question) => <li key={question}>- {question}</li>)}
+                            </ul>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No open questions are currently derived for this character.</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Mention evidence" isDark={isDark} className="xl:col-span-2">
+                          {selectedEvidence.length > 0 ? (
+                            <div className="space-y-3">
+                              {selectedEvidence.map((result, index) => (
+                                <div key={`${selectedCharacter.id}-mention-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                  <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}{result.chapter_title ? ` / ${result.chapter_title}` : ""}</p>
+                                  <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
+                                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No evidence snippets are loaded yet.</p>
+                              <button type="button" onClick={openCharacterEvidence} className={actionButtonClasses(isDark)}>Load mention evidence</button>
+                            </div>
+                          )}
+                        </SurfaceCard>
+                      </div>
+                    ) : null}
+
+                    {activeTab === "timeline" ? (
+                      <div className="mt-5 space-y-4">
+                        <SurfaceCard title="Timeline anchors" isDark={isDark}>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            {[
+                              ["First appearance", chapterAppearanceText(selectedCharacter.first_chapter)],
+                              ["Latest appearance", chapterAppearanceText(selectedCharacter.last_seen_chapter ?? selectedCharacter.first_chapter)],
+                              ["Coverage", bookCoverageLabel(selectedCharacter, book?.total_chapters)],
+                            ].map(([label, value]) => (
+                              <div key={label} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
+                                <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Timeline" isDark={isDark}>
+                          {(selectedArcTracker?.arc_timeline?.length ?? selectedGrowthEvents.length) > 0 ? (
+                            <div className="space-y-3">
+                              {(selectedArcTracker?.arc_timeline?.length ? selectedArcTracker.arc_timeline : selectedGrowthEvents.map((event) => `${chapterAppearanceLabel(growthChapter(event))}: ${growthTitle(event)}`)).map((line) => (
+                                <div key={line} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No timeline events have been captured yet.</p>
                           )}
                         </SurfaceCard>
                       </div>
@@ -3117,27 +3462,27 @@ export default function CharactersPage() {
                             <dl className="grid gap-3 text-sm">
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Goal</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.goal || selectedCharacter.goal || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.goal || selectedCharacter.goal || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Motivation</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.motivation || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.motivation || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Fear</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.fear || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.fear || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Lie</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.lie_they_believe || selectedCharacter.lie_they_believe || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.lie_they_believe || selectedCharacter.lie_they_believe || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Wound</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.wound_backstory || selectedCharacter.backstory_wound || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.wound_backstory || selectedCharacter.backstory_wound || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Arc type</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.arc_type || selectedCharacter.arc_type || selectedCharacter.archetype || "Still inferring"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.arc_type || selectedCharacter.arc_type || selectedCharacter.archetype || "Not recorded"}</dd>
                               </div>
                             </dl>
                           </SurfaceCard>
@@ -3255,11 +3600,11 @@ export default function CharactersPage() {
                     {activeTab === "continuity" ? (
                       <div className="mt-5 grid gap-4 xl:grid-cols-2">
                         <SurfaceCard title="Continuity traits" isDark={isDark}>
-                          {visibleTraitEntries(selectedCharacter).length > 0 ? (
+                          {selectedTraitEntries.length > 0 ? (
                             <div className="grid gap-3">
-                              {visibleTraitEntries(selectedCharacter).map(([key, trait]) => trait ? (
+                              {selectedTraitEntries.map(([key, trait]) => trait ? (
                                 <div key={key} className={`grid grid-cols-[120px_minmax(0,1fr)] gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
-                                  <span className={isDark ? "text-slate-500" : "text-stone-500"}>{key}</span>
+                                  <span className={isDark ? "text-slate-500" : "text-stone-500"}>{formatTraitLabel(key)}</span>
                                   <span className={isDark ? "text-white" : "text-stone-900"}>{trait.value}</span>
                                 </div>
                               ) : null)}
@@ -3395,6 +3740,11 @@ export default function CharactersPage() {
                               <span className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                 Canonical confidence {formatPercent(selectedReviewCandidate.canonical_confidence)}
                               </span>
+                              {candidateAdjudicationBadges(selectedReviewCandidate).map((badge) => (
+                                <span key={`${selectedReviewCandidate.id}-${badge}`} className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-amber-400/20 bg-amber-400/12 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                                  {badge}
+                                </span>
+                              ))}
                             </div>
                           </div>
 
@@ -3434,12 +3784,15 @@ export default function CharactersPage() {
                             </div>
                           </div>
 
-                          <div className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handlePromoteCandidate(selectedReviewCandidate)} className="w-full rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                          <div className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || selectedReviewCandidate.status !== "pending"} onClick={() => void handlePromoteCandidate(selectedReviewCandidate)} className="w-full rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                               {candidateActionId === selectedReviewCandidate.id ? "Promoting..." : "Promote candidate"}
                             </button>
-                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || !selectedCharacter} onClick={() => void handleAttachCandidate(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || selectedReviewCandidate.status !== "pending" || !selectedCharacter} onClick={() => void handleAttachCandidate(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
                               Attach to selected character
+                            </button>
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handleMarkCandidatePlace(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
+                              Mark as place
                             </button>
                             <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handleRejectCandidate(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
                               Reject candidate

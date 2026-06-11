@@ -34,6 +34,7 @@ from app.utils.book_utils import (
     deserialize_manuscript_content,
     ensure_book_cover,
     estimate_readability,
+    extract_inline_images_from_manuscript_html,
     extract_novel_scene_candidates,
     build_scene_chapter_import_text,
     markdown_to_html,
@@ -270,6 +271,31 @@ class TestManuscriptHtmlImages:
         assert payload["html"] and "<img" in payload["html"]
         assert 'src="data:image/png;base64,AAA"' in payload["html"]
         assert payload["text"] == "Intro"
+
+    def test_extract_inline_images_replaces_data_uri_with_marker(self):
+        """Data URI images should become chapter media payloads and text markers."""
+        html = '<p>Intro</p><p><img src="data:image/png;base64,QUJD" alt="Scene art"></p><p>Outro</p>'
+
+        cleaned_html, images, retained = extract_inline_images_from_manuscript_html(html)
+
+        assert retained == set()
+        assert len(images) == 1
+        assert images[0]["bytes"] == b"ABC"
+        assert images[0]["content_type"] == "image/png"
+        assert images[0]["marker"].startswith("[[IMAGE:")
+        assert cleaned_html and images[0]["marker"] in cleaned_html
+        assert "data:image/png" not in cleaned_html
+
+    def test_extract_inline_images_retains_existing_marker_image(self):
+        """Previously persisted editor images should keep their marker on save."""
+        marker = "[[IMAGE:abc123]]"
+        html = f'<p>Intro</p><p><img src="/api/v1/reader/media/1" alt="{marker}"></p>'
+
+        cleaned_html, images, retained = extract_inline_images_from_manuscript_html(html)
+
+        assert images == []
+        assert retained == {marker}
+        assert cleaned_html and marker in cleaned_html
 
 
 def test_build_blank_cover_image_renders_title_and_author_placeholder():

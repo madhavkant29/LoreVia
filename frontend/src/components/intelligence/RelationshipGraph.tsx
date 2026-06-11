@@ -13,9 +13,14 @@ import { cn } from "@/lib/utils/text"
 import type { RelationshipGraph as GraphData } from "@/types/character"
 
 import {
+  DIRECTIONAL_RELATIONSHIP_LABEL_OPTIONS,
+  PRIMARY_RELATIONSHIP_TYPE_OPTIONS,
+  SHARED_RELATIONSHIP_LABEL_OPTIONS,
   graphLabelKey,
   graphStorageKey,
   nodeInitial,
+  relationshipFacetLabel,
+  relationshipFacetSummary,
   relationshipLabel,
   sentimentLabel,
   zoomPercentLabel,
@@ -49,8 +54,6 @@ type GraphTestHandle = {
   selectEdge: (id: string) => void
   clearSelection: () => void
 }
-
-const RELATIONSHIP_TYPE_OPTIONS = ["ally", "enemy", "family", "mentor", "neutral", "political", "romantic", "rival"] as const
 
 const BASE_LAYOUT = {
   name: "cose",
@@ -160,6 +163,44 @@ function InspectorMetric({ label, value }: { label: string; value: number }) {
       <span className="text-slate-300">{label}</span>
       <span className="font-semibold text-white">{value}</span>
     </div>
+  )
+}
+
+function RelationshipLabelChecklist({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string
+  options: readonly string[]
+  selected: string[]
+  onChange: (labels: string[]) => void
+}) {
+  const selectedSet = new Set(selected)
+  return (
+    <fieldset className="rounded-lg border border-white/10 bg-black/15 p-3">
+      <legend className="px-1 text-xs text-slate-400">{label}</legend>
+      <div className="mt-2 grid max-h-36 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+        {options.map((option) => (
+          <label key={option} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-white/[0.04]">
+            <input
+              type="checkbox"
+              checked={selectedSet.has(option)}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  onChange(Array.from(new Set([...selected, option])))
+                } else {
+                  onChange(selected.filter((item) => item !== option))
+                }
+              }}
+              className="h-3.5 w-3.5 rounded border-white/20 bg-[#0b1020] text-violet-500 focus:ring-violet-400"
+            />
+            <span className="truncate">{relationshipFacetLabel(option)}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   )
 }
 
@@ -332,7 +373,16 @@ export const RelationshipGraph = memo(function RelationshipGraph({
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("arrange")
   const [zoomLevel, setZoomLevel] = useState(1)
   const [showGrid, setShowGrid] = useState(true)
-  const [edgeDraft, setEdgeDraft] = useState({ relType: "", description: "", sentiment: "0", fromChapter: "", toChapter: "" })
+  const [edgeDraft, setEdgeDraft] = useState({
+    relType: "",
+    description: "",
+    sentiment: "0",
+    fromChapter: "",
+    toChapter: "",
+    sharedLabels: [] as string[],
+    sourceToTargetLabels: [] as string[],
+    targetToSourceLabels: [] as string[],
+  })
   const [savingEdge, setSavingEdge] = useState(false)
   const [edgeMessage, setEdgeMessage] = useState<string | null>(null)
 
@@ -410,7 +460,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
         const otherNode = nodeLookup.get(otherId)
         return {
           id: `${otherId}-${edge.type}-${index}`,
-          label: relationshipLabel(edge.type),
+          label: relationshipFacetSummary([...(edge.character_a_to_b_labels ?? []), ...(edge.character_b_to_a_labels ?? []), ...(edge.shared_labels ?? [])], edge.type),
           name: otherNode?.name ?? "Unknown character",
           chapter: edge.from_chapter,
         }
@@ -540,7 +590,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
           ...edge,
           id: `${edge.source}-${edge.target}-${edge.type}-${index}`,
           relationshipId: edge.id,
-          label: relationshipLabel(edge.type),
+          label: relationshipFacetSummary([...(edge.character_a_to_b_labels ?? []), ...(edge.character_b_to_a_labels ?? []), ...(edge.shared_labels ?? [])], edge.type),
         },
       })),
     ]
@@ -656,6 +706,9 @@ export const RelationshipGraph = memo(function RelationshipGraph({
       sentiment: typeof selectedEdge.sentiment === "number" ? String(selectedEdge.sentiment) : "0",
       fromChapter: typeof selectedEdge.from_chapter === "number" ? String(selectedEdge.from_chapter) : "",
       toChapter: typeof selectedEdge.to_chapter === "number" ? String(selectedEdge.to_chapter) : "",
+      sharedLabels: selectedEdge.shared_labels ?? [],
+      sourceToTargetLabels: selectedEdge.character_a_to_b_labels ?? [],
+      targetToSourceLabels: selectedEdge.character_b_to_a_labels ?? [],
     })
     setEdgeMessage(null)
   }, [selectedEdge])
@@ -734,6 +787,9 @@ export const RelationshipGraph = memo(function RelationshipGraph({
         sentiment: edgeDraft.sentiment === "" ? null : Number(edgeDraft.sentiment),
         fromChapter: edgeDraft.fromChapter === "" ? null : Number(edgeDraft.fromChapter),
         toChapter: edgeDraft.toChapter === "" ? null : Number(edgeDraft.toChapter),
+        sharedLabels: edgeDraft.sharedLabels,
+        characterAToBLabels: edgeDraft.sourceToTargetLabels,
+        characterBToALabels: edgeDraft.targetToSourceLabels,
       })
 
       setGraphData((current) => {
@@ -750,6 +806,10 @@ export const RelationshipGraph = memo(function RelationshipGraph({
                   sentiment: updated.sentiment,
                   from_chapter: updated.from_chapter,
                   to_chapter: updated.to_chapter,
+                  shared_labels: updated.shared_labels,
+                  character_a_to_b_labels: updated.character_a_to_b_labels,
+                  character_b_to_a_labels: updated.character_b_to_a_labels,
+                  label_evidence: updated.label_evidence,
                   status: (typeof updated.to_chapter === "number" && updated.to_chapter < upToChapter ? "ended" : "ongoing") as "ended" | "ongoing",
                 }
               : edge
@@ -770,6 +830,10 @@ export const RelationshipGraph = memo(function RelationshipGraph({
                 sentiment: updated.sentiment,
                 from_chapter: updated.from_chapter,
                 to_chapter: updated.to_chapter,
+                shared_labels: updated.shared_labels,
+                character_a_to_b_labels: updated.character_a_to_b_labels,
+                character_b_to_a_labels: updated.character_b_to_a_labels,
+                label_evidence: updated.label_evidence,
               },
             }
           : current
@@ -1162,7 +1226,9 @@ export const RelationshipGraph = memo(function RelationshipGraph({
           <div className="space-y-5">
             <div>
               <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Connection</p>
-              <h3 className="mt-3 text-[1.9rem] font-semibold tracking-tight text-white">{relationshipLabel(selectedEdge.type)}</h3>
+              <h3 className="mt-3 text-[1.9rem] font-semibold tracking-tight text-white">
+                {relationshipFacetSummary([...(selectedEdge.character_a_to_b_labels ?? []), ...(selectedEdge.character_b_to_a_labels ?? []), ...(selectedEdge.shared_labels ?? [])], selectedEdge.type)}
+              </h3>
               {selectedEdgeParticipants ? (
                 <p className="mt-3 text-sm leading-7 text-slate-400">
                   {selectedEdgeParticipants.source} {"->"} {selectedEdgeParticipants.target}
@@ -1178,6 +1244,10 @@ export const RelationshipGraph = memo(function RelationshipGraph({
 
             <InspectorSection title="Network detail">
               <div className="space-y-3 text-sm text-slate-300">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-slate-300">Primary type</span>
+                  <span className="font-semibold text-white">{relationshipFacetLabel(selectedEdge.type)}</span>
+                </div>
                 {typeof selectedEdge.from_chapter === "number" ? <InspectorMetric label="First tracked" value={selectedEdge.from_chapter} /> : null}
                 {typeof selectedEdge.to_chapter === "number" ? <InspectorMetric label="Ends chapter" value={selectedEdge.to_chapter} /> : null}
                 {selectedEdge.status ? (
@@ -1209,16 +1279,40 @@ export const RelationshipGraph = memo(function RelationshipGraph({
                       onChange={(event) => setEdgeDraft((value) => ({ ...value, relType: event.target.value }))}
                       className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
                     >
-                      {edgeDraft.relType && !RELATIONSHIP_TYPE_OPTIONS.includes(edgeDraft.relType as (typeof RELATIONSHIP_TYPE_OPTIONS)[number]) ? (
+                      {edgeDraft.relType && !PRIMARY_RELATIONSHIP_TYPE_OPTIONS.includes(edgeDraft.relType as (typeof PRIMARY_RELATIONSHIP_TYPE_OPTIONS)[number]) ? (
                         <option value={edgeDraft.relType}>{relationshipLabel(edgeDraft.relType)}</option>
                       ) : null}
-                      {RELATIONSHIP_TYPE_OPTIONS.map((type) => (
+                      {PRIMARY_RELATIONSHIP_TYPE_OPTIONS.map((type) => (
                         <option key={type} value={type}>
-                          {relationshipLabel(type)}
+                          {relationshipFacetLabel(type)}
                         </option>
                       ))}
                     </select>
                   </label>
+
+                  <RelationshipLabelChecklist
+                    label="Shared facets"
+                    options={SHARED_RELATIONSHIP_LABEL_OPTIONS}
+                    selected={edgeDraft.sharedLabels}
+                    onChange={(labels) => setEdgeDraft((value) => ({ ...value, sharedLabels: labels }))}
+                  />
+
+                  {selectedEdgeParticipants ? (
+                    <div className="grid gap-3 lg:grid-cols-2">
+                      <RelationshipLabelChecklist
+                        label={`${selectedEdgeParticipants.source} to ${selectedEdgeParticipants.target}`}
+                        options={DIRECTIONAL_RELATIONSHIP_LABEL_OPTIONS}
+                        selected={edgeDraft.sourceToTargetLabels}
+                        onChange={(labels) => setEdgeDraft((value) => ({ ...value, sourceToTargetLabels: labels }))}
+                      />
+                      <RelationshipLabelChecklist
+                        label={`${selectedEdgeParticipants.target} to ${selectedEdgeParticipants.source}`}
+                        options={DIRECTIONAL_RELATIONSHIP_LABEL_OPTIONS}
+                        selected={edgeDraft.targetToSourceLabels}
+                        onChange={(labels) => setEdgeDraft((value) => ({ ...value, targetToSourceLabels: labels }))}
+                      />
+                    </div>
+                  ) : null}
 
                   <label className="block">
                     <span className="mb-1 block text-xs text-slate-400">Relationship note</span>

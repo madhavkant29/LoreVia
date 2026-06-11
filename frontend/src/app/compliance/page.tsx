@@ -45,6 +45,11 @@ const sections = [
       "You remain responsible for what you upload, how you secure your account, and how you classify or handle sensitive content inside your organization. We provide the platform and operational safeguards; you apply your own internal policies, approvals, and risk decisions.",
   },
   {
+    title: "Data rights and deletion",
+    body:
+      "LoreVia provides self-serve data export and account deletion in Settings. You may also request deletion of account or manuscript data at support@mail.getlorevia.com. Account deletion cancels subscription renewal at the next billing period, makes the account inaccessible immediately, and queues hard deletion of product data after the operational retention period while retaining only legally required billing, tax, fraud-prevention, security, or legal records.",
+  },
+  {
     title: "Reporting incidents and security concerns",
     body:
       "If you believe you have found a security issue, exposed data, account compromise, or policy mismatch, contact LoreVia directly using the addresses below. Operational incidents are communicated through our public status page so you can investigate without turning an active issue into a wider risk event.",

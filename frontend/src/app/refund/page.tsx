@@ -27,6 +27,7 @@ const sections = [
       "Cancel anytime through the LoreVia billing portal available in your account settings.",
       "Cancellation stops the next renewal. It does not usually terminate access on the same day.",
       "Keep the paid tier until the current billing period ends, then the account steps down to the free plan if available.",
+      "If you delete your LoreVia account, the subscription renewal is canceled automatically for the next billing period, but deletion is not an automatic refund.",
     ],
   },
   {

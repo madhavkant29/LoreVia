@@ -21,6 +21,10 @@ function isBrowserAnalyticsEnabled() {
 
 let posthogInitPromise: Promise<void> | null = null
 
+function writeAnalyticsConsentCookie(value: "true" | "false") {
+  document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${value}; Max-Age=31536000; Path=/; SameSite=Lax`
+}
+
 async function initPostHog() {
   if (!isBrowserAnalyticsEnabled()) return
   if (!posthogInitPromise) {
@@ -61,11 +65,13 @@ export function PostHogClient() {
   }, [analyticsKey])
 
   const enable = () => {
+    writeAnalyticsConsentCookie("true")
     void initPostHog()
     setConsentValue("true")
   }
 
   const dismiss = () => {
+    writeAnalyticsConsentCookie("false")
     setConsentValue("false")
   }
 

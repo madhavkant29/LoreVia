@@ -1,11 +1,13 @@
-export type CharacterProfileTab = "overview" | "relationships" | "arc" | "evidence" | "continuity" | "notes"
+export type CharacterProfileTab = "overview" | "relationships" | "mentions" | "timeline" | "continuity" | "arc" | "evidence" | "notes"
 
 const PROFILE_TABS: Array<[CharacterProfileTab, string]> = [
   ["overview", "Overview"],
   ["relationships", "Relationships"],
+  ["mentions", "Mentions"],
+  ["timeline", "Timeline"],
   ["arc", "Arc"],
-  ["evidence", "Evidence"],
   ["continuity", "Continuity"],
+  ["evidence", "Evidence"],
   ["notes", "Notes"],
 ]
 

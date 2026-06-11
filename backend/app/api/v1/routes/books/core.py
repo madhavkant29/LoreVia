@@ -150,6 +150,8 @@ from app.schemas.books import (
     EntityTagUpdateBody,
     MajorEventOut,
     ManuscriptImportResult,
+    PermanentBookDeletionBody,
+    PermanentBookDeletionOut,
     VaultGraphOut,
     VaultNoteLinkListOut,
     VaultPreviewOut,
@@ -177,6 +179,7 @@ from app.schemas.books import (
 )
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
 from app.schemas.character import CharacterReviewOut
+from app.services.privacy_service import queue_book_permanent_deletion
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.billing_utils import calculate_upload_usage_summary, require_author_access
 from app.services.pipeline_state_service import (
@@ -310,6 +313,7 @@ from app.utils.reader_utils import (
     build_summary_collection_payload,
     chapter_intelligence_map,
 )
+from app.utils.storage_utils import delete_storage_key_best_effort
 from app.utils.relationship_utils import (
     canonical_relationship_pair_ids,
     repair_relationship_timelines,
@@ -372,6 +376,7 @@ async def update_book_mode(
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     require_book_owner_access(book, current_user, collaborator)
+    require_author_access(current_user)
     mode = (body.mode or "").strip().lower()
     if mode not in {"reader", "author"}:
         raise HTTPException(400, "Invalid mode")
@@ -392,6 +397,7 @@ async def update_book_forum_metadata(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     normalized_title = _clean_text(body.title)
     normalized_genre = _clean_text(body.genre)
     normalized_description = _clean_text(body.description)
@@ -471,6 +477,7 @@ async def get_user_stats(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_author_access(current_user)
     books_result = await db.execute(select(Book).where(Book.user_id == current_user.id).order_by(Book.created_at.desc()))
     books = list(books_result.scalars().all())
 
@@ -522,6 +529,7 @@ async def get_user_stats(
 
 @router.get("/quotes")
 async def list_saved_quotes(db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    require_author_access(current_user)
     rows = (await db.execute(
         select(QuoteEntry, Book.title, Chapter.title)
         .join(Book, Book.id == QuoteEntry.book_id)
@@ -550,6 +558,7 @@ async def list_saved_notes(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_author_access(current_user)
     return await list_user_notes(db, current_user.id)
 
 
@@ -580,11 +589,6 @@ async def get_book_overview(
 ):
     book, collaborator = await get_book_with_collaboration_access(
         db, book_id, current_user,
-        options=(
-            selectinload(Book.characters),
-            selectinload(Book.chapters),
-            selectinload(Book.plot_threads),
-        ),
     )
     await repair_stale_completed_processing_state(db, book)
     await repair_stale_editor_processing_state(db, book)
@@ -660,6 +664,8 @@ async def get_prewriting_check(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_has_resource(collaborator, "reader_confusion_report"):
         raise HTTPException(403, "This share does not include the reader confusion report.")
+    if collaborator is None:
+        require_author_access(current_user)
     next_chapter = upcoming_chapter or ((book.total_chapters or 0) + 1)
     return await build_prewriting_check(db, book, next_chapter)
 
@@ -673,6 +679,8 @@ async def get_story_health(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_has_resource(collaborator, "reader_confusion_report"):
         raise HTTPException(403, "This share does not include the reader confusion report.")
+    if collaborator is None:
+        require_author_access(current_user)
     return await build_story_health_payload(db, book)
 
 
@@ -700,6 +708,8 @@ async def get_book_chapter_reports(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_has_resource(collaborator, "continuity_report"):
         raise HTTPException(403, "This share does not include the continuity report.")
+    if collaborator is None:
+        require_author_access(current_user)
     return await list_chapter_consistency_reports(db, book, limit)
 
 
@@ -789,6 +799,7 @@ async def get_emotional_arc(
         db, book_id, current_user.id,
         options=(selectinload(Book.characters),),
     )
+    require_author_access(current_user)
     book_characters = getattr(book, "characters", None)
     if book_characters is None:
         result = await db.execute(
@@ -855,6 +866,20 @@ async def delete_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), cu
     return await book_out(db, book, current_user.id)
 
 
+@router.delete("/{book_id}/permanent", response_model=PermanentBookDeletionOut)
+async def permanently_delete_book(
+    book_id: uuid.UUID,
+    body: PermanentBookDeletionBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    request = await queue_book_permanent_deletion(db, book, body.confirmation_text, current_user)
+    return PermanentBookDeletionOut(book_id=book_id, deletion_request_id=request.id, status=request.status)
+
+
 # ─── Cover management ─────────────────────────────────────────────────────────
 
 @router.put("/{book_id}/cover", response_model=BookOut)
@@ -865,18 +890,22 @@ async def update_book_cover(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    previous_cover_s3_key = book.cover_s3_key
     raw = await _read_upload_bounded(cover_file, MAX_COVER_UPLOAD_BYTES, "Cover image")
     if not raw:
         raise HTTPException(400, "Cover file is empty")
     suffix, content_type = _validate_cover_magic(raw)
-    book.cover_s3_key = await asyncio.to_thread(
+    next_cover_s3_key = await asyncio.to_thread(
         storage.upload_binary,
         f"covers/{current_user.id}/{uuid.uuid4()}.{suffix}",
         raw,
         content_type,
     )
+    book.cover_s3_key = next_cover_s3_key
     await db.commit()
     await db.refresh(book)
+    if previous_cover_s3_key and previous_cover_s3_key != next_cover_s3_key:
+        await delete_storage_key_best_effort(previous_cover_s3_key, context="book_cover")
     await mark_book_cache_dirty(str(book.id))
     return await book_out(db, book, current_user.id)
 
@@ -888,9 +917,12 @@ async def remove_book_cover(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    previous_cover_s3_key = book.cover_s3_key
     book.cover_s3_key = None
     await db.commit()
     await db.refresh(book)
+    if previous_cover_s3_key:
+        await delete_storage_key_best_effort(previous_cover_s3_key, context="book_cover")
     await mark_book_cache_dirty(str(book.id))
     return await book_out(db, book, current_user.id)
 

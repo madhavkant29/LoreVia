@@ -21,6 +21,7 @@ from app.core.redis import (
 from app.models.book import Book
 from app.models.character import Character, CharacterState
 from app.models.intelligence import CharacterRelationship
+from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import (
     collaboration_allows_chapter,
     get_book_with_collaboration_access,
@@ -33,6 +34,8 @@ from app.utils.reader_utils import (
 )
 from app.utils.relationship_utils import (
     canonicalize_relationship_book_rows,
+    normalize_relationship_labels,
+    relationship_label_display,
     relationship_effective_status,
 )
 from app.utils.sparse_utils import apply_sparse_includes, include_requested, parse_csv_param
@@ -58,9 +61,10 @@ async def get_relationships(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
     use_cache = parse_csv_param(include) is None
     cache_scope = "all" if include_inactive else "active"
-    cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v4:{cache_scope}"
+    cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v5:{cache_scope}"
     if use_cache:
         cached = await cache_get(cache_key)
         if cached:
@@ -132,22 +136,40 @@ async def get_relationships(
             if source == target or source not in canonical_ids or target not in canonical_ids:
                 continue
             left_key, right_key = sorted((source, target))
+            shared_labels = normalize_relationship_labels(getattr(rel, "shared_labels", None))
+            source_to_target_labels = normalize_relationship_labels(getattr(rel, "character_a_to_b_labels", None))
+            target_to_source_labels = normalize_relationship_labels(getattr(rel, "character_b_to_a_labels", None))
+            if source != left_key:
+                source_to_target_labels, target_to_source_labels = target_to_source_labels, source_to_target_labels
+            label_key = (
+                ",".join(shared_labels),
+                ",".join(source_to_target_labels),
+                ",".join(target_to_source_labels),
+            )
             if include_inactive:
                 key = (
                     left_key,
                     right_key,
                     rel.rel_type or "neutral",
+                    *label_key,
                     str(rel.from_chapter or 0),
                     str(rel.to_chapter or "open"),
                 )
             else:
-                key = (left_key, right_key, rel.rel_type or "neutral")
+                key = (left_key, right_key, rel.rel_type or "neutral", *label_key)
             bucket = edge_map.setdefault(key, {
                 "relationship_ids": [], "source": key[0], "target": key[1],
                 "type": rel.rel_type or "neutral", "sentiment_values": [],
                 "descriptions": [], "chapters": [], "end_chapters": [],
+                "shared_labels": [], "source_to_target_labels": [], "target_to_source_labels": [],
+                "label_evidence": {},
             })
             bucket["relationship_ids"].append(str(rel.id))
+            bucket["shared_labels"].extend(label for label in shared_labels if label not in bucket["shared_labels"])
+            bucket["source_to_target_labels"].extend(label for label in source_to_target_labels if label not in bucket["source_to_target_labels"])
+            bucket["target_to_source_labels"].extend(label for label in target_to_source_labels if label not in bucket["target_to_source_labels"])
+            if getattr(rel, "label_evidence", None):
+                bucket["label_evidence"].update(dict(getattr(rel, "label_evidence") or {}))
             if rel.sentiment is not None:
                 bucket["sentiment_values"].append(rel.sentiment)
             if rel.description:
@@ -159,8 +181,11 @@ async def get_relationships(
 
         for item in edge_map.values():
             for char_id, other_id in ((item["source"], item["target"]), (item["target"], item["source"])):
+                directional = item["source_to_target_labels"] if char_id == item["source"] else item["target_to_source_labels"]
+                labels = directional + [label for label in item["shared_labels"] if label not in directional]
+                label_text = ", ".join(relationship_label_display(label) for label in labels[:4]) or item["type"].replace("_", " ")
                 rel_summaries.setdefault(char_id, []).append(
-                    f"{item['type'].replace('_', ' ').capitalize()} connection with {char_names.get(other_id, other_id)}."
+                    f"{label_text.capitalize()} with {char_names.get(other_id, other_id)}."
                 )
 
     chars_with_details = []
@@ -221,6 +246,10 @@ async def get_relationships(
                 "from_chapter": min(item["chapters"]) if item["chapters"] else None,
                 "to_chapter": max(item["end_chapters"]) if item["end_chapters"] else None,
                 "status": "ended" if item["end_chapters"] and max(item["end_chapters"]) < chapter else "ongoing",
+                "shared_labels": item["shared_labels"],
+                "character_a_to_b_labels": item["source_to_target_labels"],
+                "character_b_to_a_labels": item["target_to_source_labels"],
+                "label_evidence": item["label_evidence"],
             }
             for item in edge_map.values()
         ],
@@ -250,6 +279,8 @@ async def get_relationship_evolution(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if collaborator is not None and not collaboration_allows_chapter(collaborator, chapter):
         raise HTTPException(403, "This share does not include that chapter.")
+    if collaborator is None:
+        require_author_access(current_user)
     book_version = await get_book_cache_version(str(book_id))
     progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
     cached = await get_relationship_evolution_cache(
@@ -286,6 +317,10 @@ async def get_relationship_evolution(
             "description": rel.description, "sentiment": rel.sentiment,
             "to_chapter": rel.to_chapter,
             "status": relationship_effective_status(rel, chapter),
+            "shared_labels": list(getattr(rel, "shared_labels", None) or []),
+            "character_a_to_b_labels": list(getattr(rel, "character_a_to_b_labels", None) or []),
+            "character_b_to_a_labels": list(getattr(rel, "character_b_to_a_labels", None) or []),
+            "label_evidence": dict(getattr(rel, "label_evidence", None) or {}),
         })
 
     payload = {"pairs": [{"characters": list(key), "events": value} for key, value in grouped.items()]}

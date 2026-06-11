@@ -339,7 +339,7 @@ def upload_limit_for_user(user: Any) -> int | None:
         return None
     if tier == AUTHOR_TIER:
         return settings.AUTHOR_MAX_UPLOADS
-    return settings.FREE_MAX_BOOKS
+    return 0
 
 
 async def _worldbuilding_upload_cost_by_book(db: AsyncSession, user_id: uuid.UUID) -> dict[uuid.UUID, int]:
@@ -887,10 +887,17 @@ def protected_authoring_limit_per_day(user: Any) -> int:
     if presentation.trial_active:
         return settings.TRIAL_HIGH_COST_TURNS_PER_DAY
     return {
-        FREE_TIER: settings.FREE_ADVISOR_PER_DAY,
+        FREE_TIER: 0,
         AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
     }.get(tier, 0)
+
+
+def free_advisor_limit_per_week(user: Any) -> int | None:
+    presentation = build_tier_presentation(user)
+    if presentation.trial_active or presentation.access_tier != FREE_TIER:
+        return None
+    return settings.FREE_ADVISOR_PER_WEEK
 
 
 def recall_limit_per_day(user: Any) -> int | None:
@@ -903,7 +910,7 @@ def continuity_limit_per_day(user: Any) -> int:
         return settings.TRIAL_HIGH_COST_TURNS_PER_DAY
 
     return {
-        FREE_TIER: settings.FREE_CONTINUITY_PER_DAY,
+        FREE_TIER: 0,
         AUTHOR_TIER: settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
         ARCHITECT_TIER: settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
     }.get(presentation.access_tier, 0)

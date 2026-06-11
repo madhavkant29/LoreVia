@@ -22,6 +22,11 @@ export interface Character {
   mention_count?: number
   status?: "alive" | "deceased"
   trait_state: TraitState
+  hair?: string | null
+  eyes?: string | null
+  build?: string | null
+  age_descriptor?: string | null
+  distinguishing?: string | null
   description: string | null
   personality_tags: string[]
   goal?: string | null
@@ -68,6 +73,7 @@ export interface Character {
   approval_source?: "manual_review" | "deterministic_auto" | "backfill_review" | "legacy_import" | null
   approval_reason_codes?: string[]
   approval_updated_at?: string | null
+  created_at?: string | null
   growth_events?: Array<{
     chapter?: number | null
     chapter_number?: number | null
@@ -149,14 +155,21 @@ export interface CharacterRelationship {
   type: string           // ally | enemy | romantic | family | political | mentor | rival
   sentiment: number | null
   description: string | null
+  shared_labels?: string[]
+  character_a_to_b_labels?: string[]
+  character_b_to_a_labels?: string[]
+  label_evidence?: Record<string, unknown>
 }
 
 export interface CharacterCandidate {
   id: string
   book_id: string
+  chapter_id?: string | null
+  scene_id?: string | null
   chapter_number: number
   raw_name: string
   proposed_name: string
+  display_name?: string | null
   normalized_name: string
   aliases: string[]
   matched_character_id?: string | null
@@ -164,6 +177,13 @@ export interface CharacterCandidate {
   confidence: number
   reason_codes: string[]
   evidence: Record<string, unknown>
+  mention_count?: number | null
+  chapter_count?: number | null
+  evidence_windows?: Array<Record<string, unknown>>
+  entity_type?: "person" | "place" | "organization" | "object" | "title_or_role" | "alias_candidate" | "junk" | "unknown" | string | null
+  adjudication_status?: "candidate" | "promoted_character" | "quarantined" | "rejected" | "merged_alias" | "place" | "organization" | "object" | "title_or_role" | "unknown" | string | null
+  character_score?: number | null
+  rejection_reason?: string | null
   cluster_names: string[]
   cluster_size: number
   cluster_mention_count: number
@@ -283,6 +303,10 @@ export interface CharacterRelationshipCandidate {
   rel_type?: string | null
   sentiment?: number | null
   description?: string | null
+  shared_labels?: string[] | null
+  character_a_to_b_labels?: string[] | null
+  character_b_to_a_labels?: string[] | null
+  label_evidence?: Record<string, unknown> | null
   status: "pending" | "accepted" | "rejected" | "resolved" | "merged" | "suppressed"
   reason_codes: string[]
   evidence: Record<string, unknown>
@@ -366,6 +390,10 @@ export interface RelationshipGraph {
     from_chapter?: number | null
     to_chapter?: number | null
     status?: "ongoing" | "ended"
+    shared_labels?: string[]
+    character_a_to_b_labels?: string[]
+    character_b_to_a_labels?: string[]
+    label_evidence?: Record<string, unknown>
   }>
   hidden_nodes?: Array<{
     id: string

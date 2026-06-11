@@ -210,7 +210,7 @@ async def test_ensure_upload_capacity_blocks_author_when_series_weight_pushes_pa
 
 
 @pytest.mark.asyncio
-async def test_ensure_upload_capacity_blocks_free_users_after_single_upload(db):
+async def test_ensure_upload_capacity_blocks_free_users_from_new_uploads(db):
     user = User(
         email="billing-free-cap@lorevia.app",
         username="billingfreecap",
@@ -228,7 +228,7 @@ async def test_ensure_upload_capacity_blocks_free_users_after_single_upload(db):
         await ensure_upload_capacity(db, user, requested_uploads=1)
 
     assert exc.value.status_code == 403
-    assert "This account is limited to 1 owned upload" in exc.value.detail
+    assert "This account is limited to 0 owned uploads" in exc.value.detail
 
 
 @pytest.mark.asyncio

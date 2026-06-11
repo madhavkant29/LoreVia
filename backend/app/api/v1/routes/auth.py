@@ -39,6 +39,8 @@ from app.core.security import (
 )
 from app.models.user import User
 from app.schemas.auth import (
+    AccountDeletionBody,
+    AccountDeletionOut,
     DailyWordGoalBody,
     ForgotPasswordBody,
     LoginBody,
@@ -53,6 +55,7 @@ from app.schemas.auth import (
     VerifyEmailBody,
     VerifyEmailResendBody,
 )
+from app.services.privacy_service import build_user_data_export, request_account_deletion
 from app.services.auth_service import (
     device_account_limit_message,
     DeviceTrialLimitError,
@@ -86,6 +89,7 @@ from app.utils.auth_utils import (
 )
 from app.utils.billing_utils import build_tier_presentation
 from app.utils.logging.errors import public_error_message
+from app.utils.privacy_utils import user_is_deleted
 from app.utils.user_utils import (
     current_daily_word_count,
     current_daily_word_goal,
@@ -283,6 +287,8 @@ async def login(
     if not user:
         verify_password(body.password, DUMMY_PASSWORD_HASH)
         raise HTTPException(401, "Invalid credentials")
+    if user_is_deleted(user):
+        raise HTTPException(401, "Account has been deleted.")
     try:
         valid = verify_password(body.password, user.password_hash)
     except Exception:
@@ -431,6 +437,9 @@ async def oauth_supabase(
                     "No account found for this Google login. Please create an account first via the Register page.",
                 )
 
+        if user_is_deleted(existing):
+            raise HTTPException(401, "Account has been deleted.")
+
         if device_id is not None:
             try:
                 await link_device_to_user_if_allowed(db, existing.id, device_id, strict=False)
@@ -543,6 +552,8 @@ async def refresh(
         raise HTTPException(401, "Invalid refresh token")
     if not user:
         raise HTTPException(401, "User not found")
+    if user_is_deleted(user):
+        raise HTTPException(401, "Account has been deleted.")
     current_version = current_token_version(user)
     if int(claimed_version) != current_version:
         raise HTTPException(401, "Refresh token expired")
@@ -642,6 +653,48 @@ async def me(
     await db.commit()
     await db.refresh(current_user)
     return await _build_user_out(current_user, db)
+
+
+@router.get("/me/data-export")
+async def export_my_data(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = await build_user_data_export(db, current_user)
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="lorevia-data-export.zip"'},
+    )
+
+
+@router.delete("/me", response_model=AccountDeletionOut)
+async def delete_my_account(
+    body: AccountDeletionBody,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    request, provider_followup_required = await request_account_deletion(
+        db,
+        current_user,
+        confirmation_text=body.confirmation_text,
+        password=body.password,
+    )
+    clear_auth_cookies(response)
+    response.set_cookie(
+        key="lorevia_session_dead",
+        value="1",
+        max_age=30,
+        path="/",
+        secure=auth_cookie_secure(),
+        samesite="lax",
+    )
+    return AccountDeletionOut(
+        deletion_status=current_user.deletion_status,
+        scheduled_for=request.scheduled_for,
+        provider_followup_required=provider_followup_required,
+    )
 
 
 @router.patch("/me/reading-mode")

@@ -91,14 +91,21 @@ class RelationshipOut(BaseModel):
     description: str | None
     from_chapter: int
     to_chapter: int | None
+    shared_labels: list[str] | None = None
+    character_a_to_b_labels: list[str] | None = None
+    character_b_to_a_labels: list[str] | None = None
+    label_evidence: dict | None = None
 
 
 class CharacterCandidateOut(BaseModel):
     id: uuid.UUID
     book_id: uuid.UUID
+    chapter_id: uuid.UUID | None = None
+    scene_id: uuid.UUID | None = None
     chapter_number: int
     raw_name: str
     proposed_name: str
+    display_name: str | None = None
     normalized_name: str
     aliases: list[str] = Field(default_factory=list)
     matched_character_id: uuid.UUID | None = None
@@ -106,6 +113,13 @@ class CharacterCandidateOut(BaseModel):
     confidence: int
     reason_codes: list[str] = Field(default_factory=list)
     evidence: dict = Field(default_factory=dict)
+    mention_count: int | None = None
+    chapter_count: int | None = None
+    evidence_windows: list[dict] = Field(default_factory=list)
+    entity_type: str | None = None
+    adjudication_status: str | None = None
+    character_score: int | None = None
+    rejection_reason: str | None = None
     cluster_names: list[str] = Field(default_factory=list)
     cluster_size: int = 0
     cluster_mention_count: int = 0
@@ -175,6 +189,10 @@ class CharacterRelationshipCandidateOut(BaseModel):
     rel_type: str | None = None
     sentiment: float | None = None
     description: str | None = None
+    shared_labels: list[str] | None = None
+    character_a_to_b_labels: list[str] | None = None
+    character_b_to_a_labels: list[str] | None = None
+    label_evidence: dict | None = None
     status: str
     reason_codes: list[str] = Field(default_factory=list)
     evidence: dict = Field(default_factory=dict)

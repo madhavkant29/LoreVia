@@ -46,6 +46,7 @@ from app.schemas.advisor import (
     SynopsisResponse,
     VoiceConsistencyRequest,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.advisor_utils import (
     EDITORIAL_SYSTEM,
     EDITORIAL_USER,
@@ -391,6 +392,7 @@ async def manuscript_synopsis(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     chapter_rows = (
         await db.execute(

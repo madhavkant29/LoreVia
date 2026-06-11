@@ -66,16 +66,17 @@ from app.utils.migration_utils import (
 def test_runtime_defaults(monkeypatch, request):
     """Run tests with production-like auth and billing behavior by default."""
     monkeypatch.setattr(settings, "DEBUG", False, raising=False)
-    monkeypatch.setattr(settings, "FREE_MAX_BOOKS", 1, raising=False)
+    monkeypatch.setattr(settings, "FREE_MAX_BOOKS", 0, raising=False)
     monkeypatch.setattr(settings, "FREE_TOTAL_TOKEN_BUDGET", 150000, raising=False)
-    monkeypatch.setattr(settings, "FREE_SEARCH_PER_DAY", 3, raising=False)
-    monkeypatch.setattr(settings, "FREE_SUMMARY_PER_HOUR", 30, raising=False)
+    monkeypatch.setattr(settings, "FREE_SEARCH_PER_DAY", 0, raising=False)
+    monkeypatch.setattr(settings, "FREE_SUMMARY_PER_HOUR", 0, raising=False)
     monkeypatch.setattr(settings, "FREE_PREDICTION_PER_DAY", 1, raising=False)
-    monkeypatch.setattr(settings, "FREE_RECALL_PER_DAY", 2, raising=False)
-    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_DAY", 1, raising=False)
-    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_WEEK", 7, raising=False)
-    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_MONTH", 30, raising=False)
-    monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_DAY", 1, raising=False)
+    monkeypatch.setattr(settings, "FREE_RECALL_PER_DAY", 0, raising=False)
+    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_DAY", 0, raising=False)
+    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_WEEK", 1, raising=False)
+    monkeypatch.setattr(settings, "FREE_ADVISOR_PER_MONTH", 4, raising=False)
+    monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_DAY", 0, raising=False)
+    monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_MINUTE", 0, raising=False)
 
     from app.utils import billing_utils as _billing_utils
     monkeypatch.setattr(_billing_utils, "has_authoring_access", lambda *_args, **_kwargs: True, raising=False)

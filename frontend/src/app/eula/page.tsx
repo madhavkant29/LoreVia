@@ -66,7 +66,8 @@ const sections = [
     title: "Termination and survival",
     bullets: [
       "We may suspend or end access if you violate these terms or for safety, legal, or abuse reasons.",
-      "You may stop using LoreVia at any time by closing your account.",
+      "You may stop using LoreVia at any time by closing your account or requesting deletion of account or manuscript data.",
+      "Account deletion makes local product access unavailable immediately and queues deletion of product and manuscript data, subject to legally required billing, tax, fraud-prevention, security, or legal retention.",
       "Sections on ownership, restrictions, disclaimers, liability, and survival remain in effect.",
     ],
   },

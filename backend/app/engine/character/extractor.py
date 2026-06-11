@@ -51,6 +51,15 @@ TRAIT CONFIDENCE RULES:
 - Narrator self-opinion ("plain", "ugly") → cap at 0.35, type="subjective"
 - Single mention → max 0.6; repeated → boost toward 1.0
 
+RELATIONSHIP LABEL RULES:
+- Capture every explicit or strongly implied relationship facet. Do not collapse everyone into "friend".
+- Use "type" as the best single primary snake_case label, then use label arrays for richer facets.
+- shared_labels are pair-level labels true both ways, such as spouse, forbidden_romance, friend_toxic, friend_romantic, business_partner, colleague, rival, enemy, or soulmate.
+- character_a_to_b_labels and character_b_to_a_labels are directional labels, such as father/daughter, mother/son, brother/sister, half_brother/half_sister, master/slave, owner/slave, boss/employee, teacher/student, doctor/patient, captor/prisoner.
+- If a later revelation narrows a relationship, return the narrowed label in that passage: sister -> half_sister, brother -> half_brother, lover -> ex_lover, friend -> former_friend.
+- For taboo or coercive relationships, use factual facets supported by the text such as sibling + spouse + forbidden_romance, owner/slave, or captor/prisoner. Do not add a sensational label unless the text itself uses it.
+- Prefer canonical snake_case labels. Useful labels include: friend, friend_toxic, friend_romantic, friend_codependent, friend_platonic, friend_casual, best_friend, childhood_friend, former_friend, secret_friend, loyal_friend, protective_friend, jealous_friend, one_sided_friend, manipulative_friend, fake_friend, enemy_turned_friend, friend_turned_enemy, confidant, roommate, housemate, cousin_brother, cousin_sister, sibling, brother, sister, half_brother, half_sister, father, mother, son, daughter, stepfather, stepmother, stepsibling, uncle, aunt, nephew, niece, spouse, husband, wife, lover, crush, mutual_crush, unrequited_love, secret_lover, ex_lover, ex_partner, boyfriend, girlfriend, fiance, fiancee, affair_partner, forbidden_romance, arranged_marriage_partner, political_marriage_partner, soulmate, casual_fling, friends_with_benefits, romantic_rival, toxic_lover, obsessive_lover, protective_lover, mentor, superior, subordinate, commander, soldier, ruler, subject, king, queen, prince, princess, lord, lady, servant, master, slave, owner, bodyguard, patron, sponsor, benefactor, debtor, creditor, blackmailer, hostage, captor, prisoner, handler, asset, informant, spy, mole, double_agent, puppet, controller, pawn_tool, enforcer, henchman, right_hand_person, leader, boss, employee, manager, assistant, intern, co_founder, business_partner, investor, contractor, consultant, client, customer, colleague, rival_colleague, former_colleague, workplace_rival, work_mentor, work_friend, workplace_friend, work_spouse, team_member, teammate, supervisor, apprentice, protege, teacher, student, professor, researcher, doctor, patient, lawyer, enemy, rival, nemesis, bully, victim, abuser, survivor, hunter.
+
 Return ONLY valid JSON, no markdown, no commentary:
 {
   "characters": [
@@ -93,7 +102,12 @@ Return ONLY valid JSON, no markdown, no commentary:
     {
       "character_a": "name",
       "character_b": "name",
-      "type": "ally|enemy|romantic|family|political|mentor|rival|neutral",
+      "type": "primary snake_case relationship label",
+      "primary_type": "same as type unless a legacy-compatible type is clearer",
+      "shared_labels": ["pair-level snake_case labels"],
+      "character_a_to_b_labels": ["directional labels from character_a toward character_b"],
+      "character_b_to_a_labels": ["directional labels from character_b toward character_a"],
+      "label_evidence": {"quote": "short supporting phrase", "confidence": 0.0},
       "sentiment": 0.0,
       "description": "one sentence"
     }

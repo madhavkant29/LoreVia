@@ -72,6 +72,10 @@ class RelationshipTimelineMarkerOut(BaseModel):
     title: str
     chapter_number: int
     detail: str | None = None
+    type: str | None = None
+    shared_labels: list[str] = Field(default_factory=list)
+    character_a_to_b_labels: list[str] = Field(default_factory=list)
+    character_b_to_a_labels: list[str] = Field(default_factory=list)
 
 
 class TimelineResponseOut(BaseModel):
@@ -94,6 +98,7 @@ class ChapterListItemOut(BaseModel):
     number: int
     title: str | None = None
     chapter_kind: str = "chapter"
+    word_count: int | None = None
     processed: bool
     intelligence_available: bool = True
     read: bool

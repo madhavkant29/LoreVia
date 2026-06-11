@@ -14,16 +14,24 @@ export function CharacterWorkspaceSidebarHeader({
   isDark,
   mode,
   onCastFilterChange,
+  onRoleFilterChange,
   onSearchChange,
+  onStatusFilterChange,
+  roleFilter,
   search,
+  statusFilter,
   summary,
 }: {
   castFilter: CastFilter
   isDark: boolean
   mode: WorkspaceMode
   onCastFilterChange: (filter: CastFilter) => void
+  onRoleFilterChange?: (value: string) => void
   onSearchChange: (value: string) => void
+  onStatusFilterChange?: (value: string) => void
+  roleFilter?: string
   search: string
+  statusFilter?: string
   summary: string
 }) {
   const searchLabel = characterWorkspaceSearchLabel(mode)
@@ -52,18 +60,49 @@ export function CharacterWorkspaceSidebarHeader({
       </label>
 
       {mode === "profile" ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {CAST_FILTERS.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => onCastFilterChange(value)}
-              aria-pressed={castFilter === value}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filterChipClasses(isDark, castFilter === value)}`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label>
+              <span className="sr-only">Filter by status</span>
+              <select
+                value={statusFilter ?? "all"}
+                onChange={(event) => onStatusFilterChange?.(event.target.value)}
+                className={`h-10 w-full rounded-md border px-3 text-xs font-medium outline-none ${isDark ? "border-white/10 bg-[#0c1119] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+              >
+                <option value="all">All statuses</option>
+                <option value="reviewed">Reviewed</option>
+                <option value="flagged">Flagged</option>
+                <option value="unresolved">Unresolved</option>
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Filter by role</span>
+              <select
+                value={roleFilter ?? "all"}
+                onChange={(event) => onRoleFilterChange?.(event.target.value)}
+                className={`h-10 w-full rounded-md border px-3 text-xs font-medium outline-none ${isDark ? "border-white/10 bg-[#0c1119] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+              >
+                <option value="all">All roles</option>
+                <option value="mc">Primary</option>
+                <option value="sc">Supporting</option>
+                <option value="background">Minor</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {CAST_FILTERS.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onCastFilterChange(value)}
+                aria-pressed={castFilter === value}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${filterChipClasses(isDark, castFilter === value)}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>

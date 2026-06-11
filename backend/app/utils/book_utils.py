@@ -6,10 +6,13 @@ from the books route.
 from __future__ import annotations
 
 import asyncio
+import base64
 import bisect
+import binascii
 import hashlib
 import io
 import json
+import mimetypes
 import os
 import re
 import statistics
@@ -514,6 +517,22 @@ DEFAULT_WRITER_WORKSPACE = {
         "include_acknowledgments": False,
         "include_epigraph": False,
         "include_prologue": False,
+    },
+    "novel_preface": "",
+    "novel_front_matter": {
+        "dedication": "",
+        "acknowledgements": "",
+        "copyright_page": "",
+        "about_author": "",
+        "series_book_list": "",
+    },
+    "novel_epub_metadata": {
+        "publisher": "",
+        "language": "en",
+        "isbn": "",
+        "description": "",
+        "series_name": "",
+        "series_number": "",
     },
     "revision_board": {
         "items": [],
@@ -1294,6 +1313,31 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
         payload["structure_tree"] = json.loads(json.dumps(structure_tree))
 
     payload["manuscript_front_matter"] = _derive_front_matter_defaults(source.get("manuscript_front_matter"))
+    payload["novel_preface"] = str(source.get("novel_preface") or "").strip()
+    novel_front_matter = source.get("novel_front_matter")
+    if isinstance(novel_front_matter, dict):
+        payload["novel_front_matter"] = {
+            "dedication": str(novel_front_matter.get("dedication") or "").strip(),
+            "acknowledgements": str(
+                novel_front_matter.get("acknowledgements")
+                or novel_front_matter.get("acknowledgments")
+                or ""
+            ).strip(),
+            "copyright_page": str(novel_front_matter.get("copyright_page") or "").strip(),
+            "about_author": str(novel_front_matter.get("about_author") or "").strip(),
+            "series_book_list": str(novel_front_matter.get("series_book_list") or "").strip(),
+        }
+    novel_epub_metadata = source.get("novel_epub_metadata")
+    if isinstance(novel_epub_metadata, dict):
+        language = " ".join(str(novel_epub_metadata.get("language") or "en").split()).strip() or "en"
+        payload["novel_epub_metadata"] = {
+            "publisher": str(novel_epub_metadata.get("publisher") or "").strip(),
+            "language": language[:24],
+            "isbn": str(novel_epub_metadata.get("isbn") or "").strip(),
+            "description": str(novel_epub_metadata.get("description") or "").strip(),
+            "series_name": str(novel_epub_metadata.get("series_name") or "").strip(),
+            "series_number": str(novel_epub_metadata.get("series_number") or "").strip(),
+        }
     payload["revision_board"] = _normalize_revision_board(source.get("revision_board"))
     payload["revision_recent_edits"] = _normalize_revision_recent_edits(source.get("revision_recent_edits") or [])
     payload["processing"] = _normalize_processing_state(source.get("processing")) if isinstance(source.get("processing"), dict) else None
@@ -6769,6 +6813,62 @@ def manuscript_html_to_text(html: str | None) -> str:
     return "\n\n".join(blocks)
 
 
+def extract_inline_images_from_manuscript_html(html: str | None) -> tuple[str | None, list[dict[str, Any]], set[str]]:
+    if not html or ("<img" not in html and "data:image/" not in html):
+        return html, [], set()
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(clean_manuscript_html(html), "html.parser")
+    images: list[dict[str, Any]] = []
+    retained_markers: set[str] = set()
+    for image in soup.find_all("img"):
+        src = str(image.get("src") or "")
+        marker_ref = str(image.get("alt") or image.get("title") or "").strip()
+        if marker_ref.startswith("[[IMAGE:") and marker_ref.endswith("]]"):
+            retained_markers.add(marker_ref)
+            marker_node = soup.new_tag("p")
+            marker_node.string = marker_ref
+            image.replace_with(marker_node)
+            continue
+        if not src.startswith("data:image/") or "," not in src:
+            continue
+        header, encoded = src.split(",", 1)
+        content_type = header[5:].split(";", 1)[0].strip().lower()
+        if content_type not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+            image.decompose()
+            continue
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            image.decompose()
+            continue
+        if not raw:
+            image.decompose()
+            continue
+        extension = {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/webp": "webp",
+            "image/gif": "gif",
+        }.get(content_type, "bin")
+        marker = f"[[IMAGE:{uuid.uuid4().hex}]]"
+        images.append(
+            {
+                "marker": marker,
+                "bytes": raw,
+                "content_type": content_type,
+                "filename": f"{uuid.uuid4().hex}.{extension}",
+            }
+        )
+        marker_node = soup.new_tag("p")
+        marker_node.string = marker
+        image.replace_with(marker_node)
+    if not images and not retained_markers:
+        return html, [], set()
+    return clean_manuscript_html(str(soup)), images, retained_markers
+
+
 def serialize_manuscript_content(text: str, html: str | None = None) -> str:
     normalized_text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     normalized_html = clean_manuscript_html(html) if html else ""
@@ -6805,6 +6905,123 @@ def deserialize_manuscript_content(raw: str | bytes | memoryview | None) -> dict
     return {"format": "plain_text", "text": raw_text, "html": manuscript_text_to_html(raw_text)}
 
 
+async def load_novel_export_chapters(
+    db: AsyncSession,
+    *,
+    book: Book,
+    collaborator: BookCollaborator | None,
+    include_images: bool,
+) -> list[dict[str, Any]]:
+    chapter_rows = (
+        await db.execute(
+            select(Chapter.id, Chapter.number, Chapter.title, Chapter.s3_key)
+            .where(Chapter.book_id == book.id)
+            .order_by(Chapter.number.asc())
+        )
+    ).all()
+    if collaborator is not None:
+        chapter_rows = [
+            row
+            for row in chapter_rows
+            if collaboration_allows_chapter(collaborator, int(row[1]))
+        ]
+    if not chapter_rows:
+        raise HTTPException(404, "No chapters available to export")
+
+    media_by_chapter_id: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    if include_images:
+        chapter_ids = [row[0] for row in chapter_rows]
+        media_rows = (
+            await db.execute(
+                select(ChapterMedia)
+                .where(ChapterMedia.chapter_id.in_(chapter_ids))
+                .order_by(ChapterMedia.sort_order.asc(), ChapterMedia.created_at.asc())
+            )
+        ).scalars().all()
+        for media in media_rows:
+            if getattr(media, "asset_type", "image") != "image":
+                continue
+            try:
+                raw = await asyncio.to_thread(download_book, media.storage_key)
+            except Exception:
+                continue
+            media_by_chapter_id.setdefault(media.chapter_id, []).append(
+                {
+                    "raw": raw,
+                    "content_type": media.content_type or mimetypes.guess_type(media.storage_key)[0] or "image/png",
+                    "caption": media.caption,
+                    "marker": media.marker,
+                }
+            )
+
+    chapters: list[dict[str, Any]] = []
+    for chapter_id, number, chapter_title, s3_key in chapter_rows:
+        chapter_text = ""
+        if s3_key:
+            try:
+                stored = deserialize_manuscript_content(await asyncio.to_thread(download_book, s3_key))
+                chapter_text = str(stored.get("text") or "")
+            except Exception:
+                chapter_text = ""
+        chapters.append(
+            {
+                "number": number,
+                "title": chapter_title,
+                "text": chapter_text,
+                "media": media_by_chapter_id.get(chapter_id, []),
+            }
+        )
+    return chapters
+
+
+async def load_novel_cover_image(book: Book) -> dict[str, Any] | None:
+    if not book.cover_s3_key:
+        return None
+    try:
+        raw = await asyncio.to_thread(download_book, book.cover_s3_key)
+    except Exception:
+        return None
+    return {
+        "raw": raw,
+        "content_type": mimetypes.guess_type(book.cover_s3_key)[0] or "image/png",
+    }
+
+
+async def sync_chapter_media_from_images(
+    db: AsyncSession,
+    *,
+    book: Book,
+    chapter: Chapter,
+    images: list[dict[str, Any]],
+    retain_markers: set[str] | None = None,
+) -> None:
+    retained = {str(marker) for marker in (retain_markers or set()) if str(marker).strip()}
+    delete_statement = delete(ChapterMedia).where(ChapterMedia.chapter_id == chapter.id)
+    if retained:
+        delete_statement = delete_statement.where(ChapterMedia.marker.not_in(retained))
+    await db.execute(delete_statement)
+    for index, image in enumerate(images):
+        raw = image.get("bytes")
+        marker = image.get("marker")
+        if not raw or not marker:
+            continue
+        filename = str(image.get("filename") or f"{uuid.uuid4().hex}.bin")
+        storage_key = f"chapter-media/{book.id}/{chapter.number}/{index}-{filename}"
+        await asyncio.to_thread(upload_binary, storage_key, raw, image.get("content_type"))
+        db.add(
+            ChapterMedia(
+                book_id=book.id,
+                chapter_id=chapter.id,
+                marker=str(marker),
+                asset_type="image",
+                content_type=image.get("content_type"),
+                storage_key=storage_key,
+                caption=str(image.get("caption") or "").strip() or None,
+                sort_order=index,
+            )
+        )
+
+
 async def persist_editor_chapter_content(
     db: AsyncSession,
     book: Book,
@@ -6816,7 +7033,16 @@ async def persist_editor_chapter_content(
     description: str | None = None,
     chapter_kind: str | None = None,
     content_version: int = 1,
+    images: list[dict[str, Any]] | None = None,
 ) -> Chapter:
+    extracted_images: list[dict[str, Any]] = []
+    retained_image_markers: set[str] = set()
+    if html and ("data:image/" in html or "<img" in html):
+        html, extracted_images, retained_image_markers = extract_inline_images_from_manuscript_html(html)
+        if extracted_images or retained_image_markers:
+            text = manuscript_html_to_text(html) or text
+    images_to_sync = [*extracted_images, *(images or [])]
+    should_sync_media = bool(images_to_sync) or images is not None or bool(retained_image_markers)
     storage_key = f"chapters/{book.id}/{chapter_number}.txt"
     payload = serialize_manuscript_content(text, html)
     stored_key = await asyncio.to_thread(upload_text, storage_key, payload)
@@ -6843,6 +7069,14 @@ async def persist_editor_chapter_content(
         )
         db.add(chapter)
         await db.flush()
+        if should_sync_media:
+            await sync_chapter_media_from_images(
+                db,
+                book=book,
+                chapter=chapter,
+                images=images_to_sync,
+                retain_markers=retained_image_markers,
+            )
         return chapter
 
     chapter.title = title or chapter.title
@@ -6855,6 +7089,14 @@ async def persist_editor_chapter_content(
     chapter.processed = False
     chapter.analysis_state = {}
     await db.flush()
+    if should_sync_media:
+        await sync_chapter_media_from_images(
+            db,
+            book=book,
+            chapter=chapter,
+            images=images_to_sync,
+            retain_markers=retained_image_markers,
+        )
     return chapter
 
 

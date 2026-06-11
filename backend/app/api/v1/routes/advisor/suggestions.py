@@ -17,6 +17,7 @@ from app.schemas.advisor import (
     AdvisorSuggestionScanResponse,
     AdvisorSuggestionsResponse,
 )
+from app.utils.billing_utils import require_author_access
 from app.services.advisor_suggestion_jobs_service import (
     create_advisor_suggestion_job,
     mark_advisor_suggestion_job_failed,
@@ -43,6 +44,7 @@ async def advisor_suggestions(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     result = await build_advisor_suggestions_payload(
         db=db,
@@ -64,6 +66,7 @@ async def advisor_suggestions_scan(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     total_ch = book.total_chapters or 1
     cache_key = make_advisor_suggestions_cache_key(
@@ -120,6 +123,7 @@ async def advisor_suggestions_job_status(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     job = await db.get(AdvisorSuggestionJob, _parse_advisor_job_id(job_id))
     if job is None:

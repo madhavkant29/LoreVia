@@ -33,6 +33,10 @@ from app.engine.character.entity_filters import (
 )
 from app.engine.character.extractor import extract_characters_and_relationships
 from app.engine.character.extractor import _is_title_only_name
+from app.utils.relationship_utils import (
+    normalize_relationship_labels,
+    relationship_label_display,
+)
 from app.engine.character.profile_builder import (
     build_character_profile,
     build_description,
@@ -82,6 +86,16 @@ CHARACTER_CANDIDATE_REJECTED = "rejected"
 CHARACTER_CANDIDATE_PROMOTED = "promoted"
 CHARACTER_CANDIDATE_MERGED = "merged"
 CHARACTER_CANDIDATE_SUPPRESSED = "suppressed"
+CHARACTER_ADJUDICATION_CANDIDATE = "candidate"
+CHARACTER_ADJUDICATION_PROMOTED_CHARACTER = "promoted_character"
+CHARACTER_ADJUDICATION_QUARANTINED = "quarantined"
+CHARACTER_ADJUDICATION_REJECTED = "rejected"
+CHARACTER_ADJUDICATION_MERGED_ALIAS = "merged_alias"
+CHARACTER_ADJUDICATION_PLACE = "place"
+CHARACTER_ADJUDICATION_ORGANIZATION = "organization"
+CHARACTER_ADJUDICATION_OBJECT = "object"
+CHARACTER_ADJUDICATION_TITLE_OR_ROLE = "title_or_role"
+CHARACTER_ADJUDICATION_UNKNOWN = "unknown"
 CHARACTER_DUPLICATE_PENDING = "pending"
 CHARACTER_DUPLICATE_ACCEPTED = "accepted"
 CHARACTER_DUPLICATE_DISMISSED = "dismissed"
@@ -392,10 +406,21 @@ def relationship_summary_for_character(
     perspective_name: str,
 ) -> str | None:
     counterpart = name_b if perspective_name == name_a else name_a
-    rel_type = (rel.rel_type or "connection").replace("_", " ").strip()
-    if not rel_type:
-        rel_type = "connection"
-    return f"{rel_type.capitalize()} connection with {counterpart}."
+    shared_labels = normalize_relationship_labels(getattr(rel, "shared_labels", None))
+    directional_labels = normalize_relationship_labels(
+        getattr(rel, "character_a_to_b_labels", None)
+        if perspective_name == name_a
+        else getattr(rel, "character_b_to_a_labels", None)
+    )
+    labels = directional_labels + [label for label in shared_labels if label not in directional_labels]
+    if not labels:
+        labels = [rel.rel_type or "connection"]
+    label_text = ", ".join(relationship_label_display(label) for label in labels[:4])
+    if getattr(rel, "from_chapter", None) and getattr(rel, "to_chapter", None):
+        return f"{label_text.capitalize()} with {counterpart} through chapter {rel.to_chapter}."
+    if getattr(rel, "from_chapter", None):
+        return f"{label_text.capitalize()} with {counterpart} from chapter {rel.from_chapter}."
+    return f"{label_text.capitalize()} with {counterpart}."
 
 
 def relationship_summary(
@@ -691,13 +716,22 @@ def build_character_dossier_summary(
 
 
 def build_candidate_dossier_summary(candidate: CharacterCandidate) -> dict[str, Any]:
-    return build_character_dossier_summary(
+    summary = build_character_dossier_summary(
         name=candidate.proposed_name,
         aliases=candidate.aliases or [],
         evidence=candidate.evidence or {},
         fallback_chapter_numbers=[int(candidate.chapter_number or 0)],
         reason_codes=candidate.reason_codes or [],
     )
+    summary.update(
+        {
+            "entity_type": getattr(candidate, "entity_type", None),
+            "adjudication_status": getattr(candidate, "adjudication_status", None),
+            "character_score": getattr(candidate, "character_score", None),
+            "rejection_reason": getattr(candidate, "rejection_reason", None),
+        }
+    )
+    return summary
 
 
 def _verifier_final_from_evidence(evidence: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -871,8 +905,31 @@ def decide_character_candidate_disposition(
     matched_character_id: uuid.UUID | None = None,
     intended_action: str | None = None,
 ) -> CharacterCandidateDisposition:
+    from app.engine.character.adjudicator import adjudicate_character_candidate
+
     evidence_map = dict(evidence or {})
     reasons = _clean_reason_code_values(reason_codes)
+    adjudication = adjudicate_character_candidate(
+        name=name,
+        aliases=aliases,
+        confidence=confidence,
+        evidence=evidence_map,
+        reason_codes=reasons,
+        matched_character_id=matched_character_id,
+    )
+    evidence_map["adjudication"] = {
+        "display_name": adjudication.display_name,
+        "normalized_name": adjudication.normalized_name,
+        "entity_type": adjudication.entity_type,
+        "adjudication_status": adjudication.adjudication_status,
+        "character_score": adjudication.character_score,
+        "confidence": adjudication.confidence,
+        "rejection_reason": adjudication.rejection_reason,
+        "reason_codes": list(adjudication.reason_codes),
+    }
+    if adjudication.evidence_windows:
+        evidence_map["evidence_windows"] = list(adjudication.evidence_windows)
+    reasons = dedupe_preserve_order([*reasons, *adjudication.reason_codes])
     final = _verifier_final_from_evidence(evidence_map)
     final_band = str(final.get("confidence_band") or "").strip().casefold()
     final_reasons = _clean_reason_code_values(final.get("reasons") if isinstance(final, Mapping) else [])
@@ -892,6 +949,14 @@ def decide_character_candidate_disposition(
     suppress_reasons: list[str] = []
     if final_band == "review" or "mention_verifier_review" in normalized_reasons:
         suppress_reasons.append("mention_verifier_review_suppressed")
+    if adjudication.adjudication_status in {
+        CHARACTER_ADJUDICATION_PLACE,
+        CHARACTER_ADJUDICATION_ORGANIZATION,
+        CHARACTER_ADJUDICATION_OBJECT,
+        CHARACTER_ADJUDICATION_TITLE_OR_ROLE,
+        CHARACTER_ADJUDICATION_REJECTED,
+    }:
+        suppress_reasons.append(f"{adjudication.adjudication_status}_adjudicated")
     if "fallback_review_candidate_unconfirmed" in normalized_reasons:
         suppress_reasons.append("fallback_review_candidate_unconfirmed")
     if bool(summary.get("common_single_token")):
@@ -1213,12 +1278,18 @@ def serialize_book_character(
         "book_id": str(char.book_id),
         "name": char.name,
         "aliases": char.aliases or [],
+        "alias_records": serialize_character_alias_records(char),
         "role": char.role,
         "first_chapter": char.first_chapter,
         "last_seen_chapter": char.last_seen_chapter,
         "mention_count": char.mention_count or 0,
         "status": character_status(char),
         "trait_state": char.trait_state or {},
+        "hair": char.hair,
+        "eyes": char.eyes,
+        "build": char.build,
+        "age_descriptor": char.age_descriptor,
+        "distinguishing": char.distinguishing,
         "description": compose_character_description(
             trait_state=char.trait_state or {},
             archetype=char.archetype,
@@ -1830,9 +1901,12 @@ def serialize_character_candidate(candidate: CharacterCandidate) -> dict[str, An
     return {
         "id": str(candidate.id),
         "book_id": str(candidate.book_id),
+        "chapter_id": str(candidate.chapter_id) if getattr(candidate, "chapter_id", None) else None,
+        "scene_id": str(candidate.scene_id) if getattr(candidate, "scene_id", None) else None,
         "chapter_number": int(candidate.chapter_number or 0),
         "raw_name": candidate.raw_name,
         "proposed_name": candidate.proposed_name,
+        "display_name": getattr(candidate, "display_name", None) or candidate.proposed_name,
         "normalized_name": candidate.normalized_name,
         "aliases": clean_string_list(candidate.aliases or []),
         "matched_character_id": str(candidate.matched_character_id) if candidate.matched_character_id else None,
@@ -1840,6 +1914,13 @@ def serialize_character_candidate(candidate: CharacterCandidate) -> dict[str, An
         "confidence": int(candidate.confidence or 0),
         "reason_codes": _clean_reason_codes(candidate.reason_codes or []),
         "evidence": normalized_evidence,
+        "mention_count": getattr(candidate, "mention_count", None),
+        "chapter_count": getattr(candidate, "chapter_count", None),
+        "evidence_windows": list(getattr(candidate, "evidence_windows", None) or []),
+        "entity_type": getattr(candidate, "entity_type", None),
+        "adjudication_status": getattr(candidate, "adjudication_status", None),
+        "character_score": getattr(candidate, "character_score", None),
+        "rejection_reason": getattr(candidate, "rejection_reason", None),
         "cluster_names": _coerce_string_list(normalized_evidence.get("cluster_names")),
         "cluster_size": _coerce_int(normalized_evidence.get("cluster_size"), fallback=1),
         "cluster_mention_count": _coerce_int(normalized_evidence.get("cluster_mention_count")),
@@ -2004,10 +2085,19 @@ async def list_character_review_data(
     db: AsyncSession,
     *,
     book_id: uuid.UUID,
+    include_quarantined: bool = True,
+    include_places: bool = False,
+    include_rejected: bool = False,
 ) -> dict[str, Any]:
     return await run_read_with_retry(
         db,
-        lambda: _list_character_review_data_once(db, book_id=book_id),
+        lambda: _list_character_review_data_once(
+            db,
+            book_id=book_id,
+            include_quarantined=include_quarantined,
+            include_places=include_places,
+            include_rejected=include_rejected,
+        ),
     )
 
 
@@ -2015,20 +2105,50 @@ async def _list_character_review_data_once(
     db: AsyncSession,
     *,
     book_id: uuid.UUID,
+    include_quarantined: bool,
+    include_places: bool,
+    include_rejected: bool,
 ) -> dict[str, Any]:
+    candidate_statuses = {
+        CHARACTER_CANDIDATE_PENDING,
+        CHARACTER_CANDIDATE_ACCEPTED,
+        CHARACTER_CANDIDATE_PROMOTED,
+    }
+    adjudication_statuses: set[str] = set()
+    if include_quarantined:
+        adjudication_statuses.add(CHARACTER_ADJUDICATION_QUARANTINED)
+    if include_places:
+        candidate_statuses.add(CHARACTER_CANDIDATE_SUPPRESSED)
+        adjudication_statuses.update(
+            {
+                CHARACTER_ADJUDICATION_PLACE,
+                CHARACTER_ADJUDICATION_ORGANIZATION,
+                CHARACTER_ADJUDICATION_OBJECT,
+                CHARACTER_ADJUDICATION_TITLE_OR_ROLE,
+            }
+        )
+    if include_rejected:
+        candidate_statuses.add(CHARACTER_CANDIDATE_REJECTED)
+        adjudication_statuses.add(CHARACTER_ADJUDICATION_REJECTED)
+    candidate_filters = [
+        CharacterCandidate.book_id == book_id,
+        CharacterCandidate.status.in_(tuple(sorted(candidate_statuses))),
+    ]
+    if adjudication_statuses:
+        candidate_filters.append(
+            CharacterCandidate.adjudication_status.in_(tuple(sorted(adjudication_statuses)))
+            | CharacterCandidate.status.in_(
+                (
+                    CHARACTER_CANDIDATE_PENDING,
+                    CHARACTER_CANDIDATE_ACCEPTED,
+                    CHARACTER_CANDIDATE_PROMOTED,
+                )
+            )
+        )
     candidates = (
         await db.execute(
             select(CharacterCandidate)
-            .where(
-                CharacterCandidate.book_id == book_id,
-                CharacterCandidate.status.in_(
-                    (
-                        CHARACTER_CANDIDATE_PENDING,
-                        CHARACTER_CANDIDATE_ACCEPTED,
-                        CHARACTER_CANDIDATE_PROMOTED,
-                    )
-                ),
-            )
+            .where(*candidate_filters)
             .order_by(CharacterCandidate.chapter_number, CharacterCandidate.created_at)
         )
     ).scalars().all()
@@ -2105,6 +2225,8 @@ async def record_character_candidate(
     db: AsyncSession,
     *,
     book_id: uuid.UUID,
+    chapter_id: uuid.UUID | None = None,
+    scene_id: uuid.UUID | None = None,
     chapter_number: int,
     raw_name: str,
     proposed_name: str,
@@ -2116,6 +2238,8 @@ async def record_character_candidate(
     evidence: Mapping[str, Any] | None = None,
     source_batch_key: str | None = None,
 ) -> CharacterCandidate:
+    from app.engine.character.adjudicator import adjudicate_character_candidate
+
     normalized_name = normalize_character_name(proposed_name)
     stmt = select(CharacterCandidate).where(
         CharacterCandidate.book_id == book_id,
@@ -2134,7 +2258,10 @@ async def record_character_candidate(
     )
     candidate.raw_name = clean_optional_text(raw_name) or raw_name
     candidate.proposed_name = clean_optional_text(proposed_name) or proposed_name
+    candidate.display_name = clean_optional_text(candidate.proposed_name) or candidate.proposed_name
     candidate.normalized_name = normalized_name
+    candidate.chapter_id = chapter_id
+    candidate.scene_id = scene_id
     candidate.aliases = _clean_candidate_aliases(aliases, candidate.proposed_name)
     candidate.matched_character_id = matched_character_id
     candidate.status = status
@@ -2143,7 +2270,38 @@ async def record_character_candidate(
     merged_evidence = dict(candidate.evidence or {})
     if evidence:
         merged_evidence.update(dict(evidence))
+    adjudication = adjudicate_character_candidate(
+        candidate.proposed_name,
+        aliases=candidate.aliases or [],
+        confidence=candidate.confidence,
+        evidence=merged_evidence,
+        reason_codes=candidate.reason_codes or [],
+        matched_character_id=matched_character_id,
+    )
+    existing_adjudication = merged_evidence.get("adjudication")
+    merged_evidence["adjudication"] = {
+        **(dict(existing_adjudication) if isinstance(existing_adjudication, Mapping) else {}),
+        "display_name": adjudication.display_name,
+        "normalized_name": adjudication.normalized_name,
+        "entity_type": adjudication.entity_type,
+        "adjudication_status": adjudication.adjudication_status,
+        "character_score": adjudication.character_score,
+        "confidence": adjudication.confidence,
+        "rejection_reason": adjudication.rejection_reason,
+        "reason_codes": list(adjudication.reason_codes),
+    }
     candidate.evidence = merged_evidence
+    candidate.mention_count = _coerce_int(merged_evidence.get("mention_count"), fallback=_coerce_int(merged_evidence.get("cluster_mention_count")))
+    candidate.chapter_count = max(0, len({
+        _coerce_int(chapter, fallback=0)
+        for chapter in cast(Sequence[object], merged_evidence.get("chapter_numbers") or [])
+        if _coerce_int(chapter, fallback=0) > 0
+    }))
+    candidate.evidence_windows = list(adjudication.evidence_windows)
+    candidate.entity_type = adjudication.entity_type
+    candidate.adjudication_status = adjudication.adjudication_status
+    candidate.character_score = adjudication.character_score
+    candidate.rejection_reason = adjudication.rejection_reason
     candidate.source_batch_key = source_batch_key
     if existing is None:
         db.add(candidate)
@@ -2451,6 +2609,7 @@ async def mark_character_candidates_merged(
     for candidate in candidates:
         candidate.matched_character_id = primary_character_id
         candidate.status = CHARACTER_CANDIDATE_MERGED
+        candidate.adjudication_status = CHARACTER_ADJUDICATION_MERGED_ALIAS
 
 
 def _candidate_entity_payload(candidate: CharacterCandidate) -> dict[str, Any]:
@@ -2521,6 +2680,42 @@ def reject_character_as_noise(
     )
 
 
+def reject_character_candidate(
+    candidate: CharacterCandidate,
+    *,
+    reason_codes: Sequence[object] | None = None,
+) -> None:
+    candidate.status = CHARACTER_CANDIDATE_REJECTED
+    candidate.adjudication_status = CHARACTER_ADJUDICATION_REJECTED
+    candidate.entity_type = candidate.entity_type or "unknown"
+    candidate.rejection_reason = "candidate_rejected"
+    candidate.reason_codes = _clean_reason_codes(
+        [
+            *(candidate.reason_codes or []),
+            *(reason_codes or []),
+            "candidate_rejected",
+        ]
+    )
+
+
+def mark_character_candidate_as_place(
+    candidate: CharacterCandidate,
+    *,
+    reason_codes: Sequence[object] | None = None,
+) -> None:
+    candidate.status = CHARACTER_CANDIDATE_SUPPRESSED
+    candidate.entity_type = "place"
+    candidate.adjudication_status = CHARACTER_ADJUDICATION_PLACE
+    candidate.rejection_reason = "author_marked_place"
+    candidate.reason_codes = _clean_reason_codes(
+        [
+            *(candidate.reason_codes or []),
+            *(reason_codes or []),
+            "author_marked_place",
+        ]
+    )
+
+
 async def promote_character_candidate(
     db: AsyncSession,
     *,
@@ -2544,6 +2739,7 @@ async def promote_character_candidate(
                 details={"candidate_id": str(candidate.id)},
             )
             candidate.status = CHARACTER_CANDIDATE_ACCEPTED
+            candidate.adjudication_status = CHARACTER_ADJUDICATION_MERGED_ALIAS
             return existing
 
     character = Character(**build_character_profile(entity, candidate.book_id, int(candidate.chapter_number or 1)))
@@ -2557,6 +2753,7 @@ async def promote_character_candidate(
     )
     candidate.matched_character_id = character.id
     candidate.status = CHARACTER_CANDIDATE_PROMOTED
+    candidate.adjudication_status = CHARACTER_ADJUDICATION_PROMOTED_CHARACTER
     return character
 
 
@@ -2575,6 +2772,7 @@ async def attach_character_candidate(
         setattr(character, key, value)
     candidate.matched_character_id = character.id
     candidate.status = CHARACTER_CANDIDATE_ACCEPTED
+    candidate.adjudication_status = CHARACTER_ADJUDICATION_MERGED_ALIAS
     if character.approval_state == CHARACTER_APPROVAL_PENDING_REVIEW or character.visibility_state != CHARACTER_VISIBILITY_VISIBLE:
         _approve_character_from_review(
             character,

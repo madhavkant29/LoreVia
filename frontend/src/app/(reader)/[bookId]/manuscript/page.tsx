@@ -53,7 +53,7 @@ import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCar
 import type { Character } from "@/types/character"
 import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, InlineContinuityResponse, ManuscriptSynopsis } from "@/types/intelligence"
-import type { ChapterListResponse, PlotThread, SearchResult } from "@/types/reader"
+import type { ChapterData, ChapterListResponse, ChapterMedia, PlotThread, SearchResult } from "@/types/reader"
 
 const WhatsTheWordPanel = dynamic(
   () => import("@/components/intelligence/WhatsTheWordPanel").then((module) => module.WhatsTheWordPanel),
@@ -83,6 +83,36 @@ const ManuscriptPlanWorkspace = dynamic(
     loading: () => <DeferredPanelLoadingState label="Loading planning workspace..." />,
   }
 )
+
+function escapeHtmlAttribute(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+}
+
+function chapterMediaSrc(item: ChapterMedia) {
+  if (item.url) return item.url
+  if (item.content_base64 && item.content_type) return `data:${item.content_type};base64,${item.content_base64}`
+  return ""
+}
+
+function hydrateChapterMediaHtml(chapter: ChapterData) {
+  let html = chapter.html_content || textToHtml(chapter.text_content || "")
+  const media = [...(chapter.media ?? [])].sort((left, right) => left.sort_order - right.sort_order)
+  for (const item of media) {
+    const src = chapterMediaSrc(item)
+    if (!src) continue
+    const imageHtml = `<img src="${escapeHtmlAttribute(src)}" alt="${escapeHtmlAttribute(item.marker)}" title="Embedded chapter image" />`
+    if (html.includes(item.marker)) {
+      html = html.split(item.marker).join(imageHtml)
+    } else {
+      html += `<p>${imageHtml}</p>`
+    }
+  }
+  return html
+}
 
 const ManuscriptNonWriteWorkspace = dynamic(
   () => import("@/components/reader/ManuscriptNonWriteWorkspace").then((module) => module.ManuscriptNonWriteWorkspace),
@@ -698,7 +728,7 @@ function ManuscriptPageInner() {
     const chapter = await readerApi.getChapter(bookId, chapterNumber)
     const nextTitle = chapter.chapter_title || chapterMeta?.title || `Chapter ${chapterNumber}`
     const nextText = chapter.text_content || ""
-    const nextHtml = chapter.html_content || textToHtml(nextText)
+    const nextHtml = hydrateChapterMediaHtml(chapter)
     const nextContentVersion = typeof chapter.content_version === "number" ? chapter.content_version : 1
     if (selectedChapter === chapterNumber) {
       setDraftChapterNumber(null)
@@ -1318,7 +1348,7 @@ function ManuscriptPageInner() {
       const chapter = await readerApi.getChapter(bookId, initialChapterNumber)
       const title = chapter.chapter_title || chapterMeta?.title || `Chapter ${initialChapterNumber}`
       const chapterText = chapter.text_content || ""
-      const chapterHtml = chapter.html_content || textToHtml(chapterText)
+      const chapterHtml = hydrateChapterMediaHtml(chapter)
       const chapterContentVersion = typeof chapter.content_version === "number" ? chapter.content_version : 1
       const recoveredDraft = getRecoveredDraft(initialChapterNumber, {
         title,
@@ -1472,7 +1502,7 @@ function ManuscriptPageInner() {
     readerApi.getChapter(bookId, selectedChapter).then((chapter) => {
       const title = chapter.chapter_title || chapterMeta?.title || `Chapter ${selectedChapter}`
       const chapterText = chapter.text_content || ""
-      const chapterHtml = chapter.html_content || textToHtml(chapterText)
+      const chapterHtml = hydrateChapterMediaHtml(chapter)
       const chapterContentVersion = typeof chapter.content_version === "number" ? chapter.content_version : 1
       const recoveredDraft = getRecoveredDraft(selectedChapter, {
         title,
@@ -1673,7 +1703,7 @@ function ManuscriptPageInner() {
           const fallbackDraft = {
             title: chapter.chapter_title || `Chapter ${chapter.chapter_number}`,
             text: chapter.text_content || "",
-            html: chapter.html_content || textToHtml(chapter.text_content || ""),
+            html: hydrateChapterMediaHtml(chapter),
           }
           const recoveredDraft = getRecoveredDraft(chapter.chapter_number, fallbackDraft)
           nextDrafts[chapter.chapter_number] = recoveredDraft.draft

@@ -1,7 +1,7 @@
 import ipaddress as _ipaddress
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
@@ -14,6 +14,7 @@ from app.models.user import User, UserRateLimitOverride
 from app.utils.billing_utils import (
     DAILY_LIMIT_MESSAGE,
     continuity_limit_per_day,
+    free_advisor_limit_per_week,
     free_search_limit_per_day,
     prediction_limit_per_day,
     protected_authoring_limit_per_day,
@@ -61,6 +62,15 @@ def _utc_day_bucket(action: str, now: datetime | None = None) -> tuple[str, int]
     return current.strftime(f"{action}:%Y%m%d"), ttl_seconds
 
 
+def _utc_week_bucket(action: str, now: datetime | None = None) -> tuple[str, int]:
+    current = _current_utc(now)
+    week_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_week = week_start + timedelta(days=7 - current.weekday())
+    ttl_seconds = max(int(next_week.timestamp() - current.timestamp()), 1)
+    iso_year, iso_week, _ = current.isocalendar()
+    return f"{action}:{iso_year}w{iso_week:02d}", ttl_seconds
+
+
 async def _bump_daily_bucket(
     db: AsyncSession,
     user: User | object,
@@ -80,6 +90,27 @@ async def _bump_daily_bucket(
         if isinstance(user, User) or getattr(user, "email", None):
             await track_usage_limit_friction_and_maybe_send(user, action=action)
         raise HTTPException(429, DAILY_LIMIT_MESSAGE)
+
+
+async def _bump_weekly_bucket(
+    db: AsyncSession,
+    user: User | object,
+    action: str,
+    limit: int,
+) -> None:
+    if limit <= 0:
+        raise HTTPException(403, DAILY_LIMIT_MESSAGE)
+
+    bucket, ttl_seconds = _utc_week_bucket(action)
+    user_id = getattr(user, "id", user)
+    key = key_ratelimit(str(user_id), bucket)
+    r = await get_redis()
+    await r.set(key, "0", ex=ttl_seconds, nx=True)
+    count = int(await r.incr(key))
+    if count > limit:
+        if isinstance(user, User) or getattr(user, "email", None):
+            await track_usage_limit_friction_and_maybe_send(user, action=action)
+        raise HTTPException(429, "Your free Story Advisor turn refreshes next week. Upgrade for more capacity.")
 
 
 async def rate_limit_search(
@@ -110,9 +141,15 @@ async def rate_limit_advisor(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    weekly_limit = free_advisor_limit_per_week(current_user)
+    if weekly_limit is not None:
+        weekly_limit = await _limit_for_user(db, current_user.id, "advisor_per_week", weekly_limit)
+        await _bump_weekly_bucket(db, current_user, "advisor", weekly_limit)
+        return
+
     daily_limit = protected_authoring_limit_per_day(current_user)
     if daily_limit <= 0:
-        raise HTTPException(403, "Story Advisor is an authoring feature. Upgrade to Author for access.")
+        raise HTTPException(403, "Story Advisor requires an active trial, Author, or Architect plan.")
     daily_limit = await _limit_for_user(db, current_user.id, "advisor_per_day", daily_limit)
     await _bump_daily_bucket(db, current_user, "high_cost_authoring", daily_limit)
 

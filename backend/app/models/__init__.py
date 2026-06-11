@@ -58,6 +58,7 @@ from app.models.tag import CustomTag
 from app.models.user import (
     AdminAuditEvent,
     AdminPrincipal,
+    DataDeletionRequest,
     DeviceTrial,
     EmailPreference,
     LlmUsageEvent,

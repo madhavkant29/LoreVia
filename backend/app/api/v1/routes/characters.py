@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.models.book import Book
 from app.models.character import Character, CharacterState
 from app.schemas.character import CharacterOut
+from app.utils.billing_utils import require_author_access
 from app.utils.character_utils import serialize_character_detail
 from app.utils.sparse_utils import include_requested
 
@@ -28,6 +29,7 @@ async def get_character(
     book = await db.get(Book, char.book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
     return serialize_character_detail(char, skip_analysis_metadata=not include_requested(include, "analysis_metadata"))
 
 
@@ -52,6 +54,7 @@ async def get_character_state(
         book = await db.get(Book, char.book_id)
         if not book or book.user_id != current_user.id:
             raise HTTPException(404)
+        require_author_access(current_user)
         return {"trait_state": state.trait_snapshot, "at_chapter": state.at_chapter,
                 "arc_note": state.arc_note, "prompt_delta": state.prompt_delta}
 
@@ -61,4 +64,5 @@ async def get_character_state(
     book = await db.get(Book, char.book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
     return {"trait_state": char.trait_state, "at_chapter": 0}

@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelScene, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -294,8 +294,17 @@ export const booksApi = {
     apiClient.get<BookEvents>(bookPath(id, "/events/reader"), { params: typeof chapter === "number" ? { chapter } : undefined }).then(r => r.data),
   getCharacters: (id: string) =>
     apiClient.get<Character[]>(bookPath(id, "/characters")).then(r => r.data),
-  getCharacterReview: (id: string) =>
-    apiClient.get<CharacterReviewResponse>(bookPath(id, "/character-review")).then(r => r.data),
+  getCharacterReview: (
+    id: string,
+    options?: { includeQuarantined?: boolean; includePlaces?: boolean; includeRejected?: boolean },
+  ) =>
+    apiClient.get<CharacterReviewResponse>(bookPath(id, "/character-review"), {
+      params: {
+        include_quarantined: options?.includeQuarantined,
+        include_places: options?.includePlaces,
+        include_rejected: options?.includeRejected,
+      },
+    }).then(r => r.data),
   getCharacterIdentityDiagnostics: (id: string) =>
     apiClient.get<CharacterIdentityDiagnostics>(bookPath(id, "/characters/identity-diagnostics")).then(r => r.data),
   createCharacter: (
@@ -468,6 +477,11 @@ export const booksApi = {
       invalidateBookCache(bookId)
       return r.data
     }),
+  markCharacterCandidatePlace: (bookId: string, candidateId: string) =>
+    apiClient.post<{ marked: string; adjudication_status: string }>(bookPath(bookId, `/character-review/${candidateId}/mark-place`)).then(r => {
+      invalidateBookCache(bookId)
+      return r.data
+    }),
   attachRelationshipCandidateA: (bookId: string, candidateId: string, characterId: string) =>
     apiClient.post<{ attached_a: string; relationship_candidate_id: string }>(bookPath(bookId, `/relationship-review/${candidateId}/attach-a`), {
       character_id: characterId,
@@ -493,6 +507,10 @@ export const booksApi = {
       description?: string | null
       fromChapter?: number | null
       toChapter?: number | null
+      sharedLabels?: string[]
+      characterAToBLabels?: string[]
+      characterBToALabels?: string[]
+      labelEvidence?: Record<string, unknown>
     },
   ) => apiClient.post(bookPath(bookId, `/relationship-review/${candidateId}/accept`), {
     character_a_id: payload.characterAId,
@@ -502,6 +520,10 @@ export const booksApi = {
     description: payload.description,
     from_chapter: payload.fromChapter,
     to_chapter: payload.toChapter,
+    ...(payload.sharedLabels !== undefined ? { shared_labels: payload.sharedLabels } : {}),
+    ...(payload.characterAToBLabels !== undefined ? { character_a_to_b_labels: payload.characterAToBLabels } : {}),
+    ...(payload.characterBToALabels !== undefined ? { character_b_to_a_labels: payload.characterBToALabels } : {}),
+    ...(payload.labelEvidence !== undefined ? { label_evidence: payload.labelEvidence } : {}),
   }).then(r => {
     invalidateBookCache(bookId)
     invalidateReaderCache(bookId)
@@ -558,6 +580,10 @@ export const booksApi = {
       description?: string | null
       fromChapter?: number | null
       toChapter?: number | null
+      sharedLabels?: string[]
+      characterAToBLabels?: string[]
+      characterBToALabels?: string[]
+      labelEvidence?: Record<string, unknown>
     }
   ) => apiClient.put<RelationshipGraph["edges"][number] & { rel_type: string }>(bookPath(bookId, `/relationships/${relationshipId}`), {
     rel_type: payload.relType,
@@ -565,6 +591,10 @@ export const booksApi = {
     description: payload.description,
     from_chapter: payload.fromChapter,
     to_chapter: payload.toChapter,
+    ...(payload.sharedLabels !== undefined ? { shared_labels: payload.sharedLabels } : {}),
+    ...(payload.characterAToBLabels !== undefined ? { character_a_to_b_labels: payload.characterAToBLabels } : {}),
+    ...(payload.characterBToALabels !== undefined ? { character_b_to_a_labels: payload.characterBToALabels } : {}),
+    ...(payload.labelEvidence !== undefined ? { label_evidence: payload.labelEvidence } : {}),
   }).then(r => {
     invalidateBookCache(bookId)
     invalidateReaderCache(bookId)
@@ -580,6 +610,10 @@ export const booksApi = {
       description?: string | null
       fromChapter: number
       toChapter?: number | null
+      sharedLabels?: string[]
+      characterAToBLabels?: string[]
+      characterBToALabels?: string[]
+      labelEvidence?: Record<string, unknown>
     }
   ) => apiClient.post(bookPath(bookId, "/relationships"), {
     character_a_id: payload.characterAId,
@@ -589,6 +623,10 @@ export const booksApi = {
     description: payload.description,
     from_chapter: payload.fromChapter,
     to_chapter: payload.toChapter,
+    ...(payload.sharedLabels !== undefined ? { shared_labels: payload.sharedLabels } : {}),
+    ...(payload.characterAToBLabels !== undefined ? { character_a_to_b_labels: payload.characterAToBLabels } : {}),
+    ...(payload.characterBToALabels !== undefined ? { character_b_to_a_labels: payload.characterBToALabels } : {}),
+    ...(payload.labelEvidence !== undefined ? { label_evidence: payload.labelEvidence } : {}),
   }).then(r => {
     invalidateBookCache(bookId)
     invalidateReaderCache(bookId)
@@ -720,6 +758,13 @@ export const booksApi = {
       return fallback.data
     }
   },
+  deletePermanently: (id: string, confirmationText: string) =>
+    apiClient.delete<{ ok: boolean; book_id: string; deletion_request_id: string; status: string }>(bookPath(id, "/permanent"), {
+      data: { confirmation_text: confirmationText },
+    }).then(r => {
+      invalidateBookCache(id)
+      return r.data
+    }),
   publishPublicly: (id: string, payload: { publicSlug: string; rightsConfirmation: boolean; description?: string | null }) =>
     apiClient.post<{ book_id: string; public_slug?: string | null; message?: string | null }>(bookPath(id, "/publish"), {
       public_slug: payload.publicSlug,
@@ -875,6 +920,51 @@ export const booksApi = {
       params: { format, preset, include_scene_metadata: includeSceneMetadata, font_family: fontFamily, include_toc: includeToc },
       responseType: "blob",
     }).then(r => r.data),
+  exportNovel: (
+    bookId: string,
+    format: "pdf" | "docx" | "epub" = "pdf",
+    preset: NovelExportPreset = "standard_novel",
+    includeImages = false,
+    fontFamily = "serif",
+    options: {
+      imagePlacement?: NovelImagePlacement
+      includeImageCaptions?: boolean
+      previewChapters?: number | null
+    } = {}
+  ) =>
+    apiClient.get<Blob>(bookPath(bookId, "/novel/export"), {
+      params: {
+        format,
+        preset,
+        include_images: includeImages,
+        image_placement: options.imagePlacement ?? "end",
+        include_image_captions: options.includeImageCaptions ?? false,
+        preview_chapters: options.previewChapters ?? undefined,
+        font_family: fontFamily,
+      },
+      responseType: "blob",
+    }).then(r => r.data),
+  saveNovelPreface: (bookId: string, preface: string) =>
+    apiClient.put<{ preface: string }>(bookPath(bookId, "/novel/preface"), { preface }).then(r => {
+      void invalidateQueryKeys(bookCacheKey(bookId, "writer-workspace"))
+      return r.data
+    }),
+  saveNovelSettings: (
+    bookId: string,
+    body: {
+      preface: string
+      front_matter: NovelFrontMatter
+      epub_metadata: NovelEpubMetadata
+    }
+  ) =>
+    apiClient.put<{
+      preface: string
+      front_matter: NovelFrontMatter
+      epub_metadata: NovelEpubMetadata
+    }>(bookPath(bookId, "/novel/settings"), body).then(r => {
+      void invalidateQueryKeys(bookCacheKey(bookId, "writer-workspace"))
+      return r.data
+    }),
   delete: (id: string) => apiClient.delete<Book>(bookPath(id)).then(r => {
     invalidateBookCache(id)
     return r.data

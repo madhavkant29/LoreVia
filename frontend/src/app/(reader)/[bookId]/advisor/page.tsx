@@ -497,6 +497,10 @@ export default function AdvisorPage() {
   const scanPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadSuggestions = useCallback(async () => {
+    if (!canUseAuthorMode) {
+      setSuggestionsPayload({ suggestions: [], meta: defaultScanMeta })
+      return
+    }
     setSuggestionsLoading(true)
     try {
       const data = await intelligenceApi.advisorSuggestions(bookId)
@@ -506,13 +510,18 @@ export default function AdvisorPage() {
     } finally {
       setSuggestionsLoading(false)
     }
-  }, [bookId])
+  }, [bookId, canUseAuthorMode])
 
   useEffect(() => {
     void loadSuggestions()
   }, [loadSuggestions])
 
   const startScan = useCallback(async () => {
+    if (!canUseAuthorMode) {
+      setScanStatus("failed")
+      setScanError("Continuity scans require an active trial, Author, or Architect plan.")
+      return
+    }
     if (scanStatus === "scanning") return
     setScanStatus("scanning")
     setScanError(null)
@@ -529,7 +538,7 @@ export default function AdvisorPage() {
       setScanStatus("failed")
       setScanError(err instanceof Error ? err.message : "Scan failed to start")
     }
-  }, [bookId, scanStatus, loadSuggestions])
+  }, [bookId, canUseAuthorMode, scanStatus, loadSuggestions])
 
   const pollScanJob = useCallback((jobId: string) => {
     const poll = async (attempt: number) => {
@@ -598,10 +607,15 @@ export default function AdvisorPage() {
   }, [bookId])
 
   useEffect(() => {
-    if (autoOpenedScan || tab !== "checker" || !suggestionsPayload || suggestionsPayload.suggestions.length === 0) return
+    if (canUseAuthorMode || tab !== "suggestions") return
+    setTab("checker")
+  }, [canUseAuthorMode, tab])
+
+  useEffect(() => {
+    if (!canUseAuthorMode || autoOpenedScan || tab !== "checker" || !suggestionsPayload || suggestionsPayload.suggestions.length === 0) return
     setTab("suggestions")
     setAutoOpenedScan(true)
-  }, [autoOpenedScan, suggestionsPayload, tab])
+  }, [autoOpenedScan, canUseAuthorMode, suggestionsPayload, tab])
 
   useEffect(() => {
     try {
@@ -675,9 +689,11 @@ export default function AdvisorPage() {
       const dailyCap = buildDailyCapEventDetail(err)
       const msg = err instanceof Error ? err.message : ""
       if (dailyCap) {
-        setError("You reached today's Story Advisor limit. Upgrade for more daily capacity or continue tomorrow.")
+        setError(canUseAuthorMode ? "You reached today's Story Advisor limit. Upgrade for more daily capacity or continue tomorrow." : "You reached this week's free Story Advisor turn. Upgrade for more capacity.")
       } else if (msg.includes("429")) {
         setError("Too many Story Advisor requests right now. Please try again in a bit.")
+      } else if (msg.includes("403")) {
+        setError("This advisor action requires an active trial, Author, or Architect plan.")
       } else {
         setError("The advisor couldn't respond. Try again.")
       }
@@ -685,7 +701,7 @@ export default function AdvisorPage() {
       setLoading(false)
       inputRef.current?.focus()
     }
-  }, [bookId, greeting, loading, messages])
+  }, [bookId, canUseAuthorMode, greeting, loading, messages])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -771,14 +787,22 @@ export default function AdvisorPage() {
             title="Story advisor"
             description="Ask about lore, canon, world gaps, and story logic. The advisor counters contradictions, surfaces foreshadowing, and explains the tradeoffs behind story decisions."
             actions={
-              <Link
-                href={`/${bookId}/notes`}
-                className={`inline-flex items-center justify-center rounded-md border px-4 py-3 text-sm font-medium transition ${isDark ? "border-teal-500/35 bg-teal-500/8 text-teal-100 hover:bg-teal-500/12" : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50"}`}
-              >
-                Open notes workspace
-              </Link>
+              canUseAuthorMode ? (
+                <Link
+                  href={`/${bookId}/notes`}
+                  className={`inline-flex items-center justify-center rounded-md border px-4 py-3 text-sm font-medium transition ${isDark ? "border-teal-500/35 bg-teal-500/8 text-teal-100 hover:bg-teal-500/12" : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50"}`}
+                >
+                  Open notes workspace
+                </Link>
+              ) : null
             }
           />
+
+          {!canUseAuthorMode ? (
+            <div className={`mb-6 rounded-lg border px-5 py-4 text-sm leading-6 ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`} role="status">
+              Free accounts include one Story Advisor turn per week. Continuity scans, editorial review, saved advisor notes, and deeper author tools require an active trial, Author, or Architect plan.
+            </div>
+          ) : null}
 
           {/* Tab switcher */}
           <div role="tablist" aria-label="Story Advisor mode" className={`mb-8 inline-flex flex-wrap overflow-hidden rounded-md border p-1 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
@@ -794,23 +818,25 @@ export default function AdvisorPage() {
             >
               Continuity Checker
             </Button>
-            <Button
-              variant={tab === "suggestions" ? "primary" : "ghost"}
-              size="md"
-              id="advisor-tab-scan"
-              role="tab"
-              aria-selected={tab === "suggestions"}
-              aria-controls="advisor-scan-panel"
-              onClick={() => setTab("suggestions")}
-              className="relative rounded-sm"
-            >
-              Continuity Scan
-              {warnCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-3xs font-bold text-white">
-                  {warnCount}
-                </span>
-              )}
-            </Button>
+            {canUseAuthorMode ? (
+              <Button
+                variant={tab === "suggestions" ? "primary" : "ghost"}
+                size="md"
+                id="advisor-tab-scan"
+                role="tab"
+                aria-selected={tab === "suggestions"}
+                aria-controls="advisor-scan-panel"
+                onClick={() => setTab("suggestions")}
+                className="relative rounded-sm"
+              >
+                Continuity Scan
+                {warnCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-3xs font-bold text-white">
+                    {warnCount}
+                  </span>
+                )}
+              </Button>
+            ) : null}
           </div>
 
           {/* Chat tab */}

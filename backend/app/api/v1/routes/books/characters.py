@@ -71,11 +71,13 @@ from app.utils.character_utils import (
     is_displayable_character,
     is_cast_visible_character,
     list_character_review_data,
+    mark_character_candidate_as_place,
     mark_character_curated,
     mark_character_candidates_merged,
     merge_characters,
     partition_character,
     promote_character_candidate,
+    reject_character_candidate,
     reject_character_as_noise,
     refresh_character_duplicate_suggestions,
     relationship_summary_for_character,
@@ -127,6 +129,10 @@ def _serialize_relationship_record(relationship: CharacterRelationship) -> dict[
         "description": relationship.description,
         "from_chapter": relationship.from_chapter,
         "to_chapter": relationship.to_chapter,
+        "shared_labels": list(getattr(relationship, "shared_labels", None) or []),
+        "character_a_to_b_labels": list(getattr(relationship, "character_a_to_b_labels", None) or []),
+        "character_b_to_a_labels": list(getattr(relationship, "character_b_to_a_labels", None) or []),
+        "label_evidence": dict(getattr(relationship, "label_evidence", None) or {}),
     }
 
 
@@ -143,6 +149,8 @@ async def get_book_characters(
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
     if not collaboration_has_resource(collaborator, "character_bible"):
         raise HTTPException(403, "This share does not include the character bible.")
+    if collaborator is None:
+        require_author_access(current_user)
     result = await db.execute(
         select(Character)
         .where(Character.book_id == book_id)
@@ -177,10 +185,14 @@ async def get_book_characters(
                 continue
             summary_a = relationship_summary_for_character(rel, a.name, b.name, a.name)
             summary_b = relationship_summary_for_character(rel, a.name, b.name, b.name)
+            label_signature = ":".join(
+                ",".join(str(item) for item in (getattr(rel, field, None) or []))
+                for field in ("shared_labels", "character_a_to_b_labels", "character_b_to_a_labels")
+            )
             if summary_a:
-                append_unique_summary(rel_summaries, rel_keys, str(a.id), f"{rel.rel_type}:{b.name}".lower(), summary_a)
+                append_unique_summary(rel_summaries, rel_keys, str(a.id), f"{rel.rel_type}:{rel.from_chapter}:{rel.to_chapter}:{label_signature}:{b.name}".lower(), summary_a)
             if summary_b:
-                append_unique_summary(rel_summaries, rel_keys, str(b.id), f"{rel.rel_type}:{a.name}".lower(), summary_b)
+                append_unique_summary(rel_summaries, rel_keys, str(b.id), f"{rel.rel_type}:{rel.from_chapter}:{rel.to_chapter}:{label_signature}:{a.name}".lower(), summary_b)
 
         if not skip_arc_tracker and character_ids:
             state_rows = (
@@ -237,6 +249,9 @@ async def get_book_characters(
 @router.get("/{book_id}/character-review", response_model=CharacterReviewOut)
 async def get_book_character_review(
     book_id: uuid.UUID,
+    include_quarantined: bool = Query(True),
+    include_places: bool = Query(False),
+    include_rejected: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -244,7 +259,13 @@ async def get_book_character_review(
     require_author_access(current_user)
     if book.mode != "author":
         raise HTTPException(400, "Character review is only available in author mode")
-    return await list_character_review_data(db, book_id=book.id)
+    return await list_character_review_data(
+        db,
+        book_id=book.id,
+        include_quarantined=include_quarantined,
+        include_places=include_places,
+        include_rejected=include_rejected,
+    )
 
 
 @router.get("/{book_id}/characters/identity-diagnostics")
@@ -619,6 +640,7 @@ async def merge_book_characters(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     primary = await db.get(Character, body.primary_id)
     secondary = await db.get(Character, body.secondary_id)
     if not primary or not secondary or primary.book_id != book.id or secondary.book_id != book.id:
@@ -683,6 +705,7 @@ async def update_book_character(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     character = await db.get(Character, character_id)
     if not character or character.book_id != book.id:
         raise HTTPException(404, "Character not found")
@@ -953,9 +976,26 @@ async def reject_book_character_candidate(
                 details={"candidate_id": str(candidate.id)},
                 actor_user_id=current_user.id,
             )
-    candidate.status = "rejected"
+    reject_character_candidate(candidate, reason_codes=["author_rejected_candidate"])
     await db.commit()
     return {"rejected": str(candidate.id)}
+
+
+@router.post("/{book_id}/character-review/{candidate_id}/mark-place")
+async def mark_book_character_candidate_as_place(
+    book_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    candidate = await db.get(CharacterCandidate, candidate_id)
+    if not candidate or candidate.book_id != book.id:
+        raise HTTPException(404, "Candidate not found")
+    mark_character_candidate_as_place(candidate, reason_codes=["author_marked_place"])
+    await db.commit()
+    return {"marked": str(candidate.id), "adjudication_status": candidate.adjudication_status}
 
 
 # ─── Relationship candidate management ──────────────────────────────────────
@@ -1046,6 +1086,8 @@ async def accept_relationship_candidate(
     _validate_relationship_window(from_chapter, body.to_chapter)
     if body.sentiment is not None and not -1.0 <= body.sentiment <= 1.0:
         raise HTTPException(400, "Sentiment must be between -1.0 and 1.0")
+    evidence_payload = dict(candidate.evidence or {})
+    extracted_relationship = evidence_payload.get("relationship") if isinstance(evidence_payload.get("relationship"), dict) else {}
 
     relationship, _ = await upsert_relationship_timeline_state(
         db,
@@ -1057,6 +1099,10 @@ async def accept_relationship_candidate(
         description=clean_optional_text(body.description) if body.description is not None else clean_optional_text(candidate.description),
         from_chapter=from_chapter,
         to_chapter=body.to_chapter,
+        shared_labels=body.shared_labels if body.shared_labels is not None else extracted_relationship.get("shared_labels"),
+        character_a_to_b_labels=body.character_a_to_b_labels if body.character_a_to_b_labels is not None else extracted_relationship.get("character_a_to_b_labels"),
+        character_b_to_a_labels=body.character_b_to_a_labels if body.character_b_to_a_labels is not None else extracted_relationship.get("character_b_to_a_labels"),
+        label_evidence=body.label_evidence or extracted_relationship.get("label_evidence") or evidence_payload,
     )
     relationship.edited_by_author = True
     candidate.matched_character_a_id = relationship_a.id
@@ -1216,6 +1262,10 @@ async def create_book_relationship(
         description=clean_optional_text(body.description),
         from_chapter=body.from_chapter,
         to_chapter=body.to_chapter,
+        shared_labels=body.shared_labels,
+        character_a_to_b_labels=body.character_a_to_b_labels,
+        character_b_to_a_labels=body.character_b_to_a_labels,
+        label_evidence=body.label_evidence,
     )
     relationship.edited_by_author = True
     await db.commit()
@@ -1256,6 +1306,10 @@ async def update_book_relationship(
         from_chapter=body.from_chapter or relationship.from_chapter,
         to_chapter=body.to_chapter,
         relationship_id=relationship.id,
+        shared_labels=body.shared_labels,
+        character_a_to_b_labels=body.character_a_to_b_labels,
+        character_b_to_a_labels=body.character_b_to_a_labels,
+        label_evidence=body.label_evidence if body.label_evidence is not None else dict(getattr(relationship, "label_evidence", None) or {}),
     )
     relationship.edited_by_author = True
     await db.commit()

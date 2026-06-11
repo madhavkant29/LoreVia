@@ -361,8 +361,9 @@ async def test_legacy_reader_alias_uploads_are_limited_like_non_author_owned_upl
         data={"title": "Second Reader Upload"},
     )
 
-    assert first.status_code == 202
+    assert first.status_code == 403
     assert second.status_code == 403
+    assert "Upgrade to Author for higher owner upload limits." in first.json()["detail"]
     assert "Upgrade to Author for higher owner upload limits." in second.json()["detail"]
 
 

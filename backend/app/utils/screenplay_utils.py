@@ -8,7 +8,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book, Dialogue, Scene
@@ -104,8 +104,8 @@ async def get_screenplay_stats(db: AsyncSession, book_id: uuid.UUID, user_id: uu
         select(
             func.count(Scene.id).label('total_scenes'),
             func.sum(Scene.word_count).label('total_words'),
-            func.sum(func.case((Scene.interior, 1), else_=0)).label('int_scenes'),
-            func.sum(func.case((Scene.exterior, 1), else_=0)).label('ext_scenes')
+            func.sum(case((Scene.interior, 1), else_=0)).label('int_scenes'),
+            func.sum(case((Scene.exterior, 1), else_=0)).label('ext_scenes')
         )
         .where(Scene.book_id == book_id)
     )).first())

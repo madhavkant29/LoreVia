@@ -1,9 +1,10 @@
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
 from app.models.book import Book, Chapter
-from app.models.character import Character
+from app.models.character import Character, CharacterAlias
 from app.models.intelligence import BookChunk
 from app.models.user import User
 from app.utils.character_utils import (
@@ -13,6 +14,7 @@ from app.utils.character_utils import (
     find_earliest_character_mention_chapters,
     infer_character_trust_tier,
     is_cast_visible_character,
+    serialize_book_character,
     set_character_review_state,
 )
 
@@ -145,6 +147,75 @@ def test_set_character_review_state_controls_cast_visibility():
     assert character.approval_state == "pending_review"
     assert is_cast_visible_character(character) is False
     assert payload["approval_reason_codes"] == ["sentence_start_common_word"]
+
+
+def test_serialize_book_character_includes_declared_profile_fields():
+    book_id = uuid.uuid4()
+    character_id = uuid.uuid4()
+    alias_id = uuid.uuid4()
+    created_at = datetime(2026, 6, 11, tzinfo=timezone.utc)
+    character = Character(
+        id=character_id,
+        book_id=book_id,
+        name="Captain Mira",
+        aliases=["Mira"],
+        role="mc",
+        first_chapter=1,
+        last_seen_chapter=3,
+        mention_count=8,
+        trait_state={"build": {"value": "slight", "confidence": 0.8, "type": "objective"}},
+        hair="silver",
+        eyes="gray",
+        build="slight",
+        age_descriptor="middle-aged",
+        distinguishing="scar over left eyebrow",
+        personality_tags=["focused"],
+        motivations=["Keep the crew alive"],
+        fears=["Losing command"],
+        created_at=created_at,
+    )
+    character.alias_records = [
+        CharacterAlias(
+            id=alias_id,
+            book_id=book_id,
+            character_id=character_id,
+            alias_text="The Captain",
+            normalized_alias="captain",
+            alias_kind="title",
+            source="extraction",
+            confidence=0.82,
+            created_at=created_at,
+        ),
+    ]
+
+    payload = serialize_book_character(
+        character,
+        rel_summaries={},
+        states=[],
+        relationships=[],
+        counterpart_names={},
+        voice_profile=None,
+        total_chapters=4,
+    )
+
+    assert payload["alias_records"] == [
+        {
+            "id": alias_id,
+            "book_id": book_id,
+            "character_id": character_id,
+            "alias_text": "The Captain",
+            "normalized_alias": "captain",
+            "alias_kind": "title",
+            "source": "extraction",
+            "confidence": 0.82,
+            "created_at": created_at,
+        }
+    ]
+    assert payload["hair"] == "silver"
+    assert payload["eyes"] == "gray"
+    assert payload["build"] == "slight"
+    assert payload["age_descriptor"] == "middle-aged"
+    assert payload["distinguishing"] == "scar over left eyebrow"
 
 
 @pytest.mark.asyncio

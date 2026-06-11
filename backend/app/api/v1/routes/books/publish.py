@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models.book import Book
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
 from app.services.public_publish_service import submit_public_share
+from app.utils.billing_utils import require_author_access
 from app.utils.public_utils import (
     PUBLIC_STATUS_HIDDEN,
     USER_PUBLIC_SHARE_SOURCE_KIND,
@@ -34,6 +35,7 @@ async def publish_book_publicly(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id or book.hidden_at is not None or book.archived_at is not None:
         raise HTTPException(404, "Book not found")
+    require_author_access(current_user)
     return await submit_public_share(
         db,
         book=book,
@@ -57,6 +59,7 @@ async def unpublish_book_publicly(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404, "Book not found")
+    require_author_access(current_user)
     previous_status = str(getattr(book, "public_status", "") or "") or None
     book.is_public = False
     book.public_status = PUBLIC_STATUS_HIDDEN

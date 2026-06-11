@@ -129,7 +129,7 @@ describe("AuthorToolsNav", () => {
     expect(aside?.className ?? "").toContain("xl:group-hover/navwrap:w-[16.5rem]")
   })
 
-  it("shows author sections for a free owner when the book is in author mode", () => {
+  it("limits author navigation for a free owner when the book is in author mode", () => {
     mockBaseState({
       tier: "free",
       hasOwnAuthorAccess: false,
@@ -138,8 +138,10 @@ describe("AuthorToolsNav", () => {
 
     const view = renderAuthorToolsNav()
 
-    expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')?.textContent).toContain("Manuscript Editor")
-    expect(view.querySelector('[data-testid="author-nav-item-characters"]')?.textContent).toContain("Character Bible")
+    expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')).toBeNull()
+    expect(view.querySelector('[data-testid="author-nav-item-characters"]')).toBeNull()
+    expect(view.querySelector('[data-testid="author-nav-item-advisor"]')?.textContent).toContain("Story Advisor")
+    expect(view.querySelector('[data-testid="author-nav-item-export"]')?.textContent).toContain("Import & Export")
   })
 
   it("places notes workspace directly under the scene workspace", () => {

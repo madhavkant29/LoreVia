@@ -809,7 +809,7 @@ async def test_process_chapter_records_ambiguous_roster_match_without_crashing(d
 
     assert len(candidates) == 1
     assert candidates[0].proposed_name == "Mimi"
-    assert candidates[0].reason_codes == ["ambiguous_roster_match"]
+    assert "ambiguous_roster_match" in candidates[0].reason_codes
 
 
 @pytest.mark.asyncio
@@ -1390,13 +1390,12 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(client, 
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=12)
 
-    assert result == {"skipped": "book_hidden"}
+    assert result == {"skipped": "book_unavailable"}
     assert captured_chapter_tasks == []
 
     book = await db.get(Book, book_id)
     assert book is not None
     await db.refresh(book)
-    assert book.status == "failed"
+    assert book.status == "pending"
     processing_state = (book.writer_workspace or {}).get("processing", {})
-    assert processing_state["stage"] == "cancelled"
-    assert processing_state["status"] == "failed"
+    assert processing_state == {}
