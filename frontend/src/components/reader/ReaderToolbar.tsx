@@ -57,8 +57,8 @@ export const ReaderToolbar = memo(function ReaderToolbar({
 
   const toneClass = theme === "dark"
     ? {
-        shell: "border-white/8 bg-[#070d18]/96 text-slate-100",
-        subShell: "border-white/8 bg-[#0b1120]/94",
+        shell: "border-white/[0.08] bg-[#070d18]/96 text-slate-100",
+        subShell: "border-white/[0.08] bg-[#0b1120]/94",
         meta: "text-slate-400",
         subtle: "text-slate-500",
         heading: "text-white",
@@ -70,7 +70,7 @@ export const ReaderToolbar = memo(function ReaderToolbar({
         ghost: "border-white/10 bg-[#11192b] text-slate-200 hover:bg-[#162036] hover:text-white",
         primary: "border-white/10 bg-[#151f35] text-white hover:bg-[#1a2741]",
         active: "border-[#7f86ff]/40 bg-[#353f71] text-white",
-        progressTrack: "bg-white/8",
+        progressTrack: "bg-white/[0.08]",
         progressFill: "bg-teal-600",
       }
     : {

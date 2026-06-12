@@ -29,7 +29,7 @@ export function ComparisonHero({ title, summary }: ComparisonHeroProps) {
             </Link>
             <Link
               href="/pricing"
-              className="inline-flex items-center justify-center rounded-md border border-white/12 bg-white/5 px-6 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
+              className="inline-flex items-center justify-center rounded-md border border-white/[0.12] bg-white/5 px-6 py-3.5 text-base font-semibold text-white transition hover:bg-white/[0.08]"
             >
               View pricing
             </Link>
@@ -38,11 +38,11 @@ export function ComparisonHero({ title, summary }: ComparisonHeroProps) {
 
         <div className="rounded-lg border border-white/10 bg-[#0d1715] p-6">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-md border border-white/8 bg-[#0b1513] p-5">
+            <div className="rounded-md border border-white/[0.08] bg-[#0b1513] p-5">
               <p className="text-xs uppercase tracking-[0.22em] text-[#6fae9f]">What LoreVia emphasizes</p>
               <p className="mt-4 text-lg font-semibold text-white">Continuity, story memory, revision clarity</p>
             </div>
-            <div className="rounded-md border border-white/8 bg-[#0b1513] p-5">
+            <div className="rounded-md border border-white/[0.08] bg-[#0b1513] p-5">
               <p className="text-xs uppercase tracking-[0.22em] text-[#6fae9f]">How to read this page</p>
               <p className="mt-4 text-lg font-semibold text-white">Choose the workflow that removes your bottleneck</p>
             </div>

@@ -295,7 +295,7 @@ export function AuthorToolsNav({
                               ? "border-teal-300/20 bg-teal-900/70 text-white"
                               : "bg-teal-800 text-white"
                             : isDark
-                              ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
+                              ? "border-transparent text-slate-300 hover:border-white/[0.08] hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
                               : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                         }`}
                       >
@@ -382,7 +382,7 @@ export function AuthorToolsNav({
                           ? "border-teal-300/20 bg-teal-900/70 text-white"
                           : "bg-teal-800 text-white"
                         : isDark
-                          ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
+                          ? "border-transparent text-slate-300 hover:border-white/[0.08] hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
                           : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                     }`}
                   >

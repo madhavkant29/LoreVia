@@ -63,7 +63,7 @@ function AddChapterPageInner() {
                 href="/library"
                 className={`inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold transition ${
                   isDark
-                    ? "border border-white/12 bg-[#111111] text-[#E0E0E0] hover:bg-[#171717]"
+                    ? "border border-white/[0.12] bg-[#111111] text-[#E0E0E0] hover:bg-[#171717]"
                     : "border border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
                 }`}
               >
@@ -76,7 +76,7 @@ function AddChapterPageInner() {
                 }}
                 className={`inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold transition ${
                   isDark
-                    ? "border border-white/12 bg-white/5 text-[#E0E0E0] hover:bg-white/10"
+                    ? "border border-white/[0.12] bg-white/5 text-[#E0E0E0] hover:bg-white/10"
                     : "border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100"
                 }`}
               >

@@ -356,7 +356,7 @@ function ReaderChapterSkeleton() {
     <div className="reader-display-shell flex h-[100dvh] min-h-[100dvh] overflow-hidden bg-[#070c16] text-stone-100" role="status" aria-label="Loading chapter" aria-busy="true">
       <span className="sr-only">Loading chapter</span>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <header className="reader-app-chrome sticky top-0 z-20 shrink-0 border-b border-white/8 bg-[#070d18]/96">
+        <header className="reader-app-chrome sticky top-0 z-20 shrink-0 border-b border-white/[0.08] bg-[#070d18]/96">
           <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8 xl:px-10">
             <div className="flex items-center justify-between gap-4">
               <Skeleton className="h-10 w-[154px] rounded-md bg-white/10" />
@@ -376,7 +376,7 @@ function ReaderChapterSkeleton() {
             </div>
           </div>
         </header>
-        <div className="border-b border-white/8 bg-[#0b1120]/94">
+        <div className="border-b border-white/[0.08] bg-[#0b1120]/94">
           <div className="mx-auto flex w-full max-w-[1620px] flex-wrap gap-3 px-4 py-3 sm:px-6 lg:px-8 xl:px-10">
             <Skeleton className="h-10 w-44 rounded-md bg-white/10" />
             <Skeleton className="h-10 w-64 rounded-md bg-white/10" />

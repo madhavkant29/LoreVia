@@ -7,6 +7,7 @@ const INVALID_CREDENTIALS_MESSAGE = "Invalid email or password."
 const TEMPORARY_SIGN_IN_MESSAGE = "Sign-in was temporarily unavailable. Please try again."
 const OAUTH_CONFIG_MESSAGE = "Google sign-in is currently unavailable. Please try email/password sign-in or contact support."
 const OAUTH_TIMEOUT_MESSAGE = "Google sign-in timed out. Please check your connection and try again."
+const DELETED_ACCOUNT_MESSAGE = "This account has been deleted. Contact support if you think this was a mistake."
 
 function deviceAccountLimitMessage(accountCount: number): string {
   const label = accountCount === 1 ? "account" : "accounts"
@@ -57,6 +58,10 @@ export function normalizeLoginError(error: string | null | undefined, status?: n
 
   if (detail === "Invalid credentials") {
     return INVALID_CREDENTIALS_MESSAGE
+  }
+
+  if (detail === "Account has been deleted.") {
+    return DELETED_ACCOUNT_MESSAGE
   }
 
   const deviceAccountLimitMatch = detail.match(/^This device is already linked to the maximum of (\d+) accounts\.$/)

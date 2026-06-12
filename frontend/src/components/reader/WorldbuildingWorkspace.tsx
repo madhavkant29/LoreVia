@@ -618,7 +618,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                     />
                   </LabeledField>
 
-                  <div className={`rounded-lg border border-dashed p-4 ${isDark ? "border-white/12 bg-[#07111f]" : "border-stone-300 bg-stone-50"}`}>
+                  <div className={`rounded-lg border border-dashed p-4 ${isDark ? "border-white/[0.12] bg-[#07111f]" : "border-stone-300 bg-stone-50"}`}>
                     <label className="block cursor-pointer">
                       <span className="sr-only">Upload world corpus files</span>
                       <input
@@ -1359,7 +1359,7 @@ function WorkspaceCard({
       <div className={`flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between ${isDark ? "border-white/10" : "border-stone-200"}`}>
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-3xs font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>
+            <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-3xs font-semibold ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-stone-100 text-stone-600"}`}>
               {number}
             </span>
             <p className={eyebrowClass(isDark)}>{sectionLabel}</p>
@@ -1627,7 +1627,7 @@ function mutedActionClass(isDark: boolean, accent: "teal") {
 }
 
 function badgeClass(isDark: boolean) {
-  return `rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`
+  return `rounded-full px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-stone-100 text-stone-600"}`
 }
 
 function accentBadgeClass(accent: "teal" | "blue" | "amber", isDark: boolean) {
@@ -1690,6 +1690,6 @@ function severityClass(severity: string, isDark: boolean) {
       : "rounded-full bg-amber-50 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-amber-800"
   }
   return isDark
-    ? "rounded-full bg-white/8 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-slate-200"
+    ? "rounded-full bg-white/[0.08] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-slate-200"
     : "rounded-full bg-stone-100 px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] text-stone-700"
 }

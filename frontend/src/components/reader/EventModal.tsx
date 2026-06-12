@@ -72,7 +72,7 @@ export const EventModal = memo(function EventModal({ isDark, event, onClose }: P
             <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Involved characters</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {event.involved_character_names.map((name) => (
-                <span key={name} className={`rounded-full px-3 py-1 text-sm ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                <span key={name} className={`rounded-full px-3 py-1 text-sm ${isDark ? "bg-white/[0.08] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
                   {name}
                 </span>
               ))}

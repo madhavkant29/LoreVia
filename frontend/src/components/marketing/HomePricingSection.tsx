@@ -151,7 +151,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
                   className={`mt-10 inline-flex w-full items-center justify-center rounded-md px-4 py-3.5 text-sm font-semibold transition ${
                     tier.highlight
                       ? "bg-[#2d8b81] text-white hover:bg-[#36a094]"
-                      : "border border-white/12 bg-white/5 text-white hover:bg-white/8"
+                      : "border border-white/[0.12] bg-white/5 text-white hover:bg-white/[0.08]"
                   }`}
                 >
                   {tier.cta}

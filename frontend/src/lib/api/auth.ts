@@ -84,13 +84,20 @@ export const authApi = {
   },
   exportData: () =>
     apiClient.get<Blob>("/auth/me/data-export", { responseType: "blob" }).then(r => r.data),
-  deleteAccount: (payload: { confirmationText: string; password?: string }) =>
-    apiClient.delete<AccountDeletionResponse>("/auth/me", {
+  deleteAccount: async (payload: { confirmationText: string; password?: string }) => {
+    const response = await apiClient.delete<AccountDeletionResponse>("/auth/me", {
       data: {
         confirmation_text: payload.confirmationText,
         password: payload.password || null,
       },
-    }).then(r => r.data),
+    })
+    try {
+      await supabase?.auth.signOut({ scope: "local" })
+    } catch {
+      // Local provider-session cleanup should not mask a completed account deletion.
+    }
+    return response.data
+  },
   setReadingMode: (mode: string) =>
     apiClient.patch(`/auth/me/reading-mode?mode=${mode}`).then(r => r.data),
   setDailyWordGoal: (dailyWordGoal: number) =>

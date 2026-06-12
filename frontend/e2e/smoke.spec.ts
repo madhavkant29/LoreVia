@@ -21,10 +21,10 @@ function watchBrowserSignals(page: Page) {
 test("marketing home page renders the core value proposition", async ({ page }) => {
   await page.goto("/")
 
-  await expect(page.getByRole("heading", { name: /revise coherently/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /find plot holes before your readers do/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^start free$/i }).first()).toBeVisible()
-  await expect(page.getByText("Start with the draft you already have.")).toBeVisible()
+  await expect(page.getByText("Start analyzing your manuscript")).toBeVisible()
 })
 
 test("public SEO content hubs render without auth and link into article clusters", async ({ page }) => {
@@ -755,6 +755,28 @@ test("character review surfaces unresolved relationship candidates in duplicate 
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+})
+
+test("character bible follows the persisted dark theme", async ({ page }) => {
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "lorevia-preferences",
+      JSON.stringify({
+        state: {
+          theme: "dark",
+          timelineCollapsedSections: { characters: true, plotThreads: true, relationships: true },
+        },
+        version: 0,
+      }),
+    )
+  })
+
+  await page.goto(`${BOOK_ROUTE}/characters`)
+
+  await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
+  const characterBibleShell = page.locator("xpath=//div[contains(@class, 'bg-[#11191a]') and contains(@class, 'text-slate-100')]").first()
+  await expect(characterBibleShell).toBeVisible()
 })
 
 test("world gap workspace surfaces consistency flags and the coverage watchlist", async ({ page }) => {

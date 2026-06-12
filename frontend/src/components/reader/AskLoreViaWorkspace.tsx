@@ -412,7 +412,7 @@ function AskResultCard({
                       <span
                         className={cn(
                           "rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em]",
-                          isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-500"
+                          isDark ? "bg-white/[0.08] text-slate-300" : "bg-white text-stone-500"
                         )}
                       >
                         {citation.source_type === "passage" ? "Passage" : "Summary"}
@@ -446,7 +446,7 @@ function LoadingResultCard({ isDark }: { isDark: boolean }) {
     <div
       className={cn(
         "rounded-lg border px-5 py-5 sm:px-6",
-        isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-white/90"
+        isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-200 bg-white/90"
       )}
       role="status"
       aria-label="Loading Ask LoreVia answer"
@@ -454,9 +454,9 @@ function LoadingResultCard({ isDark }: { isDark: boolean }) {
     >
       <span className="sr-only">Loading Ask LoreVia answer</span>
       <Skeleton className={cn("h-2.5 w-40", isDark ? "bg-white/10" : "bg-stone-200")} />
-      <Skeleton className={cn("mt-4 h-3 w-full", isDark ? "bg-white/8" : "bg-stone-100")} />
-      <Skeleton className={cn("mt-3 h-3 w-5/6", isDark ? "bg-white/8" : "bg-stone-100")} />
-      <Skeleton className={cn("mt-3 h-3 w-2/3", isDark ? "bg-white/8" : "bg-stone-100")} />
+      <Skeleton className={cn("mt-4 h-3 w-full", isDark ? "bg-white/[0.08]" : "bg-stone-100")} />
+      <Skeleton className={cn("mt-3 h-3 w-5/6", isDark ? "bg-white/[0.08]" : "bg-stone-100")} />
+      <Skeleton className={cn("mt-3 h-3 w-2/3", isDark ? "bg-white/[0.08]" : "bg-stone-100")} />
     </div>
   )
 }

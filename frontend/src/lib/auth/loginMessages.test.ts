@@ -35,6 +35,13 @@ describe("loginMessages", () => {
     )
   })
 
+  it("keeps deleted-account sign-in failures distinct from missing-account guidance", () => {
+    expect(normalizeLoginError("Account has been deleted.", 401)).toBe(
+      "This account has been deleted. Contact support if you think this was a mistake.",
+    )
+    expect(shouldShowCreateAccountCta("Account has been deleted.")).toBe(false)
+  })
+
   it("maps the device account cap detail into clearer login guidance", () => {
     expect(normalizeLoginError("This device is already linked to the maximum of 2 accounts.")).toBe(
       "This device is already linked to 2 LoreVia accounts. Sign in with one of those accounts or use a different device or browser profile.",

@@ -188,7 +188,7 @@ function inferNoteType(path: string) {
 function markdownButtonClass(isDark: boolean) {
   return `flex h-9 min-w-9 items-center justify-center rounded-xl border px-2 text-sm font-semibold transition ${
     isDark
-      ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.08] hover:text-white"
+      ? "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.08] hover:text-white"
       : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
   }`
 }
@@ -927,11 +927,11 @@ export function VaultNotesEditor({
     <div
       className={`rounded-lg border p-4 sm:p-5 ${
         isDark
-          ? "border-white/8 bg-[#071211]"
+          ? "border-white/[0.08] bg-[#071211]"
           : "border-stone-200 bg-white"
       }`}
     >
-      <div className="flex flex-col gap-4 border-b border-white/8 pb-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className={`font-serif text-[2rem] tracking-[-0.04em] ${isDark ? "text-white" : "text-stone-950"}`}>Vault notes workspace</h2>
           <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>A book-native vault for character notes, links, themes, and evolving story context.</p>
@@ -970,8 +970,8 @@ export function VaultNotesEditor({
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(18rem,20rem)_minmax(0,1fr)_minmax(16rem,18rem)]">
-        <aside className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#07101d]/90" : "border-stone-200 bg-white/90"}`}>
-          <div className={`border-b px-5 py-5 ${isDark ? "border-white/8" : "border-stone-200"}`}>
+        <aside className={`overflow-hidden rounded-lg border ${isDark ? "border-white/[0.08] bg-[#07101d]/90" : "border-stone-200 bg-white/90"}`}>
+          <div className={`border-b px-5 py-5 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
             <div className="flex items-center gap-3">
               <div className={`flex h-12 w-12 items-center justify-center rounded-md ${isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>
                 <IconDocument />
@@ -985,7 +985,7 @@ export function VaultNotesEditor({
 
           <div className="p-4">
             <div className="flex gap-2">
-              <label className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
+              <label className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-300" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
                 <IconSearch />
                 <input
                   value={query}
@@ -995,7 +995,7 @@ export function VaultNotesEditor({
                 />
               </label>
               <Tooltip content="Show all folders">
-                <button type="button" aria-label="Show all folders" onClick={() => setSelectedFolder(null)} className={`flex h-12 w-12 items-center justify-center rounded-md border ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                <button type="button" aria-label="Show all folders" onClick={() => setSelectedFolder(null)} className={`flex h-12 w-12 items-center justify-center rounded-md border ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
                   <IconSliders />
                 </button>
               </Tooltip>
@@ -1066,7 +1066,7 @@ export function VaultNotesEditor({
 
               <div className="mt-3 max-h-[18rem] space-y-1 overflow-auto pr-1">
                 {displayedNotes.length === 0 ? (
-                  <div className={`rounded-md border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/8 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+                  <div className={`rounded-md border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-stone-300 text-stone-500"}`}>
                     {notesView === "favorites" ? "Star a note to keep it here." : "No notes match that search."}
                   </div>
                 ) : (
@@ -1111,7 +1111,7 @@ export function VaultNotesEditor({
             </div>
           </div>
 
-          <div className={`border-t px-4 py-4 ${isDark ? "border-white/8" : "border-stone-200"}`}>
+          <div className={`border-t px-4 py-4 ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
             <button type="button" onClick={() => void createNote()} disabled={busy} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${isDark ? "text-sky-200 hover:bg-white/[0.04]" : "text-sky-700 hover:bg-stone-100"}`}>
               <IconPlus />
               New note
@@ -1119,10 +1119,10 @@ export function VaultNotesEditor({
           </div>
         </aside>
 
-        <section className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#08111e]/95" : "border-stone-200 bg-white"}`}>
+        <section className={`overflow-hidden rounded-lg border ${isDark ? "border-white/[0.08] bg-[#08111e]/95" : "border-stone-200 bg-white"}`}>
           {selectedNote ? (
             <>
-              <div className={`flex flex-col gap-5 border-b px-5 py-4 ${isDark ? "border-white/8" : "border-stone-200"} lg:flex-row lg:items-start lg:justify-between`}>
+              <div className={`flex flex-col gap-5 border-b px-5 py-4 ${isDark ? "border-white/[0.08]" : "border-stone-200"} lg:flex-row lg:items-start lg:justify-between`}>
                 <div className="min-w-0">
                   <div className={`flex flex-wrap items-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                     {selectedNote.path.split("/").slice(0, -1).map((segment, index, array) => (
@@ -1178,16 +1178,16 @@ export function VaultNotesEditor({
 
                 <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                   <span className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{status || `Saved ${formatRelativeTime(selectedNote.updated_at)}`}</span>
-                  <button type="button" onClick={() => void saveNote(selectedNote.path, selectedContent)} className={`rounded-md border px-3 py-2 text-sm font-medium ${isDark ? "border-white/8 bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                  <button type="button" onClick={() => void saveNote(selectedNote.path, selectedContent)} className={`rounded-md border px-3 py-2 text-sm font-medium ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-200 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
                     <span className="inline-flex items-center gap-2"><IconCheck />Save now</span>
                   </button>
                   <Tooltip content="Copy note reference">
-                    <button type="button" aria-label="Copy note reference" onClick={() => void copyCurrentReference()} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                    <button type="button" aria-label="Copy note reference" onClick={() => void copyCurrentReference()} className={`rounded-md border p-2.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
                       <IconCopy />
                     </button>
                   </Tooltip>
                   <Tooltip content="Open full graph">
-                    <button type="button" aria-label="Open full graph" onClick={() => setGraphExpanded(true)} className={`rounded-md border p-2.5 ${isDark ? "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
+                    <button type="button" aria-label="Open full graph" onClick={() => setGraphExpanded(true)} className={`rounded-md border p-2.5 ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}>
                       <IconExpand />
                     </button>
                   </Tooltip>
@@ -1196,9 +1196,9 @@ export function VaultNotesEditor({
 
               <div className="p-5">
                 <WhatsTheWordPanel bookId={bookId} isDark={isDark} className="mb-4" />
-                <div className={`overflow-hidden rounded-lg border ${isDark ? "border-white/8 bg-[#0a1323]" : "border-stone-200 bg-stone-50"}`}>
+                <div className={`overflow-hidden rounded-lg border ${isDark ? "border-white/[0.08] bg-[#0a1323]" : "border-stone-200 bg-stone-50"}`}>
                   {(mode === "edit" || mode === "split") ? (
-                    <div className={`border-b px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white/80"}`}>
+                    <div className={`border-b px-3 py-3 ${isDark ? "border-white/[0.08] bg-white/[0.02]" : "border-stone-200 bg-white/80"}`}>
                       <div className="flex flex-wrap gap-2">
                         {toolbarButtons.map((button) => (
                           <Tooltip key={button.key} content={button.title}>
@@ -1228,13 +1228,13 @@ export function VaultNotesEditor({
                           value={findWithinNote}
                           onChange={(event) => setFindWithinNote(event.target.value)}
                           aria-label="Find in this note"
-                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/[0.08] bg-[#08111d] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                         />
                         <input
                           value={replaceWithinNote}
                           onChange={(event) => setReplaceWithinNote(event.target.value)}
                           aria-label="Replace with"
-                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-[#08111d] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                          className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/[0.08] bg-[#08111d] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                         />
                         <button type="button" onClick={replaceInSelectedNote} disabled={!findWithinNote.trim()} className={`rounded-xl px-4 py-2 text-sm font-medium ${isDark ? "bg-white/10 text-slate-200 disabled:opacity-40" : "bg-stone-100 text-stone-700 disabled:opacity-40"}`}>
                           Replace all
@@ -1243,7 +1243,7 @@ export function VaultNotesEditor({
                     </div>
                   ) : null}
 
-                  <div className={`${mode === "split" ? "grid gap-px xl:grid-cols-2" : ""} ${isDark && mode === "split" ? "bg-white/8" : ""}`}>
+                  <div className={`${mode === "split" ? "grid gap-px xl:grid-cols-2" : ""} ${isDark && mode === "split" ? "bg-white/[0.08]" : ""}`}>
                     {mode !== "preview" ? (
                       <textarea
                         ref={textareaRef}
@@ -1274,7 +1274,7 @@ export function VaultNotesEditor({
                     ) : null}
                   </div>
 
-                  <div className={`flex flex-wrap items-center gap-4 border-t px-4 py-3 text-sm ${isDark ? "border-white/8 bg-[#09111f] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+                  <div className={`flex flex-wrap items-center gap-4 border-t px-4 py-3 text-sm ${isDark ? "border-white/[0.08] bg-[#09111f] text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
                     <span>{fileWordCount(selectedContent).toLocaleString()} words</span>
                     <span>{fileCharacterCount(selectedContent).toLocaleString()} characters</span>
                     <span>{countMarkdownHeadings(selectedContent)} headings</span>
@@ -1317,7 +1317,7 @@ export function VaultNotesEditor({
                 <input
                   value={editedFolder}
                   onChange={(event) => setEditedFolder(event.target.value)}
-                  className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
               <label className="space-y-2">
@@ -1325,7 +1325,7 @@ export function VaultNotesEditor({
                 <input
                   value={editedTitle}
                   onChange={(event) => setEditedTitle(event.target.value)}
-                  className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                  className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                 />
               </label>
               <div className="flex gap-2">
@@ -1336,13 +1336,13 @@ export function VaultNotesEditor({
                   Delete
                 </button>
               </div>
-              <div className={`overflow-hidden rounded-md border p-3 ${isDark ? "border-white/8 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+              <div className={`overflow-hidden rounded-md border p-3 ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
                 <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Send to scenes</p>
                 <div className="mt-3 flex gap-2">
                   <select
                     value={sceneChapterNumber ?? ""}
                     onChange={(event) => setSceneChapterNumber(event.target.value ? Number(event.target.value) : null)}
-                    className={`min-w-0 flex-1 rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/8 bg-[#09111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                    className={`min-w-0 flex-1 rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-[#09111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                   >
                     <option value="">Scenes inbox</option>
                     {sceneChapters.map((chapter) => (
@@ -1431,7 +1431,7 @@ export function VaultNotesEditor({
               <button
                 type="button"
                 onClick={() => setGraphExpanded(true)}
-                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${isDark ? "border-white/8 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
               >
                 Open full graph
                 <IconArrowUpRight />
@@ -1667,7 +1667,7 @@ function PanelCard({
   children: ReactNode
 }) {
   return (
-    <section className={`overflow-hidden rounded-lg border p-4 ${isDark ? "border-white/8 bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
+    <section className={`overflow-hidden rounded-lg border p-4 ${isDark ? "border-white/[0.08] bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
         <div className="flex items-center gap-2 shrink-0">
@@ -1778,14 +1778,14 @@ function MiniGraphPreview({
 
   if (!nodes.length) {
     return (
-      <div className={`flex min-h-[13rem] items-center justify-center rounded-md border border-dashed text-sm ${isDark ? "border-white/8 text-slate-500" : "border-stone-300 text-stone-500"}`}>
+      <div className={`flex min-h-[13rem] items-center justify-center rounded-md border border-dashed text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-stone-300 text-stone-500"}`}>
         Link a few notes to see the mini graph preview.
       </div>
     )
   }
 
   return (
-    <div className={`relative min-h-[13rem] overflow-hidden rounded-md border ${isDark ? "border-white/8 bg-[#091321]" : "border-stone-200 bg-stone-50"}`}>
+    <div className={`relative min-h-[13rem] overflow-hidden rounded-md border ${isDark ? "border-white/[0.08] bg-[#091321]" : "border-stone-200 bg-stone-50"}`}>
       <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {nodes.map((node, index) => {
           const position = positions[index]

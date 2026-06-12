@@ -16,8 +16,8 @@ export function CharacterWorkspaceHeader({
   isDark: boolean
 }) {
   return (
-    <header className={`rounded-md border ${isDark ? "border-white/10 bg-[#080d13]" : "border-stone-200 bg-white"}`}>
-      <div className={`flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between ${isDark ? "border-white/8" : "border-stone-200"}`}>
+    <header className={`rounded-md border ${isDark ? "border-[#202a38] bg-[#080d13]" : "border-stone-200 bg-white"}`}>
+      <div className={`flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
         <div className="flex min-w-0 items-center gap-4">
           <img src="/logoandtextlight.png" alt="LoreVia" className="h-10 w-auto shrink-0 object-contain dark:hidden" />
           <img src="/logoandtext.png" alt="LoreVia" className="hidden h-10 w-auto shrink-0 object-contain dark:block" />
@@ -38,7 +38,7 @@ export function CharacterWorkspaceHeader({
         </div>
 
         <div className="flex flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end">
-          <label className={`flex h-10 w-full min-w-[220px] items-center gap-2 rounded-md border px-3 lg:w-[280px] xl:w-[320px] ${isDark ? "border-white/10 bg-[#0d121a]" : "border-stone-200 bg-stone-50"}`}>
+          <label className={`flex h-10 w-full min-w-[220px] items-center gap-2 rounded-md border px-3 lg:w-[280px] xl:w-[320px] ${isDark ? "border-[#202a38] bg-[#0d121a]" : "border-stone-200 bg-stone-50"}`}>
             <svg className={`h-4 w-4 ${isDark ? "text-slate-500" : "text-stone-400"}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path fillRule="evenodd" d="M8.5 3a5.5 5.5 0 1 0 3.473 9.765l3.63 3.631a.75.75 0 1 0 1.06-1.06l-3.63-3.63A5.5 5.5 0 0 0 8.5 3ZM4.5 8.5a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" />
             </svg>

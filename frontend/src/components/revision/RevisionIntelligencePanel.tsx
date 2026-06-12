@@ -173,7 +173,7 @@ function TimelineMatrix({ fact, isDark }: { fact: CharacterKnowledgeTimelineFact
                         ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
                         : cell.state === "known"
                           ? isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"
-                          : isDark ? "bg-white/8 text-slate-400" : "bg-white text-slate-500 border border-slate-200"
+                          : isDark ? "bg-white/[0.08] text-slate-400" : "bg-white text-slate-500 border border-slate-200"
                     }`}
                   >
                     {cell.state}

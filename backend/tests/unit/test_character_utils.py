@@ -200,9 +200,9 @@ def test_serialize_book_character_includes_declared_profile_fields():
 
     assert payload["alias_records"] == [
         {
-            "id": alias_id,
-            "book_id": book_id,
-            "character_id": character_id,
+            "id": str(alias_id),
+            "book_id": str(book_id),
+            "character_id": str(character_id),
             "alias_text": "The Captain",
             "normalized_alias": "captain",
             "alias_kind": "title",

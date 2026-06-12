@@ -77,7 +77,7 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
 
   return (
     <div className="p-4">
-      <div role="tablist" aria-label="Character insights tabs" className="flex gap-6 border-b px-1 pb-3">
+      <div role="tablist" aria-label="Character insights tabs" className={`flex gap-6 border-b px-1 pb-3 ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
         {([
           ["insights", "Insights"],
           ["evidence", "Evidence"],
@@ -146,7 +146,7 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
           <SidebarSurface isDark={isDark} title={`Revision notes ${revisionNotes.length}`}>
             <div className="space-y-3">
               {revisionNotes.map((note) => (
-                <div key={note} className={`rounded-md border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                <div key={note} className={`rounded-md border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                   {note}
                 </div>
               ))}
@@ -188,7 +188,7 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
             <div className="mt-4 space-y-3">
               {evidenceLoading ? <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Searching passages...</p> : null}
               {evidence.slice(0, 5).map((result, index) => (
-                <div key={`${character.id}-sidebar-evidence-${index}`} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                <div key={`${character.id}-sidebar-evidence-${index}`} className={`rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                   <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
                   <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
@@ -273,7 +273,7 @@ function linkButtonClasses(isDark: boolean) {
 
 function SidebarSurface({ children, isDark, title }: { children: ReactNode; isDark: boolean; title: string }) {
   return (
-    <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+    <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
       <div className="mt-4">{children}</div>
     </section>
@@ -282,7 +282,7 @@ function SidebarSurface({ children, isDark, title }: { children: ReactNode; isDa
 
 function QuickAction({ description, isDark, onClick, title }: { description: string; isDark: boolean; onClick: () => void; title: string }) {
   return (
-    <button type="button" onClick={onClick} className={`rounded-md border p-3 text-left transition ${isDark ? "border-white/10 bg-[#0d121a] hover:border-white/15 hover:bg-[#131c29]" : "border-stone-200 bg-white hover:bg-stone-50"}`}>
+    <button type="button" onClick={onClick} className={`rounded-md border p-3 text-left transition ${isDark ? "border-[#202a38] bg-[#0d121a] hover:border-[#2b3747] hover:bg-[#131c29]" : "border-stone-200 bg-white hover:bg-stone-50"}`}>
       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{title}</p>
       <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{description}</p>
     </button>
@@ -291,7 +291,7 @@ function QuickAction({ description, isDark, onClick, title }: { description: str
 
 function ContextRow({ action, detail, isDark, label, onClick }: { action: string; detail: string; isDark: boolean; label: string; onClick: () => void }) {
   return (
-    <div className={`flex items-center justify-between rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+    <div className={`flex items-center justify-between rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
       <div>
         <p className="text-sm font-semibold">{label}</p>
         <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{detail}</p>
@@ -317,5 +317,5 @@ function sidebarTabClasses(isDark: boolean, active: boolean) {
 }
 
 function actionButtonClasses(isDark: boolean) {
-  return `inline-flex items-center rounded-md border px-3 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`
+  return `inline-flex items-center rounded-md border px-3 py-2 text-xs font-semibold transition ${isDark ? "border-[#202a38] bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`
 }

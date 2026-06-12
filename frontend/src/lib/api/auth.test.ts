@@ -154,6 +154,13 @@ describe("auth api", () => {
         password: "Secret123!",
       },
     })
+    expect(signOutMock).toHaveBeenCalledWith({ scope: "local" })
+  })
+
+  it("keeps completed account deletion successful when provider session cleanup fails", async () => {
+    signOutMock.mockRejectedValue(new Error("provider cleanup failed"))
+
+    await expect(authApi.deleteAccount({ confirmationText: "DELETE MY ACCOUNT" })).resolves.toEqual({ ok: true })
   })
 
   it("returns null on me when the backend responds with 401", async () => {

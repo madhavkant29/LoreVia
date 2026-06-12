@@ -2579,7 +2579,7 @@ function ManuscriptPageInner() {
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => openRightPane("context")}
-              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/[0.08] text-slate-200" : "bg-stone-100 text-stone-700"}`}
             >
               Check consistency
             </button>
@@ -2587,7 +2587,7 @@ function ManuscriptPageInner() {
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => openAnnotationComposer()}
-              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/[0.08] text-slate-200" : "bg-stone-100 text-stone-700"}`}
             >
               Annotate
             </button>
@@ -2601,7 +2601,7 @@ function ManuscriptPageInner() {
             </button>
             <Link
               href={`/${bookId}/advisor`}
-              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+              className={`rounded-sm px-3 py-1.5 text-xs font-medium ${isDark ? "bg-white/[0.08] text-slate-200" : "bg-stone-100 text-stone-700"}`}
             >
               Ask advisor
             </Link>
@@ -4541,7 +4541,7 @@ function InlineLoadingRows({ isDark, label, rows = 3 }: { isDark: boolean; label
       {Array.from({ length: rows }).map((_, index) => (
         <Skeleton
           key={`${label}-${index}`}
-          className={`${index === rows - 1 ? "w-2/3" : "w-full"} h-3 ${isDark ? "bg-white/8" : "bg-stone-200/80"}`}
+          className={`${index === rows - 1 ? "w-2/3" : "w-full"} h-3 ${isDark ? "bg-white/[0.08]" : "bg-stone-200/80"}`}
         />
       ))}
     </div>

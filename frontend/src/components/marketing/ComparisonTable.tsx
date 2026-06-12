@@ -19,7 +19,7 @@ export function ComparisonTable({ competitorName, rows }: ComparisonTableProps) 
               {["Feature", competitorName, "LoreVia"].map((heading) => (
                 <th
                   key={heading}
-                  className={`border-b border-white/8 px-5 py-4 font-semibold ${
+                  className={`border-b border-white/[0.08] px-5 py-4 font-semibold ${
                     heading === "LoreVia" ? "bg-[#0f2320] text-[#7ad3c1]" : ""
                   }`}
                 >

@@ -568,7 +568,7 @@ export default function ExportStudioPage() {
  <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Saved bible note overrides</p>
  <div className="mt-2 flex flex-wrap gap-2">
  {bibleNotes.slice(0, 8).map((note) => (
- <span key={note.id} className={` px-2.5 py-1 text-xs ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+ <span key={note.id} className={` px-2.5 py-1 text-xs ${isDark ? "bg-white/[0.08] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
  {note.path}
  </span>
  ))}

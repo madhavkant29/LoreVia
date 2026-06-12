@@ -81,8 +81,8 @@ export function AudienceSection() {
 
   return (
     <section id="audiences" className="mx-auto max-w-7xl px-5 py-20 md:px-8">
-      <div className="rounded-lg border border-white/8 bg-[#0d1715] p-6 md:p-8">
-        <div className="border-b border-white/8 pb-6">
+      <div className="rounded-lg border border-white/[0.08] bg-[#0d1715] p-6 md:p-8">
+        <div className="border-b border-white/[0.08] pb-6">
           <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">
             Built for every kind of author
           </p>
@@ -95,7 +95,7 @@ export function AudienceSection() {
                 className={`inline-flex items-center rounded-md border px-4 py-2 text-sm font-semibold transition ${
                   activeAudience === tab
                     ? "border-[#276a63] bg-[#11312d] text-[#86decd]"
-                    : "border-white/10 bg-white/5 text-[#c9d1cb] hover:border-white/20 hover:bg-white/8 hover:text-white"
+                    : "border-white/10 bg-white/5 text-[#c9d1cb] hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
                 }`}
               >
                 {tab}
@@ -131,7 +131,7 @@ export function AudienceSection() {
               {active.nodes.map((node) => (
                 <article
                   key={node.name}
-                  className="absolute w-[min(10.75rem,calc(100%-2rem))] rounded-md border border-white/8 bg-[#111d1a] p-4 xl:w-[min(11.5rem,calc(100%-2rem))]"
+                  className="absolute w-[min(10.75rem,calc(100%-2rem))] rounded-md border border-white/[0.08] bg-[#111d1a] p-4 xl:w-[min(11.5rem,calc(100%-2rem))]"
                   style={{ left: node.x, top: node.y, transform: "translate(-50%, -50%)" }}
                 >
                   <p className="text-sm font-semibold text-white">{node.name}</p>

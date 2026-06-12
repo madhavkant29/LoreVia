@@ -21,7 +21,7 @@ export function CharacterProfileTabs({
   onSelect: (tab: CharacterProfileTab) => void
 }) {
   return (
-    <div role="tablist" aria-label="Character workspace tabs" className={`mt-6 flex flex-wrap gap-8 border-b ${isDark ? "border-white/8" : "border-stone-200"}`}>
+    <div role="tablist" aria-label="Character workspace tabs" className={`mt-6 flex flex-wrap gap-8 border-b ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
       {PROFILE_TABS.map(([value, label]) => (
         <button
           key={value}

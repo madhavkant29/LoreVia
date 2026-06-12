@@ -423,7 +423,7 @@ export default function AuthorLoopPage() {
                     <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClasses(isDark, issue.severity)}`}>{issue.severity}</span>
                     <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.sourceLabel}</span>
                     <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.citation}</span>
-                    <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-slate-600"}`}>{issue.confidence}</span>
+                    <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-white text-slate-600"}`}>{issue.confidence}</span>
                   </div>
                   <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_14rem]">
                     <div>
