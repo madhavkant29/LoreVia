@@ -3,6 +3,10 @@
 import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 
+import { LANDING_SHOWCASE_VISUALS } from "@/lib/marketing/landingShowcaseVisuals"
+
+export { LANDING_SHOWCASE_VISUALS }
+
 type ShowcaseStep = {
   id: string
   title: string

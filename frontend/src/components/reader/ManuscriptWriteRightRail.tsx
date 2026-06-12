@@ -250,7 +250,7 @@ export function ManuscriptWriteRightRail({
   }
 
   return (
-    <aside className={`min-w-0 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:overflow-y-auto ${isDark ? "border-white/10" : "border-stone-200"}`}>
+    <aside className={`min-w-0 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:self-start xl:overflow-y-auto ${isDark ? "border-white/10" : "border-stone-200"}`}>
       <div className={`border-b px-4 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
         <div className="flex items-center gap-7" role="tablist" aria-label="Writing context panels">
           {([

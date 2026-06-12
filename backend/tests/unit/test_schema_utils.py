@@ -5,6 +5,7 @@ from app.utils.schema_utils import (
     CORE_RUNTIME_COLUMNS,
     assert_auth_schema_compatible,
     assert_core_runtime_schema_compatible,
+    assert_core_runtime_schema_compatible_from_engine,
 )
 
 
@@ -24,6 +25,22 @@ class _FakeConnection:
     async def execute(self, _query, parameters):
         self.parameters = parameters
         return _FakeResult(self.rows)
+
+
+class _FakeEngineConnection(_FakeConnection):
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeEngine:
+    def __init__(self, rows):
+        self.connection = _FakeEngineConnection(rows)
+
+    def connect(self):
+        return self.connection
 
 
 def _complete_schema_rows():
@@ -73,6 +90,15 @@ async def test_assert_core_runtime_schema_compatible_accepts_complete_schema():
     await assert_core_runtime_schema_compatible(connection)
 
     assert set(connection.parameters["table_names"]) == set(CORE_RUNTIME_COLUMNS)
+
+
+@pytest.mark.asyncio
+async def test_assert_core_runtime_schema_compatible_from_engine_checks_engine_target():
+    engine = _FakeEngine(_complete_core_schema_rows())
+
+    await assert_core_runtime_schema_compatible_from_engine(engine)
+
+    assert set(engine.connection.parameters["table_names"]) == set(CORE_RUNTIME_COLUMNS)
 
 
 @pytest.mark.asyncio

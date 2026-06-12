@@ -24,7 +24,7 @@ from app.core.redis import (
     key_extraction_inflight,
     key_extraction_inflight_book,
 )
-from app.core.storage import download_book, upload_binary
+from app.core.storage import download_book, upload_binary, upload_text
 from app.engine.character.deduplicator import (
     character_name_keys,
     find_similar,
@@ -58,7 +58,14 @@ from app.services.character_identity.resolver import (
     resolve_character_mention,
 )
 from app.utils.billing_utils import has_paid_reading_access
-from app.utils.book_utils import normalize_chapter_kind, parse_book_upload_for_ingestion, refresh_screenplay_scene_rows
+from app.utils.book_utils import (
+    extract_inline_images_from_manuscript_html,
+    manuscript_html_to_text,
+    normalize_chapter_kind,
+    parse_book_upload_for_ingestion,
+    refresh_screenplay_scene_rows,
+    serialize_manuscript_content,
+)
 from app.utils.character_utils import (
     CHARACTER_APPROVAL_APPROVED,
     CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
@@ -90,6 +97,7 @@ from app.utils.compliance.copyright_check import evaluate_document_copyright
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
     build_analysis_chapter_state,
+    build_chapter_storage_key,
     build_source_integrity_state,
     build_chapter_dispatch_plan,
     chunked,
@@ -718,6 +726,7 @@ async def _process_chapter(
         log.info("Skipping stale editor-project extraction book_id=%s", book.id)
         return
 
+    ch_data = _prepare_chapter_rich_content(ch_data)
     chapter_number = int(ch_data["number"])
     inflight_key = key_extraction_inflight(str(book.id), chapter_number)
     if not await cache_set_if_absent(
@@ -751,6 +760,13 @@ async def _process_chapter(
         )
 
         s3_key = chapter.s3_key if chapter is not None else ""
+        if ch_data.get("_lorevia_persist_rich_content"):
+            storage_key = s3_key or build_chapter_storage_key(book.id, chapter_number)
+            payload = serialize_manuscript_content(
+                str(ch_data.get("text") or ""),
+                ch_data.get("html") if isinstance(ch_data.get("html"), str) else None,
+            )
+            s3_key = await asyncio.to_thread(upload_text, storage_key, payload)
         if chapter is None:
             chapter = Chapter(
                 book_id=book.id,
@@ -788,6 +804,9 @@ async def _process_chapter(
             next_content_version = ch_data.get("content_version")
             if next_content_version is not None and int(chapter.content_version or 1) != int(next_content_version):
                 chapter.content_version = int(next_content_version)
+                chapter_changed = True
+            if s3_key and chapter.s3_key != s3_key:
+                chapter.s3_key = s3_key
                 chapter_changed = True
             if chapter_changed:
                 await db.flush()
@@ -2669,6 +2688,34 @@ def _count_words(text: str) -> int:
     return len(re.findall(r"\b[\w']+\b", cleaned))
 
 
+def _prepare_chapter_rich_content(ch_data: dict) -> dict:
+    html = ch_data.get("html") if isinstance(ch_data.get("html"), str) else None
+    if html is None:
+        return ch_data
+
+    prepared = dict(ch_data)
+    prepared["_lorevia_persist_rich_content"] = True
+    if "<img" not in html and "data:image/" not in html:
+        return prepared
+
+    cleaned_html, extracted_images, retained_markers = extract_inline_images_from_manuscript_html(html)
+    if not extracted_images and not retained_markers:
+        prepared["html"] = cleaned_html
+        return prepared
+
+    prepared["html"] = cleaned_html
+    prepared["text"] = manuscript_html_to_text(cleaned_html) or str(prepared.get("text") or "")
+    incoming_images = list(prepared.get("images") or [])
+    retained_existing_images = [
+        image
+        for image in incoming_images
+        if image.get("storage_key") and str(image.get("marker") or "") in retained_markers
+    ]
+    fresh_images = [image for image in incoming_images if image.get("bytes")]
+    prepared["images"] = [*retained_existing_images, *extracted_images, *fresh_images]
+    return prepared
+
+
 async def _sync_chapter_media(db, book: Book, chapter: Chapter, ch_data: dict) -> None:
     images = ch_data.get("images") or []
     await db.execute(delete(ChapterMedia).where(ChapterMedia.chapter_id == chapter.id))
@@ -2678,20 +2725,24 @@ async def _sync_chapter_media(db, book: Book, chapter: Chapter, ch_data: dict) -
     for index, image in enumerate(images):
         raw = image.get("bytes")
         marker = image.get("marker")
-        if not raw or not marker:
+        storage_key = str(image.get("storage_key") or "")
+        if not marker:
             continue
-        filename = image.get("filename") or f"{uuid.uuid4().hex}.bin"
-        storage_key = f"chapter-media/{book.id}/{chapter.number}/{index}-{filename}"
-        await asyncio.to_thread(upload_binary, storage_key, raw, image.get("content_type"))
+        if raw:
+            filename = image.get("filename") or f"{uuid.uuid4().hex}.bin"
+            storage_key = f"chapter-media/{book.id}/{chapter.number}/{index}-{filename}"
+            await asyncio.to_thread(upload_binary, storage_key, raw, image.get("content_type"))
+        elif not storage_key:
+            continue
         db.add(
             ChapterMedia(
                 book_id=book.id,
                 chapter_id=chapter.id,
                 marker=marker,
-                asset_type="image",
+                asset_type=image.get("asset_type") or "image",
                 content_type=image.get("content_type"),
                 storage_key=storage_key,
-                caption=None,
+                caption=image.get("caption"),
                 sort_order=index,
             )
         )

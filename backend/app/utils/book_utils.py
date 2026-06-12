@@ -6869,6 +6869,17 @@ def extract_inline_images_from_manuscript_html(html: str | None) -> tuple[str | 
     return clean_manuscript_html(str(soup)), images, retained_markers
 
 
+def chapter_media_storage_payload(media: ChapterMedia) -> dict[str, Any]:
+    return {
+        "marker": media.marker,
+        "asset_type": media.asset_type or "image",
+        "content_type": media.content_type,
+        "caption": media.caption,
+        "sort_order": media.sort_order,
+        "storage_key": media.storage_key,
+    }
+
+
 def serialize_manuscript_content(text: str, html: str | None = None) -> str:
     normalized_text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     normalized_html = clean_manuscript_html(html) if html else ""
@@ -7003,17 +7014,21 @@ async def sync_chapter_media_from_images(
     for index, image in enumerate(images):
         raw = image.get("bytes")
         marker = image.get("marker")
-        if not raw or not marker:
+        storage_key = str(image.get("storage_key") or "")
+        if not marker:
             continue
-        filename = str(image.get("filename") or f"{uuid.uuid4().hex}.bin")
-        storage_key = f"chapter-media/{book.id}/{chapter.number}/{index}-{filename}"
-        await asyncio.to_thread(upload_binary, storage_key, raw, image.get("content_type"))
+        if raw:
+            filename = str(image.get("filename") or f"{uuid.uuid4().hex}.bin")
+            storage_key = f"chapter-media/{book.id}/{chapter.number}/{index}-{filename}"
+            await asyncio.to_thread(upload_binary, storage_key, raw, image.get("content_type"))
+        elif not storage_key:
+            continue
         db.add(
             ChapterMedia(
                 book_id=book.id,
                 chapter_id=chapter.id,
                 marker=str(marker),
-                asset_type="image",
+                asset_type=str(image.get("asset_type") or "image"),
                 content_type=image.get("content_type"),
                 storage_key=storage_key,
                 caption=str(image.get("caption") or "").strip() or None,
@@ -7041,7 +7056,14 @@ async def persist_editor_chapter_content(
         html, extracted_images, retained_image_markers = extract_inline_images_from_manuscript_html(html)
         if extracted_images or retained_image_markers:
             text = manuscript_html_to_text(html) or text
-    images_to_sync = [*extracted_images, *(images or [])]
+    incoming_images = list(images or [])
+    retained_existing_images = [
+        image
+        for image in incoming_images
+        if image.get("storage_key") and str(image.get("marker") or "") in retained_image_markers
+    ]
+    fresh_images = [image for image in incoming_images if image.get("bytes")]
+    images_to_sync = [*retained_existing_images, *extracted_images, *fresh_images]
     should_sync_media = bool(images_to_sync) or images is not None or bool(retained_image_markers)
     storage_key = f"chapters/{book.id}/{chapter_number}.txt"
     payload = serialize_manuscript_content(text, html)

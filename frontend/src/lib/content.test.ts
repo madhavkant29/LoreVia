@@ -58,6 +58,11 @@ describe("content helpers", () => {
     expect(getAllPublicContentPaths()).toHaveLength(expectedCount)
   })
 
+  it("doubles the public blog and answer inventory for the content hub", () => {
+    expect(blogArticles).toHaveLength(10)
+    expect(answerPages).toHaveLength(20)
+  })
+
   it("exposes public content entries with stable publish dates for sitemap generation", () => {
     const entries = getAllPublicContentEntries()
 
@@ -78,14 +83,22 @@ describe("content helpers", () => {
   })
 
   it("uses the newest public content date for hub pages", () => {
-    expect(getLatestContentPublishedAt()).toBe("2026-05-14")
+    expect(getLatestContentPublishedAt()).toBe("2026-06-12")
     expect(getAllPublicContentEntries()).toContainEqual(
       expect.objectContaining({
         path: "/blog",
-        publishedAt: "2026-05-14",
+        publishedAt: "2026-06-12",
         type: "hub",
       }),
     )
+  })
+
+  it("keeps every blog supporting answer link resolvable", () => {
+    for (const article of blogArticles) {
+      for (const slug of article.supportingAnswerSlugs) {
+        expect(getAnswerPageBySlug(slug), `${article.slug} references ${slug}`).not.toBeNull()
+      }
+    }
   })
 
   it("keeps each public content entry above the editorial depth floor", () => {

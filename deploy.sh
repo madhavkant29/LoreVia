@@ -108,6 +108,23 @@ run_alembic() {
     backend python -m alembic "$@"
 }
 
+verify_runtime_schema() {
+  ${COMPOSE} run --rm \
+    -e DATABASE_URL="${ALEMBIC_DATABASE_URL}" \
+    backend python -c 'import asyncio
+from app.core.database import engine
+from app.utils.schema_utils import assert_core_runtime_schema_compatible_from_engine
+
+async def main():
+    try:
+        await assert_core_runtime_schema_compatible_from_engine(engine)
+    finally:
+        await engine.dispose()
+
+asyncio.run(main())
+'
+}
+
 current_output="$(run_alembic current -q || true)"
 heads_output="$(run_alembic heads -q)"
 
@@ -134,6 +151,9 @@ if ! printf '%s\n' "${post_current_output}" | awk 'NF {print $1}' | grep -Fx "${
   printf '%s\n' "${post_current_output}"
   exit 1
 fi
+
+echo "Verifying runtime schema compatibility."
+verify_runtime_schema
 
 enable_systemd_unit
 

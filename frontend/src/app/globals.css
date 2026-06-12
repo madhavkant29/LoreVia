@@ -371,6 +371,18 @@ body {
   .dark .content-library-shell__glow {
     background: none;
   }
+
+  .content-library-square-corners [class*="rounded-"],
+  .content-library-square-corners .app-panel,
+  .content-library-square-corners .app-chip,
+  .content-library-square-corners .app-button-primary,
+  .content-library-square-corners .app-button-secondary,
+  .content-library-square-corners .app-stat,
+  .content-library-square-corners .app-empty-state,
+  .content-library-square-corners .app-tab,
+  .content-library-square-corners .app-family-tab {
+    border-radius: 0 !important;
+  }
 }
 
 .app-scroll {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from sqlalchemy import bindparam, text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookForumPost, PublicBookAnalyticsEvent, PublicBookRanking
@@ -77,3 +77,10 @@ async def assert_core_runtime_schema_compatible(connection: AsyncConnection) -> 
         required_columns=CORE_RUNTIME_COLUMNS,
         scope_name="core",
     )
+
+
+async def assert_core_runtime_schema_compatible_from_engine(engine: AsyncEngine) -> None:
+    """Raise when the engine target cannot serve critical runtime traffic."""
+
+    async with engine.connect() as connection:
+        await assert_core_runtime_schema_compatible(connection)

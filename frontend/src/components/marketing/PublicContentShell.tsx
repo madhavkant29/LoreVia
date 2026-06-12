@@ -13,8 +13,10 @@ export function PublicContentShell({
   children: ReactNode
   className?: string
 }) {
+  const squareCorners = activeSection === "blog" || activeSection === "answers"
+
   return (
-    <main className={cn("app-shell overflow-hidden content-library-shell", className)}>
+    <main className={cn("app-shell overflow-hidden content-library-shell", squareCorners && "content-library-square-corners", className)}>
       <PublicContentHeader activeSection={activeSection} />
       {children}
     </main>

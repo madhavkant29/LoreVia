@@ -677,6 +677,95 @@ async def test_import_manuscript_content_rejects_stale_content_version(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_import_manuscript_content_carries_retained_media_references_on_replace(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="author", total_chapters=1, is_editor_project=True)
+    existing = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        title="Opening",
+        s3_key="chapters/1.json",
+        word_count=2,
+        content_version=1,
+    )
+    existing_media = SimpleNamespace(
+        marker="[[IMAGE:kept]]",
+        asset_type="image",
+        content_type="image/png",
+        caption="Kept map",
+        sort_order=0,
+        storage_key="chapter-media/book/kept-map.png",
+    )
+    captured: dict[str, object] = {}
+
+    async def _fake_persist(_db, _book, **kwargs):
+        captured["images"] = kwargs["images"]
+        return SimpleNamespace(id=uuid.uuid4(), number=kwargs["chapter_number"])
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    async def _fake_auto_reprocess(*_args, **_kwargs):
+        return False, 0, 0
+
+    monkeypatch.setattr(books, "get_owned_book", _async_value(book))
+    monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "next_chapter_number", _async_value(2))
+    monkeypatch.setattr(books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    monkeypatch.setattr(books, "deserialize_manuscript_content", lambda _raw: {"text": "Old body"})
+    monkeypatch.setattr(books.storage, "download_book", lambda _key: b'{"text":"Old body"}')
+    monkeypatch.setattr(imports, "snapshot_chapter_version", _async_value(SimpleNamespace(id=uuid.uuid4())))
+    monkeypatch.setattr(imports, "persist_editor_chapter_content", _fake_persist)
+    monkeypatch.setattr(books, "extract_novel_scene_candidates", lambda **_kwargs: [])
+    monkeypatch.setattr(books, "replace_chapter_novel_scenes", _noop)
+    monkeypatch.setattr(books, "sync_chapter_content_from_novel_scenes", _noop)
+    monkeypatch.setattr(books, "invalidate_advisor_caches_for_book", _noop)
+    monkeypatch.setattr(
+        "app.services.editor_project_service.maybe_auto_reprocess_editor_project",
+        _fake_auto_reprocess,
+    )
+
+    db = _FakeDB(
+        execute_values=[
+            _Result(scalar=existing),
+            _Result(scalars=[existing_media]),
+            _Result(scalar=None),
+        ],
+        scalar_values=[1],
+    )
+    payload = await books.import_manuscript_content(
+        book.id,
+        text="New body",
+        html='<p>New body</p><p><img src="/api/v1/reader/media/1" alt="[[IMAGE:kept]]"></p>',
+        title="Opening",
+        files=None,
+        work_type=None,
+        chapter_number=1,
+        replace_existing="true",
+        expected_content_version=1,
+        chunk_long_documents="false",
+        split_into_chapters="true",
+        db=db,
+        current_user=user,
+        _=None,
+    )
+
+    assert payload.imported_chapters == [1]
+    assert db.deleted == [existing]
+    assert captured["images"] == [
+        {
+            "marker": "[[IMAGE:kept]]",
+            "asset_type": "image",
+            "content_type": "image/png",
+            "caption": "Kept map",
+            "sort_order": 0,
+            "storage_key": "chapter-media/book/kept-map.png",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_import_manuscript_content_rejects_author_titles_over_four_words(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, mode="author", total_chapters=1)

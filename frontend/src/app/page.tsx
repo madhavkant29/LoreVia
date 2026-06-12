@@ -2,6 +2,7 @@ import Link from "next/link"
 import type { Metadata } from "next"
 import type { Route } from "next"
 import type { ReactNode } from "react"
+import { preload } from "react-dom"
 import Image from "next/image"
 
 import { AudienceSection } from "@/components/marketing/AudienceSection"
@@ -10,6 +11,7 @@ import { LandingShowcase } from "@/components/marketing/LandingShowcase"
 import { MarketingHeader } from "@/components/marketing/MarketingHeader"
 import { Reveal } from "@/components/marketing/Reveal"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
+import { LANDING_SHOWCASE_VISUALS } from "@/lib/marketing/landingShowcaseVisuals"
 import { homepageComparisonRows, comparisonIndexCards } from "@/lib/comparisons"
 import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
 import {
@@ -109,6 +111,16 @@ const faqItems = [
     a: "Yes. LoreVia includes export and compile workflows so you can keep publishing progress moving without locking the book inside the platform.",
   },
 ]
+
+function LandingScreenshotPreloads() {
+  for (const visual of LANDING_SHOWCASE_VISUALS) {
+    preload(visual, {
+      as: "image",
+      fetchPriority: visual === "/landing/manuscript-analysis.png" ? "high" : "low",
+    })
+  }
+  return null
+}
 
 function Section({
   id,
@@ -340,6 +352,7 @@ export default function HomePage() {
 
   return (
     <>
+      <LandingScreenshotPreloads />
       <JsonLdScript id="home-faq-jsonld" data={faqJsonLd} />
       <JsonLdScript id="home-software-jsonld" data={softwareJsonLd} />
 

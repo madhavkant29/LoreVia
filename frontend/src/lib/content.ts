@@ -382,6 +382,337 @@ export const blogArticles: BlogArticle[] = [
     ],
     demoSlug: "gregor-samsa-character-tracker",
   },
+  {
+    slug: "how-to-use-lorevia-during-a-revision-week",
+    title: "How to Use LoreVia During a Real Revision Week",
+    description:
+      "A practical Monday-to-Friday revision workflow for authors who want continuity checks, grounded questions, notes, and export prep to support the same draft instead of becoming separate chores.",
+    category: "Revision workflow",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "9 min read",
+    keywords: [
+      "fiction revision workflow",
+      "how to revise a novel with AI tools",
+      "manuscript revision software",
+      "LoreVia workflow",
+    ],
+    intro:
+      "A revision week can disappear into good intentions. You open the draft, reread three chapters, fix a sentence, remember a continuity problem, chase a note from last month, and somehow never reach the scene that actually needed attention. LoreVia is most useful when it gives that week a rhythm: read, inspect, decide, revise, and verify.",
+    highlights: [
+      "Use the first pass to locate risk, not to fix every sentence.",
+      "Turn grounded answers into decisions you can apply to specific chapters.",
+      "End the week by checking whether the revision created new continuity debt.",
+    ],
+    sections: [
+      {
+        heading: "Start by choosing one revision question",
+        body: [
+          "The fastest way to waste a revision session is to ask the draft to improve in every direction at once. Pick one question for the week: is the central relationship moving cleanly, does the timeline still work, or did the midpoint rewrite break a later reveal?",
+          "Once the question is specific, LoreVia can support it with manuscript evidence. You can inspect the relevant characters, ask chapter-grounded questions, and keep notes attached to the scenes that need decisions instead of creating a separate pile of reminders.",
+        ],
+      },
+      {
+        heading: "Use Monday for orientation, not rewriting",
+        body: [
+          "On the first day, resist the urge to polish. Upload or refresh the manuscript, review the extracted story memory, and look for the places where the system is unsure or where the draft looks noisier than your memory of it.",
+          "That orientation pass gives you a working map. The value is not that every extracted detail is sacred. The value is that the manuscript is now visible as a set of characters, scenes, relationships, timeline claims, and open threads you can inspect.",
+        ],
+        bullets: [
+          "Review character records that changed in the last draft.",
+          "Check relationships with recent scene cuts or rewritten dialogue.",
+          "Skim continuity signals before touching line edits.",
+        ],
+      },
+      {
+        heading: "Spend the middle of the week making decisions",
+        body: [
+          "Tuesday through Thursday should be decision time. Ask direct questions such as where a promise first appears, who knows a secret before Chapter 18, or whether an injury has enough recovery time. Then use the answers to choose a fix in the manuscript.",
+          "This is where grounded answers matter. A vague summary can make you feel oriented while still hiding the scene that proves or contradicts the claim. Chapter evidence lets you move from suspicion to edit without rereading the whole book.",
+        ],
+        highlight:
+          "Revision gets easier when every question ends in a manuscript decision: keep, cut, move, clarify, or mark for a later pass.",
+      },
+      {
+        heading: "End with a verification pass",
+        body: [
+          "Friday is for checking the consequences. If you moved a reveal, refresh the related thread. If you rewrote a relationship scene, check whether the later emotional beat still lands. If you deleted a chapter, inspect what facts lost their first appearance.",
+          "That final pass is the habit that keeps revisions from compounding hidden problems. LoreVia should not replace judgment; it should give your judgment a better list of places to look before the draft goes to readers or editors.",
+        ],
+      },
+    ],
+    supportingAnswerSlugs: [
+      "how-should-i-use-lorevia-after-uploading-a-draft",
+      "how-do-i-use-lorevia-in-a-weekly-revision-routine",
+      "what-should-i-ask-a-manuscript-assistant",
+      "how-do-i-turn-continuity-findings-into-edits",
+    ],
+    demoSlug: "dracula-story-timeline-tracker",
+  },
+  {
+    slug: "why-chapter-grounded-answers-matter-for-fiction-revision",
+    title: "Why Chapter-Grounded Answers Matter for Fiction Revision",
+    description:
+      "A guide to using cited manuscript answers during revision, especially when authors need to verify plot logic, character memory, and continuity without trusting unsupported summaries.",
+    category: "Grounded answers",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "8 min read",
+    keywords: [
+      "chapter grounded answers",
+      "manuscript AI assistant",
+      "fiction writing assistant with citations",
+      "ask questions about my novel",
+    ],
+    intro:
+      "The problem with many writing assistants is not that they answer badly. It is that they answer too confidently without showing you where the answer came from. Fiction revision needs a different standard. If a tool tells you a character already knows something, you need to see the chapter that proves it.",
+    highlights: [
+      "Grounded answers help authors verify claims instead of accepting a polished guess.",
+      "Chapter references make revision faster because the next edit location is visible.",
+      "Citations protect the author's voice by keeping the draft, not the assistant, in charge.",
+    ],
+    sections: [
+      {
+        heading: "A good answer should point back to the page",
+        body: [
+          "When you ask whether a reveal has been set up, the useful answer is not just yes or no. The useful answer names the scenes where the setup appears, tells you what is missing, and lets you decide whether the reader has enough information.",
+          "That is why LoreVia's answer workflow is built around the manuscript. The assistant can help you move through the draft, but the draft remains the source of truth.",
+        ],
+      },
+      {
+        heading: "Grounding is especially important in long manuscripts",
+        body: [
+          "In a short story, an author can often remember every scene. In a ninety-thousand-word novel, memory gets unreliable. A sentence written six months ago may be doing more structural work than you realize, or a deleted exchange may have removed the only explanation for a later choice.",
+          "Chapter-grounded answers reduce that uncertainty. They do not ask you to trust a broad summary. They help you reopen the relevant part of the manuscript and make a real editorial decision.",
+        ],
+        bullets: [
+          "Who knows this secret before the reveal?",
+          "Where does this object last appear?",
+          "Which chapters changed this relationship?",
+        ],
+      },
+      {
+        heading: "Citations make collaboration cleaner",
+        body: [
+          "Editors, beta readers, and coauthors all benefit when a question has evidence attached. Instead of debating whether a detail is present, the conversation can move to whether the detail is clear enough, early enough, or emotionally convincing.",
+          "That shift matters. Revision is not just finding facts. It is deciding what the reader can understand from the facts the book actually gives them.",
+        ],
+      },
+      {
+        heading: "Use answers as a starting point, not a verdict",
+        body: [
+          "No author should outsource the meaning of a scene. A grounded answer is most useful when it starts a sharper reread. It narrows the search, surfaces likely evidence, and gives you enough context to judge the prose yourself.",
+          "That keeps the workflow practical and author-led. LoreVia can help find the trail; the writer still decides what the trail should become.",
+        ],
+        highlight:
+          "The safest writing assistant is one that keeps sending you back to your own manuscript.",
+      },
+    ],
+    supportingAnswerSlugs: [
+      "why-do-chapter-citations-matter-for-writing-software",
+      "what-should-i-ask-a-manuscript-assistant",
+      "how-can-i-find-dropped-plot-threads-before-beta-readers",
+    ],
+    demoSlug: "dracula-story-timeline-tracker",
+  },
+  {
+    slug: "how-relationship-tracking-changes-a-character-rewrite",
+    title: "How Relationship Tracking Changes a Character Rewrite",
+    description:
+      "A revision guide for authors using relationship tracking to keep emotional logic, trust shifts, betrayals, alliances, and romantic pacing coherent after major rewrites.",
+    category: "Character systems",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "9 min read",
+    keywords: [
+      "relationship tracking for writers",
+      "character rewrite workflow",
+      "fiction relationship map",
+      "track character relationships in a novel",
+    ],
+    intro:
+      "A character rewrite rarely changes one character alone. If you make a protagonist less trusting, every scene with the mentor changes. If you soften a rival, the romantic subplot may suddenly move too quickly. Relationship tracking helps authors see those knock-on effects before the emotional logic of the book starts to blur.",
+    highlights: [
+      "Track the bond itself, not only the two character profiles.",
+      "Use relationship changes to find scenes that need new dialogue or motivation.",
+      "Recheck later payoff scenes after changing early trust, resentment, or attraction.",
+    ],
+    sections: [
+      {
+        heading: "The relationship is a revision object",
+        body: [
+          "Writers often keep separate character sheets and hope the relationship will stay obvious in memory. During a rewrite, that is risky. The bond between two people has its own history, pressure, and pace.",
+          "LoreVia makes that relationship easier to inspect by treating it as something with scenes, turns, and evidence. That helps when the draft changes but the emotional payoff still needs to feel earned.",
+        ],
+      },
+      {
+        heading: "Rewrite the cause, then check the effect",
+        body: [
+          "If you change why two characters mistrust each other, you have probably changed the argument in Chapter 9, the apology in Chapter 16, and the alliance in Chapter 24. Relationship tracking gives you a shortlist of scenes where that cause-and-effect chain may need attention.",
+          "This is not busywork. It is how you keep the reader from feeling that a betrayal, confession, or reconciliation arrived because the outline required it rather than because the relationship earned it.",
+        ],
+        bullets: [
+          "First meaningful tension",
+          "Scenes that raise or lower trust",
+          "Payoff moments that depend on earlier movement",
+        ],
+      },
+      {
+        heading: "Watch for emotional shortcuts",
+        body: [
+          "Rewrites often leave behind emotional shortcuts. Two characters forgive each other too quickly because a conflict scene was cut. A romantic beat feels sudden because a quieter attraction scene moved later. A rival becomes helpful without the page showing the shift.",
+          "A relationship map makes those gaps easier to notice. The goal is not to force every feeling into a chart; it is to notice when the chart exposes a missing bridge.",
+        ],
+      },
+      {
+        heading: "Use the tracker before beta readers see the draft",
+        body: [
+          "Beta readers are very good at sensing when a relationship feels rushed or inconsistent, but they may not know exactly where the problem started. Running a relationship pass first lets you send them a cleaner draft and better questions.",
+          "Ask them about the moments that still concern you: whether the reconciliation lands, whether the distrust makes sense, or whether the midpoint argument changes enough afterward.",
+        ],
+        highlight:
+          "Relationship tracking turns vague feedback like 'I did not buy this' into a more precise search for the missing emotional turn.",
+      },
+    ],
+    supportingAnswerSlugs: [
+      "how-do-i-track-relationship-changes-between-drafts",
+      "how-do-i-track-character-relationships-in-a-novel",
+      "how-do-i-track-character-arcs",
+    ],
+    demoSlug: "pride-and-prejudice-relationship-map",
+  },
+  {
+    slug: "how-to-prepare-beta-reader-packets-with-lorevia",
+    title: "How to Prepare Beta Reader Packets with LoreVia",
+    description:
+      "A grounded workflow for turning manuscript analysis, continuity cleanup, and author questions into beta reader packets that get clearer and more useful feedback.",
+    category: "Beta readers",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "8 min read",
+    keywords: [
+      "beta reader packet",
+      "prepare manuscript for beta readers",
+      "fiction beta reader workflow",
+      "author feedback questions",
+    ],
+    intro:
+      "A beta reader packet is not a press kit. It is a small working document that helps readers give useful feedback without being overloaded by the author's private process. LoreVia can help authors build that packet from the manuscript itself: what changed, what might confuse readers, and what questions matter most this round.",
+    highlights: [
+      "Clean obvious continuity issues before asking readers to evaluate story impact.",
+      "Give readers a few targeted questions instead of a long homework sheet.",
+      "Use LoreVia's story memory to prepare context without explaining the book away.",
+    ],
+    sections: [
+      {
+        heading: "Start with the reader's job",
+        body: [
+          "Before sending pages, decide what you want the reader to notice. Are you testing whether the mystery is fair, whether the romance builds at the right pace, or whether the ending feels earned?",
+          "A clear packet keeps that job visible. It should include the manuscript, the feedback priorities, any content boundaries, and just enough context to prevent avoidable confusion.",
+        ],
+      },
+      {
+        heading: "Use analysis to remove avoidable friction",
+        body: [
+          "LoreVia's continuity and story-memory views are useful before the packet goes out. If the protagonist's name changed in one chapter, fix it. If a timeline claim contradicts the chapter order, decide whether to repair it now or explicitly ask readers whether it confused them.",
+          "This lets beta readers spend less energy on errors you could have caught and more energy on the experience only a fresh reader can report.",
+        ],
+        bullets: [
+          "Run a continuity pass for names, dates, and obvious thread gaps.",
+          "Review character and relationship summaries for stale details.",
+          "Mark unresolved questions you intentionally want readers to react to.",
+        ],
+      },
+      {
+        heading: "Write questions that invite useful reactions",
+        body: [
+          "Good beta questions are specific without steering the reader into your preferred answer. Instead of asking whether the book is good, ask where their attention dropped, which character choice felt unsupported, or what they expected after a key reveal.",
+          "LoreVia helps by turning draft concerns into concrete prompts. If the relationship tracker shows a thin emotional bridge, ask readers whether that moment felt believable rather than asking for general relationship feedback.",
+        ],
+      },
+      {
+        heading: "Keep the packet light",
+        body: [
+          "Readers do not need your entire story bible. They need enough context to read the draft fairly. A short cast note, spoiler expectations, deadline, format instructions, and five to eight questions are usually more useful than a long explanation of every concern.",
+          "The manuscript still has to stand on its own. The packet's job is to focus attention, not to defend the book in advance.",
+        ],
+        highlight:
+          "The best beta packet feels like an invitation to respond, not a manual for how to read.",
+      },
+    ],
+    supportingAnswerSlugs: [
+      "what-should-go-in-a-beta-reader-packet",
+      "how-do-i-prepare-a-manuscript-for-beta-readers",
+      "how-can-i-find-dropped-plot-threads-before-beta-readers",
+    ],
+    demoSlug: "gregor-samsa-character-tracker",
+  },
+  {
+    slug: "how-to-keep-a-series-bible-alive",
+    title: "How to Keep a Series Bible Alive Without Becoming a Librarian",
+    description:
+      "A workflow for maintaining series canon, recurring characters, world rules, and cross-book continuity without turning the story bible into a second full-time project.",
+    category: "Series continuity",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "10 min read",
+    keywords: [
+      "series bible for authors",
+      "series continuity software",
+      "track canon across books",
+      "multi book story bible",
+    ],
+    intro:
+      "A series bible is supposed to make the next book easier. Too often it becomes a museum of half-updated facts. The trick is to stop treating it like an encyclopedia and start treating it like a continuity tool: what has the series made true, where was it established, and what future scenes depend on it?",
+    highlights: [
+      "Track canon by evidence and dependency, not by how interesting the lore feels.",
+      "Refresh the bible after structural edits so stale facts do not travel into the next book.",
+      "Use cross-book questions to check recurring characters, promises, and world rules.",
+    ],
+    sections: [
+      {
+        heading: "A living bible needs a maintenance rule",
+        body: [
+          "If every small detail has to be entered by hand, the bible will eventually stop matching the books. Authors need a maintenance rule that is simple enough to survive deadlines: update the bible when a fact creates future obligations.",
+          "That means recurring character history, world rules, timeline anchors, vows, injuries, political changes, magical costs, and unresolved promises deserve attention. Decorative facts can wait unless they become structurally important.",
+        ],
+      },
+      {
+        heading: "Tie canon to the book that proved it",
+        body: [
+          "Series continuity fails when notes lose their source. If a city law, family secret, or character scar matters in Book 3, the bible should tell you where that fact appeared in Book 1 or Book 2.",
+          "LoreVia's chapter-grounded workflow is useful here because it keeps the author close to evidence. You can ask where a rule was introduced, whether a character already knows it, and which later scenes depend on it.",
+        ],
+        bullets: [
+          "First book and chapter where the fact appears",
+          "Characters who know or misunderstand the fact",
+          "Scenes in later books that depend on the fact remaining true",
+        ],
+      },
+      {
+        heading: "Use the bible during planning, not only cleanup",
+        body: [
+          "A series bible is not just a place to check mistakes after drafting. It can shape the next book before the first chapter is written. Reviewing open promises, damaged relationships, and unresolved rules can show which threads are ready for payoff.",
+          "This is where a living system beats a static document. It lets the previous manuscript become useful pressure on the next one without forcing the author to reread everything from scratch.",
+        ],
+      },
+      {
+        heading: "Do a canon audit before release",
+        body: [
+          "Before a book goes out, run a focused audit on anything that crosses book boundaries. Check returning characters, old promises, world rules, travel assumptions, and timeline references. Then update the bible with the final decisions from the release draft.",
+          "That last step protects the next project. It means the author's starting point is the published canon, not a memory of the draft that existed three revisions earlier.",
+        ],
+        highlight:
+          "A good series bible is less about collecting lore and more about preventing old decisions from becoming new contradictions.",
+      },
+    ],
+    supportingAnswerSlugs: [
+      "how-do-i-use-continuity-tracking-across-a-series",
+      "what-belongs-in-a-series-bible",
+      "how-do-i-create-a-story-bible-automatically",
+    ],
+    demoSlug: "pride-and-prejudice-relationship-map",
+  },
 ]
 
 export const answerPages: AnswerPage[] = [
@@ -793,6 +1124,421 @@ export const answerPages: AnswerPage[] = [
           "State the feedback priorities clearly",
           "Give only the context needed to read well",
           "Keep your own revision questions visible while responses come in",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "how-should-i-use-lorevia-after-uploading-a-draft",
+    question: "How should I use LoreVia after uploading a draft?",
+    description: "A first-session workflow for turning an imported manuscript into useful revision context.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "how-to-use-lorevia-during-a-revision-week",
+    intro:
+      "The first session after uploading a draft should not be a frantic editing sprint. Treat it like opening a new set of editorial instruments. The goal is to learn what LoreVia can see clearly, what needs author correction, and which parts of the manuscript deserve the next focused pass.",
+    shortAnswer:
+      "Start by reviewing the extracted chapters, character records, relationships, and timeline signals. Correct obvious extraction mistakes, then choose one revision question and use grounded answers or continuity views to locate the scenes that need decisions.",
+    quickSteps: [
+      "Confirm the chapter structure and import boundaries look right.",
+      "Review the highest-value story memory: main characters, relationships, and open threads.",
+      "Ask one concrete question about the draft before making edits.",
+    ],
+    whyItMatters:
+      "A calm first pass helps LoreVia become a working revision system instead of another place where notes pile up.",
+    sections: [
+      {
+        heading: "Do not try to solve the whole book immediately",
+        body: [
+          "A manuscript import gives you a lot of surfaces at once. If you jump between every character, timeline event, note, and answer, the session can feel busy without becoming useful.",
+          "Pick the area with the most revision pressure. If you are worried about continuity, start there. If the emotional arc is unstable, start with relationships and character history.",
+        ],
+      },
+      {
+        heading: "Make the system more trustworthy",
+        body: [
+          "Review the records that matter most and fix anything obviously stale or misread. The point is not to perfect the database on day one. It is to make the parts you plan to use this week accurate enough to support real decisions.",
+          "Once the import looks reliable, ask a grounded question and follow the answer back to the manuscript. That closes the loop between analysis and editing.",
+        ],
+        bullets: [
+          "Correct names and aliases for major characters.",
+          "Check whether chapter labels match the manuscript.",
+          "Turn one answer into one specific revision action.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "what-should-i-ask-a-manuscript-assistant",
+    question: "What should I ask a manuscript assistant?",
+    description: "Examples of useful revision questions that keep the author in control of the manuscript.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "why-chapter-grounded-answers-matter-for-fiction-revision",
+    intro:
+      "The best questions for a manuscript assistant are not vague requests to improve the book. They are questions that help you locate evidence, test a concern, or choose between revision options. A good question gives the assistant a narrow job and leaves the author with the decision.",
+    shortAnswer:
+      "Ask questions that point to scenes, causality, character knowledge, timeline order, relationship change, or unresolved promises. Avoid broad prompts that invite generic advice without proving anything from the draft.",
+    quickSteps: [
+      "Ask where a fact appears before asking whether it works.",
+      "Ask who knows something at a specific chapter point.",
+      "Ask which scenes support a payoff before rewriting the payoff.",
+    ],
+    whyItMatters:
+      "Sharper questions create answers you can verify in the manuscript instead of advice that sounds plausible but cannot guide an edit.",
+    sections: [
+      {
+        heading: "Ask for evidence before advice",
+        body: [
+          "A useful manuscript question often starts with where, when, or who. Where did I first establish the vault key? When does Mara learn about the betrayal? Who has enough information to suspect the killer before the midpoint?",
+          "Those questions help you inspect the book you already wrote. Once you see the evidence, you can decide whether the setup needs more weight or the payoff needs less explanation.",
+        ],
+      },
+      {
+        heading: "Make the question match the revision stage",
+        body: [
+          "During structural revision, ask about causality, timeline, promises, and motivation. During a character pass, ask about relationships, wounds, voice, and knowledge. During final cleanup, ask about repeated facts, names, objects, and scene order.",
+          "The assistant is most helpful when it supports the pass you are actually doing, not every possible pass at once.",
+        ],
+        bullets: [
+          "Structural: what breaks if this scene moves?",
+          "Character: which scenes change this relationship?",
+          "Continuity: where does this detail contradict itself?",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "why-do-chapter-citations-matter-for-writing-software",
+    question: "Why do chapter citations matter for writing software?",
+    description: "A clear explanation of why fiction revision tools should show where an answer came from.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "why-chapter-grounded-answers-matter-for-fiction-revision",
+    demoSlug: "dracula-story-timeline-tracker",
+    intro:
+      "Chapter citations matter because fiction revision is evidence work. If software says a clue is present, a relationship has changed, or a timeline still works, the author needs to see the part of the manuscript behind that claim.",
+    shortAnswer:
+      "Citations make answers verifiable. They help authors reopen the relevant chapter, judge the scene themselves, and avoid making edits based on confident but unsupported summaries.",
+    quickSteps: [
+      "Prefer answers that name the chapter or scene behind the claim.",
+      "Use citations to jump from analysis into the next edit location.",
+      "Treat uncited answers as suggestions, not manuscript evidence.",
+    ],
+    whyItMatters:
+      "Without citations, a writing assistant can sound helpful while quietly separating the author from the draft.",
+    sections: [
+      {
+        heading: "A cited answer keeps the manuscript in charge",
+        body: [
+          "Fiction tools should not replace the author's memory with a new unsupported memory. They should improve the author's access to the manuscript. Chapter citations do that by showing where the answer came from.",
+          "That is especially useful when a question is delicate: whether a secret is fairly planted, whether a character has enough motivation, or whether a later scene contradicts an earlier rule.",
+        ],
+      },
+      {
+        heading: "Citations make revision faster",
+        body: [
+          "The practical benefit is speed. If an answer tells you the relevant evidence lives in Chapters 7, 11, and 18, you can move directly to the scenes that matter instead of rereading the entire draft with a vague concern in mind.",
+          "That does not make the edit automatic. It simply makes the next author decision easier to reach.",
+        ],
+        bullets: [
+          "Verify setup before changing payoff.",
+          "Find stale facts after moving chapters.",
+          "Check reader knowledge at a specific point in the story.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "how-do-i-use-lorevia-in-a-weekly-revision-routine",
+    question: "How do I use LoreVia in a weekly revision routine?",
+    description: "A repeatable weekly rhythm for authors revising a novel with LoreVia.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "how-to-use-lorevia-during-a-revision-week",
+    intro:
+      "A weekly routine works better than occasional giant cleanup sessions. LoreVia fits that rhythm when you give each day a clear job: orient, inspect, revise, verify, and prepare the next pass.",
+    shortAnswer:
+      "Use the beginning of the week to review manuscript intelligence, the middle to make targeted edits, and the end to check whether those edits changed continuity, relationships, or open threads.",
+    quickSteps: [
+      "Monday: review story memory and choose the week's revision question.",
+      "Tuesday to Thursday: edit the scenes connected to that question.",
+      "Friday: refresh the related records and verify consequences.",
+    ],
+    whyItMatters:
+      "A routine turns LoreVia from an occasional lookup tool into part of the author's actual revision cadence.",
+    sections: [
+      {
+        heading: "Keep the week narrow",
+        body: [
+          "One week does not need to solve every weakness in the draft. Choose a pass: timeline, relationship, plot thread, character motivation, or beta-reader prep. Then use LoreVia around that pass.",
+          "This prevents the tool from becoming another dashboard you glance at without acting on. The point is to turn analysis into a sequence of manuscript decisions.",
+        ],
+      },
+      {
+        heading: "Leave yourself a visible trail",
+        body: [
+          "When you find an issue, note the decision you made. If the fix is not immediate, keep it tied to the chapter or story record that exposed it. That makes the next session easier to resume.",
+          "At the end of the week, review what changed. If the rewrite moved a reveal, altered a character's knowledge, or deleted the first mention of a detail, add that to the next pass.",
+        ],
+        bullets: [
+          "Choose one revision pass.",
+          "Ask evidence-based questions.",
+          "Verify the downstream effects before moving on.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "how-do-i-track-relationship-changes-between-drafts",
+    question: "How do I track relationship changes between drafts?",
+    description: "A practical answer for preserving emotional continuity after rewriting scenes.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "how-relationship-tracking-changes-a-character-rewrite",
+    demoSlug: "pride-and-prejudice-relationship-map",
+    intro:
+      "Relationships can change silently between drafts. A scene cut for pacing may remove the only apology. A softened argument may make a later reconciliation feel oversized. Tracking the bond between characters helps you see those effects before readers feel them.",
+    shortAnswer:
+      "Track the relationship as its own record: current status, scenes that changed it, unresolved tension, and later payoffs that depend on earlier movement. Recheck that record after major rewrites.",
+    quickSteps: [
+      "List the scenes that changed trust, attraction, rivalry, or loyalty.",
+      "Compare the old emotional path with the new chapter order.",
+      "Verify that later payoff scenes still have enough setup.",
+    ],
+    whyItMatters:
+      "Emotional continuity is one of the first things readers notice when a rewrite removes the bridge between two beats.",
+    sections: [
+      {
+        heading: "Track the turn, not only the characters",
+        body: [
+          "A character profile can tell you who someone is. A relationship record tells you what has happened between two people. During revision, that distinction matters because the bond may change even when both profiles stay mostly the same.",
+          "For each important pair, note the scenes that shifted trust, fear, respect, attraction, debt, or resentment.",
+        ],
+      },
+      {
+        heading: "Audit payoff scenes after cuts",
+        body: [
+          "After deleting or moving scenes, check the moments where the relationship pays off. Does the apology still feel earned? Does the betrayal still hurt for the right reason? Does the alliance still make sense at that point in the book?",
+          "If the answer is uncertain, the relationship tracker gives you the right area to repair instead of sending you through the whole manuscript.",
+        ],
+        bullets: [
+          "First tension",
+          "Turning point",
+          "Payoff scene",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "how-can-i-find-dropped-plot-threads-before-beta-readers",
+    question: "How can I find dropped plot threads before beta readers?",
+    description: "A focused workflow for finding setups that no longer receive payoffs.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "why-chapter-grounded-answers-matter-for-fiction-revision",
+    intro:
+      "Dropped plot threads are embarrassing because they often began as good ideas. The draft promised something, the revision moved on, and the thread stayed behind like a door the reader expects to open.",
+    shortAnswer:
+      "Build a list of setups, promises, mysteries, objects, relationship tensions, and world rules, then check whether each one has a payoff, an intentional deferral, or a clean removal before beta readers see the draft.",
+    quickSteps: [
+      "Collect visible promises from early and middle chapters.",
+      "Mark each thread as paid off, deferred, revised, or removed.",
+      "Ask grounded questions about any setup you cannot place.",
+    ],
+    whyItMatters:
+      "Beta readers can tell you a thread disappeared, but it is better to catch obvious dropped promises before they spend attention on them.",
+    sections: [
+      {
+        heading: "Look for promises, not just subplots",
+        body: [
+          "A plot thread can be a mystery, a vow, a suspicious object, a political rule, a romantic obstacle, or a repeated image that begins to feel meaningful. If the reader is likely to expect a return, it belongs on the thread list.",
+          "LoreVia can help surface these patterns because the system is already reading characters, scenes, and recurring story material together.",
+        ],
+      },
+      {
+        heading: "Decide what each thread deserves",
+        body: [
+          "Not every thread needs a large payoff. Some need one sentence of closure. Some should be removed because the book no longer uses them. Others should be deliberately carried into the next book.",
+          "The important step is making the decision visible. A thread that is intentionally deferred feels different from one the author forgot.",
+        ],
+        bullets: [
+          "Pay off in this draft.",
+          "Clarify as background texture.",
+          "Remove the setup if it no longer serves the book.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "what-should-go-in-a-beta-reader-packet",
+    question: "What should go in a beta reader packet?",
+    description: "A concise checklist for preparing reader instructions, feedback questions, and manuscript context.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "how-to-prepare-beta-reader-packets-with-lorevia",
+    intro:
+      "A beta reader packet should make the reader's job easier without telling them what to think. It gives the practical details, the feedback priorities, and the boundaries around the draft while leaving the reading experience intact.",
+    shortAnswer:
+      "Include the manuscript, deadline, format instructions, content notes if needed, a short cast or context note, and a small set of focused feedback questions. Keep the packet short enough that readers actually use it.",
+    quickSteps: [
+      "State what kind of feedback you want this round.",
+      "Give practical reading instructions and deadline expectations.",
+      "Include five to eight questions tied to your current revision concerns.",
+    ],
+    whyItMatters:
+      "A clear packet gets better feedback because readers know where to put their attention and how to respond.",
+    sections: [
+      {
+        heading: "Separate context from persuasion",
+        body: [
+          "Context helps the reader understand the assignment. Persuasion tries to explain why the book works before they have reacted to it. Keep the packet on the context side.",
+          "A short list of major names, draft status, and feedback priorities is usually enough. If a reader needs a long explanation to understand a plot turn, the manuscript probably needs the explanation on the page.",
+        ],
+      },
+      {
+        heading: "Ask questions you can act on",
+        body: [
+          "Avoid questions that invite vague approval. Ask where the reader felt confused, which relationship beat felt too sudden, whether the villain's plan seemed fair, or what they expected after a specific reveal.",
+          "Those answers are easier to turn into revision work than a general note that the reader liked or disliked the draft.",
+        ],
+        bullets: [
+          "Confusion points",
+          "Pacing shifts",
+          "Character motivation",
+          "Ending payoff",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "how-do-i-use-continuity-tracking-across-a-series",
+    question: "How do I use continuity tracking across a series?",
+    description: "A practical answer for keeping canon consistent across multiple books.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "how-to-keep-a-series-bible-alive",
+    intro:
+      "Series continuity is harder than single-book continuity because old decisions keep creating new obligations. A scar, promise, treaty, family secret, or magic rule may matter again long after the original scene was drafted.",
+    shortAnswer:
+      "Track recurring facts by source, affected characters, and future dependencies. Before drafting or releasing a new book, audit the facts that cross book boundaries and update the series bible with the final version.",
+    quickSteps: [
+      "Record where each important canon fact first appeared.",
+      "Mark which future scenes or books depend on it.",
+      "Audit recurring characters and world rules before release.",
+    ],
+    whyItMatters:
+      "Readers remember series canon, and contradictions can weaken trust in the entire story world.",
+    sections: [
+      {
+        heading: "Track facts that travel",
+        body: [
+          "Not every detail needs series-level attention. Focus on facts that travel from one book to another: relationships, injuries, laws, powers, locations, family history, open promises, and political changes.",
+          "Those facts should have source references so the author can verify what the published story actually established.",
+        ],
+      },
+      {
+        heading: "Review before planning and before release",
+        body: [
+          "Use the continuity record before drafting the next book, then again before release. The first pass helps with planning. The second catches contradictions introduced during revision.",
+          "That habit keeps the bible alive because it is attached to real manuscript moments rather than maintained as a separate archive.",
+        ],
+        bullets: [
+          "Returning character status",
+          "Open promises from earlier books",
+          "World rules that limit the new plot",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "what-belongs-in-a-series-bible",
+    question: "What belongs in a series bible?",
+    description: "A focused list of canon records that help authors maintain multi-book continuity.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "how-to-keep-a-series-bible-alive",
+    demoSlug: "pride-and-prejudice-relationship-map",
+    intro:
+      "A series bible should not become a warehouse for every detail you have ever invented. It should hold the facts that future books may depend on and the evidence that proves those facts are canon.",
+    shortAnswer:
+      "Include recurring characters, aliases, relationship history, timeline anchors, world rules, locations, objects, unresolved promises, and book-by-book canon decisions. Tie important entries back to the chapter or book where they appeared.",
+    quickSteps: [
+      "Separate structural canon from decorative lore.",
+      "Record source chapters for facts that affect future books.",
+      "Update entries after the release draft, not only during planning.",
+    ],
+    whyItMatters:
+      "A focused series bible reduces continuity errors without turning maintenance into a second manuscript.",
+    sections: [
+      {
+        heading: "Store what creates obligations",
+        body: [
+          "The most important entries are facts that can create contradictions later. A character's age, injury, oath, secret knowledge, inherited object, or magical limit matters because later scenes may depend on it.",
+          "Decorative lore can still be stored, but it should not crowd out the entries that protect the series from drift.",
+        ],
+      },
+      {
+        heading: "Keep book-level history visible",
+        body: [
+          "For each major entry, note which book established it and whether the fact changed later. That helps when a character's public role, private allegiance, or relationship status evolves across installments.",
+          "A good series bible shows the shape of change, not only the final state.",
+        ],
+        bullets: [
+          "Canon fact",
+          "Source book and chapter",
+          "Current status",
+          "Future dependency",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "how-do-i-turn-continuity-findings-into-edits",
+    question: "How do I turn continuity findings into actual edits?",
+    description: "A practical answer for moving from a continuity flag to a clear manuscript decision.",
+    publishedAt: "2026-06-12",
+    publishedLabel: "June 12, 2026",
+    readTime: "4 min read",
+    articleSlug: "how-to-use-lorevia-during-a-revision-week",
+    intro:
+      "A continuity finding is only useful if it changes the manuscript. Authors can lose time collecting flags without deciding what each one means for the page. The better workflow is to translate every finding into a small editorial choice.",
+    shortAnswer:
+      "For each finding, decide whether to keep, clarify, move, rewrite, or remove the conflicting material. Then make the smallest edit that restores the story logic without over-explaining the problem to the reader.",
+    quickSteps: [
+      "Open the chapter evidence behind the finding.",
+      "Name the actual conflict in one sentence.",
+      "Choose the edit type before rewriting prose.",
+    ],
+    whyItMatters:
+      "Continuity review should reduce revision noise. A finding that never becomes a decision is just another note competing for attention.",
+    sections: [
+      {
+        heading: "Separate the flag from the fix",
+        body: [
+          "A flag tells you that something may be wrong. It does not automatically tell you the right repair. If a character knows a secret too early, the fix could be moving the reveal, changing the dialogue, adding a missing scene, or deciding the early knowledge is intentional.",
+          "That is why the first step is to restate the problem plainly. Once you know what the contradiction actually is, the edit gets smaller and less emotional.",
+        ],
+      },
+      {
+        heading: "Use the lightest edit that restores trust",
+        body: [
+          "Not every continuity issue needs a new scene. Sometimes a line of clarification is enough. Sometimes the cleanest fix is deleting a stray detail that no longer belongs to this draft.",
+          "LoreVia helps by pointing back to the evidence, but the author still chooses the level of intervention. The best fix is the one that makes the story coherent without making the repair visible.",
+        ],
+        bullets: [
+          "Clarify a line when the setup exists but is easy to miss.",
+          "Move a reveal when reader knowledge arrives too early.",
+          "Remove a detail when the draft no longer uses it.",
         ],
       },
     ],

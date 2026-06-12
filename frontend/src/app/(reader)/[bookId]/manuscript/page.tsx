@@ -299,8 +299,8 @@ function ManuscriptPageInner() {
   const [showCompileDialog, setShowCompileDialog] = useState(false)
   const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
   const [compileFormat, setCompileFormat] = useState<"pdf" | "docx" | "epub" | "vault">("docx")
-  const [includeSceneMetadataOnImport, setIncludeSceneMetadataOnImport] = useState(true)
-  const [includeSceneMetadataOnExport, setIncludeSceneMetadataOnExport] = useState(true)
+  const [includeSceneMetadataOnImport, setIncludeSceneMetadataOnImport] = useState(false)
+  const [includeSceneMetadataOnExport, setIncludeSceneMetadataOnExport] = useState(false)
   const [includeTableOfContentsOnExport, setIncludeTableOfContentsOnExport] = useState(false)
   const [showEditorSettings, setShowEditorSettings] = useState(false)
   const [activeEditorKey, setActiveEditorKey] = useState<string | null>(null)
@@ -1037,6 +1037,40 @@ function ManuscriptPageInner() {
     setStatusMessage(`Inserted scene "${insertion.title}" into chapter ${activeChapterNumber}.`)
   }
 
+  const handleSceneMetadataImportChange = async (checked: boolean) => {
+    if (!checked) {
+      setIncludeSceneMetadataOnImport(false)
+      return
+    }
+
+    const confirmed = await confirm({
+      title: "Insert scene metadata?",
+      body: "Scene metadata adds LoreVia planning labels to inserted scene text. Use it only when you want those scene notes in the manuscript draft.",
+      confirmLabel: "Insert metadata",
+    })
+    if (confirmed) {
+      setIncludeSceneMetadataOnImport(true)
+      setStatusMessage("Scene metadata will be included when inserting scenes.")
+    }
+  }
+
+  const handleSceneMetadataExportChange = async (checked: boolean) => {
+    if (!checked) {
+      setIncludeSceneMetadataOnExport(false)
+      return
+    }
+
+    const confirmed = await confirm({
+      title: "Include scene metadata?",
+      body: "Scene metadata adds LoreVia planning labels to compiled exports. Keep it off for clean submission prose unless you really want those notes included.",
+      confirmLabel: "Include metadata",
+    })
+    if (confirmed) {
+      setIncludeSceneMetadataOnExport(true)
+      setStatusMessage("Scene metadata will be included in compiled exports.")
+    }
+  }
+
   const createSnapshot = async () => {
     if (selectedChapter === null) return
     try {
@@ -1095,6 +1129,11 @@ function ManuscriptPageInner() {
   }
 
   const previewSnapshot = async (versionId: string) => {
+    if (chapterVersionDetail?.id === versionId) {
+      setChapterVersionDetail(null)
+      return
+    }
+
     try {
       const detail = await booksApi.getChapterVersionDetail(bookId, versionId)
       setChapterVersionDetail(detail)
@@ -1117,6 +1156,11 @@ function ManuscriptPageInner() {
   }
 
   const compareSceneVersion = async (versionId: string) => {
+    if (sceneVersionDetail?.id === versionId) {
+      setSceneVersionDetail(null)
+      return
+    }
+
     try {
       const detail = await booksApi.getSceneVersionDetail(bookId, versionId)
       setSceneVersionDetail(detail)
@@ -2515,8 +2559,8 @@ function ManuscriptPageInner() {
 
   const activeSaveLabel = saving ? "Saving..." : dirtyDrafts.includes(activeChapterNumber) ? "Unsaved" : "Saved"
   const inspectorRailClass = isDark
-    ? "border-l border-white/[0.08] bg-[#0b0f11] text-slate-100"
-    : "border-l border-stone-200 bg-white text-stone-950"
+    ? "min-w-0 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:self-start xl:overflow-y-auto border-l border-white/[0.08] bg-[#0b0f11] text-slate-100"
+    : "min-w-0 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:self-start xl:overflow-y-auto border-l border-stone-200 bg-white text-stone-950"
   const inspectorSectionClass = isDark
     ? "border-t border-white/[0.08] px-4 py-4 first:border-t-0"
     : "border-t border-stone-200 px-4 py-4 first:border-t-0"
@@ -2545,7 +2589,7 @@ function ManuscriptPageInner() {
   }
 
   return (
-    <div className={`min-h-screen overflow-x-hidden ${isDark ? "bg-[#101416] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
+    <div className={`min-h-screen overflow-x-clip ${isDark ? "bg-[#101416] text-slate-100" : "bg-[#f4f5f3] text-stone-950"}`}>
       <style jsx global>{`
         ::highlight(lorevia-annotation-open) {
           background: ${isDark ? "rgba(251, 191, 36, 0.18)" : "rgba(245, 158, 11, 0.22)"};
@@ -2778,9 +2822,9 @@ function ManuscriptPageInner() {
           />
         ) : null}
         {workspaceTab !== "plan" ? (
-        <div className={`grid min-w-0 ${desktopLayoutClass}`}>
+        <div className={`grid min-h-[calc(100vh-8.25rem)] min-w-0 ${desktopLayoutClass}`}>
           {leftRailVisible ? (
-          <aside className={`min-w-0 border-r p-5 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:overflow-y-auto ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
+          <aside className={`min-w-0 border-r p-5 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:self-start xl:overflow-y-auto ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>
             <ManuscriptWorkspaceSidebarHeader
               bookTitle={book?.title}
               fullBookReadingTime={fullBookReadingTime}
@@ -2855,7 +2899,7 @@ function ManuscriptPageInner() {
                         aria-label={`Remove Chapter ${chapter.number}`}
                         disabled={deletingChapterNumber === chapter.number}
                         onClick={() => void removeChapter(chapter.number)}
-                        className={`shrink-0 rounded-sm px-2.5 py-1 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-rose-400/40 disabled:cursor-wait disabled:opacity-60 ${isDark ? "bg-rose-500/10 text-rose-200 hover:bg-rose-500/20" : "bg-rose-50 text-rose-700 hover:bg-rose-100"}`}
+                        className={`shrink-0 rounded-none px-2.5 py-1 text-3xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-rose-400/40 disabled:cursor-wait disabled:opacity-60 ${isDark ? "bg-rose-500/10 text-rose-200 hover:bg-rose-500/20" : "bg-rose-50 text-rose-700 hover:bg-rose-100"}`}
                       >
                         {deletingChapterNumber === chapter.number ? "Removing" : "Remove"}
                       </button>
@@ -2878,7 +2922,7 @@ function ManuscriptPageInner() {
                   <input
                     type="checkbox"
                     checked={includeSceneMetadataOnImport}
-                    onChange={(event) => setIncludeSceneMetadataOnImport(event.target.checked)}
+                    onChange={(event) => void handleSceneMetadataImportChange(event.target.checked)}
                     className="h-3.5 w-3.5 rounded border-stone-300"
                   />
                   Insert metadata
@@ -2906,11 +2950,8 @@ function ManuscriptPageInner() {
                         <span className={`text-xs font-semibold uppercase tracking-[0.12em] ${isDark ? "text-slate-300" : "text-stone-700"}`}>{group.label}</span>
                         <span className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{collapsed ? "+" : "−"}</span>
                       </button>
-                      {isChapterSceneGroup ? (
+                      {isChapterSceneGroup && (isDraggingWithinChapter || chapterOrderState !== "idle") ? (
                         <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
-                          <span className={`rounded-sm border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
-                            Reorder scenes
-                          </span>
                           <ManuscriptSceneOrderStatus isDark={isDark} isDragging={isDraggingWithinChapter} state={chapterOrderState} />
                         </div>
                       ) : null}
@@ -3017,7 +3058,7 @@ function ManuscriptPageInner() {
                                         </div>
                                       ) : null}
                                     </div>
-                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`shrink-0 rounded-sm px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
+                                    <button onClick={() => void insertSceneIntoDraft(scene)} className={`shrink-0 rounded-none px-2.5 py-1 text-3xs font-semibold ${isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"}`}>Insert</button>
                                   </div>
                                   <div data-testid={`scene-copy-${scene.id}`} className="mt-3 min-w-0">
                                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -3028,8 +3069,8 @@ function ManuscriptPageInner() {
                                     {scene.description ? <p className={`mt-2 break-words text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
                                   </div>
                                   <div className="mt-3 flex flex-wrap gap-2">
-                                    <button onClick={() => openSceneEditor(scene)} className={`rounded-sm px-2.5 py-1 text-3xs ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
-                                    <button onClick={() => void removeScene(scene)} className={`rounded-sm px-2.5 py-1 text-3xs ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
+                                    <button onClick={() => openSceneEditor(scene)} className={`rounded-none px-2.5 py-1 text-3xs ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
+                                    <button onClick={() => void removeScene(scene)} className={`rounded-none px-2.5 py-1 text-3xs ${isDark ? "bg-rose-500/10 text-rose-200" : "bg-rose-50 text-rose-700"}`}>Delete</button>
                                   </div>
                                 </div>
                               </div>
@@ -3179,7 +3220,7 @@ function ManuscriptPageInner() {
                 />
               ) : (
               <div className="space-y-4">
-                <div className={`relative mx-auto w-full max-w-full overflow-hidden border ${isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
+                <div className={`relative mx-auto w-full max-w-full overflow-visible border ${isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}>
                   {showPageGuides ? (
                     <div
                       aria-hidden
@@ -3333,7 +3374,7 @@ function ManuscriptPageInner() {
                         chapterRefs.current[chapter.number] = node
                       }}
                       style={{ contentVisibility: "auto", containIntrinsicSize: "820px" }}
-                      className={`relative mx-auto w-full max-w-full overflow-hidden border ${jumpTarget === chapter.number ? isDark ? "border-teal-400/50 bg-[#0e1218]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
+                      className={`relative mx-auto w-full max-w-full overflow-visible border ${jumpTarget === chapter.number ? isDark ? "border-teal-400/50 bg-[#0e1218]" : "border-teal-300 bg-[#fdfcf9]" : isDark ? "border-white/10 bg-[#0e1218]" : "border-[#d8d0c4] bg-[#fdfcf9]"}`}
                     >
                       {showPageGuides ? (
                         <div
@@ -4403,7 +4444,7 @@ function ManuscriptPageInner() {
           compileFormat={compileFormat}
           fullBookWordCount={fullBookWordCount}
           includeSceneMetadataOnExport={includeSceneMetadataOnExport}
-          onIncludeSceneMetadataOnExportChange={setIncludeSceneMetadataOnExport}
+          onIncludeSceneMetadataOnExportChange={handleSceneMetadataExportChange}
           includeTableOfContentsOnExport={includeTableOfContentsOnExport}
           onIncludeTableOfContentsOnExportChange={setIncludeTableOfContentsOnExport}
           onUpdateFrontMatter={updateFrontMatter}
