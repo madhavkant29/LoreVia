@@ -4,7 +4,7 @@ import Link from "next/link"
 import { ContentArrowIcon } from "@/components/marketing/PublicContentHeader"
 import { PublicContentShell } from "@/components/marketing/PublicContentShell"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { blogArticles, demoPages, getAnswersByArticleSlug } from "@/lib/content"
+import { answerPages, blogArticles, demoPages, getAnswersByArticleSlug } from "@/lib/content"
 import { BLOG_RSS_PATH, DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildCollectionPageJsonLd } from "@/lib/seo"
 
 const featuredArticle = blogArticles[0]
@@ -98,7 +98,7 @@ export default function BlogPage() {
                 </div>
                 <div className="app-stat app-stat--warning">
                   <p className="app-stat__label">Q&A pages</p>
-                  <p className="app-stat__value">10</p>
+                  <p className="app-stat__value">{answerPages.length}</p>
                   <p className="app-stat__note">Question pages that support topic clusters and internal linking.</p>
                 </div>
                 <div className="app-stat app-stat--success">

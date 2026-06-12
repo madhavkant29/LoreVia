@@ -9,6 +9,8 @@ export function ManuscriptSceneOrderStatus({
   isDragging: boolean
   state: SceneOrderSaveState
 }) {
+  if (state === "idle" && !isDragging) return null
+
   return (
     <span className={`rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${getSceneOrderStatusTone(state, isDark)}`}>
       {getSceneOrderStatusLabel(state, isDragging)}
@@ -21,7 +23,7 @@ function getSceneOrderStatusLabel(state: SceneOrderSaveState, isDragging: boolea
   if (state === "saved") return "Order saved"
   if (state === "failed") return "Could not save order"
   if (isDragging) return "Drop between scenes to place it"
-  return "Drag the handle to reorder scenes"
+  return ""
 }
 
 function getSceneOrderStatusTone(state: SceneOrderSaveState, isDark: boolean) {

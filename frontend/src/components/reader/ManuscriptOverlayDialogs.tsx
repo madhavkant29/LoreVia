@@ -183,14 +183,14 @@ export function ManuscriptOverlayDialogs({
                         <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => onCompareSceneVersion(version.id)}
-                            className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                            className={`rounded-none px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                           >
                             Compare
                           </button>
                           <button
                             onClick={() => onRestoreSceneSnapshot(version.id)}
                             disabled={restoringSceneVersionId === version.id}
-                            className={`rounded-full px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
+                            className={`rounded-none px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
                           >
                             {restoringSceneVersionId === version.id ? "Restoring..." : "Restore"}
                           </button>
@@ -198,14 +198,8 @@ export function ManuscriptOverlayDialogs({
                       </div>
                       {sceneVersionDetail?.id === version.id ? (
                         <div className="mt-3 grid gap-3 xl:grid-cols-2">
-                          <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
-                            <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Saved version</p>
-                            <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{sceneVersionDetail.body || "No scene text stored in this version."}</p>
-                          </div>
-                          <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
-                            <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Current draft</p>
-                            <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{sceneBodyDraft || "No scene draft yet."}</p>
-                          </div>
+                          <VersionComparePanel isDark={isDark} label="Saved version" text={sceneVersionDetail.body || "No scene text stored in this version."} />
+                          <VersionComparePanel isDark={isDark} label="Current draft" text={sceneBodyDraft || "No scene draft yet."} />
                         </div>
                       ) : null}
                     </div>
@@ -341,6 +335,17 @@ export function ManuscriptOverlayDialogs({
         </div>
       ) : null}
     </>
+  )
+}
+
+function VersionComparePanel({ isDark, label, text }: { isDark: boolean; label: string; text: string }) {
+  return (
+    <details open className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-stone-50"}`}>
+      <summary className={`cursor-pointer text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+        {label}
+      </summary>
+      <div className={`mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{text}</div>
+    </details>
   )
 }
 

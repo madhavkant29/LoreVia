@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { ThemeBrandImage } from "@/components/layout/ThemeBrandImage"
+import { PublicThemeToggle } from "./PublicThemeToggle"
 
 function ArrowIcon() {
   return (
@@ -58,6 +59,7 @@ export function PublicContentHeader({
         </nav>
 
         <div className="flex items-center gap-3">
+          <PublicThemeToggle />
           <Link href="/login" className="hidden text-sm font-medium text-foreground/70 transition hover:text-foreground sm:inline-flex">
             Sign in
           </Link>

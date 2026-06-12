@@ -48,6 +48,7 @@ export function PostHogClient() {
   const [consentValue, setConsentValue] = React.useState<string | undefined>(undefined)
   const pathname = usePathname()
   const analyticsKey = process.env.NEXT_PUBLIC_POSTHOG_KEY
+  const useSquareCorners = pathname === "/blog" || pathname.startsWith("/blog/") || pathname === "/answers" || pathname.startsWith("/answers/")
 
   React.useEffect(() => {
     if (!analyticsKey) {
@@ -104,7 +105,7 @@ export function PostHogClient() {
             background: "#6d28d9",
             color: "white",
             fontSize: "13px",
-            borderRadius: "9999px",
+            borderRadius: useSquareCorners ? "0" : "9999px",
             padding: "10px 14px",
           }}
           declineButtonStyle={{
@@ -112,7 +113,7 @@ export function PostHogClient() {
             color: "rgba(255,255,255,0.85)",
             border: "1px solid rgba(255,255,255,0.18)",
             fontSize: "13px",
-            borderRadius: "0.375rem",
+            borderRadius: useSquareCorners ? "0" : "0.375rem",
             padding: "10px 14px",
           }}
         >

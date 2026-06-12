@@ -6,6 +6,7 @@ from app.workers.consumers.extraction_consumer import (
     _can_auto_save_character,
     _character_save_decision,
     _merge_alias_in_memory,
+    _prepare_chapter_rich_content,
     _relationship_resolution_candidates,
     _should_update_existing_character,
 )
@@ -26,6 +27,43 @@ def test_can_auto_save_character_requires_strong_single_mention_evidence():
     }
 
     assert _can_auto_save_character(entity) is False
+
+
+def test_prepare_chapter_rich_content_extracts_editor_images_and_retains_stored_media():
+    prepared = _prepare_chapter_rich_content(
+        {
+            "number": 1,
+            "text": "Intro Outro",
+            "html": (
+                '<p>Intro</p>'
+                '<p><img src="/api/v1/reader/media/1" alt="[[IMAGE:kept]]"></p>'
+                '<p><img src="data:image/png;base64,QUJD" alt="New map"></p>'
+                '<p>Outro</p>'
+            ),
+            "images": [
+                {
+                    "marker": "[[IMAGE:kept]]",
+                    "storage_key": "chapter-media/book/kept.png",
+                    "content_type": "image/png",
+                    "caption": "Kept image",
+                },
+                {
+                    "marker": "[[IMAGE:removed]]",
+                    "storage_key": "chapter-media/book/removed.png",
+                    "content_type": "image/png",
+                },
+            ],
+        }
+    )
+
+    assert prepared["_lorevia_persist_rich_content"] is True
+    assert "data:image/png" not in prepared["html"]
+    assert "[[IMAGE:kept]]" in prepared["text"]
+    assert "Outro" in prepared["text"]
+    assert [image["marker"] for image in prepared["images"][:1]] == ["[[IMAGE:kept]]"]
+    assert prepared["images"][0]["storage_key"] == "chapter-media/book/kept.png"
+    assert prepared["images"][1]["bytes"] == b"ABC"
+    assert prepared["images"][1]["content_type"] == "image/png"
 
 
 def test_can_auto_save_character_allows_multi_mention_person():

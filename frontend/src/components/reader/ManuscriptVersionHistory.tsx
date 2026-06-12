@@ -55,13 +55,13 @@ export function ManuscriptVersionHistory({
                 <button
                   onClick={() => onRestoreSnapshot(version.id)}
                   disabled={restoringVersionId === version.id}
-                  className={`rounded-md px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
+                  className={`rounded-none px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-amber-500/10 text-amber-200 disabled:opacity-50" : "bg-amber-50 text-amber-700 disabled:opacity-50"}`}
                 >
                   {restoringVersionId === version.id ? "Restoring..." : "Restore"}
                 </button>
                 <button
                   onClick={() => onPreviewSnapshot(version.id)}
-                  className={`rounded-md px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                  className={`rounded-none px-3 py-1.5 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
                 >
                   Compare
                 </button>
@@ -88,9 +88,9 @@ export function ManuscriptVersionHistory({
 
 function VersionTextPanel({ isDark, label, text }: { isDark: boolean; label: string; text: string }) {
   return (
-    <div className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
-      <div className={`mt-2 max-h-44 overflow-y-auto text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{text}</div>
-    </div>
+    <details open className={`rounded-sm border px-3 py-2 ${isDark ? "border-white/10 bg-black/30" : "border-stone-200 bg-white"}`}>
+      <summary className={`cursor-pointer text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</summary>
+      <div className={`mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-700"}`}>{text}</div>
+    </details>
   )
 }

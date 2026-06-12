@@ -16,7 +16,7 @@ from app.core import storage
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import mark_book_cache_dirty, mark_user_dashboard_cache_dirty
-from app.models.book import Book, Chapter, Series, SeriesBook
+from app.models.book import Book, Chapter, ChapterMedia, Series, SeriesBook
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
     ChapterConsistencyReport,
@@ -36,6 +36,7 @@ from app.utils.book_utils import (
     as_bool,
     assert_editor_project_not_rebuilding,
     clean_manuscript_html,
+    chapter_media_storage_payload,
     deserialize_manuscript_content,
     estimate_readability,
     extract_novel_scene_candidates,
@@ -454,6 +455,7 @@ async def import_manuscript_content(
         previous_word_count = 0
         previous_text = ""
         source_version_id: str | None = None
+        existing_media_payloads: list[dict[str, Any]] = []
         if replace_flag:
             existing = (
                 await db.execute(
@@ -478,6 +480,18 @@ async def import_manuscript_content(
                 if existing.s3_key:
                     existing_payload = deserialize_manuscript_content(await asyncio.to_thread(storage.download_book, existing.s3_key))
                     previous_text = str(existing_payload.get("text") or "")
+                existing_media_rows = (
+                    await db.execute(
+                        select(ChapterMedia)
+                        .where(ChapterMedia.chapter_id == existing.id, ChapterMedia.asset_type == "image")
+                        .order_by(ChapterMedia.sort_order.asc(), ChapterMedia.created_at.asc())
+                    )
+                ).scalars().all()
+                existing_media_payloads = [
+                    chapter_media_storage_payload(media)
+                    for media in existing_media_rows
+                    if media.marker and media.storage_key
+                ]
                 snapshot = await snapshot_chapter_version(
                     db,
                     book,
@@ -515,7 +529,7 @@ async def import_manuscript_content(
                 description=str(job.get("description") or "") or None,
                 chapter_kind=str(job.get("chapter_kind") or ""),
                 content_version=int(job.get("content_version") or 1),
-                images=list(job.get("images") or []),
+                images=[*list(job.get("images") or []), *existing_media_payloads],
             )
             if not should_auto_reprocess:
                 update_reprocess_metadata(book, add_pending_chapters=[job_number])
@@ -530,7 +544,7 @@ async def import_manuscript_content(
                     "html": job.get("html"),
                     "description": job.get("description"),
                     "chapter_kind": job.get("chapter_kind"),
-                    "images": list(job.get("images") or []),
+                    "images": [*list(job.get("images") or []), *existing_media_payloads],
                     "content_version": int(job.get("content_version") or 1),
                 },
             )

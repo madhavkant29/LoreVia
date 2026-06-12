@@ -5,7 +5,7 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { LandingShowcase } from "./LandingShowcase"
+import { LANDING_SHOWCASE_VISUALS, LandingShowcase } from "./LandingShowcase"
 
 vi.mock("next/image", () => ({
   default: ({ alt, src, className }: { alt: string; src: string; className?: string }) => (
@@ -72,6 +72,8 @@ describe("LandingShowcase", () => {
     for (const visual of landingVisuals) {
       expect(view.querySelector(`img[src="${visual}"]`)).not.toBeNull()
     }
+    expect([...LANDING_SHOWCASE_VISUALS].sort()).toEqual([...landingVisuals].sort())
+    expect(new Set(LANDING_SHOWCASE_VISUALS).size).toBe(LANDING_SHOWCASE_VISUALS.length)
   })
 
   it("keeps paired showcase screenshots in their intended order", () => {

@@ -1,10 +1,12 @@
 import time
 import uuid
+from io import BytesIO
 
+from docx import Document
 import pytest
 from sqlalchemy import select
 
-from app.models.book import Book, Chapter
+from app.models.book import Book, Chapter, ChapterMedia
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
@@ -94,3 +96,102 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
 
     chapter = (await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))).scalar_one()
     assert chapter.analysis_state["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_editor_inserted_image_reloads_and_exports_with_novel_docx(client, db, monkeypatch):
+    storage: dict[str, bytes] = {}
+
+    def _upload_text(key: str, content: str) -> str:
+        storage[key] = content.encode("utf-8")
+        return key
+
+    def _upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        storage[key] = raw
+        return key
+
+    def _download_book(key: str) -> bytes:
+        return storage[key]
+
+    for target in (
+        "app.core.storage",
+        "app.utils.book_utils",
+        "app.utils.reader_utils",
+        "app.services.chapter_recovery_service",
+        "app.api.v1.routes.reader.core",
+    ):
+        monkeypatch.setattr(f"{target}.download_book", _download_book, raising=False)
+    monkeypatch.setattr("app.core.storage.upload_text", _upload_text, raising=False)
+    monkeypatch.setattr("app.core.storage.upload_binary", _upload_binary, raising=False)
+    monkeypatch.setattr("app.utils.book_utils.upload_text", _upload_text, raising=False)
+    monkeypatch.setattr("app.utils.book_utils.upload_binary", _upload_binary, raising=False)
+    monkeypatch.setattr("app.services.chapter_recovery_service.get_presigned_url", lambda _key: None, raising=False)
+    monkeypatch.setattr("app.utils.reader_utils.get_presigned_url", lambda _key: None, raising=False)
+
+    headers, user_id = await _register_user(client, f"editor-image-{uuid.uuid4().hex[:8]}@lorevia.app")
+    book = Book(
+        user_id=user_id,
+        title="Image Persistence",
+        format="txt",
+        work_type="novel",
+        s3_key="books/image-persistence.txt",
+        status="ready",
+        mode="author",
+        is_editor_project=True,
+        writer_workspace={
+            "reprocess": {
+                "auto_reprocess_enabled": False,
+                "pending_chapters": [],
+            }
+        },
+    )
+    db.add(book)
+    await db.commit()
+
+    png_data_uri = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    )
+    response = await client.post(
+        f"/api/v1/books/{book.id}/manuscript/import",
+        headers=headers,
+        data={
+            "text": "Intro\n\nOutro",
+            "html": f'<p>Intro</p><p><img src="{png_data_uri}" alt="Inserted map"></p><p>Outro</p>',
+            "title": "Opening",
+            "chapter_number": "1",
+            "replace_existing": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    chapter = (await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))).scalar_one()
+    media = (await db.execute(select(ChapterMedia).where(ChapterMedia.chapter_id == chapter.id))).scalar_one()
+    assert media.marker.startswith("[[IMAGE:")
+    assert media.content_type == "image/png"
+
+    reload_response = await client.get(
+        f"/api/v1/reader/{book.id}/chapter/1",
+        headers=headers,
+        params={"include": "text_content,html_content,media"},
+    )
+
+    assert reload_response.status_code == 200
+    reloaded = reload_response.json()
+    assert media.marker in reloaded["html_content"]
+    assert reloaded["media"][0]["marker"] == media.marker
+    assert reloaded["media"][0]["content_base64"]
+
+    export_response = await client.get(
+        f"/api/v1/books/{book.id}/novel/export",
+        headers=headers,
+        params={
+            "format": "docx",
+            "include_images": "true",
+            "image_placement": "inline",
+        },
+    )
+
+    assert export_response.status_code == 200
+    doc = Document(BytesIO(export_response.content))
+    assert len(doc.inline_shapes) >= 2

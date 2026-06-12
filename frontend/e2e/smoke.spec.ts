@@ -418,6 +418,26 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await expect(analysisPanels.getByRole("tab", { name: "Characters" })).toBeVisible()
 })
 
+test("manuscript scene metadata insertion requires confirmation", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  const insertMetadata = page.getByLabel("Insert metadata")
+  await expect(insertMetadata).not.toBeChecked()
+
+  await insertMetadata.click()
+  const cancelDialog = page.getByRole("dialog", { name: "Insert scene metadata?" })
+  await expect(cancelDialog).toBeVisible()
+  await cancelDialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(insertMetadata).not.toBeChecked()
+
+  await insertMetadata.click()
+  const confirmDialog = page.getByRole("dialog", { name: "Insert scene metadata?" })
+  await expect(confirmDialog).toBeVisible()
+  await confirmDialog.getByRole("button", { name: "Insert metadata" }).click()
+  await expect(insertMetadata).toBeChecked()
+})
+
 test("manuscript workspace removes a chapter from the editor rail", async ({ page }) => {
   await installMockApi(page)
   const deleteRequests: string[] = []

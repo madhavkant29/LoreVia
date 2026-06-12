@@ -35,8 +35,17 @@ describe("ManuscriptVersionHistory", () => {
 
     expect(view.textContent).toContain("Saved passage")
     expect(view.textContent).toContain("Current passage")
+    const comparePanels = Array.from(view.querySelectorAll("details"))
+    expect(comparePanels).toHaveLength(2)
+    expect(comparePanels.every((panel) => panel.open)).toBe(true)
+    clickSummary(view, "Saved version")
+    expect(comparePanels[0].open).toBe(false)
+    clickSummary(view, "Saved version")
+    expect(comparePanels[0].open).toBe(true)
     clickButton(view, "Restore")
     clickButton(view, "Compare")
+    expect(buttonClass(view, "Restore")).toContain("rounded-none")
+    expect(buttonClass(view, "Compare")).toContain("rounded-none")
     expect(onRestoreSnapshot).toHaveBeenCalledWith("version-1")
     expect(onPreviewSnapshot).toHaveBeenCalledWith("version-1")
   })
@@ -92,4 +101,18 @@ function clickButton(view: HTMLDivElement, label: string) {
   act(() => {
     button.click()
   })
+}
+
+function clickSummary(view: HTMLDivElement, label: string) {
+  const summary = Array.from(view.querySelectorAll("summary")).find((candidate) => candidate.textContent === label)
+  if (!summary) throw new Error(`Could not find ${label} summary`)
+  act(() => {
+    summary.click()
+  })
+}
+
+function buttonClass(view: HTMLDivElement, label: string) {
+  const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent === label)
+  if (!button) throw new Error(`Could not find ${label} button`)
+  return button.className
 }

@@ -21,8 +21,12 @@ describe("ManuscriptSceneOrderStatus", () => {
     root = null
   })
 
+  it("renders nothing when scene ordering is idle", () => {
+    const view = renderStatus("idle", false)
+    expect(view.textContent).toBe("")
+  })
+
   it.each([
-    ["idle", false, "Drag the handle to reorder scenes"],
     ["idle", true, "Drop between scenes to place it"],
     ["saving", false, "Saving order..."],
     ["saved", false, "Order saved"],

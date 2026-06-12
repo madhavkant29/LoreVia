@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from PIL import Image
 
-from app.models.book import Book, Chapter, ManuscriptAnnotation
+from app.models.book import Book, Chapter, ChapterMedia, ManuscriptAnnotation
 from app.models.user import User
 from app.utils.book_utils import (
     _build_revision_change_summary,
@@ -37,6 +37,7 @@ from app.utils.book_utils import (
     extract_inline_images_from_manuscript_html,
     extract_novel_scene_candidates,
     build_scene_chapter_import_text,
+    load_novel_export_chapters,
     markdown_to_html,
     manuscript_html_to_text,
     normalize_chapter_kind,
@@ -52,6 +53,7 @@ from app.utils.book_utils import (
     save_manuscript_annotation,
     serialize_manuscript_content,
     strip_scene_metadata_from_manuscript_text,
+    sync_chapter_media_from_images,
     story_unit_label,
     story_unit_name,
 )
@@ -67,6 +69,14 @@ class _ScalarResult:
 
     def all(self):
         return self._value
+
+
+class _ScalarList:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
 
 
 class _FakeAnnotationDB:
@@ -95,6 +105,36 @@ class _FakeAnnotationDB:
 
     async def refresh(self, _value):
         return None
+
+
+class _FakeExecuteDB:
+    def __init__(self, execute_values=None):
+        self._execute_values = list(execute_values or [])
+        self.added: list[object] = []
+        self.executed: list[object] = []
+
+    async def execute(self, statement):
+        self.executed.append(statement)
+        return self._execute_values.pop(0) if self._execute_values else _AllResult([])
+
+    def add(self, value):
+        self.added.append(value)
+
+
+class _AllResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
+
+
+class _ScalarsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return _ScalarList(self._rows)
 
 
 class _RowResult:
@@ -296,6 +336,101 @@ class TestManuscriptHtmlImages:
         assert images == []
         assert retained == {marker}
         assert cleaned_html and marker in cleaned_html
+
+
+@pytest.mark.asyncio
+async def test_sync_chapter_media_from_images_copies_stored_media_references(monkeypatch):
+    uploaded: list[tuple[str, bytes, str | None]] = []
+
+    def _upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+        uploaded.append((key, raw, content_type))
+        return key
+
+    monkeypatch.setattr("app.utils.book_utils.upload_binary", _upload_binary)
+    db = _FakeExecuteDB()
+    book = SimpleNamespace(id=uuid.uuid4())
+    chapter = SimpleNamespace(id=uuid.uuid4(), number=3)
+
+    await sync_chapter_media_from_images(
+        db,
+        book=book,
+        chapter=chapter,
+        images=[
+            {
+                "marker": "[[IMAGE:kept]]",
+                "storage_key": "chapter-media/book/old-map.png",
+                "content_type": "image/png",
+                "caption": "Old map",
+                "asset_type": "image",
+            },
+            {
+                "marker": "[[IMAGE:fresh]]",
+                "bytes": b"fresh-bytes",
+                "content_type": "image/jpeg",
+                "filename": "fresh.jpg",
+            },
+        ],
+    )
+
+    media = [item for item in db.added if isinstance(item, ChapterMedia)]
+    assert [item.marker for item in media] == ["[[IMAGE:kept]]", "[[IMAGE:fresh]]"]
+    assert media[0].storage_key == "chapter-media/book/old-map.png"
+    assert media[0].caption == "Old map"
+    assert media[1].storage_key.endswith("/1-fresh.jpg")
+    assert uploaded == [(media[1].storage_key, b"fresh-bytes", "image/jpeg")]
+
+
+@pytest.mark.asyncio
+async def test_load_novel_export_chapters_includes_media_when_requested(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4())
+    chapter_id = uuid.uuid4()
+    media = SimpleNamespace(
+        chapter_id=chapter_id,
+        asset_type="image",
+        content_type="image/png",
+        storage_key="chapter-media/book/map.png",
+        caption="Chapter map",
+        marker="[[IMAGE:map]]",
+    )
+    db = _FakeExecuteDB(
+        execute_values=[
+            _AllResult([(chapter_id, 1, "Opening", "chapters/book/1.json")]),
+            _ScalarsResult([media]),
+        ]
+    )
+
+    def _download_book(key: str) -> bytes:
+        if key == "chapters/book/1.json":
+            return serialize_manuscript_content(
+                "Intro\n\n[[IMAGE:map]]\n\nOutro",
+                "<p>Intro</p><p>[[IMAGE:map]]</p><p>Outro</p>",
+            ).encode("utf-8")
+        return b"image-bytes"
+
+    monkeypatch.setattr("app.utils.book_utils.download_book", _download_book)
+
+    chapters = await load_novel_export_chapters(
+        db,
+        book=book,
+        collaborator=None,
+        include_images=True,
+    )
+
+    assert chapters == [
+        {
+            "number": 1,
+            "title": "Opening",
+            "text": "Intro\n\n[[IMAGE:map]]\n\nOutro",
+            "media": [
+                {
+                    "raw": b"image-bytes",
+                    "content_type": "image/png",
+                    "caption": "Chapter map",
+                    "marker": "[[IMAGE:map]]",
+                }
+            ],
+        }
+    ]
 
 
 def test_build_blank_cover_image_renders_title_and_author_placeholder():

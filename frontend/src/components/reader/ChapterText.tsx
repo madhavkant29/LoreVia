@@ -244,7 +244,7 @@ export function ChapterText({
                         />
                       </div>
                       <figcaption className={`px-3 pb-3 text-center text-xs italic ${cardTone.helper}`} style={{ fontFamily: "var(--reader-label)" }}>
-                        {block.item.caption ?? "Image from the source material, preserved in the reading flow."}
+                        {block.item.caption ?? ""}
                       </figcaption>
                     </figure>
                   ) : null
