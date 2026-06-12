@@ -23,6 +23,9 @@ from app.utils.export_utils import (
     manuscript_docx,
     manuscript_pdf_compiled,
     manuscript_vault_zip,
+    novel_docx,
+    novel_epub_compiled,
+    novel_pdf_compiled,
     _chapter_body_blocks,
 )
 
@@ -556,6 +559,240 @@ def test_manuscript_epub_compiled_declares_selected_font_stack():
 
     assert '"EB Garamond", Garamond' in stylesheet
     assert "SIL Open Font License" in export_font_notice("eb-garamond")
+
+
+def test_novel_docx_includes_cover_toc_preface_chapters_and_end_marker():
+    raw = novel_docx(
+        title="Atlas",
+        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\n\n#\n\nSecond paragraph."}],
+        front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+        preface="Before the voyage.\n\nA note to readers.",
+        novel_front_matter={
+            "dedication": "For the first readers.",
+            "copyright_page": "Copyright 2026",
+            "about_author": "A. Writer lives near the sea.",
+        },
+        preset="large_print",
+    )
+
+    doc = Document(BytesIO(raw))
+    text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+
+    assert doc.core_properties.title == "Atlas Rising"
+    assert doc.core_properties.author == "A. Writer"
+    assert doc.core_properties.subject == "Novel"
+    assert "Table of Contents" in text
+    assert "Update this table in Word" in text
+    assert "Copyright" in text
+    assert "For the first readers." in text
+    assert "Preface" in text
+    assert "Before the voyage." in text
+    assert "Chapter 1" in text
+    assert "***" in text
+    assert "THE END" in text
+    assert "About the Author" in text
+    assert doc.styles["Normal"].font.name == "Georgia"
+
+
+def test_novel_pdf_compiled_adds_preface_and_chapter_toc_entries(monkeypatch):
+    captured: dict[str, object] = {}
+    original_template = reportlab.platypus.SimpleDocTemplate
+
+    class FakeCanvas:
+        def __init__(self):
+            self.bookmarks: list[str] = []
+            self.outlines: list[tuple[str, str, int, bool]] = []
+
+        def saveState(self) -> None:
+            return None
+
+        def restoreState(self) -> None:
+            return None
+
+        def setFont(self, *_args) -> None:
+            return None
+
+        def setTitle(self, _value: str) -> None:
+            return None
+
+        def setAuthor(self, _value: str) -> None:
+            return None
+
+        def setSubject(self, _value: str) -> None:
+            return None
+
+        def setCreator(self, _value: str) -> None:
+            return None
+
+        def drawRightString(self, *_args) -> None:
+            return None
+
+        def drawCentredString(self, *_args) -> None:
+            return None
+
+        def drawImage(self, *_args, **_kwargs) -> None:
+            return None
+
+        def getPageNumber(self) -> int:
+            return 9
+
+        def bookmarkPage(self, key: str) -> None:
+            self.bookmarks.append(key)
+
+        def addOutlineEntry(self, title: str, key: str, level: int = 0, closed: bool = False) -> None:
+            self.outlines.append((title, key, level, closed))
+
+    class FakeDoc:
+        def __init__(self, buffer, **kwargs):
+            self.buffer = buffer
+            self.page = 9
+            self.pagesize = kwargs["pagesize"]
+            self.rightMargin = kwargs["rightMargin"]
+
+        def notify(self, kind, data) -> None:
+            captured.setdefault("notifications", []).append((kind, data))
+
+        def multiBuild(self, story, onFirstPage=None, onLaterPages=None):
+            captured["story"] = story
+            self.canv = FakeCanvas()
+            if onFirstPage is not None:
+                onFirstPage(self.canv, self)
+            for item in story:
+                self.afterFlowable(item)
+            captured["bookmarks"] = self.canv.bookmarks
+            captured["outlines"] = self.canv.outlines
+
+    monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", FakeDoc)
+    try:
+        novel_pdf_compiled(
+            title="Atlas",
+            chapters=[{"number": 1, "title": "Opening", "text": "First paragraph."}],
+            front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+            preface="Before the voyage.",
+            novel_front_matter={"dedication": "For readers."},
+        )
+    finally:
+        monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", original_template)
+
+    paragraph_text = [item.getPlainText() for item in captured["story"] if hasattr(item, "getPlainText")]
+
+    assert "Table of Contents" in paragraph_text
+    assert "Dedication" in paragraph_text
+    assert "Preface" in paragraph_text
+    assert "Before the voyage." in paragraph_text
+    assert ("TOCEntry", (0, "Preface", 9, "novel-preface")) in captured["notifications"]
+    assert ("TOCEntry", (0, "Chapter 1: Opening", 9, "chapter-1")) in captured["notifications"]
+    assert "novel-preface" in captured["bookmarks"]
+    assert ("Chapter 1: Opening", "chapter-1", 0, False) in captured["outlines"]
+
+
+def test_novel_pdf_compiled_draws_cover_as_full_page(monkeypatch):
+    captured: dict[str, object] = {}
+    original_template = reportlab.platypus.SimpleDocTemplate
+
+    class FakeCanvas:
+        def saveState(self) -> None:
+            return None
+
+        def restoreState(self) -> None:
+            return None
+
+        def setFont(self, *_args) -> None:
+            return None
+
+        def setTitle(self, _value: str) -> None:
+            return None
+
+        def setAuthor(self, _value: str) -> None:
+            return None
+
+        def setSubject(self, _value: str) -> None:
+            return None
+
+        def setCreator(self, _value: str) -> None:
+            return None
+
+        def drawCentredString(self, *_args) -> None:
+            return None
+
+        def getPageNumber(self) -> int:
+            return 1
+
+        def drawImage(self, _reader, x, y, *, width, height, **_kwargs) -> None:
+            captured["cover_draw"] = {"x": x, "y": y, "width": width, "height": height}
+
+    class FakeDoc:
+        def __init__(self, buffer, **kwargs):
+            self.buffer = buffer
+            self.page = 1
+            self.pagesize = kwargs["pagesize"]
+            self.rightMargin = kwargs["rightMargin"]
+            captured["pagesize"] = self.pagesize
+
+        def multiBuild(self, story, onFirstPage=None, onLaterPages=None):
+            captured["story"] = story
+            if onFirstPage is not None:
+                onFirstPage(FakeCanvas(), self)
+
+    monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", FakeDoc)
+    try:
+        novel_pdf_compiled(
+            title="Atlas",
+            chapters=[{"number": 1, "title": "Opening", "text": "First paragraph."}],
+            front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+        )
+    finally:
+        monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", original_template)
+
+    cover_draw = captured["cover_draw"]
+    page_width, page_height = captured["pagesize"]
+    assert cover_draw["x"] <= 0
+    assert cover_draw["y"] <= 0
+    assert cover_draw["width"] >= page_width
+    assert cover_draw["height"] >= page_height
+
+
+def test_novel_epub_compiled_writes_preface_chapters_and_cover():
+    raw = novel_epub_compiled(
+        title="Atlas",
+        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\n\n---\n\nSecond paragraph."}],
+        front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
+        preface="Before the voyage.",
+        novel_front_matter={
+            "copyright_page": "Copyright 2026",
+            "acknowledgements": "Thanks to early readers.",
+        },
+        epub_metadata={
+            "publisher": "LoreVia Press",
+            "language": "en-US",
+            "isbn": "9780000000000",
+            "description": "A blurb.",
+            "series_name": "Atlas Cycle",
+            "series_number": "1",
+        },
+        font_family="eb-garamond",
+    )
+
+    with ZipFile(BytesIO(raw)) as archive:
+        names = set(archive.namelist())
+        package = archive.read("EPUB/content.opf").decode("utf-8")
+        copyright_html = archive.read("EPUB/copyright_page.xhtml").decode("utf-8")
+        preface_html = archive.read("EPUB/preface.xhtml").decode("utf-8")
+        chapter_html = archive.read("EPUB/chapter-1.xhtml").decode("utf-8")
+        ending_html = archive.read("EPUB/the-end.xhtml").decode("utf-8")
+        acknowledgements_html = archive.read("EPUB/acknowledgements.xhtml").decode("utf-8")
+        stylesheet = archive.read("EPUB/styles/main.css").decode("utf-8")
+
+    assert any(name.startswith("EPUB/cover.") for name in names)
+    assert "LoreVia Press" in package
+    assert "9780000000000" in package
+    assert "<h1>Copyright</h1>" in copyright_html
+    assert "<h1>Preface</h1>" in preface_html
+    assert "Before the voyage." in preface_html
+    assert '<p class="scene-break">***</p>' in chapter_html
+    assert "THE END" in ending_html
+    assert "Thanks to early readers." in acknowledgements_html
+    assert '"EB Garamond", Garamond' in stylesheet
 
 
 def test_manuscript_vault_zip_creates_expected_folders():

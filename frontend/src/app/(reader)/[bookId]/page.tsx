@@ -7,6 +7,7 @@ import type { Route } from "next"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 
+import { ContextualUpgradePrompt } from "@/components/billing/ContextualUpgradePrompt"
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
@@ -14,11 +15,12 @@ import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
 import { capture } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
-import { asQueryKey, bookCacheKey, booksQuotesCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, bookCacheKey, booksQuotesCacheKey, booksStatsCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
+import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
 import type { ReadingProgress } from "@/types/reader"
 import type { RecentActivityItem } from "@/types/ux"
 
@@ -43,6 +45,8 @@ const ReaderOverview = dynamic(
     loading: () => <WorkspacePanelLoadingState />,
   }
 )
+
+const FREE_FEATURE_GATE_FLASH_PREFIX = "lorevia:free-feature-gate:"
 
 type WorkspaceSaveState = "idle" | "saving" | "saved" | "error"
 
@@ -140,10 +144,12 @@ function getCurrentWeekActivity(activityDates: string[]) {
 
 export default function BookOverviewPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  const normalizedBookId = normalizeBookRouteId(bookId)
   const [bookmark, setBookmark] = useState<ReaderBookmarkSnapshot | null>(null)
   const [secondaryDataEnabled, setSecondaryDataEnabled] = useState(false)
   const [workspaceSaveState, setWorkspaceSaveState] = useState<WorkspaceSaveState>("idle")
   const [workspaceSaveMessage, setWorkspaceSaveMessage] = useState<string | null>(null)
+  const [featureGateMessage, setFeatureGateMessage] = useState<string | null>(null)
   const [modeSaving, setModeSaving] = useState(false)
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -189,7 +195,8 @@ export default function BookOverviewPage() {
   const resolvedCollaborationRole = overviewQuery.data?.book.collaboration_role ?? null
   const resolvedCollaborationPermissions = overviewQuery.data?.book.collaboration_permissions ?? null
   const resolvedCanSwitchWorkspaceMode = overviewQuery.data?.book.can_switch_workspace_mode ?? true
-  const canUsePaidAuthorTools = canUseAuthorFeatures(userTier) || Boolean(resolvedCollaborationPermissions?.can_edit_manuscript)
+  const hasOwnAuthorAccess = canUseAuthorFeatures(userTier)
+  const canUsePaidAuthorTools = hasOwnAuthorAccess || Boolean(resolvedCollaborationPermissions?.can_edit_manuscript)
   const bookNotesQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "notes")),
     queryFn: () => booksApi.getBookNotes(bookId),
@@ -201,6 +208,12 @@ export default function BookOverviewPage() {
     queryFn: () => booksApi.listQuotes(),
     staleTime: 45_000,
     enabled: secondaryDataEnabled && resolvedBookMode === "reader",
+  })
+  const userStatsQuery = useQuery<UserStats>({
+    queryKey: asQueryKey(booksStatsCacheKey()),
+    queryFn: booksApi.getStats,
+    staleTime: 45_000,
+    enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const charactersQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
@@ -245,6 +258,7 @@ export default function BookOverviewPage() {
   const summaryCollection = overviewQuery.data?.summary_collection ?? null
   const bookNotes = bookNotesQuery.data ?? []
   const savedQuotes = (savedQuotesQuery.data ?? []).filter((quote) => quote.book_id === bookId)
+  const userStats = userStatsQuery.data ?? null
   const characters = charactersQuery.data ?? []
   const chapterReports = chapterReportsQuery.data ?? []
   const preWritingCheck = preWritingCheckQuery.data ?? null
@@ -328,6 +342,13 @@ export default function BookOverviewPage() {
   useEffect(() => {
     if (typeof window === "undefined") return
 
+    const gateMessageKey = `${FREE_FEATURE_GATE_FLASH_PREFIX}${normalizedBookId}`
+    const gateMessage = window.sessionStorage.getItem(gateMessageKey)
+    if (gateMessage) {
+      setFeatureGateMessage(gateMessage)
+      window.sessionStorage.removeItem(gateMessageKey)
+    }
+
     const saved = window.sessionStorage.getItem(overviewScrollKey)
     if (saved) {
       const nextY = Number(saved)
@@ -343,7 +364,7 @@ export default function BookOverviewPage() {
     saveScroll()
     window.addEventListener("scroll", saveScroll, { passive: true })
     return () => window.removeEventListener("scroll", saveScroll)
-  }, [overviewScrollKey])
+  }, [normalizedBookId, overviewScrollKey])
 
   const continueChapter = progress?.current_chapter ?? 1
   const percentComplete = Math.round(progress?.percent_complete ?? book?.progress_pct ?? 0)
@@ -354,8 +375,9 @@ export default function BookOverviewPage() {
   const canSwitchWorkspaceMode = book?.can_switch_workspace_mode ?? resolvedCanSwitchWorkspaceMode
   const isCollaboratorSession = Boolean(collaborationRole)
   const hasCollaboratorAuthorAccess = Boolean(collaborationPermissions?.can_edit_manuscript)
-  const canUseAuthorWorkspace = activeBookMode === "author" || (!isCollaboratorSession || hasCollaboratorAuthorAccess)
-  const canEditSharedManuscript = !isCollaboratorSession || hasCollaboratorAuthorAccess
+  const canUseAuthorWorkspace = isCollaboratorSession ? hasCollaboratorAuthorAccess : hasOwnAuthorAccess
+  const canEditSharedManuscript = canUsePaidAuthorTools
+  const shouldShowAuthorWorkspace = activeBookMode === "author" && canUsePaidAuthorTools
   const processingSummary = getProcessingSummary(book)
   const unitTitle = storyUnitTitle(book?.work_type)
   const unitPrefix = storyUnitPrefix(book?.work_type)
@@ -564,11 +586,19 @@ export default function BookOverviewPage() {
             emptyLabel="No project signals yet. Start writing or reading to see your activity trail here."
           />
 
-          {activeBookMode === "reader" ? (
+          {featureGateMessage ? (
+            <ContextualUpgradePrompt
+              featureName="Manuscript Editor"
+              body={featureGateMessage}
+              onBack={() => setFeatureGateMessage(null)}
+            />
+          ) : null}
+
+          {!shouldShowAuthorWorkspace ? (
             <ReaderOverview
               bookId={bookId}
               book={book}
-              activeBookMode={activeBookMode}
+              activeBookMode="reader"
               progress={progress}
               chapterList={chapterList}
               summaryCollection={summaryCollection}
@@ -615,6 +645,7 @@ export default function BookOverviewPage() {
               weeklyLoginActivity={weeklyLoginActivity}
               dailyWords={dailyWords}
               dailyTarget={dailyTarget}
+              userStats={userStats}
               saveState={workspaceSaveState}
               saveMessage={workspaceSaveMessage}
               onModeChange={updateMode}
@@ -642,7 +673,7 @@ export default function BookOverviewPage() {
         </main>
       </div>
 
-      {activeBookMode === "author" && canEditSharedManuscript ? (
+      {shouldShowAuthorWorkspace && canEditSharedManuscript ? (
         <CreateFab bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} />
       ) : null}
 

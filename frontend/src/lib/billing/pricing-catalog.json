@@ -52,14 +52,11 @@
       "price_monthly": 0,
       "price_annual": 0,
       "bullets": [
-        "1 upload total, including worldbuilding manuscripts",
-        "Access LoreVia sample workflows and content",
-        "Can join author-invited beta reads for free",
-        "Basic story recall with strict daily limits",
-        "Collaborator-safe export options",
-        "Short summaries only",
-        "3 semantic searches/day and 1 prediction query/day",
-        "1 advisor turn/day and 1 continuity tool use/day"
+        "Read existing projects",
+        "Export manuscript and novel files",
+        "1 Story Advisor turn per week",
+        "Join invited beta reads",
+        "Author tools only during the 10-day trial"
       ]
     },
     {
@@ -77,11 +74,12 @@
       "bullets": [
         "Everything in Free, plus:",
         "15 uploads across manuscript and worldbuilding workspaces",
+        "30 Story Advisor turns per day",
+        "30 continuity and editorial scans per day",
+        "Manuscript editor, notes, summaries, search, and publishing",
         "Worldbuilding manuscripts count as uploads",
         "Series-linked worldbuilding counts once per book in the series",
         "Invite collaborators for beta reading and manuscript feedback",
-        "Catch continuity errors automatically",
-        "Chapter and full-book manuscript editing",
         "Character bible export and edit mode",
         "Visual character relationship maps"
       ]
@@ -101,8 +99,10 @@
       "bullets": [
         "Everything in Author, plus:",
         "Unlimited uploads, including series-linked worldbuilding",
-        "Deeper continuity analysis",
+        "60 Story Advisor turns per day",
+        "60 continuity and editorial scans per day",
         "Analyze multiple books together",
+        "Deeper series continuity analysis",
         "Early access to new features"
       ]
     }

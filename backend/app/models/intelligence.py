@@ -46,11 +46,15 @@ class CharacterRelationship(Base):
     character_a_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
     character_b_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
     rel_type: Mapped[str] = mapped_column(String, nullable=False)
-    # ally | enemy | romantic | family | political | mentor | rival | neutral
+    # Backward-compatible primary display label. Rich relationship facets live in the JSONB columns below.
     sentiment: Mapped[float | None] = mapped_column(Float)   # -1.0 hostile → 1.0 warm
     description: Mapped[str | None] = mapped_column(String)
     from_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
     to_chapter: Mapped[int | None] = mapped_column(Integer)  # null = still active
+    shared_labels: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
+    character_a_to_b_labels: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
+    character_b_to_a_labels: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
+    label_evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     edited_by_author: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     book = relationship("Book", back_populates="relationships")

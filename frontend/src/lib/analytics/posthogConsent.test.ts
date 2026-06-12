@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   ANALYTICS_CONSENT_COOKIE,
   getAnalyticsConsentValue,
+  hasAnalyticsConsentChoice,
   hasAnalyticsConsent,
   shouldShowAnalyticsConsentBanner,
 } from "./posthogConsent"
@@ -16,6 +17,12 @@ describe("posthog consent helpers", () => {
     expect(hasAnalyticsConsent("true")).toBe(true)
     expect(hasAnalyticsConsent("false")).toBe(false)
     expect(hasAnalyticsConsent(undefined)).toBe(false)
+  })
+
+  it("treats explicit true and false values as remembered choices", () => {
+    expect(hasAnalyticsConsentChoice("true")).toBe(true)
+    expect(hasAnalyticsConsentChoice("false")).toBe(true)
+    expect(hasAnalyticsConsentChoice(undefined)).toBe(false)
   })
 
   it("reads the analytics consent value from a browser cookie string", () => {
@@ -40,7 +47,7 @@ describe("posthog consent helpers", () => {
     ).toBe(true)
   })
 
-  it("shows the banner again after a previous decline", () => {
+  it("hides the banner after a previous decline", () => {
     expect(
       shouldShowAnalyticsConsentBanner({
         analyticsKey: "phc_test",
@@ -48,7 +55,7 @@ describe("posthog consent helpers", () => {
         pathname: "/settings",
         hydrated: true,
       })
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it("hides the banner after consent has been accepted", () => {

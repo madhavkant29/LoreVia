@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
 import { clearAuthCookies } from "@/lib/api/client"
 import { billingApi } from "@/lib/api/billing"
+import { ANALYTICS_CONSENT_COOKIE, getAnalyticsConsentValue } from "@/lib/analytics/posthogConsent"
 import { emailApi } from "@/lib/api/email"
 import { tierLabel } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -27,7 +28,10 @@ const SETTINGS_NAV = [
   { id: "emails", label: "Emails", icon: <MailIcon /> },
   { id: "goals", label: "Writing goals", icon: <GoalIcon /> },
   { id: "session", label: "Session", icon: <SignOutIcon /> },
+  { id: "danger", label: "Danger Zone", icon: <ShieldIcon /> },
 ]
+
+const DELETION_REQUEST_EMAIL = "support@mail.getlorevia.com"
 
 export default function SettingsPage() {
   const { user, setUser, logout } = useAuthStore()
@@ -48,6 +52,13 @@ export default function SettingsPage() {
   const [emailPreferencesLoading, setEmailPreferencesLoading] = useState(false)
   const [emailPreferencesSaving, setEmailPreferencesSaving] = useState(false)
   const [emailPreferencesMessage, setEmailPreferencesMessage] = useState<string | null>(null)
+  const [dataExportBusy, setDataExportBusy] = useState(false)
+  const [dataExportMessage, setDataExportMessage] = useState<string | null>(null)
+  const [accountDeleteConfirmation, setAccountDeleteConfirmation] = useState("")
+  const [accountDeletePassword, setAccountDeletePassword] = useState("")
+  const [accountDeleteBusy, setAccountDeleteBusy] = useState(false)
+  const [accountDeleteMessage, setAccountDeleteMessage] = useState<string | null>(null)
+  const [analyticsConsent, setAnalyticsConsent] = useState<string | undefined>(undefined)
   const router = useRouter()
   const stableUser = authHydrated ? user : null
   const displayTier = stableUser?.tier_label ?? tierLabel(stableUser?.tier)
@@ -63,6 +74,10 @@ export default function SettingsPage() {
   useEffect(() => {
     setUsernameDraft(stableUser?.username ?? "")
   }, [stableUser?.username])
+
+  useEffect(() => {
+    setAnalyticsConsent(getAnalyticsConsentValue(document.cookie))
+  }, [])
 
   useEffect(() => {
     if (!stableUser?.email) return
@@ -108,6 +123,56 @@ export default function SettingsPage() {
     })
     
     router.replace("/login")
+  }
+
+  const setAnalyticsCookie = (value: "true" | "false") => {
+    document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${value}; Max-Age=31536000; Path=/; SameSite=Lax`
+    setAnalyticsConsent(value)
+    if (value === "false") {
+      window.localStorage.removeItem("ph_phc_posthog")
+      window.localStorage.removeItem("ph_lorevia_posthog")
+    }
+  }
+
+  const exportData = async () => {
+    setDataExportBusy(true)
+    setDataExportMessage(null)
+    try {
+      const blob = await authApi.exportData()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = "lorevia-data-export.zip"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      setDataExportMessage("Your data export download has started.")
+    } catch {
+      setDataExportMessage(`We could not prepare your export right now. You can email ${DELETION_REQUEST_EMAIL} for help.`)
+    } finally {
+      setDataExportBusy(false)
+    }
+  }
+
+  const deleteAccount = async () => {
+    if (accountDeleteConfirmation !== "DELETE MY ACCOUNT") return
+    setAccountDeleteBusy(true)
+    setAccountDeleteMessage(null)
+    try {
+      await authApi.deleteAccount({
+        confirmationText: accountDeleteConfirmation,
+        password: accountDeletePassword,
+      })
+      logout()
+      clearAuthCookies()
+      document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
+      router.replace("/login")
+    } catch {
+      setAccountDeleteMessage("We could not delete your account. Check your confirmation and password, or contact support.")
+    } finally {
+      setAccountDeleteBusy(false)
+    }
   }
 
   const openBillingPortal = async () => {
@@ -428,6 +493,27 @@ export default function SettingsPage() {
                 ))}
               </div>
               {permissionMessage ? <InlineMessage message={permissionMessage} tone="neutral" className="mt-4" /> : null}
+              <div className="settings-subsection mt-5">
+                <div>
+                  <p className="settings-label">Analytics consent</p>
+                  <p className="settings-copy mt-2">
+                    Object to or withdraw optional product analytics tracking at any time. This does not affect security, billing, or abuse-prevention logs.
+                  </p>
+                </div>
+                <div className="settings-session-row mt-4">
+                  <p className="settings-copy">
+                    Current choice: {analyticsConsent === "true" ? "Allowed" : analyticsConsent === "false" ? "Withdrawn" : "Not set"}.
+                  </p>
+                  <div className="settings-button-row">
+                    <button onClick={() => setAnalyticsCookie("true")} className="settings-secondary-button">
+                      Allow analytics
+                    </button>
+                    <button onClick={() => setAnalyticsCookie("false")} className="settings-danger-button">
+                      Withdraw analytics
+                    </button>
+                  </div>
+                </div>
+              </div>
             </SettingsPanel>
 
             <SettingsPanel id="emails" title="LoreVia emails">
@@ -504,6 +590,60 @@ export default function SettingsPage() {
                 <button onClick={handleLogout} className="settings-danger-button">
                   Sign out
                 </button>
+              </div>
+            </SettingsPanel>
+
+            <SettingsPanel id="danger" title="Danger Zone">
+              <div className="settings-danger-stack">
+                <div>
+                  <p className="settings-label">Export my data</p>
+                  <p className="settings-copy mt-2">
+                    Download a machine-readable export of your account, preferences, books, manuscript text, notes, generated analysis, and beta/collaboration data.
+                  </p>
+                  <button onClick={exportData} disabled={dataExportBusy} className="settings-secondary-button mt-4">
+                    {dataExportBusy ? "Preparing export..." : "Export my data"}
+                  </button>
+                  {dataExportMessage ? <InlineMessage message={dataExportMessage} tone="neutral" className="mt-3" /> : null}
+                </div>
+
+                <div className="settings-danger-box">
+                  <p className="settings-label">Delete account</p>
+                  <p className="settings-copy mt-2">
+                    Permanently delete your LoreVia account, manuscripts, generated analysis, character data, relationships, timeline data, and public/shared links. Some billing, tax, fraud-prevention, and security records may be retained where legally required.
+                  </p>
+                  <p className="settings-copy mt-2">
+                    To request deletion of your account or manuscript data, email {DELETION_REQUEST_EMAIL}.
+                  </p>
+                  <label className="settings-label mt-5 block" htmlFor="account-delete-confirmation">
+                    Type DELETE MY ACCOUNT
+                  </label>
+                  <input
+                    id="account-delete-confirmation"
+                    value={accountDeleteConfirmation}
+                    onChange={(event) => setAccountDeleteConfirmation(event.target.value)}
+                    className="settings-input mt-2"
+                    autoComplete="off"
+                  />
+                  <label className="settings-label mt-4 block" htmlFor="account-delete-password">
+                    Current password
+                  </label>
+                  <input
+                    id="account-delete-password"
+                    type="password"
+                    value={accountDeletePassword}
+                    onChange={(event) => setAccountDeletePassword(event.target.value)}
+                    className="settings-input mt-2"
+                    autoComplete="current-password"
+                  />
+                  <button
+                    onClick={deleteAccount}
+                    disabled={accountDeleteBusy || accountDeleteConfirmation !== "DELETE MY ACCOUNT"}
+                    className="settings-danger-button mt-5"
+                  >
+                    {accountDeleteBusy ? "Deleting account..." : "Delete account"}
+                  </button>
+                  {accountDeleteMessage ? <InlineMessage message={accountDeleteMessage} tone="warning" className="mt-3" /> : null}
+                </div>
               </div>
             </SettingsPanel>
           </div>
@@ -778,6 +918,7 @@ export default function SettingsPage() {
         }
 
         .settings-primary-button,
+        .settings-secondary-button,
         .settings-danger-button {
           display: inline-flex;
           min-height: 2.75rem;
@@ -800,9 +941,19 @@ export default function SettingsPage() {
         }
 
         .settings-primary-button:disabled,
+        .settings-secondary-button:disabled,
         .settings-danger-button:disabled {
           cursor: not-allowed;
           opacity: 0.58;
+        }
+
+        .settings-secondary-button {
+          border: 1px solid rgba(99, 224, 203, 0.55);
+          color: #7debd9;
+        }
+
+        .settings-secondary-button:hover {
+          background: rgba(99, 224, 203, 0.08);
         }
 
         .settings-danger-button {
@@ -812,6 +963,44 @@ export default function SettingsPage() {
 
         .settings-danger-button:hover {
           background: rgba(255, 92, 108, 0.08);
+        }
+
+        .settings-button-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.75rem;
+        }
+
+        .settings-subsection,
+        .settings-danger-box {
+          border: 1px solid rgba(135, 164, 184, 0.24);
+          border-radius: 8px;
+          background: rgba(7, 15, 23, 0.28);
+          padding: 1rem;
+        }
+
+        .settings-surface--light .settings-subsection,
+        .settings-surface--light .settings-danger-box {
+          background: rgba(255, 255, 255, 0.62);
+          border-color: rgba(148, 163, 184, 0.32);
+        }
+
+        .settings-danger-stack {
+          display: grid;
+          gap: 1.25rem;
+        }
+
+        .settings-danger-box .settings-input {
+          min-height: 2.9rem;
+          border: 1px solid rgba(135, 164, 184, 0.36);
+          border-radius: 7px;
+          background: rgba(8, 16, 24, 0.5);
+          padding: 0 0.9rem;
+        }
+
+        .settings-surface--light .settings-danger-box .settings-input {
+          background: rgba(255, 255, 255, 0.86);
+          border-color: rgba(148, 163, 184, 0.42);
         }
 
         .settings-choice {

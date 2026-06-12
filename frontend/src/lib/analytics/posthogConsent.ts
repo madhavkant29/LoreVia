@@ -4,6 +4,10 @@ export function hasAnalyticsConsent(consentValue: string | undefined) {
   return consentValue === "true"
 }
 
+export function hasAnalyticsConsentChoice(consentValue: string | undefined) {
+  return consentValue === "true" || consentValue === "false"
+}
+
 export function getAnalyticsConsentValue(cookieString: string) {
   if (!cookieString) return undefined
 
@@ -38,5 +42,5 @@ export function shouldShowAnalyticsConsentBanner({
     return false
   }
 
-  return !hasAnalyticsConsent(consentValue)
+  return !hasAnalyticsConsentChoice(consentValue)
 }

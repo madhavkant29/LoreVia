@@ -586,7 +586,6 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
     async def _fake_short_summary(*_args, **_kwargs):
         return {"status": "ready", "content": "Generated", "key_events": [], "diagnostics": {}}
     monkeypatch.setattr(reader, "get_or_generate_summary", _fake_short_summary)
-    monkeypatch.setattr("app.utils.reader_utils.get_or_generate_summary", _fake_short_summary)
 
     db = _FakeDB(
         get_values=[book, book, book, book, book],
@@ -602,7 +601,7 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
             _Result(scalars=[chapter]),
             _Result(scalar=progress),
             _Result(scalars=[chapter]),
-            _Result(all_rows=[]),
+            _Result(all_rows=[(chapter.id, "Generated", [])]),
         ],
     )
 
@@ -712,8 +711,34 @@ async def test_relationship_evolution_groups_reversed_pairs_into_one_timeline(mo
     book = _book(user_id=user_id)
     iris = SimpleNamespace(id=uuid.uuid4(), name="Iris")
     sol = SimpleNamespace(id=uuid.uuid4(), name="Sol")
-    rel_one = SimpleNamespace(id=uuid.uuid4(), character_a_id=iris.id, character_b_id=sol.id, rel_type="enemy", sentiment=-0.6, description="Hostile", from_chapter=2, to_chapter=2)
-    rel_two = SimpleNamespace(id=uuid.uuid4(), character_a_id=sol.id, character_b_id=iris.id, rel_type="ally", sentiment=0.7, description="Trust", from_chapter=3, to_chapter=None)
+    rel_one = SimpleNamespace(
+        id=uuid.uuid4(),
+        character_a_id=iris.id,
+        character_b_id=sol.id,
+        rel_type="enemy",
+        sentiment=-0.6,
+        description="Hostile",
+        from_chapter=2,
+        to_chapter=2,
+        shared_labels=["rival"],
+        character_a_to_b_labels=[],
+        character_b_to_a_labels=[],
+        label_evidence={"quote": "Hostile"},
+    )
+    rel_two = SimpleNamespace(
+        id=uuid.uuid4(),
+        character_a_id=sol.id,
+        character_b_id=iris.id,
+        rel_type="ally",
+        sentiment=0.7,
+        description="Trust",
+        from_chapter=3,
+        to_chapter=None,
+        shared_labels=["friend_romantic"],
+        character_a_to_b_labels=["protector"],
+        character_b_to_a_labels=[],
+        label_evidence={"quote": "Trust"},
+    )
 
     monkeypatch.setattr(reader, "get_book_cache_version", _async_value(1))
     monkeypatch.setattr(reader, "get_reader_progress_cache_version", _async_value(1))
@@ -732,7 +757,8 @@ async def test_relationship_evolution_groups_reversed_pairs_into_one_timeline(mo
 
     assert len(payload["pairs"]) == 1
     assert payload["pairs"][0]["characters"] == ["Iris", "Sol"]
-    assert [event["type"] for event in payload["pairs"][0]["events"]] == ["enemy", "ally"]
+    assert [event["type"] for event in payload["pairs"][0]["events"]] == ["enemy", "friend_romantic"]
+    assert payload["pairs"][0]["events"][1]["shared_labels"] == ["friend_romantic"]
 
 
 @pytest.mark.asyncio
@@ -801,7 +827,7 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
     user_id = uuid.uuid4()
     book = _book(user_id=user_id, total_chapters=4)
     progress = SimpleNamespace(current_chapter=2, scroll_pct=0.5, chapters_read=[], last_read=None)
-    chapter = SimpleNamespace(id=uuid.uuid4(), number=2, processed=False)
+    chapter = SimpleNamespace(id=uuid.uuid4(), number=2, processed=False, current_chapter=0, chapters_read=[])
     quote_db = _FakeDB(get_values=[book])
     with pytest.raises(HTTPException):
         await reader.save_quote(book.id, SaveQuoteBody(quote_text=" "), db=quote_db, current_user=_user(user_id))
@@ -838,7 +864,7 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
             _Result(scalars=["Door"]),
             _Result(scalar=progress),
             _Result(scalar=progress),
-            _Result(scalar=SimpleNamespace(id=uuid.uuid4(), processed=False)),
+            _Result(scalar=SimpleNamespace(id=uuid.uuid4(), processed=False, current_chapter=0, chapters_read=[])),
             _Result(scalar=chapter),
             _Result(scalar=None),
             _Result(scalar=chapter),
@@ -885,7 +911,7 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
     assert updated == {"ok": True}
     assert marked["percent_complete"] == 100.0
     assert status["read"] is True
-    assert task_calls
+    assert task_calls == []
     assert len(dirty_calls) == 3
 
 

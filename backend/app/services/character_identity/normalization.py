@@ -4,6 +4,14 @@ import re
 from collections import defaultdict
 from typing import Any, Iterable
 
+HONORIFIC_COMPARISON_FORMS = {
+    "capt": "captain",
+    "dr": "doctor",
+    "mr": "mister",
+    "mrs": "mrs",
+    "prof": "professor",
+}
+
 NAME_TITLES = {
     "mr",
     "mrs",
@@ -21,6 +29,26 @@ NAME_TITLES = {
     "master",
     "mistress",
 }
+
+
+def display_name_form(name: str | None) -> str:
+    if not name:
+        return ""
+    cleaned = re.sub(r"\s+", " ", str(name).strip())
+    cleaned = re.sub(r"[\s.,;:!?]+$", "", cleaned)
+    return cleaned
+
+
+def normalized_comparison_name(name: str | None) -> str:
+    display_name = display_name_form(name)
+    if not display_name:
+        return ""
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", display_name)
+    normalized_tokens: list[str] = []
+    for token in tokens:
+        normalized = token.casefold().strip(".")
+        normalized_tokens.append(HONORIFIC_COMPARISON_FORMS.get(normalized, normalized))
+    return " ".join(normalized_tokens).strip()
 
 
 def normalize_name(name: str | None) -> str:

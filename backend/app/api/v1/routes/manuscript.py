@@ -664,7 +664,7 @@ async def insert_scene_into_chapter(
     scene_id: uuid.UUID,
     chapter_number: int = Query(..., ge=1),
     position: str = Query("end", pattern="^(start|end)$"),
-    include_metadata: bool = Query(True),
+    include_metadata: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):

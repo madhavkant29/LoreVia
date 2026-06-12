@@ -4,6 +4,8 @@ import {
   graphLabelKey,
   graphStorageKey,
   nodeInitial,
+  relationshipFacetLabel,
+  relationshipFacetSummary,
   relationshipLabel,
   sentimentLabel,
   zoomPercentLabel,
@@ -18,6 +20,15 @@ describe("relationshipGraphDisplay", () => {
   it("humanizes relationship labels", () => {
     expect(relationshipLabel("found_family")).toBe("found family")
     expect(relationshipLabel(null)).toBe("connection")
+  })
+
+  it("formats complex relationship facets", () => {
+    expect(relationshipFacetLabel("friend_toxic")).toBe("friend (toxic)")
+    expect(relationshipFacetLabel("pawn_tool")).toBe("pawn (tool)")
+    expect(relationshipFacetLabel("one_sided_friend")).toBe("one-sided friend")
+    expect(relationshipFacetLabel("mother_in_law")).toBe("mother-in-law")
+    expect(relationshipFacetSummary(["half_sister", "spouse", "forbidden_romance"], "family")).toBe("half-sister, spouse, forbidden romance")
+    expect(relationshipFacetSummary([], "family")).toBe("family")
   })
 
   it("maps edge sentiment bands to readable copy", () => {

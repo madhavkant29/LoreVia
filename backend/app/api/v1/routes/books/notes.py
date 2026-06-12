@@ -37,6 +37,7 @@ from app.utils.book_utils import (
     save_book_note,
     save_vault_note,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.tag_utils import (
     ENTITY_TYPE_NOTE,
     can_manage_tag_target,
@@ -54,6 +55,8 @@ async def get_book_notes(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
     if collaborator and not collaboration_can_comment(collaborator):
         raise HTTPException(403, "This share cannot view or leave comments.")
     return await list_book_notes(db, book, collaborator=collaborator)
@@ -67,6 +70,8 @@ async def update_revision_tags(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
     resolved_type, resolved_entity_id, target_chapter_number = await resolve_tag_target(
         db,
         book=book,
@@ -112,6 +117,8 @@ async def upsert_book_note(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
     if collaborator and not collaboration_can_comment(collaborator):
         raise HTTPException(403, "This share cannot leave comments.")
     if collaborator and body.chapter_number is not None and not collaboration_allows_chapter(collaborator, body.chapter_number):
@@ -135,6 +142,8 @@ async def remove_book_note(
     current_user=Depends(get_current_user),
 ):
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator is None:
+        require_author_access(current_user)
     if collaborator and not collaboration_can_comment(collaborator):
         raise HTTPException(403, "This share cannot remove comments.")
     await delete_book_note(db, book=book, user_id=current_user.id, note_id=note_id)
@@ -148,6 +157,7 @@ async def list_book_vault_notes(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     return await list_vault_notes(
         db,
         book=book,
@@ -164,6 +174,7 @@ async def save_book_vault_note(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     return await save_vault_note(
         db,
         book=book,
@@ -182,6 +193,7 @@ async def delete_book_vault_note(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     await delete_vault_note(
         db,
         book=book,
@@ -201,6 +213,7 @@ async def import_book_vault_notes(
     _=Depends(rate_limit_manuscript_import),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     archive_bytes = await _read_upload_bounded(file, settings.VAULT_IMPORT_MAX_BYTES, "ZIP file")
     return await import_vault_notes_zip(
         db,
@@ -218,6 +231,7 @@ async def export_book_vault_notes(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     notes = await list_vault_notes(
         db,
         book=book,
@@ -241,6 +255,7 @@ async def get_book_vault_graph(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     notes = await list_vault_notes(
         db,
         book=book,
@@ -258,6 +273,7 @@ async def get_book_vault_note_relations(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     return await list_vault_note_relations(
         db,
         book=book,

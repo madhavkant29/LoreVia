@@ -10,7 +10,7 @@ import { ErrorCard } from "@/components/ui/ErrorCard"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
-import type { Book, GoalCalendarItem, PreWritingCheck, RevisionActionItem, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
+import type { Book, GoalCalendarItem, PreWritingCheck, RevisionActionItem, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
 
 type IconName =
@@ -68,6 +68,7 @@ type Props = {
   weeklyLoginActivity: boolean[]
   dailyWords: number
   dailyTarget: number
+  userStats: UserStats | null
   saveState: WorkspaceSaveState
   saveMessage: string | null
   storyHealthError?: boolean
@@ -118,6 +119,7 @@ export function AuthorWorkspaceDashboard({
   weeklyLoginActivity,
   dailyWords,
   dailyTarget,
+  userStats,
   saveState,
   saveMessage,
   storyHealthError,
@@ -370,6 +372,7 @@ export function AuthorWorkspaceDashboard({
               chapters={chapters}
               dailyWords={dailyWords}
               dailyTarget={dailyTarget}
+              userStats={userStats}
               loginStreakDays={loginStreakDays}
               weeklyLoginActivity={weeklyLoginActivity}
               onOpenManuscript={onOpenManuscript}
@@ -1628,6 +1631,7 @@ function WorkspaceStatsTab({
   chapters,
   dailyWords,
   dailyTarget,
+  userStats,
   loginStreakDays,
   weeklyLoginActivity,
   onOpenManuscript,
@@ -1642,12 +1646,22 @@ function WorkspaceStatsTab({
   chapters: ChapterListResponse["chapters"]
   dailyWords: number
   dailyTarget: number
+  userStats: UserStats | null
   loginStreakDays: number
   weeklyLoginActivity: boolean[]
   onOpenManuscript: () => void
 }) {
   const averageWords = chapterCount && currentWords ? Math.round(currentWords / chapterCount) : 0
   const progress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
+  const chapterWordStats = chapters
+    .filter((chapter) => typeof chapter.word_count === "number" && chapter.word_count > 0)
+    .map((chapter) => ({ label: `Ch. ${chapter.number}`, value: chapter.word_count ?? 0 }))
+  const measuredChapterAverage = chapterWordStats.length > 0
+    ? Math.round(chapterWordStats.reduce((sum, chapter) => sum + chapter.value, 0) / chapterWordStats.length)
+    : averageWords
+  const recentWritingDays = getRecentWritingDays(userStats, 7)
+  const recentWritingTotal = userStats?.writing.last_7_days.words ?? recentWritingDays.reduce((sum, day) => sum + day.value, 0)
+  const recentWritingAverage = recentWritingDays.length > 0 ? Math.round(recentWritingTotal / recentWritingDays.length) : null
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1fr)_minmax(0,1fr)]">
@@ -1657,15 +1671,45 @@ function WorkspaceStatsTab({
       <div className="space-y-5">
         <DailyGoalCard isDark={isDark} dailyWords={dailyWords} dailyTarget={dailyTarget} onUpdateGoal={onOpenManuscript} />
         <WritingStreakCard isDark={isDark} streakDays={loginStreakDays} weekActivity={weeklyLoginActivity} />
-        <ProgressBreakdownCard isDark={isDark} progress={progress} />
+        <ProgressBreakdownCard
+          isDark={isDark}
+          progress={progress}
+          currentWords={currentWords}
+          targetWords={targetWords}
+          chapters={chapters}
+          dailyWords={dailyWords}
+          dailyTarget={dailyTarget}
+          userStats={userStats}
+        />
       </div>
       <div className="space-y-5">
-        <BarChartCard isDark={isDark} title="Chapter cadence" eyebrow="Average words per chapter" value={averageWords ? averageWords.toLocaleString() : "Syncing"} labels={chapters.slice(-5).map((chapter) => `Ch. ${chapter.number}`)} values={chapters.slice(-5).map((_, index) => Math.max(20, progress - index * 7))} />
-        <BarChartCard isDark={isDark} title="Writing velocity" eyebrow="Average words per day" value={dailyWords > 0 ? dailyWords.toLocaleString() : averageWords ? Math.round(averageWords / 10).toLocaleString() : "Syncing"} labels={["M", "T", "W", "T", "F", "S", "S"]} values={weeklyLoginActivity.map((active, index) => active ? 40 + index * 8 : 12)} />
+        <BarChartCard
+          isDark={isDark}
+          title="Chapter cadence"
+          eyebrow="Average words per measured chapter"
+          value={measuredChapterAverage ? measuredChapterAverage.toLocaleString() : "No data"}
+          data={chapterWordStats.slice(-5)}
+          emptyLabel="No chapter word counts have been recorded yet."
+        />
+        <BarChartCard
+          isDark={isDark}
+          title="Writing velocity"
+          eyebrow="Average words per day, last 7 days"
+          value={recentWritingAverage !== null ? recentWritingAverage.toLocaleString() : "No data"}
+          data={recentWritingDays}
+          emptyLabel="No daily writing entries have been recorded this week."
+        />
       </div>
       <div className="space-y-5">
-        <TrendCard isDark={isDark} progress={progress} currentWords={currentWords} />
-        <InsightsCard isDark={isDark} worldArticleCount={worldArticleCount} progress={progress} />
+        <TrendCard isDark={isDark} userStats={userStats} currentWords={currentWords} />
+        <InsightsCard
+          isDark={isDark}
+          worldArticleCount={worldArticleCount}
+          currentWords={currentWords}
+          targetWords={targetWords}
+          chapters={chapters}
+          userStats={userStats}
+        />
       </div>
     </div>
   )
@@ -2009,68 +2053,162 @@ function PlanningMetric({ isDark, label, value }: { isDark: boolean; label: stri
   )
 }
 
-function ProgressBreakdownCard({ isDark, progress }: { isDark: boolean; progress: number }) {
-  const rows: Array<{ label: string; value: number; tone: "teal" | "amber" | "rose" }> = [
-    { label: "Plot / structure", value: progress + 8, tone: "teal" },
-    { label: "Characters / arcs", value: progress + 2, tone: "teal" },
-    { label: "Worldbuilding", value: progress - 4, tone: "amber" },
-    { label: "Pacing / momentum", value: progress - 12, tone: "rose" },
-    { label: "Theme / symbolism", value: progress - 18, tone: "rose" },
-    { label: "Overall workspace progress", value: progress, tone: "teal" },
+function ProgressBreakdownCard({
+  isDark,
+  progress,
+  currentWords,
+  targetWords,
+  chapters,
+  dailyWords,
+  dailyTarget,
+  userStats,
+}: {
+  isDark: boolean
+  progress: number
+  currentWords: number | null
+  targetWords: number
+  chapters: ChapterListResponse["chapters"]
+  dailyWords: number
+  dailyTarget: number
+  userStats: UserStats | null
+}) {
+  const processedChapters = chapters.filter((chapter) => chapter.processed).length
+  const intelligenceReadyChapters = chapters.filter((chapter) => chapter.intelligence_available !== false).length
+  const chapterTotal = chapters.length
+  const weeklyWords = userStats?.writing.this_week.words ?? 0
+  const weeklyTarget = userStats?.writing.this_week.target_words ?? null
+  const rows: Array<{ label: string; value: string; percent: number; tone: "teal" | "amber" | "rose" }> = [
+    {
+      label: "Book target",
+      value: `${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`,
+      percent: progress,
+      tone: "teal",
+    },
+    {
+      label: "Processed chapters",
+      value: `${processedChapters} / ${chapterTotal}`,
+      percent: chapterTotal > 0 ? (processedChapters / chapterTotal) * 100 : 0,
+      tone: processedChapters === chapterTotal ? "teal" : "amber",
+    },
+    {
+      label: "Intelligence coverage",
+      value: `${intelligenceReadyChapters} / ${chapterTotal}`,
+      percent: chapterTotal > 0 ? (intelligenceReadyChapters / chapterTotal) * 100 : 0,
+      tone: intelligenceReadyChapters === chapterTotal ? "teal" : "amber",
+    },
+    {
+      label: "Daily goal",
+      value: `${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`,
+      percent: (dailyWords / dailyTarget) * 100,
+      tone: dailyWords >= dailyTarget ? "teal" : "amber",
+    },
   ]
+
+  if (weeklyTarget && weeklyTarget > 0) {
+    rows.push({
+      label: "Weekly goal",
+      value: `${weeklyWords.toLocaleString()} / ${weeklyTarget.toLocaleString()}`,
+      percent: (weeklyWords / weeklyTarget) * 100,
+      tone: weeklyWords >= weeklyTarget ? "teal" : "amber",
+    })
+  }
+
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Progress breakdown</p>
       <div className="mt-4 space-y-3">
-        {rows.map(({ label, value, tone }) => (
-          <CompactProgressRow key={label} isDark={isDark} label={label} value={`${Math.round(clamp(value, 0, 100))}%`} percent={value} tone={tone} />
+        {rows.map(({ label, value, percent, tone }) => (
+          <CompactProgressRow key={label} isDark={isDark} label={label} value={value} percent={percent} tone={tone} />
         ))}
       </div>
     </section>
   )
 }
 
-function BarChartCard({ isDark, title, eyebrow, value, labels, values }: { isDark: boolean; title: string; eyebrow: string; value: string; labels: string[]; values: number[] }) {
-  const normalizedLabels = labels.length > 0 ? labels : ["1", "2", "3"]
-  const normalizedValues = values.length > 0 ? values : [20, 34, 26]
+function BarChartCard({
+  isDark,
+  title,
+  eyebrow,
+  value,
+  data,
+  emptyLabel,
+}: {
+  isDark: boolean
+  title: string
+  eyebrow: string
+  value: string
+  data: Array<{ label: string; value: number }>
+  emptyLabel: string
+}) {
+  const maxValue = data.reduce((max, item) => Math.max(max, item.value), 0)
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{title}</p>
       <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{eyebrow}</p>
       <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
-      <div className="mt-5 flex h-32 items-end gap-3 border-b border-white/10 px-2">
-        {normalizedValues.map((item, index) => (
-          <div key={`${normalizedLabels[index] ?? index}-${index}`} className="flex flex-1 flex-col items-center justify-end gap-2">
-            <div className="w-full rounded-t-lg bg-teal-500/80" style={{ height: `${clamp(item, 8, 100)}%` }} />
-            <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{normalizedLabels[index]}</span>
-          </div>
-        ))}
-      </div>
+      {data.length > 0 ? (
+        <div className="mt-5 flex h-32 items-end gap-3 border-b border-white/10 px-2">
+          {data.map((item) => (
+            <div key={item.label} className="flex flex-1 flex-col items-center justify-end gap-2" title={`${item.label}: ${item.value.toLocaleString()} words`}>
+              <div className="w-full rounded-t-lg bg-teal-500/80" style={{ height: `${clamp((item.value / Math.max(1, maxValue)) * 100, 8, 100)}%` }} />
+              <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-500" : "border-slate-200 bg-slate-50 text-slate-400"}`}>{emptyLabel}</p>
+      )}
     </section>
   )
 }
 
-function TrendCard({ isDark, progress, currentWords }: { isDark: boolean; progress: number; currentWords: number | null }) {
+function TrendCard({ isDark, userStats, currentWords }: { isDark: boolean; userStats: UserStats | null; currentWords: number | null }) {
+  const recentDays = getRecentWritingDays(userStats, 14)
+  const maxValue = recentDays.reduce((max, day) => Math.max(max, day.value), 0)
+  const last30Words = userStats?.writing.last_30_days.words ?? null
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Trend overview</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>30-day writing trend</p>
-      <p className="mt-2 text-2xl font-semibold text-teal-500">+{Math.max(0, Math.round(progress / 4))}%</p>
-      <div className="mt-5 grid h-28 grid-cols-8 items-end gap-2">
-        {[24, 34, 28, 44, 52, 49, 64, 76].map((height, index) => (
-          <div key={index} className="rounded-t-lg bg-teal-500/70" style={{ height: `${height}%` }} />
-        ))}
-      </div>
-      <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Total words this period: {formatNumber(currentWords)}</p>
+      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Words written in the last 30 days</p>
+      <p className="mt-2 text-2xl font-semibold text-teal-500">{last30Words !== null ? last30Words.toLocaleString() : "No data"}</p>
+      {recentDays.length > 0 ? (
+        <div className="mt-5 grid h-28 items-end gap-1.5" style={{ gridTemplateColumns: `repeat(${recentDays.length}, minmax(0, 1fr))` }}>
+          {recentDays.map((day) => (
+            <div key={day.key} className="rounded-t-lg bg-teal-500/70" title={`${day.label}: ${day.value.toLocaleString()} words`} style={{ height: `${day.value > 0 ? clamp((day.value / Math.max(1, maxValue)) * 100, 8, 100) : 4}%` }} />
+          ))}
+        </div>
+      ) : (
+        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-500" : "border-slate-200 bg-slate-50 text-slate-400"}`}>No recent writing entries have been recorded.</p>
+      )}
+      <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current manuscript words: {formatNumber(currentWords)}</p>
     </section>
   )
 }
 
-function InsightsCard({ isDark, worldArticleCount, progress }: { isDark: boolean; worldArticleCount: number; progress: number }) {
+function InsightsCard({
+  isDark,
+  worldArticleCount,
+  currentWords,
+  targetWords,
+  chapters,
+  userStats,
+}: {
+  isDark: boolean
+  worldArticleCount: number
+  currentWords: number | null
+  targetWords: number
+  chapters: ChapterListResponse["chapters"]
+  userStats: UserStats | null
+}) {
+  const measuredChapters = chapters.filter((chapter) => typeof chapter.word_count === "number" && chapter.word_count > 0).length
+  const processedChapters = chapters.filter((chapter) => chapter.processed).length
+  const last7Words = userStats?.writing.last_7_days.words ?? null
   const insights = [
-    "Your most productive time appears in recent evening writing windows.",
-    progress < 70 ? "Pacing dips may need another pass before reader review." : "Pacing balance is stable across the current sample.",
-    worldArticleCount > 0 ? "Worldbuilding is growing steadily with the manuscript." : "Worldbuilding items will appear once notes or templates are added.",
+    `${measuredChapters} of ${chapters.length} chapters have measured word counts.`,
+    `${processedChapters} of ${chapters.length} chapters are processed for workspace intelligence.`,
+    currentWords ? `${formatNumber(currentWords)} of ${targetWords.toLocaleString()} target words are drafted.` : "Manuscript word total is not available yet.",
+    last7Words !== null ? `${last7Words.toLocaleString()} words were recorded in the last 7 days.` : "Recent writing totals will appear after the stats feed syncs.",
+    `${worldArticleCount.toLocaleString()} world item${worldArticleCount === 1 ? "" : "s"} are attached to this workspace.`,
   ]
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
@@ -2474,6 +2612,22 @@ function clamp(value: number, min: number, max: number) {
 function formatNumber(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return "Syncing"
   return value.toLocaleString()
+}
+
+function getRecentWritingDays(userStats: UserStats | null, count: number) {
+  if (!userStats?.writing.heatmap.length) return []
+
+  return [...userStats.writing.heatmap]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-count)
+    .map((day) => {
+      const date = new Date(`${day.date}T00:00:00Z`)
+      return {
+        key: day.date,
+        label: date.toLocaleDateString(undefined, { weekday: "short", timeZone: "UTC" }),
+        value: day.words,
+      }
+    })
 }
 
 function formatDateInputValue(date: Date) {

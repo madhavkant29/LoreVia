@@ -12,6 +12,7 @@ from app.models.character import Character
 from app.models.intelligence import ChapterSummary
 from app.models.progress import ReadingProgress
 from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
+from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import get_owned_book
 
 router = APIRouter()
@@ -63,6 +64,7 @@ async def get_book_events(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     chapter_rows = (
         await db.execute(
             select(Chapter.number, Chapter.title, ChapterSummary.key_events)
@@ -113,6 +115,7 @@ async def get_reader_safe_book_events(
     current_user=Depends(get_current_user),
 ):
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     progress_result = await db.execute(
         select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book.id)
     )

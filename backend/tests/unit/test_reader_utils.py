@@ -218,7 +218,7 @@ async def test_queue_analysis_if_missing_clears_queued_key_when_dispatch_fails(m
 
 
 @pytest.mark.asyncio
-async def test_build_summary_collection_reports_newly_scheduled_analysis_as_queued(monkeypatch):
+async def test_build_summary_collection_does_not_enqueue_missing_analysis_by_default(monkeypatch):
     book = _build_book("author")
     current_user = SimpleNamespace(id=book.user_id, tier="pro")
     chapter = SimpleNamespace(
@@ -235,8 +235,8 @@ async def test_build_summary_collection_reports_newly_scheduled_analysis_as_queu
     ]
 
     monkeypatch.setattr(reader_utils, "summary_visible_chapter_set", AsyncMock(return_value={1}))
-    monkeypatch.setattr(reader_utils, "queue_analysis_if_missing", AsyncMock(return_value=True))
-    monkeypatch.setattr(reader_utils, "get_or_generate_summary", AsyncMock(return_value={"status": "pending"}))
+    queue_analysis = AsyncMock(return_value=True)
+    monkeypatch.setattr(reader_utils, "queue_analysis_if_missing", queue_analysis)
 
     payload = await reader_utils.build_summary_collection_payload(
         db,
@@ -253,8 +253,49 @@ async def test_build_summary_collection_reports_newly_scheduled_analysis_as_queu
             "chapter_kind": "chapter",
             "read": True,
             "available": False,
-            "status": "queued",
+            "status": "pending",
             "content": None,
             "key_events": [],
         }
     ]
+    queue_analysis.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_build_summary_collection_can_enqueue_missing_analysis_when_requested(monkeypatch):
+    book = _build_book("author")
+    current_user = SimpleNamespace(id=book.user_id, tier="pro")
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        title="One",
+        analysis_state={},
+    )
+    db = AsyncMock()
+    db.execute.side_effect = [
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [chapter])),
+        SimpleNamespace(all=lambda: []),
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+    ]
+
+    monkeypatch.setattr(reader_utils, "summary_visible_chapter_set", AsyncMock(return_value={1}))
+    queue_analysis = AsyncMock(return_value=True)
+    monkeypatch.setattr(reader_utils, "queue_analysis_if_missing", queue_analysis)
+
+    payload = await reader_utils.build_summary_collection_payload(
+        db,
+        book=book,
+        current_user=current_user,
+        progress=SimpleNamespace(current_chapter=0),
+        intelligence_map={1: True},
+        enqueue_missing_analysis=True,
+    )
+
+    assert payload["summaries"][0]["status"] == "queued"
+    queue_analysis.assert_awaited_once_with(
+        db,
+        chapter,
+        current_user,
+        detailed_summary_chapter_ids=set(),
+    )

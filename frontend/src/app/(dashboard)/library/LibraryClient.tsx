@@ -1,6 +1,6 @@
 "use client"
 
-import type { ReactNode } from "react"
+import type { MouseEvent, ReactNode } from "react"
 import { useRef } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
@@ -455,6 +455,20 @@ export function LibraryClient() {
     }
   }
 
+  async function handlePermanentDelete(book: Book) {
+    const confirmation = window.prompt(`Type DELETE BOOK to permanently delete "${book.title}".`)
+    if (confirmation !== "DELETE BOOK") return
+
+    setBusyBookId(book.id)
+    try {
+      await booksApi.deletePermanently(book.id, confirmation)
+      await refetch()
+      setMenuBookId(null)
+    } finally {
+      setBusyBookId(null)
+    }
+  }
+
   function handleAddChapter(bookId?: string) {
     const href = bookId ? (`/library/add-chapter?book=${bookId}` as Route) : ("/library/add-chapter" as Route)
     router.push(href)
@@ -784,6 +798,7 @@ export function LibraryClient() {
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
+                    onPermanentDelete={() => handlePermanentDelete(book)}
                     onAddChapter={() => handleAddChapter(book.id)}
                     onPublish={() => {
                       setPublishBook(book)
@@ -811,6 +826,7 @@ export function LibraryClient() {
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
+                    onPermanentDelete={() => handlePermanentDelete(book)}
                     onAddChapter={() => handleAddChapter(book.id)}
                     onPublish={() => {
                       setPublishBook(book)
@@ -872,6 +888,7 @@ export function LibraryClient() {
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
+                    onPermanentDelete={() => handlePermanentDelete(book)}
                     onAddChapter={() => handleAddChapter(book.id)}
                     onPublish={() => {
                       setPublishBook(book)
@@ -907,6 +924,7 @@ export function LibraryClient() {
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
                     onRemove={() => handleRemove(book.id)}
+                    onPermanentDelete={() => handlePermanentDelete(book)}
                     onAddChapter={() => handleAddChapter(book.id)}
                     onPublish={() => {
                       setPublishBook(book)
@@ -1277,6 +1295,7 @@ function ProjectCard({
   onArchive,
   onRestore,
   onRemove,
+  onPermanentDelete,
   onAddChapter,
   onPublish,
   onUnpublish,
@@ -1292,6 +1311,7 @@ function ProjectCard({
   onArchive: () => void
   onRestore: () => void
   onRemove: () => void
+  onPermanentDelete: () => void
   onAddChapter: () => void
   onPublish: () => void
   onUnpublish: () => void
@@ -1307,12 +1327,18 @@ function ProjectCard({
   const toneClass = isDark ? "text-[#f5f0e8]" : "text-stone-950"
   const subtextClass = isDark ? "text-[#b8b2a8]" : "text-stone-600"
   const metaClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
+  const ignoreNestedActionClick = (event: MouseEvent<HTMLElement>) => {
+    return event.target instanceof HTMLElement && Boolean(event.target.closest("button,a"))
+  }
 
   return (
     <article
       role="button"
       tabIndex={0}
-      onClick={onOpen}
+      onClick={(event) => {
+        if (ignoreNestedActionClick(event)) return
+        onOpen()
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
@@ -1389,6 +1415,7 @@ function ProjectCard({
                 onArchive={onArchive}
                 onRestore={onRestore}
                 onRemove={onRemove}
+                onPermanentDelete={onPermanentDelete}
                 onAddChapter={onAddChapter}
                 onPublish={onPublish}
                 onUnpublish={onUnpublish}
@@ -1435,6 +1462,7 @@ function ProjectRow({
   onArchive,
   onRestore,
   onRemove,
+  onPermanentDelete,
   onAddChapter,
   onPublish,
   onUnpublish,
@@ -1450,6 +1478,7 @@ function ProjectRow({
   onArchive: () => void
   onRestore: () => void
   onRemove: () => void
+  onPermanentDelete: () => void
   onAddChapter: () => void
   onPublish: () => void
   onUnpublish: () => void
@@ -1462,12 +1491,18 @@ function ProjectRow({
   const publicSampleStatus = getPublicSampleStatus(book)
   const subtextClass = isDark ? "text-[#b8b2a8]" : "text-stone-600"
   const metaClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
+  const ignoreNestedActionClick = (event: MouseEvent<HTMLElement>) => {
+    return event.target instanceof HTMLElement && Boolean(event.target.closest("button,a"))
+  }
 
   return (
     <article
       role="button"
       tabIndex={0}
-      onClick={onOpen}
+      onClick={(event) => {
+        if (ignoreNestedActionClick(event)) return
+        onOpen()
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
@@ -1571,6 +1606,7 @@ function ProjectRow({
                 onArchive={onArchive}
                 onRestore={onRestore}
                 onRemove={onRemove}
+                onPermanentDelete={onPermanentDelete}
                 onAddChapter={onAddChapter}
                 onPublish={onPublish}
                 onUnpublish={onUnpublish}
@@ -1595,6 +1631,7 @@ function ProjectMenu({
   onArchive,
   onRestore,
   onRemove,
+  onPermanentDelete,
   onAddChapter,
   onPublish,
   onUnpublish,
@@ -1610,6 +1647,7 @@ function ProjectMenu({
   onArchive: () => void
   onRestore: () => void
   onRemove: () => void
+  onPermanentDelete: () => void
   onAddChapter: () => void
   onPublish: () => void
   onUnpublish: () => void
@@ -1628,6 +1666,7 @@ function ProjectMenu({
         <MenuButton isDark={isDark} onClick={onArchive} label="Archive" disabled={busy} tooltip="Hide from active views without deleting" />
       )}
       <MenuButton isDark={isDark} onClick={onRemove} label="Remove" disabled={busy} danger tooltip="Remove from this library view" />
+      <MenuButton isDark={isDark} onClick={onPermanentDelete} label="Delete permanently" disabled={busy} danger tooltip="Delete manuscript and generated project data" />
     </div>
   )
 }

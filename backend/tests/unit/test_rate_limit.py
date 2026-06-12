@@ -7,6 +7,7 @@ from starlette.requests import Request
 from app.api.deps import rate_limit as rate_limit_module
 from app.api.deps.rate_limit import (
     _bump_daily_bucket,
+    _bump_weekly_bucket,
     _client_identifier,
     rate_limit_advisor,
     rate_limit_continuity_checker,
@@ -93,6 +94,28 @@ async def test_daily_bucket_blocks_after_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_weekly_bucket_blocks_after_limit(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    monkeypatch.setattr(
+        "app.api.deps.rate_limit._current_utc",
+        lambda now=None: datetime(2026, 5, 7, 10, 0, tzinfo=UTC),
+    )
+
+    await _bump_weekly_bucket(None, "user-1", "advisor", 1)
+
+    with pytest.raises(Exception) as exc_info:
+        await _bump_weekly_bucket(None, "user-1", "advisor", 1)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+    assert "refreshes next week" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
     fake_redis = _FakeRedis()
 
@@ -111,7 +134,7 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
     user = SimpleNamespace(
         id="user-2",
         tier="free",
-        created_at=datetime(2026, 5, 16, 10, 0, tzinfo=UTC),
+        created_at=datetime(2026, 6, 6, 10, 0, tzinfo=UTC),
     )
 
     await rate_limit_advisor(user, db=None)
@@ -124,7 +147,38 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_free_recall_limit_blocks_after_two_uses(monkeypatch):
+async def test_free_advisor_uses_one_weekly_turn(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    async def _fake_limit_for_user(_db, user_id, field, default):
+        assert _db is None
+        assert user_id == "user-free-advisor"
+        assert field == "advisor_per_week"
+        return default
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
+
+    user = SimpleNamespace(
+        id="user-free-advisor",
+        tier="free",
+        created_at=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
+    )
+
+    await rate_limit_advisor(user, db=None)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_advisor(user, db=None)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+    assert "refreshes next week" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_free_recall_is_author_only(monkeypatch):
     fake_redis = _FakeRedis()
 
     async def _fake_get_redis():
@@ -138,17 +192,14 @@ async def test_free_recall_limit_blocks_after_two_uses(monkeypatch):
         created_at=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
     )
 
-    await rate_limit_recall(user, db=None)
-    await rate_limit_recall(user, db=None)
-
     with pytest.raises(Exception) as exc_info:
         await rate_limit_recall(user, db=None)
 
-    assert getattr(exc_info.value, "status_code", None) == 429
+    assert getattr(exc_info.value, "status_code", None) == 403
 
 
 @pytest.mark.asyncio
-async def test_free_continuity_limit_blocks_after_one_use(monkeypatch):
+async def test_free_continuity_checker_is_author_only(monkeypatch):
     fake_redis = _FakeRedis()
 
     async def _fake_get_redis():
@@ -162,12 +213,10 @@ async def test_free_continuity_limit_blocks_after_one_use(monkeypatch):
         created_at=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
     )
 
-    await rate_limit_continuity_checker(user, db=None)
-
     with pytest.raises(Exception) as exc_info:
         await rate_limit_continuity_checker(user, db=None)
 
-    assert getattr(exc_info.value, "status_code", None) == 429
+    assert getattr(exc_info.value, "status_code", None) == 403
 
 
 @pytest.mark.asyncio

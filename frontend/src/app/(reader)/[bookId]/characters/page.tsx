@@ -11,13 +11,14 @@ import { CONFIDENCE_THRESHOLDS } from "@/lib/constants"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
+import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { candidateAdjudicationBadges } from "@/lib/utils/characterAdjudication"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { CharacterEvidencePanel } from "@/components/reader/CharacterEvidencePanel"
 import { CharacterProfileRightRail, type CharacterHealth, type ConnectedRelationship, type SidebarTab } from "@/components/reader/CharacterProfileRightRail"
 import { CharacterProfileTabs, type CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
 import { CharacterWorkspaceHeader } from "@/components/reader/CharacterWorkspaceHeader"
 import { CharacterWorkspaceSidebarHeader } from "@/components/reader/CharacterWorkspaceSidebarHeader"
-import { FirstTimeTooltip } from "@/components/tooltips/FirstTimeTooltip"
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 import type { Book } from "@/types/book"
@@ -31,7 +32,7 @@ import type {
   CharacterShadowRecord,
   RelationshipGraph as RelationshipGraphData,
 } from "@/types/character"
-import type { ReadingProgress, SearchResult } from "@/types/reader"
+import type { ChapterListResponse, ReadingProgress, SearchResult } from "@/types/reader"
 
 const RelationshipGraph = dynamic(
   () => import("@/components/intelligence/RelationshipGraph"),
@@ -246,6 +247,11 @@ function formatRoleFilterLabel(role: Character["role"]) {
   return "unclassified"
 }
 
+function formatTraitLabel(key: string) {
+  if (key === "age") return "Age"
+  return key.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 function formatStatus(status: Character["status"]) {
   return status === "deceased" ? "Deceased" : "Active"
 }
@@ -348,9 +354,22 @@ function graphVisibilityReasonCopy(reason: string) {
 
 function visibleTraitEntries(character: Character | null) {
   if (!character) return []
-  return Object.entries(character.trait_state ?? {}).filter(([, trait]) => (
+  const entries = Object.entries(character.trait_state ?? {}).filter(([, trait]) => (
     trait && trait.confidence >= CONFIDENCE_THRESHOLDS.SHOW_IN_UI && trait.value
   ))
+  const seen = new Set(entries.map(([key]) => key))
+  const addLegacyTrait = (key: string, value: string | null | undefined) => {
+    const trimmed = value?.trim()
+    if (!trimmed || seen.has(key)) return
+    entries.push([key, { value: trimmed, confidence: 1, type: "objective" }])
+    seen.add(key)
+  }
+  addLegacyTrait("hair", character.hair)
+  addLegacyTrait("eyes", character.eyes)
+  addLegacyTrait("build", character.build)
+  addLegacyTrait("age", character.age_descriptor)
+  addLegacyTrait("distinguishing", character.distinguishing)
+  return entries
 }
 
 function missingTraitLabels(character: Character) {
@@ -372,6 +391,13 @@ function sentimentLabel(value: number | null | undefined) {
 function strengthValue(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return 32
   return Math.max(18, Math.min(100, Math.round((value + 1) * 50)))
+}
+
+function relationshipStrengthColor(value: number | null | undefined, isDark: boolean) {
+  if (typeof value !== "number" || Number.isNaN(value)) return isDark ? "bg-slate-500" : "bg-stone-400"
+  if (value >= 0.4) return "bg-teal-600"
+  if (value <= -0.4) return "bg-rose-500"
+  return isDark ? "bg-slate-500" : "bg-stone-400"
 }
 
 function growthTitle(event: NonNullable<Character["growth_events"]>[number]) {
@@ -507,13 +533,97 @@ function buildSelectedCharacterSummary(character: Character | null, connections:
     .join(" ")
 }
 
-function topStats(characterCount: number, relationshipCount: number, chapter: number, mergeSuggestionCount: number) {
+type CharacterBibleStat = {
+  label: string
+  value: string
+  detail?: string
+  tone: "default" | "teal" | "amber" | "rose" | "violet"
+  icon: "characters" | "relationships" | "chapter" | "merge" | "review"
+}
+
+function topStats({
+  characterCount,
+  reviewedCount,
+  flaggedCount,
+  duplicateCount,
+  unresolvedCount,
+}: {
+  characterCount: number
+  reviewedCount: number
+  flaggedCount: number
+  duplicateCount: number
+  unresolvedCount: number
+}): CharacterBibleStat[] {
+  const percent = (value: number) => characterCount > 0 ? `${Math.round((value / characterCount) * 100)}%` : "0%"
   return [
-    { label: "characters", value: String(characterCount) },
-    { label: "relationships", value: String(relationshipCount) },
-    { label: "chapter", value: String(chapter) },
-    { label: "merge suggestions", value: String(mergeSuggestionCount) },
+    { label: "Total characters", value: String(characterCount), tone: "default", icon: "characters" },
+    { label: "Reviewed", value: String(reviewedCount), detail: percent(reviewedCount), tone: "teal", icon: "review" },
+    { label: "Flagged", value: String(flaggedCount), detail: percent(flaggedCount), tone: "amber", icon: "chapter" },
+    { label: "Potential duplicates", value: String(duplicateCount), detail: percent(duplicateCount), tone: "violet", icon: "merge" },
+    { label: "Unresolved items", value: String(unresolvedCount), detail: "View", tone: "rose", icon: "review" },
   ]
+}
+
+function isReviewedCharacter(character: Character) {
+  return Boolean(
+    character.approval_state === "approved"
+    || character.approval_state === "protected"
+    || character.analysis_metadata?.user_curated
+    || character.is_manual,
+  )
+}
+
+function isFlaggedCharacter(character: Character, flags: string[]) {
+  return Boolean(
+    flags.length > 0
+    || character.approval_state === "pending_review"
+    || character.analysis_metadata?.needs_review
+    || (character.analysis_metadata?.quality_flags?.length ?? 0) > 0,
+  )
+}
+
+function reviewStatusLabel(character: Character, flags: string[]) {
+  if (isFlaggedCharacter(character, flags)) return "Flagged"
+  if (isReviewedCharacter(character)) return "Reviewed"
+  return "Unresolved"
+}
+
+function chapterSpanCount(character: Character) {
+  const first = character.first_chapter || 1
+  const last = character.last_seen_chapter ?? first
+  return Math.max(1, last - first + 1)
+}
+
+function bookCoverageLabel(character: Character, totalChapters: number | null | undefined) {
+  if (!totalChapters || totalChapters < 1) return "Coverage unknown"
+  return `${Math.min(100, Math.round((chapterSpanCount(character) / totalChapters) * 100))}% of book`
+}
+
+function chapterAppearanceLabel(chapter: number | null | undefined) {
+  if (typeof chapter !== "number" || chapter < 1) return "Chapter unknown"
+  return `Chapter ${chapter}`
+}
+
+function knownFacts(character: Character, connections: ConnectedRelationship[]) {
+  const facts: string[] = []
+  for (const [key, trait] of Object.entries(character.trait_state ?? {})) {
+    if (trait?.value && trait.confidence >= CONFIDENCE_THRESHOLDS.SHOW_IN_UI) {
+      facts.push(`${key.replaceAll("_", " ")}: ${trait.value}`)
+    }
+  }
+  if (character.goal) facts.push(`Goal: ${character.goal}`)
+  if (character.arc_type) facts.push(`Arc: ${character.arc_type}`)
+  if (connections.length > 0) facts.push(`${connections.length} relationship ${connections.length === 1 ? "link" : "links"} tracked`)
+  return facts.slice(0, 5)
+}
+
+function openQuestionsForCharacter(character: Character, connections: ConnectedRelationship[]) {
+  const questions: string[] = []
+  if (!character.goal && !character.arc_tracker?.goal) questions.push(`What does ${character.name} want most clearly?`)
+  if ((character.motivations ?? []).length === 0) questions.push("Which scene proves the motivation?")
+  if (connections.length === 0) questions.push("Which relationship should be linked first?")
+  if (!character.arc_summary) questions.push("What is the long-term arc summary?")
+  return questions.slice(0, 3)
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -527,19 +637,19 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function iconButtonClasses(isDark: boolean) {
   return `inline-flex h-10 w-10 items-center justify-center rounded-xl border transition ${
-    isDark ? "border-white/10 bg-[#121823] text-slate-200 hover:border-white/15 hover:bg-[#182131]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+    isDark ? "border-[#202a38] bg-[#121823] text-slate-200 hover:border-[#2b3747] hover:bg-[#182131]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
   }`
 }
 
 function actionButtonClasses(isDark: boolean) {
   return `inline-flex items-center rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
-    isDark ? "border-white/10 bg-[#121823] text-slate-100 hover:border-white/15 hover:bg-[#182131]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+    isDark ? "border-[#202a38] bg-[#121823] text-slate-100 hover:border-[#2b3747] hover:bg-[#182131]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
   }`
 }
 
 function menuPanelClasses(isDark: boolean) {
   return `absolute right-0 top-full z-30 mt-2 w-60 overflow-hidden rounded-md border p-1 ${
-    isDark ? "border-white/10 bg-[#0b1018]" : "border-stone-200 bg-white"
+    isDark ? "border-[#202a38] bg-[#0b1018]" : "border-stone-200 bg-white"
   }`
 }
 
@@ -563,17 +673,17 @@ function workspaceActionButtonClasses(
     if (tone === "amber") {
       return "border border-amber-500 bg-amber-600 text-white"
     }
-    return "border border-white/15 bg-white/[0.08] text-white"
+    return "border border-[#2b3747] bg-white/[0.08] text-white"
   }
 
   return isDark
-    ? "border border-white/10 bg-[#121823] text-slate-100 hover:border-white/15 hover:bg-[#182131]"
+    ? "border border-[#202a38] bg-[#121823] text-slate-100 hover:border-[#2b3747] hover:bg-[#182131]"
     : "border border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
 }
 
 function fieldClasses(isDark: boolean) {
   return isDark
-    ? "w-full rounded-xl border border-white/10 bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
+    ? "w-full rounded-xl border border-[#202a38] bg-[#0c1119] px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400/40 focus:ring-2 focus:ring-violet-400/20"
     : "w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-200/70"
 }
 
@@ -678,7 +788,7 @@ function ShellIcon({
 }
 
 function CharacterBibleSkeleton({ isDark, atmosphere }: { isDark: boolean; atmosphere: string }) {
-  const panelClass = isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/85"
+  const panelClass = isDark ? "border-[#202a38] bg-black/20" : "border-stone-200 bg-white/85"
 
   return (
     <div className={`min-h-screen ${atmosphere}`}>
@@ -725,54 +835,28 @@ function CharacterBibleSkeleton({ isDark, atmosphere }: { isDark: boolean; atmos
   )
 }
 
-function StatCard({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
-  const iconName = label.includes("merge")
-    ? "merge"
-    : label.includes("relationship")
-      ? "relationships"
-      : label.includes("chapter")
-        ? "chapter"
-        : "characters"
-  const tone = label.includes("merge")
-    ? "violet"
-    : label.includes("relationship")
-      ? "teal"
-      : label.includes("chapter")
-        ? "amber"
-        : "default"
-
+function StatCard({ stat, isDark }: { stat: CharacterBibleStat; isDark: boolean }) {
   return (
-    <div className={`min-h-[92px] rounded-md border px-4 py-3.5 ${isDark ? "border-white/10 bg-[#0b1018]" : "border-stone-200 bg-white/92"}`}>
+    <div className={`min-h-[82px] rounded-md border px-4 py-3 ${isDark ? "border-[#202a38] bg-[#0b1018]" : "border-stone-200 bg-white"}`}>
       <div className="flex items-start justify-between gap-3">
         <span className={`inline-flex h-9 w-9 items-center justify-center rounded-sm ${
-          tone === "violet"
+          stat.tone === "violet"
             ? isDark ? "bg-violet-500/12 text-violet-200" : "bg-violet-50 text-violet-700"
-            : tone === "teal"
+            : stat.tone === "teal"
               ? isDark ? "bg-teal-500/12 text-teal-200" : "bg-teal-50 text-teal-700"
-              : tone === "amber"
-                ? isDark ? "bg-sky-500/10 text-slate-200" : "bg-sky-50 text-sky-700"
+              : stat.tone === "amber"
+                ? isDark ? "bg-amber-500/12 text-amber-200" : "bg-amber-50 text-amber-700"
+                : stat.tone === "rose"
+                  ? isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"
                 : isDark ? "bg-white/[0.05] text-slate-200" : "bg-stone-100 text-stone-700"
         }`}>
-          <ShellIcon name={iconName} className="h-[18px] w-[18px]" />
+          <ShellIcon name={stat.icon} className="h-[18px] w-[18px]" />
         </span>
-        <span
-          className={`mt-1 inline-flex h-2.5 w-2.5 rounded-full ${
-            tone === "violet"
-              ? "bg-violet-400"
-              : tone === "teal"
-                ? "bg-teal-400"
-                : tone === "amber"
-                  ? "bg-teal-400"
-                  : isDark
-                    ? "bg-slate-600"
-                    : "bg-stone-300"
-          }`}
-          aria-hidden="true"
-        />
+        {stat.detail ? <span className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>{stat.detail}</span> : null}
       </div>
-      <div className="mt-4 flex items-end justify-between gap-3">
-        <p className={`text-[2.05rem] font-semibold leading-none tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{value}</p>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
+      <div className="mt-3">
+        <p className={`text-3xl font-semibold leading-none tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>{stat.value}</p>
+        <p className={`mt-1 text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>{stat.label}</p>
       </div>
     </div>
   )
@@ -790,7 +874,7 @@ function SurfaceCard({
   className?: string
 }) {
   return (
-    <section className={`rounded-md border px-4 py-4 ${isDark ? "border-white/8 bg-[#0d141d]/92" : "border-stone-200 bg-stone-50/80"} ${className}`}>
+    <section className={`rounded-md border px-4 py-4 ${isDark ? "border-transparent bg-[#0d141d]/92" : "border-stone-200 bg-stone-50/80"} ${className}`}>
       <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
       <div className="mt-4">{children}</div>
     </section>
@@ -819,7 +903,7 @@ function OverflowMenu({
       {open ? (
         <div className={menuPanelClasses(isDark)}>
           {actions.map((action, index) => (
-            <div key={`${action.label}-${index}`} className={action.dividerBefore ? `mt-1 border-t pt-1 ${isDark ? "border-white/10" : "border-stone-200"}` : ""}>
+            <div key={`${action.label}-${index}`} className={action.dividerBefore ? `mt-1 border-t pt-1 ${isDark ? "border-[#202a38]" : "border-stone-200"}` : ""}>
               <button
                 type="button"
                 disabled={action.disabled}
@@ -857,7 +941,7 @@ function QuickActionTile({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-md border p-3 text-left transition ${isDark ? "border-white/10 bg-[#0d121a] hover:border-white/15 hover:bg-[#131c29]" : "border-stone-200 bg-white hover:bg-stone-50"}`}
+      className={`rounded-md border p-3 text-left transition ${isDark ? "border-[#202a38] bg-[#0d121a] hover:border-[#2b3747] hover:bg-[#131c29]" : "border-stone-200 bg-white hover:bg-stone-50"}`}
     >
       {icon ? (
         <span className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-sm ${isDark ? "bg-white/[0.05] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
@@ -879,6 +963,10 @@ export default function CharactersPage() {
   const { data: progressData = null } = useQuery<ReadingProgress | null>({
     queryKey: asQueryKey(readerCacheKey(bookId, "progress")),
     queryFn: () => readerApi.getProgress(bookId).catch(() => null),
+  })
+  const { data: chapterListData = null } = useQuery<ChapterListResponse | null>({
+    queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
+    queryFn: () => readerApi.getChapterList(bookId).catch(() => null),
   })
   const {
     data: charactersData = [],
@@ -915,7 +1003,11 @@ export default function CharactersPage() {
     refetch: refetchCharacterReview,
   } = useQuery<CharacterReviewResponse>({
     queryKey: asQueryKey(bookCacheKey(bookId, "character-review")),
-    queryFn: () => booksApi.getCharacterReview(bookId).catch(() => emptyReview),
+    queryFn: () => booksApi.getCharacterReview(bookId, {
+      includeQuarantined: true,
+      includePlaces: true,
+      includeRejected: false,
+    }).catch(() => emptyReview),
     enabled: reviewDataEnabled,
     staleTime: 60_000,
   })
@@ -925,7 +1017,7 @@ export default function CharactersPage() {
   const [graphData, setGraphData] = useState<RelationshipGraphData | null>(null)
   const loading = bookLoading || charactersLoading
   const error: string | null = null
-  const [theme] = useState<"light" | "dark">("dark")
+  const theme = usePreferencesStore((state) => state.theme)
   const [search, setSearch] = useState("")
   const [selectedId, setSelectedId] = useState("")
   const [selectedMergeKey, setSelectedMergeKey] = useState("")
@@ -935,6 +1027,8 @@ export default function CharactersPage() {
   const [relationshipsEnabled, setRelationshipsEnabled] = useState(false)
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("insights")
   const [castFilter, setCastFilter] = useState<CastFilter>("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [roleFilter, setRoleFilter] = useState("all")
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profile")
   const [showAllCast, setShowAllCast] = useState(false)
   const [dismissedMergeKeys, setDismissedMergeKeys] = useState<string[]>([])
@@ -1026,6 +1120,19 @@ export default function CharactersPage() {
 
   const isDark = theme === "dark"
   const isAuthorMode = book?.mode === "author"
+  const chapterTitleByNumber = useMemo(() => {
+    const titles = new Map<number, string>()
+    for (const chapter of chapterListData?.chapters ?? []) {
+      if (chapter.title?.trim()) titles.set(chapter.number, chapter.title.trim())
+    }
+    return titles
+  }, [chapterListData])
+  const chapterAppearanceText = (chapter: number | null | undefined) => {
+    const label = chapterAppearanceLabel(chapter)
+    if (typeof chapter !== "number") return label
+    const title = chapterTitleByNumber.get(chapter)
+    return title ? `${label} / ${title}` : label
+  }
   const {
     data: identityDiagnostics = emptyIdentityDiagnostics,
     refetch: refetchIdentityDiagnostics,
@@ -1125,7 +1232,13 @@ export default function CharactersPage() {
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
 
   const pendingCandidates = useMemo(
-    () => (reviewData.candidates ?? []).filter((candidate) => candidate.status === "pending"),
+    () => (reviewData.candidates ?? []).filter((candidate) => (
+      candidate.status === "pending"
+      || (
+        candidate.status === "suppressed"
+        && ["place", "organization", "object", "title_or_role"].includes(candidate.adjudication_status ?? "")
+      )
+    )),
     [reviewData.candidates],
   )
   const pendingRelationshipCandidates = useMemo(
@@ -1237,24 +1350,31 @@ export default function CharactersPage() {
 
   const filteredChars = useMemo(() => chars.filter((char) => {
     const flags = flagsByCharacter.get(char.id) ?? []
+    const statusLabel = reviewStatusLabel(char, flags).toLowerCase()
     const haystack = [
       char.name,
       ...(char.aliases ?? []),
       char.description ?? "",
       char.arc_summary ?? "",
       ...(char.personality_tags ?? []),
+      statusLabel,
+      formatRoleFilterLabel(char.role),
       ...flags,
     ]
       .join(" ")
       .toLowerCase()
 
     if (deferredSearch && !haystack.includes(deferredSearch)) return false
+    if (statusFilter === "reviewed" && !isReviewedCharacter(char)) return false
+    if (statusFilter === "flagged" && !isFlaggedCharacter(char, flags)) return false
+    if (statusFilter === "unresolved" && (isReviewedCharacter(char) || isFlaggedCharacter(char, flags))) return false
+    if (roleFilter !== "all" && char.role !== roleFilter) return false
     if (castFilter === "all") return true
     if (castFilter === "main") return char.role === "mc" || char.role === "sc"
     if (castFilter === "minor") return char.role === "background" || !char.role
     if (castFilter === "duplicates") return mergeSuggestionIds.has(char.id)
     return flags.length > 0
-  }), [castFilter, chars, deferredSearch, flagsByCharacter, mergeSuggestionIds])
+  }), [castFilter, chars, deferredSearch, flagsByCharacter, mergeSuggestionIds, roleFilter, statusFilter])
 
   useEffect(() => {
     if (filteredChars.length === 0) {
@@ -1344,6 +1464,18 @@ export default function CharactersPage() {
     () => selectedCharacter ? connectionsByCharacter.get(selectedCharacter.id) ?? [] : [],
     [connectionsByCharacter, selectedCharacter],
   )
+  const selectedKnownFacts = useMemo(
+    () => selectedCharacter ? knownFacts(selectedCharacter, selectedConnections) : [],
+    [selectedCharacter, selectedConnections],
+  )
+  const selectedTraitEntries = useMemo(
+    () => visibleTraitEntries(selectedCharacter),
+    [selectedCharacter],
+  )
+  const selectedOpenQuestions = useMemo(
+    () => selectedCharacter ? openQuestionsForCharacter(selectedCharacter, selectedConnections) : [],
+    [selectedCharacter, selectedConnections],
+  )
   const hiddenGraphNodes = graphData?.hidden_nodes ?? []
   const selectedHiddenGraphRecord = useMemo(
     () => selectedCharacter ? hiddenGraphNodes.find((node) => node.id === selectedCharacter.id) ?? null : null,
@@ -1353,6 +1485,7 @@ export default function CharactersPage() {
     () => selectedCharacter ? flagsByCharacter.get(selectedCharacter.id) ?? [] : [],
     [flagsByCharacter, selectedCharacter],
   )
+  const selectedReviewStatus = selectedCharacter ? reviewStatusLabel(selectedCharacter, selectedFlags) : "Unresolved"
   const selectedHealth = useMemo(
     () => selectedCharacter ? healthByCharacter.get(selectedCharacter.id) ?? null : null,
     [healthByCharacter, selectedCharacter],
@@ -1392,6 +1525,22 @@ export default function CharactersPage() {
     : selectedMergeSuggestion ? charById.get(selectedMergeSuggestion.secondaryId) ?? null : null
   const selectedMergePrimaryEvidence = selectedMergePrimary ? evidenceCache[selectedMergePrimary.id]?.results ?? [] : []
   const selectedMergeSecondaryEvidence = selectedMergeSecondary ? evidenceCache[selectedMergeSecondary.id]?.results ?? [] : []
+  const dashboardStats = useMemo(() => {
+    let reviewedCount = 0
+    let flaggedCount = 0
+    for (const character of chars) {
+      const flags = flagsByCharacter.get(character.id) ?? []
+      if (isReviewedCharacter(character)) reviewedCount += 1
+      if (isFlaggedCharacter(character, flags)) flaggedCount += 1
+    }
+    return topStats({
+      characterCount: chars.length,
+      reviewedCount,
+      flaggedCount,
+      duplicateCount: mergeSuggestions.length,
+      unresolvedCount: pendingReviewItemCount,
+    })
+  }, [chars, flagsByCharacter, mergeSuggestions.length, pendingReviewItemCount])
 
   useEffect(() => {
     if (!editing) {
@@ -1878,6 +2027,19 @@ export default function CharactersPage() {
     }
   }
 
+  async function handleMarkCandidatePlace(candidate: CharacterCandidate) {
+    setCandidateActionId(candidate.id)
+    setActionError(null)
+    try {
+      await booksApi.markCharacterCandidatePlace(bookId, candidate.id)
+      await refetchCharacterReview()
+    } catch {
+      setActionError("Could not mark this candidate as a place.")
+    } finally {
+      setCandidateActionId(null)
+    }
+  }
+
   async function handleDemoteSelectedCharacter() {
     if (!selectedCharacter) return
     setSaving(true)
@@ -2220,8 +2382,6 @@ export default function CharactersPage() {
     },
   ] : []
 
-  const stats = topStats(chars.length, graphData?.edges.length ?? 0, relationshipChapter, mergeSuggestions.length)
-
   const atmosphere = isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"
   const sidebarSummary =
     workspaceMode === "duplicates"
@@ -2238,12 +2398,6 @@ export default function CharactersPage() {
 
   return (
     <div className={`min-h-screen transition-colors ${atmosphere}`}>
-      <FirstTimeTooltip
-        storageKey="lorevia-character-bible-first-visit"
-        title="💡 Tip: Merge Duplicate Characters"
-        message="You can merge duplicate characters by clicking on the 3 dots menu (⋮) next to a character, then selecting 'Merge with another character' and choosing the second character you want to merge with."
-        isDark={isDark}
-      />
       <div className="mx-auto max-w-[1500px] px-4 pb-8 pt-5 sm:px-6 lg:px-8">
         <CharacterWorkspaceHeader
           title="Character Bible"
@@ -2251,9 +2405,9 @@ export default function CharactersPage() {
           onBack={() => router.back()}
           isDark={isDark}
           stats={(
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {stats.map((stat) => (
-                <StatCard key={stat.label} label={stat.label} value={stat.value} isDark={isDark} />
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+              {dashboardStats.map((stat) => (
+                <StatCard key={stat.label} stat={stat} isDark={isDark} />
               ))}
             </div>
           )}
@@ -2312,16 +2466,20 @@ export default function CharactersPage() {
         {error ? <p className="mt-3 text-sm text-rose-400">{error}</p> : null}
 
         {!error && (chars.length > 0 || creating || workspaceMode !== "profile") ? (
-          <div className={`mt-5 overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-[#070c13]" : "border-stone-200 bg-white/94"}`}>
+          <div className={`mt-5 overflow-hidden rounded-lg border ${isDark ? "border-[#202a38] bg-[#070c13]" : "border-stone-200 bg-white/94"}`}>
             <div className="grid xl:h-[calc(100vh-12rem)] xl:grid-cols-[340px_minmax(0,1fr)_320px] 2xl:grid-cols-[350px_minmax(0,1fr)_330px]">
-              <aside className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-white/8" : "border-stone-200"}`}>
+              <aside className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
                 <CharacterWorkspaceSidebarHeader
                   castFilter={castFilter}
                   isDark={isDark}
                   mode={workspaceMode}
                   onCastFilterChange={setCastFilter}
+                  onRoleFilterChange={setRoleFilter}
                   onSearchChange={setSearch}
+                  onStatusFilterChange={setStatusFilter}
+                  roleFilter={roleFilter}
                   search={search}
+                  statusFilter={statusFilter}
                   summary={sidebarSummary}
                 />
 
@@ -2331,7 +2489,8 @@ export default function CharactersPage() {
                     {visibleCastChars.map((char) => {
                       const isActive = selectedCharacter?.id === char.id
                       const flags = flagsByCharacter.get(char.id) ?? []
-                      const health = healthByCharacter.get(char.id)
+                      const statusLabel = reviewStatusLabel(char, flags)
+                      const statusTone = statusLabel === "Reviewed" ? "teal" : statusLabel === "Flagged" ? "amber" : "rose"
                       return (
                         <button
                           key={char.id}
@@ -2344,7 +2503,7 @@ export default function CharactersPage() {
                           }}
                           className={`mb-1 w-full px-3 py-3 text-left transition ${isActive
                             ? isDark ? "rounded-md border border-violet-400/40 bg-violet-500/12" : "rounded-md border border-violet-300 bg-violet-50"
-                            : isDark ? "border-b border-white/8 hover:bg-white/[0.03]" : "border-b border-stone-200 hover:bg-stone-50/80"
+                            : isDark ? "border-b border-[#17202c] hover:bg-white/[0.03]" : "border-b border-stone-200 hover:bg-stone-50/80"
                           }`}
                         >
                           <div className="flex items-start gap-3">
@@ -2365,21 +2524,21 @@ export default function CharactersPage() {
                                       </span>
                                     ) : null}
                                   </div>
-                                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{relationshipCounts.get(char.id) ?? 0} ties</p>
+                                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{formatRole(char.role)}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className={`text-xs font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{health?.score ?? 0}%</span>
-                                  <span
-                                    className="inline-flex h-3.5 w-3.5 rounded-full border-2"
-                                    style={{
-                                      borderColor: health?.tone === "strong" ? "#22c55e" : health?.tone === "moderate" ? "#8b5cf6" : "#f59e0b",
-                                      backgroundColor: "transparent",
-                                    }}
-                                  />
+                                  <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold ${statusTone === "teal"
+                                    ? isDark ? "bg-teal-500/15 text-teal-100" : "bg-teal-50 text-teal-700"
+                                    : statusTone === "amber"
+                                      ? isDark ? "bg-amber-500/15 text-amber-100" : "bg-amber-50 text-amber-700"
+                                      : isDark ? "bg-rose-500/15 text-rose-100" : "bg-rose-50 text-rose-700"
+                                  }`}>
+                                    {statusLabel}
+                                  </span>
                                 </div>
                               </div>
                               <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                                {flags.length > 0 ? flags.slice(0, 2).join(" / ") : `${formatRoleFilterLabel(char.role)} / ${formatChapterRange(char.first_chapter, char.last_seen_chapter ?? null)}`}
+                                {chapterSpanCount(char)} {chapterSpanCount(char) === 1 ? "chapter" : "chapters"} / {relationshipCounts.get(char.id) ?? 0} ties
                               </p>
                             </div>
                           </div>
@@ -2429,7 +2588,7 @@ export default function CharactersPage() {
                           onClick={() => setSelectedMergeKey(suggestion.key)}
                           className={`w-full rounded-md border px-3 py-3 text-left transition ${active
                             ? isDark ? "border-violet-400/40 bg-violet-500/12" : "border-violet-300 bg-violet-50"
-                            : isDark ? "border-white/8 bg-white/[0.02] hover:bg-white/[0.04]" : "border-stone-200 bg-white hover:bg-stone-50"
+                            : isDark ? "border-[#17202c] bg-white/[0.02] hover:bg-white/[0.04]" : "border-stone-200 bg-white hover:bg-stone-50"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -2454,7 +2613,7 @@ export default function CharactersPage() {
 
                     {workspaceMode === "review" ? (
                       <div className="px-3 py-6">
-                        <div className={`rounded-md border px-4 py-5 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
+                        <div className={`rounded-md border px-4 py-5 ${isDark ? "border-[#17202c] bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
                           <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Duplicate comparison stays in the dedicated review workspace. Focus this queue on held candidates, resolver reasons, and promotion blockers.</p>
                         </div>
                       </div>
@@ -2462,27 +2621,34 @@ export default function CharactersPage() {
 
                     {workspaceMode === "repair" ? (
                       <div className="px-3 py-6">
-                        <div className={`rounded-md border px-4 py-5 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
+                        <div className={`rounded-md border px-4 py-5 ${isDark ? "border-[#17202c] bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
                           <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Repair preview lists safe merges, obvious-noise demotions, and protected skips in the main workspace. Search here to narrow the queue before reprocessing.</p>
                         </div>
                       </div>
                     ) : null}
 
                     {filteredPendingCandidates.length > 0 ? (
-                      <div className={`mt-5 border-t px-3 pt-4 ${isDark ? "border-white/8" : "border-stone-200"}`}>
+                      <div className={`mt-5 border-t px-3 pt-4 ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Quarantine queue</p>
                         <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{filteredPendingCandidates.length} candidates waiting for review</p>
                         <div className="mt-3 space-y-3">
                           {filteredPendingCandidates.slice(0, 8).map((candidate) => (
-                            <div key={candidate.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
+                            <div key={candidate.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
                               <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.proposed_name}</p>
                               <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter {candidate.chapter_number} · {candidate.confidence}%</p>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {candidateAdjudicationBadges(candidate).slice(0, 3).map((badge) => (
+                                  <span key={`${candidate.id}-${badge}`} className={`rounded-full px-2 py-1 text-[0.68rem] font-semibold ${isDark ? "bg-amber-400/12 text-amber-100" : "bg-amber-50 text-amber-700"}`}>
+                                    {badge}
+                                  </span>
+                                ))}
+                              </div>
                               <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{candidate.reason_codes[0] ?? "Needs review"}</p>
                               {workspaceMode !== "repair" ? (
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    disabled={candidateActionId === candidate.id}
+                                    disabled={candidateActionId === candidate.id || candidate.status !== "pending"}
                                     onClick={() => void handlePromoteCandidate(candidate)}
                                     className={actionButtonClasses(isDark)}
                                   >
@@ -2490,11 +2656,19 @@ export default function CharactersPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    disabled={candidateActionId === candidate.id || !selectedCharacter}
+                                    disabled={candidateActionId === candidate.id || candidate.status !== "pending" || !selectedCharacter}
                                     onClick={() => void handleAttachCandidate(candidate)}
                                     className={actionButtonClasses(isDark)}
                                   >
                                     Attach to selected
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={candidateActionId === candidate.id}
+                                    onClick={() => void handleMarkCandidatePlace(candidate)}
+                                    className={actionButtonClasses(isDark)}
+                                  >
+                                    Mark as place
                                   </button>
                                   <button
                                     type="button"
@@ -2513,12 +2687,12 @@ export default function CharactersPage() {
                     ) : null}
 
                     {(workspaceMode === "review" || workspaceMode === "duplicates") && filteredRelationshipCandidates.length > 0 ? (
-                      <div className={`mt-5 border-t px-3 pt-4 ${isDark ? "border-white/8" : "border-stone-200"}`}>
+                      <div className={`mt-5 border-t px-3 pt-4 ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Relationship review</p>
                         <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{filteredRelationshipCandidates.length} unresolved relationships waiting for review</p>
                         <div className="mt-3 space-y-3">
                           {filteredRelationshipCandidates.slice(0, 8).map((candidate) => (
-                            <div key={candidate.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
+                            <div key={candidate.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-white/[0.02]" : "border-stone-200 bg-white"}`}>
                               <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} {"<->"} {candidate.raw_character_b}</p>
                               <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
                               <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{candidate.reason_codes[0] ?? "Needs relationship review"}</p>
@@ -2573,7 +2747,7 @@ export default function CharactersPage() {
                 )}
               </aside>
 
-              <section className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-white/8" : "border-stone-200"}`}>
+              <section className={`border-b xl:min-h-0 xl:overflow-y-auto xl:border-b-0 xl:border-r ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
                 {workspaceMode === "profile" && creating ? (
                   <div className="p-5">
                     <div>
@@ -2591,11 +2765,11 @@ export default function CharactersPage() {
                         </div>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Name</span>
-                          <input value={createDraft.name} onChange={(event) => setCreateDraft((value) => ({ ...value, name: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.name} onChange={(event) => setCreateDraft((value) => ({ ...value, name: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Role</span>
-                          <select value={createDraft.role} onChange={(event) => setCreateDraft((value) => ({ ...value, role: event.target.value as CreateDraft["role"] }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}>
+                          <select value={createDraft.role} onChange={(event) => setCreateDraft((value) => ({ ...value, role: event.target.value as CreateDraft["role"] }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}>
                             <option value="">Unclassified</option>
                             <option value="mc">Primary character</option>
                             <option value="sc">Supporting character</option>
@@ -2604,11 +2778,11 @@ export default function CharactersPage() {
                         </label>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>First chapter</span>
-                          <input value={createDraft.firstChapter} onChange={(event) => setCreateDraft((value) => ({ ...value, firstChapter: event.target.value }))} inputMode="numeric" className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.firstChapter} onChange={(event) => setCreateDraft((value) => ({ ...value, firstChapter: event.target.value }))} inputMode="numeric" className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Aliases</span>
-                          <input value={createDraft.aliases} onChange={(event) => setCreateDraft((value) => ({ ...value, aliases: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.aliases} onChange={(event) => setCreateDraft((value) => ({ ...value, aliases: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                           <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Separate multiple aliases with commas.</span>
                         </label>
                         <label className="space-y-1 md:col-span-2">
@@ -2616,42 +2790,42 @@ export default function CharactersPage() {
                             <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</span>
                             <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{createDraft.description.length}/600</span>
                           </span>
-                          <textarea value={createDraft.description} onChange={(event) => setCreateDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <textarea value={createDraft.description} onChange={(event) => setCreateDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <div className="mt-2 md:col-span-2">
                           <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${sectionEyebrowClasses(isDark, "teal")}`}>Story context</p>
                         </div>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Goal</span>
-                          <input value={createDraft.goal} onChange={(event) => setCreateDraft((value) => ({ ...value, goal: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.goal} onChange={(event) => setCreateDraft((value) => ({ ...value, goal: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc type</span>
-                          <input value={createDraft.arcType} onChange={(event) => setCreateDraft((value) => ({ ...value, arcType: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.arcType} onChange={(event) => setCreateDraft((value) => ({ ...value, arcType: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1 md:col-span-2">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Lie they believe</span>
-                          <textarea value={createDraft.lieTheyBelieve} onChange={(event) => setCreateDraft((value) => ({ ...value, lieTheyBelieve: event.target.value }))} rows={2} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <textarea value={createDraft.lieTheyBelieve} onChange={(event) => setCreateDraft((value) => ({ ...value, lieTheyBelieve: event.target.value }))} rows={2} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1 md:col-span-2">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Wound / backstory</span>
-                          <textarea value={createDraft.backstoryWound} onChange={(event) => setCreateDraft((value) => ({ ...value, backstoryWound: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <textarea value={createDraft.backstoryWound} onChange={(event) => setCreateDraft((value) => ({ ...value, backstoryWound: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1 md:col-span-2">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</span>
-                          <textarea value={createDraft.arcSummary} onChange={(event) => setCreateDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <textarea value={createDraft.arcSummary} onChange={(event) => setCreateDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality tags</span>
-                          <input value={createDraft.personalityTags} onChange={(event) => setCreateDraft((value) => ({ ...value, personalityTags: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.personalityTags} onChange={(event) => setCreateDraft((value) => ({ ...value, personalityTags: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</span>
-                          <input value={createDraft.motivations} onChange={(event) => setCreateDraft((value) => ({ ...value, motivations: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.motivations} onChange={(event) => setCreateDraft((value) => ({ ...value, motivations: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                         <label className="space-y-1 md:col-span-2">
                           <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</span>
-                          <input value={createDraft.fears} onChange={(event) => setCreateDraft((value) => ({ ...value, fears: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                          <input value={createDraft.fears} onChange={(event) => setCreateDraft((value) => ({ ...value, fears: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                         </label>
                       </div>
                       {actionError ? <p className="mt-3 text-sm text-rose-400">{actionError}</p> : null}
@@ -2711,7 +2885,7 @@ export default function CharactersPage() {
                             `${selectedCharacter.mention_count ?? 0} mentions`,
                             `${selectedConnections.length} relationships`,
                           ].map((item) => (
-                            <span key={item} className={`rounded-full px-3 py-1 text-xs ${isDark ? "border border-white/10 bg-white/[0.03] text-slate-300" : "border border-stone-200 bg-white text-stone-600"}`}>
+                            <span key={item} className={`rounded-full px-3 py-1 text-xs ${isDark ? "border border-[#202a38] bg-white/[0.03] text-slate-300" : "border border-stone-200 bg-white text-stone-600"}`}>
                               {item}
                             </span>
                           ))}
@@ -2755,7 +2929,7 @@ export default function CharactersPage() {
                           <p className={`text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                             {selectedCharacterSummary || "LoreVia is still building a concise grounded profile from the manuscript."}
                           </p>
-                          <div className={`mt-4 flex items-center justify-between rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                          <div className={`mt-4 flex items-center justify-between rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                             <span>Grounded in {selectedEvidence.length > 0 ? selectedEvidence.length : selectedGrowthEvents.length} passages</span>
                             <button type="button" onClick={openCharacterEvidence} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-white/[0.06] text-white" : "bg-stone-100 text-stone-800"}`}>
                               View evidence
@@ -2766,6 +2940,10 @@ export default function CharactersPage() {
                         <SurfaceCard title="Identity" isDark={isDark}>
                           <dl className="grid gap-4 text-sm">
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Role</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{formatRole(selectedCharacter.role)}</dd>
+                            </div>
+                            <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
                               <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Aliases</dt>
                               <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.aliases.length > 0 ? selectedCharacter.aliases.join(", ") : "None recorded"}</dd>
                             </div>
@@ -2773,7 +2951,7 @@ export default function CharactersPage() {
                               <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Alias records</dt>
                               <dd className="space-y-2">
                                 {selectedAliasGroups.length > 0 ? selectedAliasGroups.map(([kind, aliases]) => (
-                                  <div key={kind} className={`rounded-xl border px-3 py-2 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                  <div key={kind} className={`rounded-xl border px-3 py-2 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                     <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{kind.replaceAll("_", " ")}</p>
                                     <div className="mt-2 flex flex-wrap gap-2">
                                       {aliases.map((alias) => (
@@ -2789,27 +2967,96 @@ export default function CharactersPage() {
                               </dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
-                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Role</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>{formatRole(selectedCharacter.role)}</dd>
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>First appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>
+                                {chapterAppearanceText(selectedCharacter.first_chapter)}
+                              </dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
-                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>First seen</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>Chapter {selectedCharacter.first_chapter}</dd>
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Last appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>
+                                {chapterAppearanceText(selectedCharacter.last_seen_chapter ?? selectedCharacter.first_chapter)}
+                              </dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
-                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Latest chapter</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.last_seen_chapter ? `Chapter ${selectedCharacter.last_seen_chapter}` : `Chapter ${selectedCharacter.first_chapter}`}</dd>
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Chapter count</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterSpanCount(selectedCharacter)} / {bookCoverageLabel(selectedCharacter, book?.total_chapters)}</dd>
                             </div>
                             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
                               <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Status</dt>
-                              <dd className={isDark ? "text-white" : "text-stone-900"}>{formatStatus(selectedCharacter.status)}</dd>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedReviewStatus}</dd>
                             </div>
                           </dl>
                         </SurfaceCard>
 
+                        <SurfaceCard title="Traits and motivations" isDark={isDark}>
+                          <div className="space-y-4">
+                            <div>
+                              <p className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>Traits</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {selectedTraitEntries.length > 0 ? selectedTraitEntries.map(([key, trait]) => trait ? (
+                                  <span key={key} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-white/[0.06] text-slate-200" : "bg-stone-100 text-stone-700"}`}>
+                                    {formatTraitLabel(key)}: {trait.value}
+                                  </span>
+                                ) : null) : null}
+                                {(selectedCharacter.personality_tags?.length ?? 0) > 0 ? selectedCharacter.personality_tags.map((trait) => (
+                                  <span key={trait} className={`rounded-full px-3 py-1.5 text-xs ${isDark ? "bg-teal-500/10 text-teal-100" : "bg-teal-50 text-teal-800"}`}>{trait}</span>
+                                )) : (
+                                  selectedTraitEntries.length === 0 ? <span className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Traits not recorded</span> : null
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-stone-500"}`}>Motivations</p>
+                              {(selectedCharacter.motivations?.length ?? 0) > 0 ? (
+                                <ul className={`mt-2 space-y-1 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
+                                  {selectedCharacter.motivations.map((motivation) => <li key={motivation}>- {motivation}</li>)}
+                                </ul>
+                              ) : (
+                                <p className={isDark ? "mt-2 text-sm text-slate-400" : "mt-2 text-sm text-stone-500"}>Motivations not recorded</p>
+                              )}
+                            </div>
+                          </div>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Known facts" isDark={isDark}>
+                          {selectedKnownFacts.length > 0 ? (
+                            <ul className={`space-y-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
+                              {selectedKnownFacts.map((fact) => <li key={fact}>- {fact}</li>)}
+                            </ul>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Durable facts not recorded</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Notes and audit" isDark={isDark}>
+                          <div className="space-y-4 text-sm">
+                            <div>
+                              <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Notes</p>
+                              <p className={`mt-1 leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+                                {selectedCharacter.analysis_metadata?.review_note || selectedCharacter.relationship_summaries?.[0] || "Reviewer note not recorded"}
+                              </p>
+                            </div>
+                            <dl className="grid grid-cols-3 gap-3">
+                              <div>
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Created</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.created_at ? new Date(selectedCharacter.created_at).toLocaleDateString() : "Not recorded"}</dd>
+                              </div>
+                              <div>
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Last updated</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.approval_updated_at ? new Date(selectedCharacter.approval_updated_at).toLocaleDateString() : "Not tracked"}</dd>
+                              </div>
+                              <div>
+                                <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Status</dt>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedReviewStatus}</dd>
+                              </div>
+                            </dl>
+                          </div>
+                        </SurfaceCard>
+
                         <SurfaceCard title="Graph visibility" isDark={isDark}>
                           <div className="space-y-3">
-                            <div className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                            <div className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                               <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{graphVisibilityLabel(selectedCharacter.graph_visibility_override ?? null)}</p>
                               <p className="mt-1">
                                 {selectedHiddenGraphRecord
@@ -2836,10 +3083,10 @@ export default function CharactersPage() {
                                 <button type="button" aria-pressed={selectedCharacter.graph_visibility_override === "include"} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("include")} className="rounded-md bg-[#1f615d] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">
                                   Include in graph
                                 </button>
-                                <button type="button" aria-pressed={selectedCharacter.graph_visibility_override === "exclude"} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("exclude")} className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-60 ${isDark ? "border border-white/10 text-slate-200 hover:bg-white/[0.05]" : "border border-stone-200 text-stone-700 hover:bg-white"}`}>
+                                <button type="button" aria-pressed={selectedCharacter.graph_visibility_override === "exclude"} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride("exclude")} className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-60 ${isDark ? "border border-[#202a38] text-slate-200 hover:bg-white/[0.05]" : "border border-stone-200 text-stone-700 hover:bg-white"}`}>
                                   Exclude from graph
                                 </button>
-                                <button type="button" aria-pressed={selectedCharacter.graph_visibility_override == null} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride(null)} className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-60 ${isDark ? "border border-white/10 text-slate-200 hover:bg-white/[0.05]" : "border border-stone-200 text-stone-700 hover:bg-white"}`}>
+                                <button type="button" aria-pressed={selectedCharacter.graph_visibility_override == null} disabled={graphOverrideBusy} onClick={() => void handleGraphVisibilityOverride(null)} className={`rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-60 ${isDark ? "border border-[#202a38] text-slate-200 hover:bg-white/[0.05]" : "border border-stone-200 text-stone-700 hover:bg-white"}`}>
                                   Return to auto
                                 </button>
                               </div>
@@ -2850,7 +3097,7 @@ export default function CharactersPage() {
                         {isAuthorMode ? (
                           <SurfaceCard title="Review controls" isDark={isDark}>
                             <div className="space-y-3">
-                              <div className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                              <div className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                                 <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Canonical confidence {formatPercent(selectedCharacter.analysis_metadata?.canonical_confidence)}</p>
                                 <p className="mt-1">Grounding coverage {formatPercent(selectedCharacter.analysis_metadata?.grounding_coverage)}. Resolver status: {formatResolverStatus(selectedCharacter.analysis_metadata?.resolver_status)}.</p>
                               </div>
@@ -2860,7 +3107,7 @@ export default function CharactersPage() {
                                   value={reviewNoteDraft}
                                   onChange={(event) => setReviewNoteDraft(event.target.value)}
                                   rows={4}
-                                  className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                  className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                 />
                               </label>
                               <div className="flex flex-wrap gap-2">
@@ -2893,47 +3140,47 @@ export default function CharactersPage() {
                             <div className="grid gap-4 md:grid-cols-2">
                               <label className="space-y-1">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Name</span>
-                                <input value={draft.name} onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <input value={draft.name} onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Aliases</span>
-                                <input value={draft.aliases} onChange={(event) => setDraft((value) => ({ ...value, aliases: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <input value={draft.aliases} onChange={(event) => setDraft((value) => ({ ...value, aliases: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1 md:col-span-2">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Description</span>
-                                <textarea value={draft.description} onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <textarea value={draft.description} onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))} rows={4} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Goal</span>
-                                <input value={draft.goal} onChange={(event) => setDraft((value) => ({ ...value, goal: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <input value={draft.goal} onChange={(event) => setDraft((value) => ({ ...value, goal: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc type</span>
-                                <input value={draft.arcType} onChange={(event) => setDraft((value) => ({ ...value, arcType: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <input value={draft.arcType} onChange={(event) => setDraft((value) => ({ ...value, arcType: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1 md:col-span-2">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Lie they believe</span>
-                                <textarea value={draft.lieTheyBelieve} onChange={(event) => setDraft((value) => ({ ...value, lieTheyBelieve: event.target.value }))} rows={2} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <textarea value={draft.lieTheyBelieve} onChange={(event) => setDraft((value) => ({ ...value, lieTheyBelieve: event.target.value }))} rows={2} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1 md:col-span-2">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Wound / backstory</span>
-                                <textarea value={draft.backstoryWound} onChange={(event) => setDraft((value) => ({ ...value, backstoryWound: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <textarea value={draft.backstoryWound} onChange={(event) => setDraft((value) => ({ ...value, backstoryWound: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1 md:col-span-2">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Arc summary</span>
-                                <textarea value={draft.arcSummary} onChange={(event) => setDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <textarea value={draft.arcSummary} onChange={(event) => setDraft((value) => ({ ...value, arcSummary: event.target.value }))} rows={3} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Personality tags</span>
-                                <input value={draft.personalityTags} onChange={(event) => setDraft((value) => ({ ...value, personalityTags: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <input value={draft.personalityTags} onChange={(event) => setDraft((value) => ({ ...value, personalityTags: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Motivations</span>
-                                <input value={draft.motivations} onChange={(event) => setDraft((value) => ({ ...value, motivations: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <input value={draft.motivations} onChange={(event) => setDraft((value) => ({ ...value, motivations: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                               <label className="space-y-1 md:col-span-2">
                                 <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Fears</span>
-                                <input value={draft.fears} onChange={(event) => setDraft((value) => ({ ...value, fears: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
+                                <input value={draft.fears} onChange={(event) => setDraft((value) => ({ ...value, fears: event.target.value }))} className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`} />
                               </label>
                             </div>
                             {actionError ? <p className="mt-3 text-sm text-rose-400">{actionError}</p> : null}
@@ -2947,7 +3194,7 @@ export default function CharactersPage() {
                                   setEditing(false)
                                   setDraft(buildDraft(selectedCharacter))
                                 }}
-                                className={`rounded-full border px-4 py-2.5 text-sm font-medium ${isDark ? "border-white/10 text-slate-300 hover:bg-white/[0.05]" : "border-stone-200 text-stone-700 hover:bg-white"}`}
+                                className={`rounded-full border px-4 py-2.5 text-sm font-medium ${isDark ? "border-[#202a38] text-slate-300 hover:bg-white/[0.05]" : "border-stone-200 text-stone-700 hover:bg-white"}`}
                               >
                                 Cancel
                               </button>
@@ -2984,7 +3231,7 @@ export default function CharactersPage() {
                                   <select
                                     value={relationshipDraft.counterpartId}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, counterpartId: event.target.value }))}
-                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   >
                                     <option value="">Choose a character</option>
                                     {relationshipCounterpartOptions.map((character) => (
@@ -2997,7 +3244,7 @@ export default function CharactersPage() {
                                   <select
                                     value={relationshipDraft.relType}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, relType: event.target.value as RelationshipComposerDraft["relType"] }))}
-                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   >
                                     {RELATIONSHIP_TYPE_OPTIONS.map((type) => (
                                       <option key={type} value={type}>{formatRelationshipType(type)}</option>
@@ -3013,7 +3260,7 @@ export default function CharactersPage() {
                                     step={0.1}
                                     value={relationshipDraft.sentiment}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, sentiment: event.target.value }))}
-                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   />
                                 </label>
                                 <label className="space-y-1">
@@ -3022,7 +3269,7 @@ export default function CharactersPage() {
                                     value={relationshipDraft.fromChapter}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, fromChapter: event.target.value }))}
                                     inputMode="numeric"
-                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   />
                                 </label>
                                 <label className="space-y-1">
@@ -3031,7 +3278,7 @@ export default function CharactersPage() {
                                     value={relationshipDraft.toChapter}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, toChapter: event.target.value }))}
                                     inputMode="numeric"
-                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   />
                                 </label>
                                 <label className="space-y-1 md:col-span-2">
@@ -3040,7 +3287,7 @@ export default function CharactersPage() {
                                     value={relationshipDraft.description}
                                     onChange={(event) => setRelationshipDraft((value) => ({ ...value, description: event.target.value }))}
                                     rows={3}
-                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
+                                    className={`w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
                                   />
                                 </label>
                               </div>
@@ -3055,7 +3302,7 @@ export default function CharactersPage() {
                               {hiddenGraphNodes.length > 0 ? (
                                 <div className="space-y-3">
                                   {hiddenGraphNodes.slice(0, 8).map((node) => (
-                                    <div key={node.id} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                    <div key={node.id} className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                       <div className="flex items-start justify-between gap-3">
                                         <div>
                                           <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{node.name}</p>
@@ -3085,20 +3332,119 @@ export default function CharactersPage() {
                         <SurfaceCard title="Relationship table" isDark={isDark}>
                           {selectedConnections.length > 0 ? (
                             <div className="space-y-3">
+                              <div className={`hidden grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_120px_96px] gap-2 px-3 text-xs font-semibold uppercase tracking-wide md:grid ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                                <span>Character</span>
+                                <span>Relationship</span>
+                                <span>Dynamics</span>
+                                <span>Strength</span>
+                                <span>Evidence</span>
+                              </div>
                               {selectedConnections.map((edge, index) => (
-                                <div key={`${edge.source}-${edge.target}-${edge.type}-${index}`} className={`grid gap-2 rounded-xl border px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_120px_90px] ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <div key={`${edge.source}-${edge.target}-${edge.type}-${index}`} className={`grid gap-2 rounded-xl border px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_120px_96px] ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                   <div className="min-w-0">
                                     <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{edge.counterpartName}</p>
-                                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{edge.description || "Relationship evidence is still being summarized."}</p>
+                                    <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{typeof edge.from_chapter === "number" ? `Chapter ${edge.from_chapter}` : "Chapter evidence pending"} / {Math.max(1, Math.round(strengthValue(edge.sentiment) / 10))} mentions</p>
                                   </div>
                                   <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{formatRelationshipType(edge.type)}</div>
-                                  <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{sentimentLabel(edge.sentiment)}</div>
+                                  <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{edge.description || sentimentLabel(edge.sentiment)}</div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`h-2 flex-1 rounded-full ${isDark ? "bg-white/10" : "bg-stone-100"}`}>
+                                      <span className={`block h-2 rounded-full ${relationshipStrengthColor(edge.sentiment, isDark)}`} style={{ width: `${strengthValue(edge.sentiment)}%` }} />
+                                    </span>
+                                  </div>
                                   <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{typeof edge.from_chapter === "number" ? `Ch. ${edge.from_chapter}` : "No ch."}{edge.status === "ended" ? " • ended" : ""}</div>
                                 </div>
                               ))}
                             </div>
                           ) : (
                             <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No relationship links are visible for this character yet.</p>
+                          )}
+                        </SurfaceCard>
+                      </div>
+                    ) : null}
+
+                    {activeTab === "mentions" ? (
+                      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                        <SurfaceCard title="Mention summary" isDark={isDark}>
+                          <dl className="grid gap-3 text-sm">
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Total mentions</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedCharacter.mention_count ?? 0}</dd>
+                            </div>
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>First appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterAppearanceText(selectedCharacter.first_chapter)}</dd>
+                            </div>
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Last appearance</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterAppearanceText(selectedCharacter.last_seen_chapter ?? selectedCharacter.first_chapter)}</dd>
+                            </div>
+                            <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
+                              <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Chapter count</dt>
+                              <dd className={isDark ? "text-white" : "text-stone-900"}>{chapterSpanCount(selectedCharacter)} / {bookCoverageLabel(selectedCharacter, book?.total_chapters)}</dd>
+                            </div>
+                          </dl>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Open questions" isDark={isDark}>
+                          {selectedOpenQuestions.length > 0 ? (
+                            <ul className={`space-y-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
+                              {selectedOpenQuestions.map((question) => <li key={question}>- {question}</li>)}
+                            </ul>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No open questions are currently derived for this character.</p>
+                          )}
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Mention evidence" isDark={isDark} className="xl:col-span-2">
+                          {selectedEvidence.length > 0 ? (
+                            <div className="space-y-3">
+                              {selectedEvidence.map((result, index) => (
+                                <div key={`${selectedCharacter.id}-mention-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+                                  <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}{result.chapter_title ? ` / ${result.chapter_title}` : ""}</p>
+                                  <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
+                                  <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No evidence snippets are loaded yet.</p>
+                              <button type="button" onClick={openCharacterEvidence} className={actionButtonClasses(isDark)}>Load mention evidence</button>
+                            </div>
+                          )}
+                        </SurfaceCard>
+                      </div>
+                    ) : null}
+
+                    {activeTab === "timeline" ? (
+                      <div className="mt-5 space-y-4">
+                        <SurfaceCard title="Timeline anchors" isDark={isDark}>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            {[
+                              ["First appearance", chapterAppearanceText(selectedCharacter.first_chapter)],
+                              ["Latest appearance", chapterAppearanceText(selectedCharacter.last_seen_chapter ?? selectedCharacter.first_chapter)],
+                              ["Coverage", bookCoverageLabel(selectedCharacter, book?.total_chapters)],
+                            ].map(([label, value]) => (
+                              <div key={label} className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</p>
+                                <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </SurfaceCard>
+
+                        <SurfaceCard title="Timeline" isDark={isDark}>
+                          {(selectedArcTracker?.arc_timeline?.length ?? selectedGrowthEvents.length) > 0 ? (
+                            <div className="space-y-3">
+                              {(selectedArcTracker?.arc_timeline?.length ? selectedArcTracker.arc_timeline : selectedGrowthEvents.map((event) => `${chapterAppearanceLabel(growthChapter(event))}: ${growthTitle(event)}`)).map((line) => (
+                                <div key={line} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No timeline events have been captured yet.</p>
                           )}
                         </SurfaceCard>
                       </div>
@@ -3117,27 +3463,27 @@ export default function CharactersPage() {
                             <dl className="grid gap-3 text-sm">
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Goal</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.goal || selectedCharacter.goal || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.goal || selectedCharacter.goal || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Motivation</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.motivation || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.motivation || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Fear</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.fear || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.fear || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Lie</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.lie_they_believe || selectedCharacter.lie_they_believe || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.lie_they_believe || selectedCharacter.lie_they_believe || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Wound</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.wound_backstory || selectedCharacter.backstory_wound || "Not grounded yet"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.wound_backstory || selectedCharacter.backstory_wound || "Not recorded"}</dd>
                               </div>
                               <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-3">
                                 <dt className={isDark ? "text-slate-500" : "text-stone-500"}>Arc type</dt>
-                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.arc_type || selectedCharacter.arc_type || selectedCharacter.archetype || "Still inferring"}</dd>
+                                <dd className={isDark ? "text-white" : "text-stone-900"}>{selectedArcTracker?.arc_type || selectedCharacter.arc_type || selectedCharacter.archetype || "Not recorded"}</dd>
                               </div>
                             </dl>
                           </SurfaceCard>
@@ -3146,7 +3492,7 @@ export default function CharactersPage() {
                             {(selectedArcTracker?.voice_markers?.length ?? 0) > 0 ? (
                               <div className="space-y-2">
                                 {selectedArcTracker?.voice_markers?.map((marker) => (
-                                  <div key={marker} className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  <div key={marker} className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                     {marker}
                                   </div>
                                 ))}
@@ -3161,7 +3507,7 @@ export default function CharactersPage() {
                           {(selectedArcTracker?.arc_timeline?.length ?? 0) > 0 ? (
                             <div className="space-y-3">
                               {selectedArcTracker?.arc_timeline?.map((line) => (
-                                <div key={line} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div key={line} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                   {line}
                                 </div>
                               ))}
@@ -3175,7 +3521,7 @@ export default function CharactersPage() {
                           {(selectedArcTracker?.major_turning_points?.length ?? selectedGrowthEvents.length) > 0 ? (
                             <div className="space-y-3">
                               {(selectedArcTracker?.major_turning_points?.length ? selectedArcTracker.major_turning_points : selectedGrowthEvents).map((event, index) => (
-                                <div key={`${selectedCharacter.id}-growth-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <div key={`${selectedCharacter.id}-growth-${index}`} className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                   <div className="flex flex-wrap items-center gap-2">
                                     {("chapter_number" in event ? event.chapter_number : growthChapter(event)) ? (
                                       <span className={`rounded-full px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
@@ -3207,7 +3553,7 @@ export default function CharactersPage() {
                             {(selectedArcTracker?.relationship_changes?.length ?? 0) > 0 ? (
                               <div className="space-y-3">
                                 {selectedArcTracker?.relationship_changes?.map((item, index) => (
-                                  <div key={relationshipChangeKey(item, index)} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                  <div key={relationshipChangeKey(item, index)} className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                     <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>Chapter {item.chapter_number}: {item.counterpart_name}</p>
                                     <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{formatRelationshipType(item.type)} / {sentimentLabel(item.sentiment)}</p>
                                     {item.description ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{item.description}</p> : null}
@@ -3223,7 +3569,7 @@ export default function CharactersPage() {
                             {(selectedArcTracker?.physical_description_history?.length ?? 0) > 0 ? (
                               <div className="space-y-3">
                                 {selectedArcTracker?.physical_description_history?.map((item) => (
-                                  <div key={`${item.chapter_number}-${item.trait}-${item.value}`} className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  <div key={`${item.chapter_number}-${item.trait}-${item.value}`} className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                     <span className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {item.chapter_number}</span>
                                     <p className={`mt-1 font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{item.label}</p>
                                     <p className="mt-1">{item.previous_value ? `${item.previous_value} -> ${item.value}` : item.value}</p>
@@ -3255,11 +3601,11 @@ export default function CharactersPage() {
                     {activeTab === "continuity" ? (
                       <div className="mt-5 grid gap-4 xl:grid-cols-2">
                         <SurfaceCard title="Continuity traits" isDark={isDark}>
-                          {visibleTraitEntries(selectedCharacter).length > 0 ? (
+                          {selectedTraitEntries.length > 0 ? (
                             <div className="grid gap-3">
-                              {visibleTraitEntries(selectedCharacter).map(([key, trait]) => trait ? (
-                                <div key={key} className={`grid grid-cols-[120px_minmax(0,1fr)] gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
-                                  <span className={isDark ? "text-slate-500" : "text-stone-500"}>{key}</span>
+                              {selectedTraitEntries.map(([key, trait]) => trait ? (
+                                <div key={key} className={`grid grid-cols-[120px_minmax(0,1fr)] gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+                                  <span className={isDark ? "text-slate-500" : "text-stone-500"}>{formatTraitLabel(key)}</span>
                                   <span className={isDark ? "text-white" : "text-stone-900"}>{trait.value}</span>
                                 </div>
                               ) : null)}
@@ -3273,7 +3619,7 @@ export default function CharactersPage() {
                           {(selectedHealth?.issues.length || selectedArcTracker?.diagnostics?.length) ? (
                             <div className="space-y-3">
                             {[...(selectedHealth?.issues ?? []), ...(selectedArcTracker?.diagnostics ?? [])].map((issue, index) => (
-                              <div key={`${issue}-${index}`} className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                              <div key={`${issue}-${index}`} className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                 <span>{issue}</span>
                                 <SectionChevron className={`mt-0.5 h-4 w-4 shrink-0 ${isDark ? "text-slate-500" : "text-stone-400"}`} />
                               </div>
@@ -3288,7 +3634,7 @@ export default function CharactersPage() {
                           {(selectedArcTracker?.contradictions?.length ?? 0) > 0 ? (
                             <div className="space-y-3">
                               {selectedArcTracker?.contradictions?.map((item, index) => (
-                                <div key={`${item}-${index}`} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div key={`${item}-${index}`} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                   {item}
                                 </div>
                               ))}
@@ -3312,7 +3658,7 @@ export default function CharactersPage() {
                           </button>
                           <Link
                             href={`/${bookId}/notes`}
-                            className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/8 text-slate-200" : "bg-stone-100 text-stone-700"}`}
+                            className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/[0.08] text-slate-200" : "bg-stone-100 text-stone-700"}`}
                           >
                             Open notes workspace
                           </Link>
@@ -3323,7 +3669,7 @@ export default function CharactersPage() {
                           {(selectedCharacter.relationship_summaries?.length ?? 0) > 0 ? (
                             <div className="space-y-3">
                               {selectedCharacter.relationship_summaries?.map((summary, index) => (
-                                <div key={`${selectedCharacter.id}-note-${index}`} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                                <div key={`${selectedCharacter.id}-note-${index}`} className={`rounded-xl border px-4 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                                   {summary}
                                 </div>
                               ))}
@@ -3368,7 +3714,7 @@ export default function CharactersPage() {
                         </p>
                         </div>
                         {selectedReviewCandidate ? (
-                          <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-white/10 bg-[#0c1119] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                          <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-[#202a38] bg-[#0c1119] text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                             {`1 of ${Math.max(filteredPendingCandidates.length, 1)} candidates`}
                           </div>
                         ) : null}
@@ -3392,13 +3738,18 @@ export default function CharactersPage() {
                               <span className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-teal-500/20 bg-teal-500/12 text-teal-100" : "border-teal-200 bg-teal-50 text-teal-700"}`}>
                                 Grounding {formatPercent(selectedReviewCandidate.grounding_coverage)}
                               </span>
-                              <span className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                              <span className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-[#202a38] bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                 Canonical confidence {formatPercent(selectedReviewCandidate.canonical_confidence)}
                               </span>
+                              {candidateAdjudicationBadges(selectedReviewCandidate).map((badge) => (
+                                <span key={`${selectedReviewCandidate.id}-${badge}`} className={`rounded-sm border px-3 py-2 text-xs ${isDark ? "border-amber-400/20 bg-amber-400/12 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                                  {badge}
+                                </span>
+                              ))}
                             </div>
                           </div>
 
-                          <div className={`mt-5 grid gap-4 xl:grid-cols-2 ${isDark ? "xl:divide-x xl:divide-white/8" : "xl:divide-x xl:divide-stone-200"}`}>
+                          <div className={`mt-5 grid gap-4 xl:grid-cols-2 ${isDark ? "xl:divide-x xl:divide-[#17202c]" : "xl:divide-x xl:divide-stone-200"}`}>
                             <div className="xl:pr-5">
                               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Resolver reasons</p>
                               <div className="mt-2 flex flex-wrap gap-2">
@@ -3421,12 +3772,12 @@ export default function CharactersPage() {
                               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Evidence snippets</p>
                               <div className="mt-2 space-y-2">
                                 {(selectedReviewCandidate.snippets ?? []).map((snippet, index) => (
-                                  <div key={`${selectedReviewCandidate.id}-snippet-${index}`} className={`rounded-xl border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                                  <div key={`${selectedReviewCandidate.id}-snippet-${index}`} className={`rounded-xl border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
                                     {snippet}
                                   </div>
                                 ))}
                                 {(selectedReviewCandidate.snippets ?? []).length === 0 ? (
-                                  <div className={`rounded-xl border px-3 py-3 text-sm leading-6 ${isDark ? "border-white/8 bg-black/20 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
+                                  <div className={`rounded-xl border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
                                     No evidence snippet is available for this held candidate yet.
                                   </div>
                                 ) : null}
@@ -3434,12 +3785,15 @@ export default function CharactersPage() {
                             </div>
                           </div>
 
-                          <div className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handlePromoteCandidate(selectedReviewCandidate)} className="w-full rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                          <div className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || selectedReviewCandidate.status !== "pending"} onClick={() => void handlePromoteCandidate(selectedReviewCandidate)} className="w-full rounded-md bg-[#1f615d] px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                               {candidateActionId === selectedReviewCandidate.id ? "Promoting..." : "Promote candidate"}
                             </button>
-                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || !selectedCharacter} onClick={() => void handleAttachCandidate(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id || selectedReviewCandidate.status !== "pending" || !selectedCharacter} onClick={() => void handleAttachCandidate(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
                               Attach to selected character
+                            </button>
+                            <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handleMarkCandidatePlace(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
+                              Mark as place
                             </button>
                             <button type="button" disabled={candidateActionId === selectedReviewCandidate.id} onClick={() => void handleRejectCandidate(selectedReviewCandidate)} className={`${actionButtonClasses(isDark)} w-full justify-center`}>
                               Reject candidate
@@ -3472,7 +3826,7 @@ export default function CharactersPage() {
                           {evidenceCache[selectedReviewCandidate.id]?.results?.length ? (
                             <div className="mt-4 space-y-2">
                               {evidenceCache[selectedReviewCandidate.id].results.slice(0, 3).map((result, index) => (
-                                <div key={`${selectedReviewCandidate.id}-search-${index}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <div key={`${selectedReviewCandidate.id}-search-${index}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                   <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
                                   <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
                                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
@@ -3491,7 +3845,7 @@ export default function CharactersPage() {
                         {filteredRelationshipCandidates.length > 0 ? (
                           <div className="space-y-3">
                             {filteredRelationshipCandidates.slice(0, 6).map((candidate) => (
-                              <div key={candidate.id} className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                              <div key={candidate.id} className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                 <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} {"<->"} {candidate.raw_character_b}</p>
                                 <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}</p>
                                 <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{candidate.description || candidate.reason_codes[0] || "Needs relationship review."}</p>
@@ -3519,7 +3873,7 @@ export default function CharactersPage() {
 
                       <SurfaceCard title="Repair controls" isDark={isDark}>
                         <div className="grid gap-3 md:grid-cols-2">
-                          <label className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                          <label className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
                             <div className="flex items-start gap-3">
                               <input type="checkbox" checked={reprocessAllowMerge} onChange={(event) => setReprocessAllowMerge(event.target.checked)} />
                               <div>
@@ -3528,7 +3882,7 @@ export default function CharactersPage() {
                               </div>
                             </div>
                           </label>
-                          <label className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                          <label className={`rounded-xl border px-4 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
                             <div className="flex items-start gap-3">
                               <input type="checkbox" checked={reprocessAllowDemote} onChange={(event) => setReprocessAllowDemote(event.target.checked)} />
                               <div>
@@ -3560,7 +3914,7 @@ export default function CharactersPage() {
                               ["Suppressed", repairPreview.auto_suppressed ?? repairPreview.planned_suppressions?.length ?? repairPreview.planned_demotions.length],
                               ["Blocked", repairPreview.blocked_suggestions ?? repairPreview.blocked_duplicate_suggestions?.length ?? 0],
                             ].map(([label, value]) => (
-                              <div key={String(label)} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                              <div key={String(label)} className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                 <p className={`text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{value}</p>
                                 <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>{label}</p>
                               </div>
@@ -3573,8 +3927,8 @@ export default function CharactersPage() {
 
                         <SurfaceCard title="Identity diagnostics" isDark={isDark}>
                           <div className="grid gap-3 sm:grid-cols-2">
-                            <p className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>{identityDiagnostics.suppressed_count} suppressed records</p>
-                            <p className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>{identityDiagnostics.blocked_duplicate_count} blocked duplicate pairs</p>
+                            <p className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>{identityDiagnostics.suppressed_count} suppressed records</p>
+                            <p className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>{identityDiagnostics.blocked_duplicate_count} blocked duplicate pairs</p>
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2">
                             {Object.entries(identityDiagnostics.suppression_reasons).slice(0, 6).map(([reason, count]) => (
@@ -3589,7 +3943,7 @@ export default function CharactersPage() {
                           <div className="mt-4 space-y-2">
                             <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Recent auto-actions</p>
                             {identityDiagnostics.recent_identity_actions.slice(0, 6).map((action) => (
-                              <div key={action.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                              <div key={action.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
                                 <div className="min-w-0">
                                   <p className={`font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{action.action_type.replaceAll("_", " ")}</p>
                                   <p className={`mt-1 truncate text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
@@ -3622,7 +3976,7 @@ export default function CharactersPage() {
                           <div className="mt-3 space-y-2">
                               {repairPreview.planned_merges.slice(0, 8).map(([primaryId, secondaryId]) => {
                                 return (
-                                  <div key={`${primaryId}:${secondaryId}`} className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                                  <div key={`${primaryId}:${secondaryId}`} className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
                                   {characterLabel(primaryId)} {"<-"} {characterLabel(secondaryId)}
                                   </div>
                                 )
@@ -3637,7 +3991,7 @@ export default function CharactersPage() {
                           <div className="mt-3 space-y-2">
                             {repairPreview.planned_demotions.slice(0, 8).map((characterId) => {
                               return (
-                                <div key={characterId} className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div key={characterId} className={`rounded-xl border px-3 py-3 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-700"}`}>
                                   {characterLabel(characterId)}
                                 </div>
                               )
@@ -3702,7 +4056,7 @@ export default function CharactersPage() {
                                     setManualMergeSecondaryId(fallbackSecondary)
                                   }
                                 }}
-                                className={`mt-2 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                                className={`mt-2 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                               >
                                 {mergeableCharacters.map((character) => (
                                   <option key={`manual-primary-${character.id}`} value={character.id}>{character.name}</option>
@@ -3714,7 +4068,7 @@ export default function CharactersPage() {
                               <select
                                 value={selectedMergeSecondary.id}
                                 onChange={(event) => setManualMergeSecondaryId(event.target.value)}
-                                className={`mt-2 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+                                className={`mt-2 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-[#202a38] bg-[#0b1220] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
                               >
                                 {mergeableCharacters.filter((character) => character.id !== selectedMergePrimary.id).map((character) => (
                                   <option key={`manual-secondary-${character.id}`} value={character.id}>{character.name}</option>
@@ -3796,7 +4150,7 @@ export default function CharactersPage() {
                                   <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Evidence</p>
                                   <div className="mt-2 space-y-2">
                                     {evidence.slice(0, 2).map((result, evidenceIndex) => (
-                                      <div key={`${character.id}-evidence-compare-${evidenceIndex}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                      <div key={`${character.id}-evidence-compare-${evidenceIndex}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                         <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
                                         <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
                                       </div>
@@ -3813,11 +4167,11 @@ export default function CharactersPage() {
 
                         <SurfaceCard title="Differences" isDark={isDark}>
                           <div className="grid gap-3 md:grid-cols-2">
-                            <div className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                            <div className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Primary record</p>
                               <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedMergePrimary.name} / {selectedMergePrimary.mention_count ?? 0} mentions / {relationshipCounts.get(selectedMergePrimary.id) ?? 0} ties</p>
                             </div>
-                            <div className={`rounded-xl border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                            <div className={`rounded-xl border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                               <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Candidate record</p>
                               <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedMergeSecondary.name} / {selectedMergeSecondary.mention_count ?? 0} mentions / {relationshipCounts.get(selectedMergeSecondary.id) ?? 0} ties</p>
                             </div>
@@ -3887,14 +4241,14 @@ export default function CharactersPage() {
                 {workspaceMode === "profile" && creating ? (
                   <div className="p-4">
                     <div className="space-y-4">
-                      <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                      <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Manual add</p>
                         <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                           Use this for characters LoreVia missed, off-page characters you still want tracked, or deliberate naming choices you do not want to wait for extraction to infer.
                         </p>
                       </section>
 
-                      <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                      <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Tips</p>
                         <div className="mt-4 space-y-3 text-sm leading-6">
                           <p className={isDark ? "text-slate-300" : "text-stone-600"}>Add a short description if you want the new profile to read well immediately.</p>
@@ -3936,7 +4290,7 @@ export default function CharactersPage() {
                 {workspaceMode === "review" ? (
                   <div className="p-4">
                     <div className="space-y-4">
-                      <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                      <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${sectionEyebrowClasses(isDark, "teal")}`}>Review guide</p>
                         <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                           Promote grounded candidates into the cast, attach partial matches to the selected character, or reject role-label noise before it pollutes the bible.
@@ -3944,7 +4298,7 @@ export default function CharactersPage() {
                       </section>
 
                       {selectedReviewCandidate ? (
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                        <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                           <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Current candidate</p>
                           <p className={`mt-3 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedReviewCandidate.proposed_name}</p>
                           <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Chapter {selectedReviewCandidate.chapter_number} · {selectedReviewCandidate.confidence}% confidence</p>
@@ -3961,18 +4315,18 @@ export default function CharactersPage() {
                         </section>
                       ) : null}
 
-                      <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                      <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Queue health</p>
                         <div className="mt-4 space-y-3">
-                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                             <p className={`text-xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Candidates</p>
                             <p className={`mt-1 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{filteredPendingCandidates.length}</p>
                           </div>
-                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                             <p className={`text-xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Relationship items</p>
                             <p className={`mt-1 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{filteredRelationshipCandidates.length}</p>
                           </div>
-                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                             <p className={`text-xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Merge suggestions</p>
                             <p className={`mt-1 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{mergeSuggestions.length}</p>
                           </div>
@@ -3985,32 +4339,32 @@ export default function CharactersPage() {
                 {workspaceMode === "repair" ? (
                   <div className="p-4">
                     <div className="space-y-4">
-                      <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                      <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${sectionEyebrowClasses(isDark, "amber")}`}>Repair guidance</p>
                         <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                           Review the safe plan first. Protected or manually curated records stay out of automated cleanup unless you act on them explicitly elsewhere.
                         </p>
                       </section>
 
-                      <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                      <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Preview totals</p>
                         <div className="mt-4 grid gap-3">
-                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                             <p className={`text-xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Planned merges</p>
                             <p className={`mt-1 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{repairPreview.planned_merges.length}</p>
                           </div>
-                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                             <p className={`text-xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Planned demotions</p>
                             <p className={`mt-1 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{repairPreview.planned_demotions.length}</p>
                           </div>
-                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                          <div className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                             <p className={`text-xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Protected skips</p>
                             <p className={`mt-1 text-lg font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{repairPreview.skipped_protected_merge_pairs.length + repairPreview.skipped_protected_demotions.length}</p>
                           </div>
                         </div>
                       </section>
 
-                      <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
+                      <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Current safeguards</p>
                         <div className="mt-4 space-y-2 text-sm leading-6">
                           <p className={isDark ? "text-slate-300" : "text-stone-600"}>{reprocessAllowMerge ? "Safe duplicate merges are enabled." : "Safe duplicate merges are paused."}</p>
@@ -4025,29 +4379,29 @@ export default function CharactersPage() {
                   <div className="p-4">
                     {selectedMergePrimary && selectedMergeSecondary ? (
                       <div className="space-y-4">
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
+                        <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
                           <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{isManualMerge ? "Manual merge" : "Merge suggestion"}</p>
                           <p className={`mt-3 text-2xl font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{selectedMergeSuggestion && !isManualMerge ? `${selectedMergeSuggestion.confidence}%` : "Manual review"}</p>
                           <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{selectedMergeSuggestion && !isManualMerge ? "Confidence based on name overlap, alias collisions, and shared chapter context." : "Use this when a family-role alias or late rename was missed by automatic duplicate suggestions."}</p>
                           {selectedMergeSuggestion && !isManualMerge ? (
                             <div className="mt-4 space-y-2">
                               {selectedMergeSuggestion.reasons.map((reason) => (
-                                <div key={reason} className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div key={reason} className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                   {reason}
                                 </div>
                               ))}
                               {selectedMergeSuggestion.sharedClusterKeys.length > 0 ? (
-                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                   Shared clusters: {selectedMergeSuggestion.sharedClusterKeys.join(", ")}
                                 </div>
                               ) : null}
                               {selectedMergeSuggestion.sharedChapters.length > 0 ? (
-                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                   Shared chapters: {selectedMergeSuggestion.sharedChapters.join(", ")}
                                 </div>
                               ) : null}
                               {typeof selectedMergeSuggestion.embeddingSimilarity === "number" ? (
-                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-white/8 bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+                                <div className={`rounded-xl border px-3 py-2.5 text-sm ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
                                   Embedding similarity: {formatPercent(selectedMergeSuggestion.embeddingSimilarity)}
                                 </div>
                               ) : null}
@@ -4055,7 +4409,7 @@ export default function CharactersPage() {
                           ) : null}
                         </section>
 
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
+                        <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
                           <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Quick actions</p>
                           <div className="mt-4 space-y-3">
                             <QuickActionTile
@@ -4091,12 +4445,12 @@ export default function CharactersPage() {
                           </div>
                         </section>
 
-                        <section className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
+                        <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-white/[0.03]" : "border-stone-200 bg-stone-50/75"}`}>
                           <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Relationship queue</p>
                           {filteredRelationshipCandidates.length > 0 ? (
                             <div className="mt-4 space-y-3">
                               {filteredRelationshipCandidates.slice(0, 4).map((candidate) => (
-                                <div key={`duplicate-review-${candidate.id}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+                                <div key={`duplicate-review-${candidate.id}`} className={`rounded-xl border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                                   <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{candidate.raw_character_a} and {candidate.raw_character_b}</p>
                                   <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
                                     Chapter {candidate.chapter_number}{candidate.rel_type ? ` · ${formatRelationshipType(candidate.rel_type)}` : ""}
@@ -4134,7 +4488,7 @@ export default function CharactersPage() {
             </div>
           </div>
         ) : !error ? (
-          <div className={`mt-5 rounded-lg border p-6 text-sm ${isDark ? "border-white/10 bg-black/20 text-slate-300" : "border-stone-200 bg-white/85 text-stone-600"}`}>
+          <div className={`mt-5 rounded-lg border p-6 text-sm ${isDark ? "border-[#202a38] bg-black/20 text-slate-300" : "border-stone-200 bg-white/85 text-stone-600"}`}>
             <p>
               {hasPendingReviewItems
                 ? `LoreVia held ${pendingReviewItemCount} extracted ${pendingReviewItemCount === 1 ? "item" : "items"} for review instead of adding them automatically.`

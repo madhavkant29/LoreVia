@@ -1,5 +1,6 @@
 import time
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import uuid
@@ -191,7 +192,7 @@ def test_llm_usage_limit_error_ignores_other_429_errors():
 @pytest.mark.asyncio
 async def test_is_book_hidden_detects_hidden_books():
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=datetime.now(UTC))
+    db.execute = AsyncMock(return_value=SimpleNamespace(first=lambda: (datetime.now(UTC), "active", None)))
 
     assert await is_book_hidden(db, uuid.uuid4()) is True
 
@@ -199,7 +200,7 @@ async def test_is_book_hidden_detects_hidden_books():
 @pytest.mark.asyncio
 async def test_is_book_hidden_returns_false_for_visible_books():
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=None)
+    db.execute = AsyncMock(return_value=SimpleNamespace(first=lambda: (None, "active", None)))
 
     assert await is_book_hidden(db, uuid.uuid4()) is False
 

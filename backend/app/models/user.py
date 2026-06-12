@@ -11,6 +11,8 @@ from app.core.database import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
+        Index("ix_users_beta_read_penalty_required_at", "beta_read_penalty_required_at"),
+        Index("ix_users_username", "username", unique=True),
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),
         UniqueConstraint("supabase_auth_id", name="uq_users_supabase_auth_id"),
@@ -41,6 +43,13 @@ class User(Base):
     reputation_dislikes_received: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     messaging_permission: Mapped[str] = mapped_column(String, default="anyone", server_default="anyone")
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    deletion_status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active", index=True)
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    deletion_scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    deleted_email_hash: Mapped[str | None] = mapped_column(String, index=True)
+    deletion_provider_status: Mapped[str | None] = mapped_column(String, index=True)
+    deletion_provider_metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     books = relationship("Book", foreign_keys="Book.user_id", back_populates="user", cascade="all, delete-orphan")
@@ -82,6 +91,28 @@ class User(Base):
     direct_messages_sent = relationship("DirectMessage", foreign_keys="DirectMessage.sender_user_id", back_populates="sender", cascade="all, delete-orphan")
     login_activities = relationship("UserLoginActivity", back_populates="user", cascade="all, delete-orphan")
     email_preferences = relationship("EmailPreference", back_populates="user", cascade="all, delete-orphan", uselist=False)
+
+
+class DataDeletionRequest(Base):
+    __tablename__ = "data_deletion_requests"
+    __table_args__ = (
+        Index("ix_data_deletion_requests_status_scheduled_for", "status", "scheduled_for"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    book_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="SET NULL"), index=True)
+    request_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending", index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    storage_keys_json: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    provider_actions_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    error_detail: Mapped[str | None] = mapped_column(Text)
 
 
 class Subscription(Base):

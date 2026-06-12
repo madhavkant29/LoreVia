@@ -69,6 +69,7 @@ type NavSection = {
 }
 
 const READER_SHELL_ITEM_IDS = new Set(["overview", "read", "chapters", "summaries", "search", "timeline", "beta-feedback"])
+const FREE_OWNER_AUTHOR_ITEM_IDS = new Set(["overview", "read", "chapters", "advisor", "export"])
 
 function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermissions | null) {
   if (!permissions) return false
@@ -188,9 +189,9 @@ export function AuthorToolsNav({
   const currentShell = book?.workspace_shell ?? mode
   const isOwnerSession = !collaborationRole
   const hasOwnAuthorAccess = canUseAuthorFeatures(tier)
-  const hasFreeSampleIntelligenceAccess = tier === "free"
   const hasCollaboratorAccess = Boolean(collaborationRole && collaborationPermissions)
   const showAuthorSections = currentShell === "author" && (isOwnerSession || hasOwnAuthorAccess || hasCollaboratorAccess)
+  const isLimitedFreeOwner = currentShell === "author" && isOwnerSession && !hasOwnAuthorAccess
   const { prefetchByNavId } = useNavigationPrefetch(bookId)
 
   const sections = useMemo(
@@ -200,10 +201,13 @@ export function AuthorToolsNav({
           if (currentShell === "reader") {
             return !section.authorOnly
           }
+          if (isLimitedFreeOwner) {
+            return section.title === "Library" || section.title === "Review Center" || section.title === "Publish & Export"
+          }
           if (showAuthorSections || !section.authorOnly) {
             return true
           }
-          return hasFreeSampleIntelligenceAccess && section.title === "Review Center"
+          return false
         })
         .map((section) => ({
           ...section,
@@ -211,15 +215,15 @@ export function AuthorToolsNav({
             if (currentShell === "reader") {
               return READER_SHELL_ITEM_IDS.has(item.id)
             }
-            if (!showAuthorSections && hasFreeSampleIntelligenceAccess) {
-              return item.id === "advisor" || item.id === "editorial-review"
+            if (isLimitedFreeOwner) {
+              return FREE_OWNER_AUTHOR_ITEM_IDS.has(item.id)
             }
             if (isOwnerSession || hasOwnAuthorAccess || !collaborationRole) return true
             return canSeeCollaboratorItem(item.id, collaborationPermissions)
           }),
         }))
         .filter((section) => section.items.length > 0),
-    [bookId, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasFreeSampleIntelligenceAccess, hasOwnAuthorAccess, showAuthorSections]
+    [bookId, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasOwnAuthorAccess, isLimitedFreeOwner, isOwnerSession, showAuthorSections]
   )
   const rail = variant === "rail"
   const [isPinnedOpen, setIsPinnedOpen] = useState(false)
@@ -291,7 +295,7 @@ export function AuthorToolsNav({
                               ? "border-teal-300/20 bg-teal-900/70 text-white"
                               : "bg-teal-800 text-white"
                             : isDark
-                              ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
+                              ? "border-transparent text-slate-300 hover:border-white/[0.08] hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
                               : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                         }`}
                       >
@@ -333,7 +337,7 @@ export function AuthorToolsNav({
               </div>
               )
               return section.authorOnly ? (
-                <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess}>
+                <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess || (isLimitedFreeOwner && section.title === "Publish & Export")}>
                   {sectionMarkup}
                 </AuthorFeatureComponent>
               ) : (
@@ -378,7 +382,7 @@ export function AuthorToolsNav({
                           ? "border-teal-300/20 bg-teal-900/70 text-white"
                           : "bg-teal-800 text-white"
                         : isDark
-                          ? "border-transparent text-slate-300 hover:border-white/8 hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
+                          ? "border-transparent text-slate-300 hover:border-white/[0.08] hover:bg-white/[0.05] hover:text-white focus-visible:ring-white/25"
                           : "border-transparent text-stone-600 hover:border-stone-200 hover:bg-stone-100 focus-visible:ring-stone-300 hover:text-stone-950"
                     }`}
                   >
@@ -420,7 +424,7 @@ export function AuthorToolsNav({
           </div>
           )
           return section.authorOnly ? (
-            <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess}>
+            <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess || (isLimitedFreeOwner && section.title === "Publish & Export")}>
               {sectionMarkup}
             </AuthorFeatureComponent>
           ) : (

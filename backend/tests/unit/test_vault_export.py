@@ -48,6 +48,9 @@ def test_character_bible_vault_manifest_builds_linked_vault_structure():
             "rel_type": "ally",
             "from_chapter": 2,
             "to_chapter": None,
+            "shared_labels": ["spouse", "forbidden_romance"],
+            "character_a_to_b_labels": ["half_sister"],
+            "character_b_to_a_labels": ["half_brother"],
             "description": "Aria trusts Blaire.",
         }
     ]
@@ -126,6 +129,7 @@ def test_character_bible_vault_manifest_builds_linked_vault_structure():
 
     assert "[[Blaire]]" in paths[f"{root_folder}/Characters/Aria.md"]
     assert "[[Aria]]" in paths[f"{root_folder}/Characters/Blaire.md"]
+    assert "Half-Sister, Half-Brother, Spouse, Forbidden Romance" in paths[f"{root_folder}/Relationships/Relationship Map.md"]
     assert "Next: [[Blaire joins]]" in paths[f"{root_folder}/Major Events/Aria arrives.md"]
     assert "Previous: [[Aria arrives]]" in paths[f"{root_folder}/Major Events/Blaire joins.md"]
     assert "## Connected Plot Threads" in paths[f"{root_folder}/Major Events/Aria arrives.md"]

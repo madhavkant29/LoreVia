@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { getMock, postMock, patchMock, isAxiosErrorMock, signOutMock } = vi.hoisted(() => ({
+const { getMock, postMock, patchMock, deleteMock, isAxiosErrorMock, signOutMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
   patchMock: vi.fn(),
+  deleteMock: vi.fn(),
   isAxiosErrorMock: vi.fn(),
   signOutMock: vi.fn(),
 }))
@@ -13,6 +14,7 @@ vi.mock("./client", () => ({
     get: getMock,
     post: postMock,
     patch: patchMock,
+    delete: deleteMock,
   },
 }))
 
@@ -38,12 +40,14 @@ describe("auth api", () => {
     getMock.mockReset()
     postMock.mockReset()
     patchMock.mockReset()
+    deleteMock.mockReset()
     isAxiosErrorMock.mockReset()
     signOutMock.mockReset()
 
     postMock.mockResolvedValue({ data: { ok: true } })
     getMock.mockResolvedValue({ data: { ok: true } })
     patchMock.mockResolvedValue({ data: { ok: true } })
+    deleteMock.mockResolvedValue({ data: { ok: true } })
     signOutMock.mockResolvedValue({})
   })
 
@@ -133,6 +137,30 @@ describe("auth api", () => {
     getMock.mockResolvedValue({ data: { id: "user-1" } })
 
     await expect(authApi.me()).resolves.toEqual({ id: "user-1" })
+  })
+
+  it("exports current user data as a blob", async () => {
+    await authApi.exportData()
+
+    expect(getMock).toHaveBeenCalledWith("/auth/me/data-export", { responseType: "blob" })
+  })
+
+  it("deletes the current account with confirmation and password", async () => {
+    await authApi.deleteAccount({ confirmationText: "DELETE MY ACCOUNT", password: "Secret123!" })
+
+    expect(deleteMock).toHaveBeenCalledWith("/auth/me", {
+      data: {
+        confirmation_text: "DELETE MY ACCOUNT",
+        password: "Secret123!",
+      },
+    })
+    expect(signOutMock).toHaveBeenCalledWith({ scope: "local" })
+  })
+
+  it("keeps completed account deletion successful when provider session cleanup fails", async () => {
+    signOutMock.mockRejectedValue(new Error("provider cleanup failed"))
+
+    await expect(authApi.deleteAccount({ confirmationText: "DELETE MY ACCOUNT" })).resolves.toEqual({ ok: true })
   })
 
   it("returns null on me when the backend responds with 401", async () => {

@@ -115,6 +115,7 @@ function buildWorkspace(): WriterWorkspace {
       include_epigraph: false,
       include_prologue: false,
     },
+    novel_preface: "",
     revision_board: {
       items: [],
     },

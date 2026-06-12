@@ -20,7 +20,7 @@ function EvidenceCard({
   title: string
 }) {
   return (
-    <section className={`rounded-lg border p-4 ${isDark ? "border-white/8 bg-white/[0.025]" : "border-stone-200 bg-stone-50/60"}`}>
+    <section className={`rounded-lg border p-4 ${isDark ? "border-[#17202c] bg-white/[0.025]" : "border-stone-200 bg-stone-50/60"}`}>
       <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{title}</h3>
       <div className="mt-4">{children}</div>
     </section>
@@ -55,7 +55,7 @@ export function CharacterEvidencePanel({
         {evidence.length > 0 ? (
           <div className="space-y-3">
             {evidence.map((result, index) => (
-              <div key={`${characterId}-evidence-${index}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+              <div key={`${characterId}-evidence-${index}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-md px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-violet-500/15 text-violet-100" : "bg-violet-100 text-violet-700"}`}>
                     Chapter {result.chapter_num}
@@ -77,7 +77,7 @@ export function CharacterEvidencePanel({
         {relationships.length > 0 ? (
           <div className="space-y-3">
             {relationships.map((edge, index) => (
-              <div key={`${characterId}-relationship-evidence-${index}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-200 bg-white"}`}>
+              <div key={`${characterId}-relationship-evidence-${index}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                 <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{characterName} to {edge.counterpartName}</p>
                 <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
                   {formatRelationshipType(edge.type)} / {sentimentLabel(edge.sentiment)}{typeof edge.from_chapter === "number" ? ` / Chapter ${edge.from_chapter}` : ""}

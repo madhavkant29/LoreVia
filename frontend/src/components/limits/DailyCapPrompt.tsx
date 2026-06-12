@@ -81,7 +81,7 @@ export function DailyCapPrompt() {
           <button
             type="button"
             onClick={close}
-            className={`rounded-full px-3 py-1 text-sm ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-500"}`}
+            className={`rounded-full px-3 py-1 text-sm ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-stone-100 text-stone-500"}`}
           >
             Close
           </button>
@@ -89,7 +89,7 @@ export function DailyCapPrompt() {
 
         <p className={`mt-4 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{copy.body}</p>
 
-        <div className={`mt-5 rounded-lg border p-5 ${isDark ? "border-white/8 bg-white/[0.04]" : "border-stone-200 bg-white/85"}`}>
+        <div className={`mt-5 rounded-lg border p-5 ${isDark ? "border-white/[0.08] bg-white/[0.04]" : "border-stone-200 bg-white/85"}`}>
           <p className="text-sm leading-7">
             Paid plans are the only upgrade path exposed in the main author workspace.
           </p>
@@ -107,7 +107,7 @@ export function DailyCapPrompt() {
             <button
               type="button"
               onClick={close}
-              className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/12 text-slate-100" : "border border-stone-200 text-stone-800"}`}
+              className={`rounded-full px-4 py-2 text-sm font-semibold ${isDark ? "border border-white/[0.12] text-slate-100" : "border border-stone-200 text-stone-800"}`}
             >
               Continue later
             </button>

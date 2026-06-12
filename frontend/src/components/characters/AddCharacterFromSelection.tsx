@@ -186,7 +186,7 @@ export function AddCharacterFromSelection({
             disabled={busy}
             className={`rounded-md px-4 py-2 text-sm font-medium ${
               isDark
-                ? "bg-white/8 text-slate-200 hover:bg-white/12"
+                ? "bg-white/[0.08] text-slate-200 hover:bg-white/[0.12]"
                 : "bg-stone-100 text-stone-700 hover:bg-stone-200"
             } disabled:opacity-40`}
           >

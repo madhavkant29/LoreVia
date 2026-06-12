@@ -197,13 +197,18 @@ class CharacterCandidate(Base):
         Index("ix_character_candidates_book_status", "book_id", "status"),
         Index("ix_character_candidates_book_normalized_name", "book_id", "normalized_name"),
         Index("ix_character_candidates_matched_character_id", "matched_character_id"),
+        Index("ix_character_candidates_book_adjudication", "book_id", "adjudication_status"),
+        Index("ix_character_candidates_book_entity_type", "book_id", "entity_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    chapter_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True)
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("novel_scenes.id", ondelete="SET NULL"), nullable=True, index=True)
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_name: Mapped[str] = mapped_column(String, nullable=False)
     proposed_name: Mapped[str] = mapped_column(String, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String)
     normalized_name: Mapped[str] = mapped_column(String, nullable=False)
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     matched_character_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -215,6 +220,13 @@ class CharacterCandidate(Base):
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    mention_count: Mapped[int | None] = mapped_column(Integer)
+    chapter_count: Mapped[int | None] = mapped_column(Integer)
+    evidence_windows: Mapped[list[dict] | None] = mapped_column(JSONB, default=list)
+    entity_type: Mapped[str | None] = mapped_column(String)
+    adjudication_status: Mapped[str | None] = mapped_column(String)
+    character_score: Mapped[int | None] = mapped_column(Integer)
+    rejection_reason: Mapped[str | None] = mapped_column(String)
     source_batch_key: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

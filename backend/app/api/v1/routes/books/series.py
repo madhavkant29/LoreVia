@@ -19,6 +19,7 @@ from app.schemas.books import (
     SeriesMembershipBody,
     SeriesOut,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.book_utils import (
     book_out,
     build_single_series_out,
@@ -41,6 +42,7 @@ async def update_book_series(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404, "Book not found")
+    require_author_access(current_user)
 
     series_name = _clean_text(body.series_name)
     if body.series_order is not None and body.series_order < 1:
@@ -99,6 +101,7 @@ async def list_series(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_author_access(current_user)
     if limit < 1 or limit > 100:
         raise HTTPException(400, "limit must be between 1 and 100")
     if offset < 0:
@@ -146,6 +149,7 @@ async def get_series_bible(
     current_user=Depends(get_current_user),
 ):
     series = await get_owned_series(db, series_id, current_user.id)
+    require_author_access(current_user)
     return await build_series_bible_payload(db, series=series)
 
 
@@ -155,6 +159,7 @@ async def create_series(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_author_access(current_user)
     name = _clean_text(body.name)
     description = _clean_optional_text(body.description)
     if not name:
@@ -183,6 +188,7 @@ async def add_book_to_series(
 ):
     series = await get_owned_series(db, series_id, current_user.id)
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     if body.position is not None and body.position < 1:
         raise HTTPException(400, "Position must be at least 1")
 
@@ -209,6 +215,7 @@ async def remove_book_from_series(
 ):
     series = await get_owned_series(db, series_id, current_user.id)
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     membership = (
         await db.execute(select(SeriesBook).where(SeriesBook.series_id == series.id, SeriesBook.book_id == book.id))
     ).scalar()
@@ -234,6 +241,7 @@ async def set_series_book_status(
 ):
     series = await get_owned_series(db, series_id, current_user.id)
     book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     membership = (
         await db.execute(select(SeriesBook).where(SeriesBook.series_id == series.id, SeriesBook.book_id == book.id))
     ).scalar()

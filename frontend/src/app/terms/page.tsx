@@ -72,6 +72,14 @@ const sections = [
     paragraphs: [
       "LoreVia may change features, pricing, limits, moderation workflows, and product functionality over time. We do not guarantee uninterrupted availability.",
       "Paid subscriptions renew according to their billing terms unless canceled. Fees are non-refundable except where required by law or stated otherwise.",
+      "If you delete your account, LoreVia will make the account inaccessible immediately and cancel subscription renewal at the next billing period. Account deletion does not automatically refund unused time in the current paid period.",
+    ],
+  },
+  {
+    title: "Account deletion and retained records",
+    paragraphs: [
+      "You may delete your account from settings or request deletion of account or manuscript data by contacting support@mail.getlorevia.com. Product data, manuscripts, generated analysis, character data, relationships, public/shared links, and related workspace data are queued for deletion after the operational retention period.",
+      "LoreVia may retain limited billing, tax, fraud-prevention, security, and legal records where required. Where possible, those records are detached from active product data.",
     ],
   },
   {

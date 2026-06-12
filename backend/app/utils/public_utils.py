@@ -64,10 +64,12 @@ from app.schemas.public import (
     PublicUserProfileOut,
     PublicUserProjectOut,
 )
+
 from app.utils.billing_utils import has_authoring_access
 from app.utils.beta_read_utils import NEUTRAL_RATING_MIN, POSITIVE_RATING_MIN, RATED_ASSIGNMENT_STATES
 from app.utils.book_utils import build_story_health_payload, deserialize_manuscript_content, estimate_readability
 from app.utils.character_utils import is_displayable_character
+from app.utils.storage_utils import delete_storage_key_best_effort
 
 FORUM_POST_OPEN = "open"
 FORUM_POST_CLOSED = "closed"
@@ -3182,6 +3184,7 @@ async def update_public_forum_post(
         ).scalar_one_or_none()
         if existing_open_post is not None:
             raise HTTPException(409, "This manuscript already has another open beta forum post.")
+    previous_image_s3_key = post.image_s3_key
     post.headline = headline
     post.body = description
     if image_upload is not None:
@@ -3200,6 +3203,9 @@ async def update_public_forum_post(
     post.status = next_status
     await db.commit()
     await db.refresh(post)
+    if image_upload is not None or body.remove_image:
+        if previous_image_s3_key and previous_image_s3_key != post.image_s3_key:
+            await delete_storage_key_best_effort(previous_image_s3_key, context="public_forum_image")
     await _invalidate_public_forum_cache()
     await _invalidate_public_profile_cache_for_users(current_user.id)
     return await get_public_forum_post_detail(db, post_id=post.id, current_user=current_user)

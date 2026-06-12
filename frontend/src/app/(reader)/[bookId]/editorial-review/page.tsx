@@ -344,7 +344,7 @@ export default function EditorialReviewPage() {
                         isDark ? "text-slate-100" : "text-stone-900"
                       }`}
                     />
-                    <div className={`flex items-center justify-between gap-3 border-t px-4 py-3 text-xs ${isDark ? "border-white/8 text-slate-500" : "border-stone-200 text-stone-500"}`}>
+                    <div className={`flex items-center justify-between gap-3 border-t px-4 py-3 text-xs ${isDark ? "border-white/[0.08] text-slate-500" : "border-stone-200 text-stone-500"}`}>
                       <span>{chapterNumber ? `Review target: Chapter ${chapterNumber}` : "Review target: custom passage. Paste a paragraph, scene, or full chapter section."}</span>
                       <span>{textCharacterCount} characters</span>
                     </div>
@@ -359,7 +359,7 @@ export default function EditorialReviewPage() {
                   <div className={`space-y-3 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50/80"}`} role="status" aria-label="Loading editorial review" aria-busy="true">
                     <span className="sr-only">Loading editorial review</span>
                     <Skeleton className={`h-2.5 w-40 ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
-                    <Skeleton className={`h-2.5 w-full ${isDark ? "bg-white/8" : "bg-stone-200/80"}`} />
+                    <Skeleton className={`h-2.5 w-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200/80"}`} />
                     <Skeleton className={`h-2.5 w-3/4 ${isDark ? "bg-white/6" : "bg-stone-200/70"}`} />
                   </div>
                 ) : null}

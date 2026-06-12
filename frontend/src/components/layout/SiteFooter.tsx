@@ -47,7 +47,7 @@ export function SiteFooter() {
     <footer
       className={`border-t px-4 py-16 text-sm transition-colors sm:px-6 lg:px-8 ${isDashboardShellSurface ? "lg:ml-[15rem]" : ""} ${
         isEditorialMarketingSurface
-          ? "border-white/8 bg-[#08110f] text-[#d9e0db]"
+          ? "border-white/[0.08] bg-[#08110f] text-[#d9e0db]"
           : "border-slate-200 bg-[#f6f5f3] text-[rgb(var(--foreground))] dark:border-slate-700/70 dark:bg-[#12171c]"
       }`}
     >
@@ -84,7 +84,7 @@ export function SiteFooter() {
             </div>
 
             {!isLandingPage ? (
-              <div className={`mt-8 border-t pt-8 ${isEditorialMarketingSurface ? "border-white/8" : "border-slate-200 dark:border-slate-700/70"}`}>
+              <div className={`mt-8 border-t pt-8 ${isEditorialMarketingSurface ? "border-white/[0.08]" : "border-slate-200 dark:border-slate-700/70"}`}>
                 <Link href={returnLink.href} className={`group inline-flex items-center gap-4 text-[1.05rem] transition-colors ${isEditorialMarketingSurface ? "text-[#f3ede4] hover:text-[#69c6b1]" : "text-stone-900 hover:text-[#1f615d] dark:text-[#f3ede4] dark:hover:text-[#69c6b1]"}`}>
                   <span className={`flex h-10 w-10 items-center justify-center rounded-full border transition-colors ${
                     isEditorialMarketingSurface
@@ -125,7 +125,7 @@ export function SiteFooter() {
                 </div>
               </div>
 
-              <div className={`border-t pt-6 ${isEditorialMarketingSurface ? "border-white/8" : "border-slate-200 dark:border-slate-700/70"}`}>
+              <div className={`border-t pt-6 ${isEditorialMarketingSurface ? "border-white/[0.08]" : "border-slate-200 dark:border-slate-700/70"}`}>
                 <div className="flex items-start gap-4">
                   <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${
                     isEditorialMarketingSurface
@@ -158,14 +158,14 @@ export function SiteFooter() {
               className="mt-6 flex items-center gap-3"
               linkClassName={`inline-flex h-11 w-11 items-center justify-center rounded-full border transition-colors ${
                 isEditorialMarketingSurface
-                  ? "border-white/12 text-[#c9d1cb] hover:border-[#69c6b1] hover:text-[#69c6b1]"
+                  ? "border-white/[0.12] text-[#c9d1cb] hover:border-[#69c6b1] hover:text-[#69c6b1]"
                   : "border-slate-300 text-stone-700 hover:border-[#76b4aa] hover:text-[#1f615d] dark:border-slate-600 dark:text-slate-300 dark:hover:border-[#69c6b1] dark:hover:text-[#69c6b1]"
               }`}
             />
           </div>
         </div>
 
-        <div className={`mt-14 border-t pt-8 ${isEditorialMarketingSurface ? "border-white/8" : "border-slate-200 dark:border-slate-700/70"}`}>
+        <div className={`mt-14 border-t pt-8 ${isEditorialMarketingSurface ? "border-white/[0.08]" : "border-slate-200 dark:border-slate-700/70"}`}>
           <p className={`text-[1.05rem] ${isEditorialMarketingSurface ? "text-[#8fa19a]" : "text-stone-500 dark:text-slate-400"}`}>&copy; 2026 LoreVia</p>
         </div>
       </div>

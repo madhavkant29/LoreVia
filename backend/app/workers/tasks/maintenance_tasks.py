@@ -56,6 +56,30 @@ def process_beta_reads_task(self, *, limit: int = 100):
         raise self.retry(exc=exc)
 
 
+@celery_app.task(bind=True, name="maintenance_tasks.process_data_deletion_requests", queue="intelligence", max_retries=2, ignore_result=True)
+def process_data_deletion_requests_task(self, *, limit: int = 50):
+    async def _run():
+        from app.core.database import AsyncSessionLocal
+        from app.core.redis import cache_delete_if_owner, cache_set_if_absent, key_cron_lock
+        from app.services.privacy_service import process_due_data_deletion_requests
+
+        lock_key = key_cron_lock("maintenance_tasks.process_data_deletion_requests")
+        owner_token = self.request.id or "unknown"
+        if not await cache_set_if_absent(lock_key, owner_token, ttl=900):
+            return {"skipped": "cron_task_already_running"}
+
+        try:
+            async with AsyncSessionLocal() as db:
+                return await process_due_data_deletion_requests(db, limit=limit)
+        finally:
+            await cache_delete_if_owner(lock_key, owner_token)
+
+    try:
+        return run_worker_coro(_run())
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
 @celery_app.task(bind=True, name="maintenance_tasks.cleanup_expired_advisor_jobs", queue="intelligence", max_retries=2, ignore_result=True)
 def cleanup_expired_advisor_jobs_task(self, *, limit: int = 1000):
     async def _run():

@@ -29,7 +29,7 @@ export function ComparisonCTA({
             </Link>
             <Link
               href="/compare"
-              className="inline-flex items-center justify-center rounded-md border border-white/12 bg-white/5 px-7 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
+              className="inline-flex items-center justify-center rounded-md border border-white/[0.12] bg-white/5 px-7 py-3.5 text-base font-semibold text-white transition hover:bg-white/[0.08]"
             >
               See all comparisons
             </Link>

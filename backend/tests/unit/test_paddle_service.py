@@ -67,6 +67,39 @@ def test_verify_webhook_signature_rejects_mismatched_signature(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cancel_subscription_at_period_end_uses_next_billing_period(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": {"id": "sub_123", "status": "canceled"}}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
+    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+
+    result = await paddle_service.cancel_subscription_at_period_end("sub_123")
+
+    assert result["id"] == "sub_123"
+    assert captured["url"] == "https://api.paddle.com/subscriptions/sub_123/cancel"
+    assert captured["json"] == {"effective_from": "next_billing_period"}
+
+
+@pytest.mark.asyncio
 async def test_create_checkout_url_uses_recommended_checkout_page_when_override_missing(monkeypatch):
     captured: dict[str, object] = {}
 

@@ -1,6 +1,8 @@
 export type BookStatus = "pending" | "processing" | "ready" | "failed"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
+export type NovelExportPreset = "standard_novel" | "trade_novel" | "large_print" | "ebook_optimized"
+export type NovelImagePlacement = "end" | "inline" | "plates"
 export type RevisionTagTarget = "chapter" | "scene" | "character" | "note" | "comment" | "plot_thread" | "world_note"
 export type WorkspaceShell = "reader" | "author"
 export type BookAccessClass = "owner" | "author_collaborator" | "reader_collaborator"
@@ -715,6 +717,9 @@ export interface WriterWorkspace {
   templates: WritingTemplate[]
   publishing: PublishingPreset
   manuscript_front_matter: ManuscriptFrontMatter
+  novel_preface?: string
+  novel_front_matter?: NovelFrontMatter
+  novel_epub_metadata?: NovelEpubMetadata
   revision_board: RevisionBoard
   editor_preferences?: EditorPreferences
   reading_themes?: ReadingThemes
@@ -724,6 +729,23 @@ export interface WriterWorkspace {
   reprocess?: ReprocessMetadata
   processing?: BookProcessing | null
   index_format?: string
+}
+
+export interface NovelFrontMatter {
+  dedication: string
+  acknowledgements: string
+  copyright_page: string
+  about_author: string
+  series_book_list: string
+}
+
+export interface NovelEpubMetadata {
+  publisher: string
+  language: string
+  isbn: string
+  description: string
+  series_name: string
+  series_number: string
 }
 
 export interface ReprocessMetadata {

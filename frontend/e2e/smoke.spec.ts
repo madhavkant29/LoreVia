@@ -21,10 +21,10 @@ function watchBrowserSignals(page: Page) {
 test("marketing home page renders the core value proposition", async ({ page }) => {
   await page.goto("/")
 
-  await expect(page.getByRole("heading", { name: /revise coherently/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /find plot holes before your readers do/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^start free$/i }).first()).toBeVisible()
-  await expect(page.getByText("Start with the draft you already have.")).toBeVisible()
+  await expect(page.getByText("Start analyzing your manuscript")).toBeVisible()
 })
 
 test("public SEO content hubs render without auth and link into article clusters", async ({ page }) => {
@@ -199,6 +199,31 @@ test("settings page updates promotional email preferences", async ({ page }) => 
   await expect(page.getByText("Email preferences updated.")).toBeVisible()
 })
 
+test("settings data export triggers a download request", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/settings")
+
+  await page.locator("#danger").scrollIntoViewIfNeeded()
+  const downloadPromise = page.waitForEvent("download")
+  await page.getByRole("button", { name: "Export my data" }).click()
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toBe("lorevia-data-export.zip")
+})
+
+test("settings account deletion requires confirmation and redirects to login", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/settings")
+
+  await page.locator("#danger").scrollIntoViewIfNeeded()
+  await expect(page.getByRole("button", { name: "Delete account" })).toBeDisabled()
+  await page.getByLabel("Type DELETE MY ACCOUNT").fill("DELETE MY ACCOUNT")
+  await page.getByLabel("Current password").fill("StrongPass123!@#")
+  await page.getByRole("button", { name: "Delete account" }).click()
+
+  await expect(page).toHaveURL(/\/login$/)
+})
+
 test("settings sidebar follows the current section while scrolling", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/settings")
@@ -206,6 +231,21 @@ test("settings sidebar follows the current section while scrolling", async ({ pa
   await expect(page.getByRole("link", { name: "Account" })).toHaveAttribute("aria-current", "location")
   await page.locator("#session").scrollIntoViewIfNeeded()
   await expect(page.getByRole("link", { name: "Session" })).toHaveAttribute("aria-current", "location")
+})
+
+test("library permanent book deletion requires confirmation and removes the project", async ({ page }) => {
+  await installMockApi(page)
+  page.on("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("DELETE BOOK")
+    await dialog.accept("DELETE BOOK")
+  })
+  await page.goto("/library")
+
+  await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
+  await page.locator('button[aria-label="Open actions for Sky of Ash"]').first().click()
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click()
+
+  await expect(page.getByRole("heading", { name: "Sky of Ash" })).toHaveCount(0)
 })
 
 test("author uploads default the manuscript byline from the public username", async ({ page }) => {
@@ -284,6 +324,40 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(page).toHaveURL(/\/(?:[^/]+--)?book-1\/manuscript$/, { timeout: 15000 })
   await expect(page.getByText("Story manuscript")).toBeVisible()
   await expect(page.getByText("Manuscript progress")).toBeVisible()
+})
+
+test("expired free owners are redirected away from author-only book routes", async ({ page }) => {
+  await installMockApi(page, { userTier: "free" })
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  await expect(page).toHaveURL(new RegExp(`${BOOK_ROUTE}$`))
+  await expect(page.getByText("Manuscript Editor requires Author")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Upgrade to Author" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Compare plans" })).toBeVisible()
+  await expect(page.getByText("Open Manuscript Editor")).toHaveCount(0)
+})
+
+test("export studio saves a novel preface and downloads a novel export", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto(`${BOOK_ROUTE}/export`)
+
+  const novelCard = page.getByTestId("novel-export-card")
+  await expect(novelCard.getByText("Novel export")).toBeVisible()
+  await expect(novelCard.getByLabel("Preface")).toHaveValue("A short note before the ash gates open.")
+  await novelCard.getByLabel("Preface").fill("A new preface for early readers.")
+  await novelCard.getByLabel("Dedication").fill("For the first readers.")
+  await novelCard.getByLabel("Publisher").fill("LoreVia Press")
+  await novelCard.getByLabel("Export first 2 chapters only").check()
+  await novelCard.getByRole("button", { name: "Save novel settings" }).click()
+  await expect(page.getByText("Saved novel export settings.")).toBeVisible()
+  await novelCard.getByRole("button", { name: "EPUB" }).click()
+
+  const downloadPromise = page.waitForEvent("download")
+  await novelCard.getByRole("button", { name: "Export novel" }).click()
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toBe("Sky-of-Ash-novel-preview.epub")
+  await expect(page.getByText("Downloaded first 2-chapter sample as EPUB.")).toBeVisible()
 })
 
 test("book overview shows the nav panel on mobile", async ({ page }) => {
@@ -683,6 +757,28 @@ test("character review surfaces unresolved relationship candidates in duplicate 
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
 })
 
+test("character bible follows the persisted dark theme", async ({ page }) => {
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "lorevia-preferences",
+      JSON.stringify({
+        state: {
+          theme: "dark",
+          timelineCollapsedSections: { characters: true, plotThreads: true, relationships: true },
+        },
+        version: 0,
+      }),
+    )
+  })
+
+  await page.goto(`${BOOK_ROUTE}/characters`)
+
+  await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
+  const characterBibleShell = page.locator("xpath=//div[contains(@class, 'bg-[#11191a]') and contains(@class, 'text-slate-100')]").first()
+  await expect(characterBibleShell).toBeVisible()
+})
+
 test("world gap workspace surfaces consistency flags and the coverage watchlist", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/world-gap`)
@@ -908,6 +1004,8 @@ test("relationship graph inspector responds to node and edge selection", async (
 
   await expect(page.getByRole("heading", { name: /family/i })).toBeVisible()
   await expect(page.getByText("Gregor -> Grete")).toBeVisible()
+  await expect(page.getByText("Shared facets")).toBeVisible()
+  await expect(page.getByText("Gregor to Grete")).toBeVisible()
   await expect(page.getByRole("textbox", { name: "Relationship note" })).toHaveValue("Sibling bond under pressure.")
   await expect(page.getByRole("button", { name: /save correction/i })).toBeVisible()
 

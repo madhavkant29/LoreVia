@@ -188,7 +188,7 @@ export const PlotTracker = memo(function PlotTracker({ bookId, chapter, mode = "
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{thread.title}</p>
-                        {thread.type ? <span className={`rounded-full px-2.5 py-1 text-3xs uppercase tracking-[0.16em] ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-600"}`}>{thread.type}</span> : null}
+                        {thread.type ? <span className={`rounded-full px-2.5 py-1 text-3xs uppercase tracking-[0.16em] ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-stone-100 text-stone-600"}`}>{thread.type}</span> : null}
                       </div>
                       {thread.description ? <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{thread.description}</p> : null}
                       <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
@@ -259,13 +259,13 @@ export const PlotTracker = memo(function PlotTracker({ bookId, chapter, mode = "
                           type="button"
                           onClick={() => void saveToVault(thread)}
                           disabled={vaultSavingId === thread.id}
-                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/8 text-slate-100" : "bg-stone-100 text-stone-700"} disabled:opacity-50`}
+                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/[0.08] text-slate-100" : "bg-stone-100 text-stone-700"} disabled:opacity-50`}
                         >
                           {vaultSavingId === thread.id ? "Sending..." : "Save to vault"}
                         </button>
                         <Link
                           href={`/${bookId}/notes`}
-                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/8 text-slate-100" : "bg-white text-stone-700"}`}
+                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/[0.08] text-slate-100" : "bg-white text-stone-700"}`}
                         >
                           Open notes
                         </Link>

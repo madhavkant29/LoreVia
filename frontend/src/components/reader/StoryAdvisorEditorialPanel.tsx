@@ -194,7 +194,7 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
             value={editText}
             onChange={e => setEditText(e.target.value)}
             rows={10}
-            className={`w-full resize-y rounded-md border px-4 py-3 text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-white/4 text-slate-200 focus:border-indigo-500/40" : "border-stone-200 bg-stone-50 text-stone-800 focus:border-violet-300"}`}
+            className={`w-full resize-y rounded-md border px-4 py-3 text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200 focus:border-indigo-500/40" : "border-stone-200 bg-stone-50 text-stone-800 focus:border-violet-300"}`}
           />
           <span className={`mt-2 block text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Paste a paragraph, scene, or full chapter section.</span>
         </label>
@@ -210,9 +210,9 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
         ) : null}
 
         {editLoading ? (
-          <div className={`mt-4 animate-pulse space-y-2 rounded-md border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
+          <div className={`mt-4 animate-pulse space-y-2 rounded-md border p-4 ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-100 bg-stone-50"}`}>
             <div className={`h-2.5 w-40 rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`} />
-            <div className={`h-2.5 w-full rounded-full ${isDark ? "bg-white/8" : "bg-stone-100"}`} />
+            <div className={`h-2.5 w-full rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-100"}`} />
             <div className={`h-2.5 w-3/4 rounded-full ${isDark ? "bg-white/6" : "bg-stone-100"}`} />
           </div>
         ) : null}
@@ -280,7 +280,7 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
                       ? isDark ? "border-red-500/30 bg-red-500/10" : "border-red-200 bg-red-50"
                       : issue.severity === "moderate"
                         ? isDark ? "border-amber-500/30 bg-amber-500/8" : "border-amber-200 bg-amber-50"
-                        : isDark ? "border-white/10 bg-white/4" : "border-stone-100 bg-stone-50"
+                        : isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-100 bg-stone-50"
                   }`}>
                     <div className="mb-2 flex flex-wrap items-center gap-2">
                       <span className={`rounded-full px-2 py-0.5 text-3xs font-bold uppercase tracking-[0.22em] ${
@@ -330,7 +330,7 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
               </p>
               <div className="space-y-2.5">
                 {editResult.grammar_issues.map((issue, index) => (
-                  <div key={index} className={`rounded-md border px-4 py-4 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`}>
+                  <div key={index} className={`rounded-md border px-4 py-4 ${isDark ? "border-white/[0.08] bg-white/[0.04]" : "border-stone-100 bg-stone-50"}`}>
                     <p className={`mb-1 text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{issue.issue}</p>
                     <p className={`mb-1 text-sm line-through opacity-60 ${isDark ? "text-slate-400" : "text-stone-500"}`}>"{issue.original}"</p>
                     <p className={`text-sm font-medium ${isDark ? "text-teal-300" : "text-teal-700"}`}>&rarr; "{issue.fix}"</p>
@@ -363,7 +363,7 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
               <p className={`mb-3 text-3xs font-bold uppercase tracking-[0.28em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
                 Formatting Notes
               </p>
-              <div className={`space-y-2 rounded-md border px-5 py-4 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`}>
+              <div className={`space-y-2 rounded-md border px-5 py-4 ${isDark ? "border-white/[0.08] bg-white/[0.04]" : "border-stone-100 bg-stone-50"}`}>
                 {editResult.formatting_notes.map((note, index) => (
                   <div key={index} className="flex items-start gap-2.5">
                     <span className={`mt-0.5 shrink-0 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>-</span>
@@ -394,7 +394,7 @@ export const StoryAdvisorEditorialPanel = memo(function StoryAdvisorEditorialPan
               </p>
               <div className="grid gap-2 sm:grid-cols-2">
                 {editPassages.map((passage, index) => (
-                  <div key={index} className={`rounded-md border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
+                  <div key={index} className={`rounded-md border p-4 ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-100 bg-stone-50"}`}>
                     <p className={`mb-1 text-3xs font-bold uppercase tracking-[0.22em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>
                       Ch. {passage.chapter_num}{passage.chapter_title ? `: ${passage.chapter_title}` : ""}
                     </p>

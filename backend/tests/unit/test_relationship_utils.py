@@ -14,7 +14,10 @@ from app.utils.relationship_utils import (
     canonical_relationship_pair_ids,
     canonicalize_relationship_book_rows,
     canonicalize_relationship_rows,
+    normalize_relationship_labels,
     reconcile_extracted_relationships,
+    relationship_label_display,
+    upsert_relationship_timeline_state,
 )
 
 
@@ -28,6 +31,9 @@ def _relationship(
     to_chapter: int | None = None,
     description: str | None = None,
     sentiment: float | None = None,
+    shared_labels: list[str] | None = None,
+    character_a_to_b_labels: list[str] | None = None,
+    character_b_to_a_labels: list[str] | None = None,
 ) -> CharacterRelationship:
     return CharacterRelationship(
         book_id=book_id or uuid.uuid4(),
@@ -38,6 +44,9 @@ def _relationship(
         description=description,
         from_chapter=from_chapter,
         to_chapter=to_chapter,
+        shared_labels=shared_labels or [],
+        character_a_to_b_labels=character_a_to_b_labels or [],
+        character_b_to_a_labels=character_b_to_a_labels or [],
     )
 
 
@@ -46,6 +55,14 @@ def test_canonical_relationship_pair_ids_treats_reversed_pairs_as_identical():
     right_id = uuid.uuid4()
 
     assert canonical_relationship_pair_ids(left_id, right_id) == canonical_relationship_pair_ids(right_id, left_id)
+
+
+def test_normalize_relationship_labels_handles_aliases_and_supersession():
+    labels = normalize_relationship_labels(["freind", "friend(toxic)", "sister", "half-sister"])
+
+    assert labels == ["friend_toxic", "half_sister"]
+    assert relationship_label_display("pawn") == "pawn (tool)"
+    assert relationship_label_display("grandmother maternal") == "grandmother (maternal)"
 
 
 def test_canonicalize_relationship_rows_merges_same_state_later_batch():
@@ -102,6 +119,37 @@ def test_canonicalize_relationship_rows_closes_previous_state_on_transition():
     assert kept == [hostile, ally]
     assert hostile.to_chapter == 4
     assert ally.to_chapter is None
+
+
+def test_canonicalize_relationship_rows_tracks_label_revelation_as_transition():
+    left_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    right_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    sister = _relationship(
+        character_a_id=left_id,
+        character_b_id=right_id,
+        rel_type="family",
+        from_chapter=1,
+        character_a_to_b_labels=["sister"],
+        character_b_to_a_labels=["brother"],
+    )
+    half_sister = _relationship(
+        character_a_id=right_id,
+        character_b_id=left_id,
+        rel_type="family",
+        from_chapter=7,
+        character_a_to_b_labels=["half_brother"],
+        character_b_to_a_labels=["half_sister"],
+    )
+
+    kept, removed = canonicalize_relationship_rows([sister, half_sister])
+
+    assert removed == []
+    assert [(row.rel_type, row.from_chapter, row.to_chapter) for row in kept] == [
+        ("sister", 1, 6),
+        ("half_sister", 7, None),
+    ]
+    assert kept[1].character_a_to_b_labels == ["half_sister"]
+    assert kept[1].character_b_to_a_labels == ["half_brother"]
 
 
 def test_canonicalize_relationship_rows_splits_overlapping_manual_window():
@@ -248,6 +296,77 @@ def test_canonicalize_relationship_book_rows_accepts_sparse_row_objects():
     assert (rel.character_a_id, rel.character_b_id) == canonical_relationship_pair_ids(left_id, right_id)
     assert rel.to_chapter is None
     assert rel.description == "Bonds"
+
+
+@pytest.mark.asyncio
+async def test_upsert_relationship_timeline_state_preserves_omitted_label_facets(db):
+    user = User(email="relationship-label-preserve@example.com", username="relationship-label-preserve", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Relationship Label Preserve",
+        format="pdf",
+        s3_key="books/relationship-label-preserve.pdf",
+        status="ready",
+        mode="author",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    left = Character(
+        book_id=book.id,
+        name="Grete",
+        aliases=[],
+        first_chapter=1,
+        visibility_state="visible",
+        approval_state="approved",
+    )
+    right = Character(
+        book_id=book.id,
+        name="Gregor",
+        aliases=[],
+        first_chapter=1,
+        visibility_state="visible",
+        approval_state="approved",
+    )
+    db.add_all([left, right])
+    await db.flush()
+    left_id, right_id = canonical_relationship_pair_ids(left.id, right.id)
+    relationship = CharacterRelationship(
+        book_id=book.id,
+        character_a_id=left_id,
+        character_b_id=right_id,
+        rel_type="family",
+        sentiment=0.2,
+        description="Known siblings",
+        from_chapter=1,
+        shared_labels=["forbidden_romance"],
+        character_a_to_b_labels=["sister"],
+        character_b_to_a_labels=["brother"],
+        label_evidence={"quote": "They were raised as siblings."},
+    )
+    db.add(relationship)
+    await db.flush()
+
+    updated, created = await upsert_relationship_timeline_state(
+        db,
+        book_id=book.id,
+        character_a_id=right_id,
+        character_b_id=left_id,
+        rel_type="family",
+        sentiment=0.2,
+        description="Known siblings, with a later paternal reveal",
+        from_chapter=1,
+        relationship_id=relationship.id,
+        character_a_to_b_labels=["half_brother"],
+    )
+
+    assert created is True
+    assert updated.shared_labels == ["forbidden_romance"]
+    assert updated.character_a_to_b_labels == ["sister"]
+    assert updated.character_b_to_a_labels == ["half_brother"]
+    assert updated.label_evidence == {"quote": "They were raised as siblings."}
 
 
 @pytest.mark.asyncio

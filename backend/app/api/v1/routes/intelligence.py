@@ -32,6 +32,7 @@ from app.schemas.intelligence import (
     GroundedCitationOut,
     QARequest,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.llm_usage_utils import (
     assert_llm_token_capacity,
     create_tracked_chat_completion,
@@ -58,6 +59,7 @@ async def cross_book_intelligence(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     comparison_books = [book]
     series_name = None
@@ -141,6 +143,7 @@ async def qa_endpoint(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
     cache_key = key_grounded_answer(str(book_id), body.current_chapter, body.question)
     cached = await cache_get(cache_key)
     if cached:
@@ -202,6 +205,7 @@ async def qa_stream_endpoint(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     cache_key = key_grounded_answer(str(book_id), body.current_chapter, body.question)
     cached = await cache_get(cache_key)

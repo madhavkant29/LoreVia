@@ -4,6 +4,8 @@ import uuid
 from collections import defaultdict
 from collections.abc import Iterable
 from math import inf
+from typing import Any
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +22,341 @@ def normalize_relationship_type_value(value: object | None) -> str:
     text = clean_relationship_text(value)
     if not text:
         return "connection"
-    return text.lower().replace(" ", "_")
+    return _normalize_relationship_label_token(text) or "connection"
+
+
+RELATIONSHIP_LABEL_DISPLAY: dict[str, str] = {
+    "connection": "connection",
+    "ally": "ally",
+    "enemy": "enemy",
+    "family": "family",
+    "mentor": "mentor",
+    "neutral": "neutral",
+    "political": "political",
+    "rival": "rival",
+    "romantic": "romantic",
+    "friend": "friend",
+    "friend_toxic": "friend (toxic)",
+    "friend_romantic": "friend (romantic)",
+    "friend_codependent": "friend (codependent)",
+    "friend_platonic": "friend (platonic)",
+    "friend_casual": "friend (casual)",
+    "friend_open": "friend (open)",
+    "best_friend": "best friend",
+    "childhood_friend": "childhood friend",
+    "former_friend": "former friend",
+    "secret_friend": "secret friend",
+    "loyal_friend": "loyal friend",
+    "protective_friend": "protective friend",
+    "jealous_friend": "jealous friend",
+    "one_sided_friend": "one-sided friend",
+    "manipulative_friend": "manipulative friend",
+    "fake_friend": "fake friend",
+    "enemy_turned_friend": "enemy-turned-friend",
+    "friend_turned_enemy": "friend-turned-enemy",
+    "confidant": "confidant",
+    "drinking_buddy": "drinking buddy",
+    "travel_companion": "travel companion",
+    "online_friend": "online friend",
+    "pen_pal": "pen pal",
+    "social_circle_member": "social circle member",
+    "roommate": "roommate",
+    "housemate": "housemate",
+    "cousin_brother": "cousin (brother)",
+    "cousin_sister": "cousin (sister)",
+    "sibling": "sibling",
+    "brother": "brother",
+    "sister": "sister",
+    "half_brother": "half-brother",
+    "half_sister": "half-sister",
+    "stepfather": "stepfather",
+    "stepmother": "stepmother",
+    "stepsibling": "stepsibling",
+    "father": "father",
+    "mother": "mother",
+    "son": "son",
+    "daughter": "daughter",
+    "grandmother_maternal": "grandmother (maternal)",
+    "grandmother_paternal": "grandmother (paternal)",
+    "grandfather_maternal": "grandfather (maternal)",
+    "grandfather_paternal": "grandfather (paternal)",
+    "uncle": "uncle",
+    "aunt": "aunt",
+    "nephew": "nephew",
+    "niece": "niece",
+    "in_law": "in-law",
+    "father_in_law": "father-in-law",
+    "mother_in_law": "mother-in-law",
+    "brother_in_law": "brother-in-law",
+    "sister_in_law": "sister-in-law",
+    "godfather": "godfather",
+    "godmother": "godmother",
+    "guardian": "guardian",
+    "foster_parent": "foster parent",
+    "adopted_parent": "adopted parent",
+    "adopted_child": "adopted child",
+    "ancestor": "ancestor",
+    "descendant": "descendant",
+    "heir": "heir",
+    "family_rival": "family rival",
+    "estranged_family": "estranged family",
+    "disowned_child": "disowned child",
+    "illegitimate_child": "illegitimate child",
+    "missing_relative": "missing relative",
+    "lover": "lover",
+    "crush": "crush",
+    "mutual_crush": "mutual crush",
+    "unrequited_love": "unrequited love",
+    "secret_lover": "secret lover",
+    "ex_lover": "ex-lover",
+    "ex_partner": "ex-partner",
+    "boyfriend": "boyfriend",
+    "girlfriend": "girlfriend",
+    "fiance": "fiance",
+    "fiancee": "fiancee",
+    "husband": "husband",
+    "wife": "wife",
+    "spouse": "spouse",
+    "affair_partner": "affair partner",
+    "forbidden_romance": "forbidden romance",
+    "arranged_marriage_partner": "arranged marriage partner",
+    "political_marriage_partner": "political marriage partner",
+    "soulmate": "soulmate",
+    "casual_fling": "casual fling",
+    "friends_with_benefits": "friends-with-benefits",
+    "love_triangle_rival": "love triangle rival",
+    "romantic_rival": "romantic rival",
+    "toxic_lover": "toxic lover",
+    "obsessive_lover": "obsessive lover",
+    "protective_lover": "protective lover",
+    "superior": "superior",
+    "subordinate": "subordinate",
+    "commander": "commander",
+    "soldier": "soldier",
+    "ruler": "ruler",
+    "subject": "subject",
+    "king": "king",
+    "queen": "queen",
+    "prince": "prince",
+    "princess": "princess",
+    "lord": "lord",
+    "lady": "lady",
+    "servant": "servant",
+    "master": "master",
+    "slave": "slave",
+    "owner": "owner",
+    "bodyguard": "bodyguard",
+    "client": "client",
+    "patron": "patron",
+    "sponsor": "sponsor",
+    "benefactor": "benefactor",
+    "debtor": "debtor",
+    "creditor": "creditor",
+    "blackmailer": "blackmailer",
+    "hostage": "hostage",
+    "captor": "captor",
+    "prisoner": "prisoner",
+    "handler": "handler",
+    "asset": "asset",
+    "informant": "informant",
+    "spy": "spy",
+    "mole": "mole",
+    "double_agent": "double agent",
+    "puppet": "puppet",
+    "controller": "controller",
+    "pawn_tool": "pawn (tool)",
+    "enforcer": "enforcer",
+    "henchman": "henchman",
+    "right_hand_person": "right-hand person",
+    "leader": "leader",
+    "boss": "boss",
+    "employee": "employee",
+    "manager": "manager",
+    "assistant": "assistant",
+    "intern": "intern",
+    "co_founder": "co-founder",
+    "business_partner": "business partner",
+    "investor": "investor",
+    "contractor": "contractor",
+    "consultant": "consultant",
+    "customer": "customer",
+    "colleague": "colleague",
+    "rival_colleague": "rival colleague",
+    "former_colleague": "former colleague",
+    "workplace_rival": "workplace rival",
+    "work_mentor": "work mentor",
+    "work_friend": "work friend",
+    "workplace_friend": "workplace friend",
+    "work_spouse": "work spouse",
+    "team_member": "team member",
+    "teammate": "teammate",
+    "supervisor": "supervisor",
+    "apprentice": "apprentice",
+    "protege": "protege",
+    "teacher": "teacher",
+    "student": "student",
+    "professor": "professor",
+    "researcher": "researcher",
+    "doctor": "doctor",
+    "patient": "patient",
+    "lawyer": "lawyer",
+    "nemesis": "nemesis",
+    "bully": "bully",
+    "victim": "victim",
+    "abuser": "abuser",
+    "survivor": "survivor",
+    "hunter": "hunter",
+}
+
+RELATIONSHIP_LABEL_ALIASES: dict[str, str] = {
+    "freind": "friend",
+    "friend_toxic": "friend_toxic",
+    "toxic_friend": "friend_toxic",
+    "romantic_friend": "friend_romantic",
+    "codependent_friend": "friend_codependent",
+    "platonic_friend": "friend_platonic",
+    "casual_friend": "friend_casual",
+    "open_friend": "friend_open",
+    "cousin_bro": "cousin_brother",
+    "cousin_sis": "cousin_sister",
+    "sibling_brother": "brother",
+    "sibling_sister": "sister",
+    "half_sibling_brother": "half_brother",
+    "half_sibling_sister": "half_sister",
+    "maternal_grandmother": "grandmother_maternal",
+    "paternal_grandmother": "grandmother_paternal",
+    "maternal_grandfather": "grandfather_maternal",
+    "paternal_grandfather": "grandfather_paternal",
+    "fiance": "fiance",
+    "fiancee": "fiancee",
+    "fiance_": "fiance",
+    "fiancee_": "fiancee",
+    "fwb": "friends_with_benefits",
+    "workplace_freind": "workplace_friend",
+    "workplace_friend": "workplace_friend",
+    "work_friend": "work_friend",
+    "pawn": "pawn_tool",
+    "tool": "pawn_tool",
+    "subject": "subject",
+}
+
+RELATIONSHIP_SUPERSEDES: dict[str, set[str]] = {
+    "half_brother": {"brother", "sibling"},
+    "half_sister": {"sister", "sibling"},
+    "stepfather": {"father"},
+    "stepmother": {"mother"},
+    "ex_lover": {"lover"},
+    "ex_partner": {"lover", "boyfriend", "girlfriend", "spouse"},
+    "former_friend": {"friend"},
+    "friend_turned_enemy": {"friend"},
+    "enemy_turned_friend": {"enemy"},
+    "friend_toxic": {"friend"},
+    "friend_romantic": {"friend"},
+    "friend_codependent": {"friend"},
+    "friend_platonic": {"friend"},
+    "friend_casual": {"friend"},
+    "friend_open": {"friend"},
+    "toxic_lover": {"lover"},
+    "obsessive_lover": {"lover"},
+    "protective_lover": {"lover"},
+    "workplace_friend": {"friend"},
+    "work_friend": {"friend"},
+}
+
+RELATIONSHIP_PRIMARY_PRIORITY: tuple[str, ...] = (
+    "half_sister", "half_brother", "sister", "brother", "spouse", "husband", "wife",
+    "father", "mother", "son", "daughter", "lover", "ex_lover", "boyfriend", "girlfriend",
+    "forbidden_romance", "mentor", "teacher", "student", "master", "slave", "owner",
+    "captor", "prisoner", "enemy", "rival", "friend_toxic", "friend_romantic", "friend",
+    "workplace_friend", "colleague", "ally", "family", "romantic", "political", "neutral",
+)
+
+GENERIC_RELATIONSHIP_TYPES = {
+    "connection", "neutral", "family", "romantic", "ally", "friend", "political",
+}
+
+
+def _normalize_relationship_label_token(value: object | None) -> str | None:
+    text = clean_relationship_text(value)
+    if not text:
+        return None
+    normalized = text.casefold().replace("&", " and ")
+    normalized = normalized.replace("'", "")
+    normalized = normalized.replace("(", " ").replace(")", " ")
+    normalized = normalized.replace("/", " ")
+    normalized = normalized.replace("-", "_")
+    normalized = "_".join(normalized.split())
+    normalized = normalized.replace("__", "_").strip("_")
+    normalized = RELATIONSHIP_LABEL_ALIASES.get(normalized, normalized)
+    return normalized if normalized in RELATIONSHIP_LABEL_DISPLAY else normalized
+
+
+def _iter_relationship_label_values(value: object | None) -> Iterable[object]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        split = value.replace("+", ",").replace(";", ",").split(",")
+        return [item for item in split if item.strip()]
+    if isinstance(value, Iterable) and not isinstance(value, (dict, bytes)):
+        return value
+    return [value]
+
+
+def normalize_relationship_labels(value: object | None) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    for raw in _iter_relationship_label_values(value):
+        label = _normalize_relationship_label_token(raw)
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
+
+    superseded: set[str] = set()
+    for label in labels:
+        superseded.update(RELATIONSHIP_SUPERSEDES.get(label, set()))
+    return [label for label in labels if label not in superseded]
+
+
+def relationship_label_display(label: object | None) -> str:
+    normalized = _normalize_relationship_label_token(label) or "connection"
+    return RELATIONSHIP_LABEL_DISPLAY.get(normalized, normalized.replace("_", " "))
+
+
+def relationship_labels_display(labels: object | None) -> list[str]:
+    return [relationship_label_display(label) for label in normalize_relationship_labels(labels)]
+
+
+def derive_relationship_primary_type(
+    rel_type: object | None,
+    *,
+    shared_labels: object | None = None,
+    character_a_to_b_labels: object | None = None,
+    character_b_to_a_labels: object | None = None,
+) -> str:
+    normalized_type = normalize_relationship_type_value(rel_type)
+    labels = (
+        normalize_relationship_labels(character_a_to_b_labels)
+        + normalize_relationship_labels(character_b_to_a_labels)
+        + normalize_relationship_labels(shared_labels)
+    )
+    if labels and normalized_type in GENERIC_RELATIONSHIP_TYPES:
+        ranked = sorted(labels, key=lambda label: RELATIONSHIP_PRIMARY_PRIORITY.index(label) if label in RELATIONSHIP_PRIMARY_PRIORITY else len(RELATIONSHIP_PRIMARY_PRIORITY))
+        return ranked[0]
+    return normalized_type
+
+
+def relationship_labels_signature(
+    *,
+    shared_labels: object | None,
+    character_a_to_b_labels: object | None,
+    character_b_to_a_labels: object | None,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    return (
+        tuple(normalize_relationship_labels(shared_labels)),
+        tuple(normalize_relationship_labels(character_a_to_b_labels)),
+        tuple(normalize_relationship_labels(character_b_to_a_labels)),
+    )
 
 
 def normalize_relationship_sentiment_value(value: object | None) -> float | None:
@@ -73,19 +409,40 @@ def relationship_state_signature(
     rel_type: object | None,
     sentiment: object | None,
     description: object | None,
-) -> tuple[str, float | None, str]:
+    shared_labels: object | None = None,
+    character_a_to_b_labels: object | None = None,
+    character_b_to_a_labels: object | None = None,
+) -> tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...], float | None, str]:
+    normalized_shared, normalized_a_to_b, normalized_b_to_a = relationship_labels_signature(
+        shared_labels=shared_labels,
+        character_a_to_b_labels=character_a_to_b_labels,
+        character_b_to_a_labels=character_b_to_a_labels,
+    )
     return (
-        normalize_relationship_type_value(rel_type),
+        derive_relationship_primary_type(
+            rel_type,
+            shared_labels=normalized_shared,
+            character_a_to_b_labels=normalized_a_to_b,
+            character_b_to_a_labels=normalized_b_to_a,
+        ),
+        normalized_shared,
+        normalized_a_to_b,
+        normalized_b_to_a,
         normalize_relationship_sentiment_value(sentiment),
         clean_relationship_text(description) or "",
     )
 
 
-def relationship_state_signature_for_row(relationship: CharacterRelationship) -> tuple[str, float | None, str]:
+def relationship_state_signature_for_row(
+    relationship: CharacterRelationship,
+) -> tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...], float | None, str]:
     return relationship_state_signature(
         rel_type=getattr(relationship, "rel_type", None),
         sentiment=getattr(relationship, "sentiment", None),
         description=getattr(relationship, "description", None),
+        shared_labels=getattr(relationship, "shared_labels", None),
+        character_a_to_b_labels=getattr(relationship, "character_a_to_b_labels", None),
+        character_b_to_a_labels=getattr(relationship, "character_b_to_a_labels", None),
     )
 
 
@@ -133,17 +490,39 @@ def canonicalize_relationship_rows(
             relationship.from_chapter = 1
         if not hasattr(relationship, "to_chapter"):
             relationship.to_chapter = None
+        if not hasattr(relationship, "shared_labels"):
+            relationship.shared_labels = []
+        if not hasattr(relationship, "character_a_to_b_labels"):
+            relationship.character_a_to_b_labels = []
+        if not hasattr(relationship, "character_b_to_a_labels"):
+            relationship.character_b_to_a_labels = []
+        if not hasattr(relationship, "label_evidence"):
+            relationship.label_evidence = {}
         if not hasattr(relationship, "id"):
             relationship.id = None
         if not hasattr(relationship, "book_id"):
             relationship.book_id = None
+        original_a_id = relationship.character_a_id
         left_id, right_id = canonical_relationship_pair_ids(
             relationship.character_a_id,
             relationship.character_b_id,
         )
         relationship.character_a_id = left_id
         relationship.character_b_id = right_id
-        relationship.rel_type = normalize_relationship_type_value(relationship.rel_type)
+        if original_a_id != left_id:
+            relationship.character_a_to_b_labels, relationship.character_b_to_a_labels = (
+                relationship.character_b_to_a_labels,
+                relationship.character_a_to_b_labels,
+            )
+        relationship.shared_labels = normalize_relationship_labels(relationship.shared_labels)
+        relationship.character_a_to_b_labels = normalize_relationship_labels(relationship.character_a_to_b_labels)
+        relationship.character_b_to_a_labels = normalize_relationship_labels(relationship.character_b_to_a_labels)
+        relationship.rel_type = derive_relationship_primary_type(
+            relationship.rel_type,
+            shared_labels=relationship.shared_labels,
+            character_a_to_b_labels=relationship.character_a_to_b_labels,
+            character_b_to_a_labels=relationship.character_b_to_a_labels,
+        )
         relationship.description = clean_relationship_text(relationship.description)
         relationship.sentiment = normalize_relationship_sentiment_value(relationship.sentiment)
 
@@ -195,6 +574,10 @@ def canonicalize_relationship_rows(
                     description=previous.description,
                     from_chapter=current_to + 1,
                     to_chapter=original_previous_to,
+                    shared_labels=list(previous.shared_labels or []),
+                    character_a_to_b_labels=list(previous.character_a_to_b_labels or []),
+                    character_b_to_a_labels=list(previous.character_b_to_a_labels or []),
+                    label_evidence=dict(previous.label_evidence or {}),
                 )
                 insert_at = len(rows)
                 tail_sort_key = _relationship_sort_key(
@@ -230,6 +613,10 @@ def canonicalize_relationship_rows(
                     description=previous.description,
                     from_chapter=current_to + 1,
                     to_chapter=original_previous_to,
+                    shared_labels=list(previous.shared_labels or []),
+                    character_a_to_b_labels=list(previous.character_a_to_b_labels or []),
+                    character_b_to_a_labels=list(previous.character_b_to_a_labels or []),
+                    label_evidence=dict(previous.label_evidence or {}),
                 )
                 insert_at = len(rows)
                 tail_sort_key = _relationship_sort_key(
@@ -326,13 +713,52 @@ async def upsert_relationship_timeline_state(
     from_chapter: int,
     to_chapter: int | None = None,
     relationship_id: uuid.UUID | None = None,
+    shared_labels: object | None = None,
+    character_a_to_b_labels: object | None = None,
+    character_b_to_a_labels: object | None = None,
+    label_evidence: dict[str, Any] | None = None,
 ) -> tuple[CharacterRelationship, bool]:
     left_id, right_id = canonical_relationship_pair_ids(character_a_id, character_b_id)
+    normalized_shared = normalize_relationship_labels(shared_labels)
+    normalized_a_to_b = normalize_relationship_labels(character_a_to_b_labels)
+    normalized_b_to_a = normalize_relationship_labels(character_b_to_a_labels)
+    if character_a_id != left_id:
+        normalized_a_to_b, normalized_b_to_a = normalized_b_to_a, normalized_a_to_b
+    normalized_type = derive_relationship_primary_type(
+        rel_type,
+        shared_labels=normalized_shared,
+        character_a_to_b_labels=normalized_a_to_b,
+        character_b_to_a_labels=normalized_b_to_a,
+    )
     target_relationship: CharacterRelationship | None = None
     if relationship_id is not None:
         target_relationship = await db.get(CharacterRelationship, relationship_id)
         if target_relationship is None:
             raise ValueError("Relationship not found")
+        canonical_a_to_b_provided = (
+            character_a_to_b_labels is not None
+            if character_a_id == left_id
+            else character_b_to_a_labels is not None
+        )
+        canonical_b_to_a_provided = (
+            character_b_to_a_labels is not None
+            if character_a_id == left_id
+            else character_a_to_b_labels is not None
+        )
+        if shared_labels is None:
+            normalized_shared = normalize_relationship_labels(getattr(target_relationship, "shared_labels", None))
+        if not canonical_a_to_b_provided:
+            normalized_a_to_b = normalize_relationship_labels(getattr(target_relationship, "character_a_to_b_labels", None))
+        if not canonical_b_to_a_provided:
+            normalized_b_to_a = normalize_relationship_labels(getattr(target_relationship, "character_b_to_a_labels", None))
+        if label_evidence is None:
+            label_evidence = dict(getattr(target_relationship, "label_evidence", None) or {})
+        normalized_type = derive_relationship_primary_type(
+            rel_type,
+            shared_labels=normalized_shared,
+            character_a_to_b_labels=normalized_a_to_b,
+            character_b_to_a_labels=normalized_b_to_a,
+        )
     if target_relationship is None:
         _existing_curated = await db.execute(
             select(CharacterRelationship).where(
@@ -349,11 +775,15 @@ async def upsert_relationship_timeline_state(
             book_id=book_id,
             character_a_id=left_id,
             character_b_id=right_id,
-            rel_type=normalize_relationship_type_value(rel_type),
+            rel_type=normalized_type,
             sentiment=normalize_relationship_sentiment_value(sentiment),
             description=clean_relationship_text(description),
             from_chapter=from_chapter,
             to_chapter=to_chapter,
+            shared_labels=normalized_shared,
+            character_a_to_b_labels=normalized_a_to_b,
+            character_b_to_a_labels=normalized_b_to_a,
+            label_evidence=label_evidence or {},
         )
         db.add(target_relationship)
 
@@ -363,11 +793,15 @@ async def upsert_relationship_timeline_state(
     target_relationship.book_id = book_id
     target_relationship.character_a_id = left_id
     target_relationship.character_b_id = right_id
-    target_relationship.rel_type = normalize_relationship_type_value(rel_type)
+    target_relationship.rel_type = normalized_type
     target_relationship.sentiment = normalize_relationship_sentiment_value(sentiment)
     target_relationship.description = clean_relationship_text(description)
     target_relationship.from_chapter = from_chapter
     target_relationship.to_chapter = to_chapter
+    target_relationship.shared_labels = normalized_shared
+    target_relationship.character_a_to_b_labels = normalized_a_to_b
+    target_relationship.character_b_to_a_labels = normalized_b_to_a
+    target_relationship.label_evidence = label_evidence or {}
     await db.flush()
 
     kept, removed = await normalize_relationship_pair_timeline(
@@ -577,6 +1011,8 @@ async def reconcile_extracted_relationships(
                 candidate.evidence = evidence
                 demoted_candidates += 1
             continue
+        evidence = dict(candidate.evidence or {})
+        extracted_relationship = evidence.get("relationship") if isinstance(evidence.get("relationship"), dict) else {}
         relationship, _created = await upsert_relationship_timeline_state(
             db,
             book_id=book_id,
@@ -586,12 +1022,15 @@ async def reconcile_extracted_relationships(
             sentiment=candidate.sentiment,
             description=candidate.description,
             from_chapter=int(candidate.chapter_number or 1),
+            shared_labels=extracted_relationship.get("shared_labels"),
+            character_a_to_b_labels=extracted_relationship.get("character_a_to_b_labels"),
+            character_b_to_a_labels=extracted_relationship.get("character_b_to_a_labels"),
+            label_evidence=extracted_relationship.get("label_evidence") if isinstance(extracted_relationship.get("label_evidence"), dict) else evidence,
         )
         candidate.matched_character_a_id = relationship.character_a_id
         candidate.matched_character_b_id = relationship.character_b_id
         candidate.status = "accepted"
         candidate.reason_codes = ["relationship_auto_reconciled"]
-        evidence = dict(candidate.evidence or {})
         evidence["pair_key"] = [str(relationship.character_a_id), str(relationship.character_b_id)]
         evidence["resolution"] = "resolved:resolved"
         evidence["relationship_auto_reconciled"] = True

@@ -287,6 +287,17 @@ async def cancel_subscription_immediately(subscription_id: str) -> dict[str, Any
         return response.json()["data"]
 
 
+async def cancel_subscription_at_period_end(subscription_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(
+            f"{PADDLE_API_BASE}/subscriptions/{subscription_id}/cancel",
+            headers=_headers(),
+            json={"effective_from": "next_billing_period"},
+        )
+        response.raise_for_status()
+        return response.json()["data"]
+
+
 def verify_webhook_signature(raw_body: bytes, paddle_signature: str | None) -> bool:
     secret = settings.PADDLE_WEBHOOK_SECRET
     if not secret or not paddle_signature:

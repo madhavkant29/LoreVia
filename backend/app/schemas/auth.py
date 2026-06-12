@@ -51,6 +51,18 @@ class MessagingPermissionBody(BaseModel):
     messaging_permission: str = Field(..., pattern="^(anyone|friends_only)$")
 
 
+class AccountDeletionBody(BaseModel):
+    confirmation_text: str
+    password: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class AccountDeletionOut(BaseModel):
+    ok: bool = True
+    deletion_status: str
+    scheduled_for: datetime | None = None
+    provider_followup_required: bool = False
+
+
 class RegisterOut(BaseModel):
     id: uuid.UUID
     email: str

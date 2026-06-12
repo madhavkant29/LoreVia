@@ -8,6 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.character import Character, CharacterDuplicateSuggestion, CharacterMention
+from app.engine.character.adjudicator import (
+    ADJUDICATION_OBJECT,
+    ADJUDICATION_ORGANIZATION,
+    ADJUDICATION_PLACE,
+    ADJUDICATION_QUARANTINED,
+    ADJUDICATION_TITLE_OR_ROLE,
+    ENTITY_JUNK,
+    ENTITY_PERSON,
+    adjudicate_character_candidate,
+)
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
 from app.services.character_identity.constraints import add_identity_constraint, has_blocking_identity_constraint
 from app.services.character_identity.merge import add_character_alias, record_identity_action
@@ -18,8 +28,10 @@ from app.services.character_identity.normalization import (
 )
 from app.services.character_identity.suppression import suppress_candidate
 from app.utils.character_utils import (
+    CHARACTER_APPROVAL_PENDING_REVIEW,
     CHARACTER_APPROVAL_REJECTED,
     CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
+    CHARACTER_VISIBILITY_QUARANTINED,
     CHARACTER_DUPLICATE_DISMISSED,
     CHARACTER_DUPLICATE_PENDING,
     CHARACTER_VISIBILITY_NOISE,
@@ -267,9 +279,35 @@ class CharacterIdentityRepairJob:
         dry_run: bool,
     ) -> None:
         for character in characters:
+            if is_protected_character(character):
+                continue
+            adjudication = adjudicate_character_candidate(
+                character.name,
+                aliases=character.aliases or [],
+                evidence={
+                    "mention_count": character.mention_count,
+                    "has_physical_description": bool(
+                        character.trait_state
+                        or character.hair
+                        or character.eyes
+                        or character.build
+                        or character.age_descriptor
+                        or character.distinguishing
+                    ),
+                },
+            )
             kind = classify_candidate_kind(character.name)
             reason = ""
-            if kind == CandidateKind.FRAGMENT:
+            if adjudication.adjudication_status in {
+                ADJUDICATION_PLACE,
+                ADJUDICATION_ORGANIZATION,
+                ADJUDICATION_OBJECT,
+                ADJUDICATION_TITLE_OR_ROLE,
+            } or adjudication.entity_type == ENTITY_JUNK:
+                reason = f"{adjudication.adjudication_status}_adjudicated"
+            elif adjudication.adjudication_status == ADJUDICATION_QUARANTINED and adjudication.entity_type != ENTITY_PERSON:
+                reason = "adjudication_quarantined_for_review"
+            elif kind == CandidateKind.FRAGMENT:
                 reason = "title_only_fragment_suppressed"
             elif kind == CandidateKind.KINSHIP_DESCRIPTOR and family_role_reference(character.name)[1]:
                 reason = "kinship_descriptor_unresolved_suppressed"
@@ -277,11 +315,26 @@ class CharacterIdentityRepairJob:
                 reason = f"{kind.value}_suppressed"
             elif kind == CandidateKind.ROLE_DESCRIPTOR and int(character.mention_count or 0) <= 2:
                 reason = "role_descriptor_low_evidence_suppressed"
-            if not reason or is_protected_character(character):
+            if not reason:
                 continue
             result.planned_suppressions.append(str(character.id))
             result.auto_suppressed += 1
             if dry_run:
+                continue
+            if reason == "adjudication_quarantined_for_review":
+                set_character_review_state(
+                    character,
+                    visibility_state=CHARACTER_VISIBILITY_QUARANTINED,
+                    approval_state=CHARACTER_APPROVAL_PENDING_REVIEW,
+                    approval_source=CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
+                    reason_codes=[reason, *list(adjudication.reason_codes)],
+                    action="character_adjudication_quarantined",
+                    details={
+                        "adjudication_status": adjudication.adjudication_status,
+                        "entity_type": adjudication.entity_type,
+                        "character_score": adjudication.character_score,
+                    },
+                )
                 continue
             character.is_auto_suppressed = True
             character.suppression_reason = reason
@@ -290,16 +343,21 @@ class CharacterIdentityRepairJob:
                 visibility_state=CHARACTER_VISIBILITY_NOISE,
                 approval_state=CHARACTER_APPROVAL_REJECTED,
                 approval_source=CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
-                reason_codes=[reason],
+                reason_codes=[reason, *list(adjudication.reason_codes)],
                 action="character_auto_suppressed",
-                details={"candidate_kind": kind.value},
+                details={
+                    "candidate_kind": kind.value,
+                    "adjudication_status": adjudication.adjudication_status,
+                    "entity_type": adjudication.entity_type,
+                    "character_score": adjudication.character_score,
+                },
             )
             await suppress_candidate(
                 self.db,
                 book_id=self.book_id,
                 character_id=character.id,
                 surface_text=character.name,
-                candidate_kind=kind.value,
+                candidate_kind=adjudication.entity_type or kind.value,
                 reason=reason,
                 confidence=0.9,
                 repair_run_id=self.repair_run_id,

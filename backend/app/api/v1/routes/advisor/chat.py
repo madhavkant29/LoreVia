@@ -34,6 +34,7 @@ from app.schemas.advisor import (
     WhatsTheWordRequest,
     WhatsTheWordResponse,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.advisor_utils import (
     generate_whats_the_word_result,
     make_advisor_cache_key,
@@ -244,6 +245,7 @@ async def whats_the_word(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
@@ -270,6 +272,7 @@ async def whats_the_word_stream(
     book = await db.get(Book, book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
+    require_author_access(current_user)
 
     async def event_stream():
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)

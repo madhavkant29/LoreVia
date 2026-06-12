@@ -16,6 +16,13 @@ describe("pricing catalog", () => {
     expect(freeTier?.access).toBe("free")
     expect(pricingTierAccessLabel(freeTier!)).toBe("Included with every account")
     expect(pricingTierGuestCtaLabel(freeTier!)).toBe("Create free account")
+    expect(freeTier?.bullets).toEqual([
+      "Read existing projects",
+      "Export manuscript and novel files",
+      "1 Story Advisor turn per week",
+      "Join invited beta reads",
+      "Author tools only during the 10-day trial",
+    ])
   })
 
   it("marks checkout tiers as paid subscriptions", () => {

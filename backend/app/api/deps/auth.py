@@ -20,6 +20,7 @@ from app.services.admin_service import (
     record_admin_audit_event,
 )
 from app.utils.auth_utils import current_token_version, get_user_for_auth_subject
+from app.utils.privacy_utils import user_is_deleted
 from app.utils.auth_cookies import (
     REFRESH_TOKEN_COOKIE_NAME,
     get_auth_token,
@@ -82,6 +83,8 @@ async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSe
 
     if not user:
         raise HTTPException(401, "User not found")
+    if user_is_deleted(user):
+        raise HTTPException(401, "Account has been deleted.")
 
     current_version = current_token_version(user)
     if claimed_version != current_version:

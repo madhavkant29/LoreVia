@@ -339,7 +339,7 @@ export function EditorToolbar({
                     run((instance) => instance.chain().focus().insertContent({ type: "mentionToken", attrs: { mention: character.name, label: character.name } }).insertContent(" ").run())
                     setShowMentionPicker(false)
                   }}
-                  className={`block w-full rounded-sm px-3 py-2 text-left text-sm transition ${isDark ? "text-slate-200 hover:bg-white/8" : "text-stone-700 hover:bg-stone-100"}`}
+                  className={`block w-full rounded-sm px-3 py-2 text-left text-sm transition ${isDark ? "text-slate-200 hover:bg-white/[0.08]" : "text-stone-700 hover:bg-stone-100"}`}
                 >
                   @{character.name}
                 </button>

@@ -109,6 +109,77 @@ describe("books api", () => {
     })
   })
 
+  it("exports a reader-ready novel with preset and image options", async () => {
+    await booksApi.exportNovel("book-1", "epub", "large_print", true, "eb-garamond", {
+      imagePlacement: "inline",
+      includeImageCaptions: false,
+      previewChapters: 2,
+    })
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/novel/export", {
+      params: {
+        format: "epub",
+        preset: "large_print",
+        include_images: true,
+        image_placement: "inline",
+        include_image_captions: false,
+        preview_chapters: 2,
+        font_family: "eb-garamond",
+      },
+      responseType: "blob",
+    })
+  })
+
+  it("saves a novel preface and invalidates the writer workspace cache", async () => {
+    await booksApi.saveNovelPreface("book-1", "Before the voyage")
+
+    expect(putMock).toHaveBeenCalledWith("/books/book-1/novel/preface", {
+      preface: "Before the voyage",
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:writer-workspace")
+  })
+
+  it("saves novel export settings and invalidates the writer workspace cache", async () => {
+    await booksApi.saveNovelSettings("book-1", {
+      preface: "Before the voyage",
+      front_matter: {
+        dedication: "For readers",
+        acknowledgements: "Thanks",
+        copyright_page: "Copyright 2026",
+        about_author: "M. Author",
+        series_book_list: "Book 1",
+      },
+      epub_metadata: {
+        publisher: "LoreVia Press",
+        language: "en",
+        isbn: "9780000000000",
+        description: "A blurb",
+        series_name: "Atlas",
+        series_number: "1",
+      },
+    })
+
+    expect(putMock).toHaveBeenCalledWith("/books/book-1/novel/settings", {
+      preface: "Before the voyage",
+      front_matter: {
+        dedication: "For readers",
+        acknowledgements: "Thanks",
+        copyright_page: "Copyright 2026",
+        about_author: "M. Author",
+        series_book_list: "Book 1",
+      },
+      epub_metadata: {
+        publisher: "LoreVia Press",
+        language: "en",
+        isbn: "9780000000000",
+        description: "A blurb",
+        series_name: "Atlas",
+        series_number: "1",
+      },
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:writer-workspace")
+  })
+
   it("loads collaborator activity", async () => {
     await booksApi.getCollaboratorActivity("book-1", "collab-7")
 
@@ -388,6 +459,29 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
   })
 
+  it("loads character review with adjudication filters", async () => {
+    await booksApi.getCharacterReview("book-1", {
+      includeQuarantined: true,
+      includePlaces: true,
+      includeRejected: false,
+    })
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/character-review", {
+      params: {
+        include_quarantined: true,
+        include_places: true,
+        include_rejected: false,
+      },
+    })
+  })
+
+  it("marks a character candidate as a place", async () => {
+    await booksApi.markCharacterCandidatePlace("book-1", "candidate-1")
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/character-review/candidate-1/mark-place")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+  })
+
   it("attaches the left side of a relationship review candidate", async () => {
     await booksApi.attachRelationshipCandidateA("book-1", "rel-1", "char-1")
 
@@ -619,6 +713,15 @@ describe("books api", () => {
 
     await expect(booksApi.hide("book-1", true)).rejects.toBe(error)
     expect(deleteMock).not.toHaveBeenCalled()
+  })
+
+  it("permanently deletes books with explicit confirmation", async () => {
+    await booksApi.deletePermanently("book-1", "DELETE BOOK")
+
+    expect(deleteMock).toHaveBeenCalledWith("/books/book-1/permanent", {
+      data: { confirmation_text: "DELETE BOOK" },
+    })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
   })
 
   it("updates book forum metadata", async () => {

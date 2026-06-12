@@ -19,14 +19,16 @@ describe("CharacterProfileRightRail", () => {
     root = null
   })
 
-  it("renders author-facing health context and delegates quick actions", () => {
+  it("renders author-facing review context and delegates quick actions", () => {
     const onOpenRelationships = vi.fn()
     const view = renderRail({ onOpenRelationships })
 
-    expect(view.textContent).toContain("Character health")
+    expect(view.textContent).toContain("Continuity alerts")
+    expect(view.textContent).toContain("Extraction confidence")
+    expect(view.textContent).toContain("Open questions")
     expect(view.textContent).toContain("Grounded profile")
     expect(view.textContent).toContain("1 connected ties")
-    clickButton(view, "Open relationships")
+    clickButton(view, "Open")
     expect(onOpenRelationships).toHaveBeenCalledOnce()
   })
 

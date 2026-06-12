@@ -70,6 +70,7 @@ from app.api.v1.routes.books.core import (  # noqa: E402, F401
     hide_book,
     list_books,
     list_saved_notes,
+    permanently_delete_book,
     update_book_mode,
     update_writer_workspace,
 )
@@ -83,9 +84,12 @@ from app.api.v1.routes.books.exports import (  # noqa: E402, F401
     export_character_bible,
     export_character_card,
     export_manuscript,
+    export_novel,
     list_character_bible_vault_notes,
     preview_character_bible_vault,
     save_character_bible_vault_note,
+    save_novel_preface,
+    save_novel_settings,
 )
 from app.api.v1.routes.books.imports import (  # noqa: E402, F401
     import_manuscript_content,
@@ -238,6 +242,9 @@ from app.utils.export_utils import (  # noqa: E402, F401
     manuscript_epub_compiled,
     manuscript_vault_zip,
     manuscript_pdf_compiled,
+    novel_docx,
+    novel_epub_compiled,
+    novel_pdf_compiled,
 )
 from app.engine.character.consolidator import consolidate_characters  # noqa: E402, F401
 from dataclasses import asdict  # noqa: E402, F401

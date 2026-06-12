@@ -19,7 +19,7 @@ export function CompareNav({ activeSlug }: CompareNavProps) {
             className={`inline-flex items-center rounded-full border px-4 py-2 text-sm font-semibold transition ${
               active
                 ? "border-[#276a63] bg-[#11312d] text-[#86decd]"
-                : "border-white/10 bg-white/5 text-[#c9d1cb] hover:border-white/20 hover:bg-white/8 hover:text-white"
+                : "border-white/10 bg-white/5 text-[#c9d1cb] hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
             }`}
           >
             LoreVia vs {item.name}

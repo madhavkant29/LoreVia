@@ -219,7 +219,7 @@ export function ManuscriptPagedPreview({
           >
             Next
           </button>
-          <span className={`rounded-full px-3 py-1.5 ${isDark ? "bg-white/8 text-slate-200" : "bg-white text-stone-700"}`}>
+          <span className={`rounded-full px-3 py-1.5 ${isDark ? "bg-white/[0.08] text-slate-200" : "bg-white text-stone-700"}`}>
             Page {currentPage} of {pageCount}
           </span>
         </div>

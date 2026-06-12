@@ -105,8 +105,8 @@ function responseTypeStyle(type: ResponseType, isDark: boolean) {
     default:
       return {
         border: isDark ? "border-white/10" : "border-stone-200",
-        bg: isDark ? "bg-white/4" : "bg-white",
-        badge: isDark ? "bg-white/12 text-slate-300" : "bg-stone-100 text-stone-500",
+        bg: isDark ? "bg-white/[0.04]" : "bg-white",
+        badge: isDark ? "bg-white/[0.12] text-slate-300" : "bg-stone-100 text-stone-500",
         label: "Response",
       }
   }
@@ -350,7 +350,7 @@ function StoryAdvisorEmptyState({
     ? isDark ? "border-red-500/20 bg-red-500/8 text-red-100" : "border-red-200 bg-red-50 text-red-800"
     : accent === "success"
       ? isDark ? "border-teal-500/20 bg-teal-500/8 text-teal-100" : "border-teal-200 bg-teal-50 text-teal-800"
-      : isDark ? "border-white/10 bg-white/4 text-white" : "border-stone-200 bg-white text-stone-900"
+      : isDark ? "border-white/10 bg-white/[0.04] text-white" : "border-stone-200 bg-white text-stone-900"
 
   return (
     <StoryAdvisorSurface isDark={isDark} className={`p-10 text-center ${styles}`}>
@@ -389,7 +389,7 @@ function SuggestionGroup({
       <div className="mb-3 flex items-center gap-2">
         <span className={`text-sm ${sectionTone === "teal" ? "text-teal-300" : sectionTone === "violet" ? "text-violet-300" : sectionTone === "amber" ? "text-amber-300" : isDark ? "text-slate-300" : "text-stone-500"}`}>{icon}</span>
         <StoryAdvisorSectionLabel tone={sectionTone === "slate" ? "slate" : sectionTone}>{label}</StoryAdvisorSectionLabel>
-        <span className={`rounded-full px-1.5 py-0.5 text-3xs font-semibold ${isDark ? "bg-white/8 text-slate-400" : "bg-stone-100 text-stone-500"}`}>{items.length}</span>
+        <span className={`rounded-full px-1.5 py-0.5 text-3xs font-semibold ${isDark ? "bg-white/[0.08] text-slate-400" : "bg-stone-100 text-stone-500"}`}>{items.length}</span>
       </div>
       <div className="space-y-3">
         {items.map(s => {
@@ -431,7 +431,7 @@ function SuggestionGroup({
                         : s.severity === "info" || s.severity === "direction"
                           ? "bg-violet-600 text-white hover:bg-violet-500"
                           : isDark
-                            ? "bg-white/12 text-slate-100 hover:bg-white/16"
+                            ? "bg-white/[0.12] text-slate-100 hover:bg-white/[0.16]"
                             : "bg-stone-900 text-white hover:bg-stone-800"}`}
                     >
                       {s.action_label} &rarr;
@@ -448,7 +448,7 @@ function SuggestionGroup({
                           s.description,
                         ].filter(Boolean).join("\n"),
                       })}
-                      className={`rounded-sm border px-3.5 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/8 text-slate-200 hover:bg-white/12" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                      className={`rounded-sm border px-3.5 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/[0.08] text-slate-200 hover:bg-white/[0.12]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
                     >
                       Save note
                     </button>
@@ -497,6 +497,10 @@ export default function AdvisorPage() {
   const scanPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadSuggestions = useCallback(async () => {
+    if (!canUseAuthorMode) {
+      setSuggestionsPayload({ suggestions: [], meta: defaultScanMeta })
+      return
+    }
     setSuggestionsLoading(true)
     try {
       const data = await intelligenceApi.advisorSuggestions(bookId)
@@ -506,13 +510,18 @@ export default function AdvisorPage() {
     } finally {
       setSuggestionsLoading(false)
     }
-  }, [bookId])
+  }, [bookId, canUseAuthorMode])
 
   useEffect(() => {
     void loadSuggestions()
   }, [loadSuggestions])
 
   const startScan = useCallback(async () => {
+    if (!canUseAuthorMode) {
+      setScanStatus("failed")
+      setScanError("Continuity scans require an active trial, Author, or Architect plan.")
+      return
+    }
     if (scanStatus === "scanning") return
     setScanStatus("scanning")
     setScanError(null)
@@ -529,7 +538,7 @@ export default function AdvisorPage() {
       setScanStatus("failed")
       setScanError(err instanceof Error ? err.message : "Scan failed to start")
     }
-  }, [bookId, scanStatus, loadSuggestions])
+  }, [bookId, canUseAuthorMode, scanStatus, loadSuggestions])
 
   const pollScanJob = useCallback((jobId: string) => {
     const poll = async (attempt: number) => {
@@ -598,10 +607,15 @@ export default function AdvisorPage() {
   }, [bookId])
 
   useEffect(() => {
-    if (autoOpenedScan || tab !== "checker" || !suggestionsPayload || suggestionsPayload.suggestions.length === 0) return
+    if (canUseAuthorMode || tab !== "suggestions") return
+    setTab("checker")
+  }, [canUseAuthorMode, tab])
+
+  useEffect(() => {
+    if (!canUseAuthorMode || autoOpenedScan || tab !== "checker" || !suggestionsPayload || suggestionsPayload.suggestions.length === 0) return
     setTab("suggestions")
     setAutoOpenedScan(true)
-  }, [autoOpenedScan, suggestionsPayload, tab])
+  }, [autoOpenedScan, canUseAuthorMode, suggestionsPayload, tab])
 
   useEffect(() => {
     try {
@@ -675,9 +689,11 @@ export default function AdvisorPage() {
       const dailyCap = buildDailyCapEventDetail(err)
       const msg = err instanceof Error ? err.message : ""
       if (dailyCap) {
-        setError("You reached today's Story Advisor limit. Upgrade for more daily capacity or continue tomorrow.")
+        setError(canUseAuthorMode ? "You reached today's Story Advisor limit. Upgrade for more daily capacity or continue tomorrow." : "You reached this week's free Story Advisor turn. Upgrade for more capacity.")
       } else if (msg.includes("429")) {
         setError("Too many Story Advisor requests right now. Please try again in a bit.")
+      } else if (msg.includes("403")) {
+        setError("This advisor action requires an active trial, Author, or Architect plan.")
       } else {
         setError("The advisor couldn't respond. Try again.")
       }
@@ -685,7 +701,7 @@ export default function AdvisorPage() {
       setLoading(false)
       inputRef.current?.focus()
     }
-  }, [bookId, greeting, loading, messages])
+  }, [bookId, canUseAuthorMode, greeting, loading, messages])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -771,14 +787,22 @@ export default function AdvisorPage() {
             title="Story advisor"
             description="Ask about lore, canon, world gaps, and story logic. The advisor counters contradictions, surfaces foreshadowing, and explains the tradeoffs behind story decisions."
             actions={
-              <Link
-                href={`/${bookId}/notes`}
-                className={`inline-flex items-center justify-center rounded-md border px-4 py-3 text-sm font-medium transition ${isDark ? "border-teal-500/35 bg-teal-500/8 text-teal-100 hover:bg-teal-500/12" : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50"}`}
-              >
-                Open notes workspace
-              </Link>
+              canUseAuthorMode ? (
+                <Link
+                  href={`/${bookId}/notes`}
+                  className={`inline-flex items-center justify-center rounded-md border px-4 py-3 text-sm font-medium transition ${isDark ? "border-teal-500/35 bg-teal-500/8 text-teal-100 hover:bg-teal-500/12" : "border-stone-300 bg-white text-stone-900 hover:bg-stone-50"}`}
+                >
+                  Open notes workspace
+                </Link>
+              ) : null
             }
           />
+
+          {!canUseAuthorMode ? (
+            <div className={`mb-6 rounded-lg border px-5 py-4 text-sm leading-6 ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`} role="status">
+              Free accounts include one Story Advisor turn per week. Continuity scans, editorial review, saved advisor notes, and deeper author tools require an active trial, Author, or Architect plan.
+            </div>
+          ) : null}
 
           {/* Tab switcher */}
           <div role="tablist" aria-label="Story Advisor mode" className={`mb-8 inline-flex flex-wrap overflow-hidden rounded-md border p-1 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
@@ -794,23 +818,25 @@ export default function AdvisorPage() {
             >
               Continuity Checker
             </Button>
-            <Button
-              variant={tab === "suggestions" ? "primary" : "ghost"}
-              size="md"
-              id="advisor-tab-scan"
-              role="tab"
-              aria-selected={tab === "suggestions"}
-              aria-controls="advisor-scan-panel"
-              onClick={() => setTab("suggestions")}
-              className="relative rounded-sm"
-            >
-              Continuity Scan
-              {warnCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-3xs font-bold text-white">
-                  {warnCount}
-                </span>
-              )}
-            </Button>
+            {canUseAuthorMode ? (
+              <Button
+                variant={tab === "suggestions" ? "primary" : "ghost"}
+                size="md"
+                id="advisor-tab-scan"
+                role="tab"
+                aria-selected={tab === "suggestions"}
+                aria-controls="advisor-scan-panel"
+                onClick={() => setTab("suggestions")}
+                className="relative rounded-sm"
+              >
+                Continuity Scan
+                {warnCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-3xs font-bold text-white">
+                    {warnCount}
+                  </span>
+                )}
+              </Button>
+            ) : null}
           </div>
 
           {/* Chat tab */}
@@ -819,7 +845,7 @@ export default function AdvisorPage() {
 
               {/* Chat area */}
               <StoryAdvisorSurface isDark={isDark} className="flex min-h-[62vh] flex-col overflow-hidden">
-                <div className={`border-b px-5 py-4 ${isDark ? "border-white/8 bg-[#0d1524]/72" : "border-stone-100"}`}>
+                <div className={`border-b px-5 py-4 ${isDark ? "border-white/[0.08] bg-[#0d1524]/72" : "border-stone-100"}`}>
                   <StoryAdvisorSectionLabel tone="slate">Continuity Checker</StoryAdvisorSectionLabel>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
                     Ask targeted questions about contradictions, lore gaps, world rules, endings, and tradeoffs. The advisor preserves the current conversation flow and answer formatting.
@@ -917,7 +943,7 @@ export default function AdvisorPage() {
 
                   {/* Loading */}
                   {loading && (
-                    <div className={`rounded-md border p-5 ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} role="status" aria-label="Loading advisor response" aria-busy="true">
+                    <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.08] bg-white/[0.04]" : "border-stone-100 bg-stone-50"}`} role="status" aria-label="Loading advisor response" aria-busy="true">
                       <span className="sr-only">Loading advisor response</span>
                       <Skeleton className="mb-3 h-2.5 w-24 rounded-full" />
                       <Skeleton className="mb-2 h-2.5 w-full rounded-full" />
@@ -937,7 +963,7 @@ export default function AdvisorPage() {
                 </div>
 
                 {/* Input bar */}
-                <div className={`border-t px-4 py-4 ${isDark ? "border-white/8 bg-[#09101b]" : "border-stone-100"}`}>
+                <div className={`border-t px-4 py-4 ${isDark ? "border-white/[0.08] bg-[#09101b]" : "border-stone-100"}`}>
                   <div className="mx-auto w-full max-w-[52rem]">
                     <div className={`rounded-md border px-4 py-3 ${isDark ? "border-white/10 bg-[#0b1322]" : "border-stone-200 bg-stone-50"} transition`}>
                       <div className="flex items-end gap-3">
@@ -991,7 +1017,7 @@ export default function AdvisorPage() {
                       <div className="mt-4 space-y-2">
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300/80" : "text-emerald-800"}`}>Alerts</p>
                         {worldAnalysis.logic_alerts.slice(0, 3).map((item, index) => (
-                          <div key={`world-alert-${index}`} className={`rounded-md border p-3 ${isDark ? "border-white/8 bg-black/15" : "border-emerald-100 bg-white/70"}`}>
+                          <div key={`world-alert-${index}`} className={`rounded-md border p-3 ${isDark ? "border-white/[0.08] bg-black/15" : "border-emerald-100 bg-white/70"}`}>
                             <p className={`text-xs font-semibold ${isDark ? "text-slate-100" : "text-stone-800"}`}>{worldItemTitle(item, `Alert ${index + 1}`)}</p>
                             {worldItemDescription(item) ? (
                               <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{worldItemDescription(item)}</p>
@@ -1004,7 +1030,7 @@ export default function AdvisorPage() {
                       <div className="mt-4 space-y-2">
                         <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-emerald-300/80" : "text-emerald-800"}`}>Next moves</p>
                         {worldAnalysis.suggestions.slice(0, 3).map((item, index) => (
-                          <div key={`world-suggestion-${index}`} className={`rounded-md border p-3 ${isDark ? "border-white/8 bg-black/15" : "border-emerald-100 bg-white/70"}`}>
+                          <div key={`world-suggestion-${index}`} className={`rounded-md border p-3 ${isDark ? "border-white/[0.08] bg-black/15" : "border-emerald-100 bg-white/70"}`}>
                             <p className={`text-xs font-semibold ${isDark ? "text-slate-100" : "text-stone-800"}`}>{worldItemTitle(item, `Suggestion ${index + 1}`)}</p>
                             {worldItemDescription(item) ? (
                               <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{worldItemDescription(item)}</p>
@@ -1016,7 +1042,7 @@ export default function AdvisorPage() {
                     {worldAnalysis.citations.length > 0 ? (
                       <div className="mt-4 flex flex-wrap gap-2">
                         {worldAnalysis.citations.slice(0, 4).map((citation, index) => (
-                          <span key={`world-citation-${index}`} className={`rounded-full px-2.5 py-1 text-3xs font-medium ${isDark ? "bg-white/8 text-slate-300" : "bg-white text-stone-600"}`}>
+                          <span key={`world-citation-${index}`} className={`rounded-full px-2.5 py-1 text-3xs font-medium ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-white text-stone-600"}`}>
                             {worldItemTitle(citation, `Source ${index + 1}`)}
                           </span>
                         ))}
@@ -1038,7 +1064,7 @@ export default function AdvisorPage() {
                   ) : (
                     <div className="space-y-3">
                       {passages.map((p, i) => (
-                        <div key={i} className={`rounded-md border p-4 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
+                        <div key={i} className={`rounded-md border p-4 ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-100 bg-stone-50"}`}>
                           <div className="flex items-center justify-between mb-2">
                             <span className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-indigo-300" : "text-violet-600"}`}>
                               Ch. {p.chapter_num}{p.chapter_title ? `: ${p.chapter_title}` : ""}
@@ -1061,7 +1087,7 @@ export default function AdvisorPage() {
                   <StoryAdvisorSectionLabel tone="slate">Response Types</StoryAdvisorSectionLabel>
                   <div className="space-y-2">
                     {RESPONSE_TYPE_LEGEND.map(({ icon, label, desc }) => (
-                      <div key={label} className={`flex items-start gap-3 rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-black/10" : "border-stone-200 bg-stone-50"}`}>
+                      <div key={label} className={`flex items-start gap-3 rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-black/10" : "border-stone-200 bg-stone-50"}`}>
                         <span className={`mt-0.5 inline-flex min-w-[2.6rem] justify-center rounded-full px-2 py-1 text-3xs font-semibold ${icon === "WRN" ? "bg-amber-500/15 text-amber-300" : icon === "OPP" ? "bg-teal-500/15 text-teal-300" : icon === "TRD" ? "bg-violet-500/15 text-violet-300" : "bg-blue-500/15 text-blue-300"}`}>{icon}</span>
                         <div className="space-y-1">
                           <p className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-stone-700"}`}>{label}</p>
@@ -1085,7 +1111,7 @@ export default function AdvisorPage() {
                   type="button"
                   id="suggestions-tab-scan"
                   onClick={() => setSugTab("scan")}
-                  className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "scan" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
+                  className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "scan" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/[0.08]" : "text-stone-600 hover:bg-stone-50"}`}
                 >
                   Continuity Scan
                 </button>
@@ -1093,7 +1119,7 @@ export default function AdvisorPage() {
                   type="button"
                   id="suggestions-tab-editorial"
                   onClick={() => setSugTab("editorial")}
-                  className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "editorial" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/8" : "text-stone-600 hover:bg-stone-50"}`}
+                  className={`px-5 py-2.5 text-sm font-medium transition ${sugTab === "editorial" ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "text-slate-300 hover:bg-white/[0.08]" : "text-stone-600 hover:bg-stone-50"}`}
                 >
                   ✏️ Editorial Review
                 </button>
@@ -1126,7 +1152,7 @@ export default function AdvisorPage() {
                       ) : null}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-white/8 text-slate-300" : "bg-stone-100 text-stone-700"}`}>
+                      <span className={`rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-stone-100 text-stone-700"}`}>
                         {suggestionsMeta.heuristic_count} heuristic card{suggestionsMeta.heuristic_count === 1 ? "" : "s"}
                       </span>
                       {suggestionsMeta.proactive_audit_applied ? (
@@ -1144,7 +1170,7 @@ export default function AdvisorPage() {
                         { label: "Relationships", value: suggestionsMeta.relationship_count, kind: "relationships" as const },
                         { label: "World Elements", value: suggestionsMeta.world_element_count, kind: "world_elements" as const },
                       ].map((item) => (
-                        <div key={item.label} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/8 bg-black/20" : "border-stone-100 bg-stone-50"}`}>
+                        <div key={item.label} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.08] bg-black/20" : "border-stone-100 bg-stone-50"}`}>
                           <div className="flex items-center gap-3">
                             <div className={`${isDark ? "text-teal-300" : "text-teal-700"}`}>
                               <StoryAdvisorIcon kind={item.kind} />
@@ -1176,7 +1202,7 @@ export default function AdvisorPage() {
                         </div>
                       )}
                       {[1, 2, 3].map(i => (
-                        <Skeleton key={i} variant="card" className={`h-28 rounded-lg border ${isDark ? "border-white/8 bg-white/4" : "border-stone-100 bg-stone-50"}`} />
+                        <Skeleton key={i} variant="card" className={`h-28 rounded-lg border ${isDark ? "border-white/[0.08] bg-white/[0.04]" : "border-stone-100 bg-stone-50"}`} />
                       ))}
                     </div>
                   ) : scanStatus === "failed" && scanError ? (
@@ -1204,7 +1230,7 @@ export default function AdvisorPage() {
                       <SuggestionGroup label="Info" icon="INF" items={grouped.info} isDark={isDark} onAsk={handleSuggestionAsk} onSaveNote={saveQuickNote} onMarkIntentional={markIntentional} onDismiss={dismissSuggestion} />
 
                       {intentionalIds.size > 0 && (
-                        <div className={`rounded-lg border p-5 ${isDark ? "border-white/8 bg-white/3" : "border-stone-100 bg-stone-50"}`}>
+                        <div className={`rounded-lg border p-5 ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-100 bg-stone-50"}`}>
                           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] mb-1 ${isDark ? "text-slate-500" : "text-stone-400"}`}>
                             Intentional choices ({intentionalIds.size})
                           </p>

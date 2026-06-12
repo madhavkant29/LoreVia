@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +10,7 @@ from fastapi import HTTPException, UploadFile
 
 from app.api.v1.router import api_router
 from app.api.v1.routes import books
+from app.api.v1.routes.books import imports
 from app.utils.llm_usage_utils import LlmUsageSummary
 from app.schemas.books import (
     BookModeBody,
@@ -25,6 +26,8 @@ from app.schemas.books import (
     CharacterEventOut,
     ChapterConsistencyReport,
     MajorEventOut,
+    NovelPrefaceBody,
+    NovelSettingsBody,
     VaultNoteBody,
     ReadabilityRequestBody,
     RelationshipCreateBody,
@@ -350,6 +353,38 @@ async def test_upload_book_endpoint_rejects_disguised_pdf(monkeypatch):
 
     assert exc_info.value.status_code == 400
     assert "valid PDF" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_free_users_cannot_upload_or_preview_manuscripts(monkeypatch):
+    monkeypatch.setattr("app.utils.billing_utils.has_authoring_access", lambda *_args, **_kwargs: False)
+    user = SimpleNamespace(
+        id=uuid.uuid4(),
+        tier="free",
+        created_at=datetime.now(UTC) - timedelta(days=20),
+    )
+
+    with pytest.raises(HTTPException) as upload_exc:
+        await books.upload_book_endpoint(
+            file=_upload("atlas.txt", b"chapter text"),
+            title="Atlas",
+            db=_FakeDB(),
+            current_user=user,
+            __=None,
+        )
+
+    with pytest.raises(HTTPException) as preview_exc:
+        await imports.preview_upload_endpoint(
+            file=_upload("atlas.txt", b"chapter text"),
+            db=_FakeDB(),
+            current_user=user,
+            __=None,
+        )
+
+    assert upload_exc.value.status_code == 403
+    assert preview_exc.value.status_code == 403
+    assert "requires an Author or Architect plan" in upload_exc.value.detail
+    assert "requires an Author or Architect plan" in preview_exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -834,6 +869,77 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
 
 
 @pytest.mark.asyncio
+async def test_editor_project_import_persists_parsed_images(monkeypatch):
+    user = _user()
+    book = _book(user_id=user.id, mode="author", total_chapters=0, is_editor_project=True)
+    persisted_payloads: list[dict[str, object]] = []
+
+    async def _fake_persist(*_args, **kwargs):
+        persisted_payloads.append(kwargs)
+        return SimpleNamespace(id=uuid.uuid4(), number=kwargs["chapter_number"])
+
+    async def _fake_replace(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(books, "get_owned_book", _async_value(book))
+    monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "next_chapter_number", _async_value(1))
+    monkeypatch.setattr(books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    monkeypatch.setattr(
+        books,
+        "parse_book_upload_for_ingestion",
+        _async_value(
+            {
+                "chapters": [{
+                    "number": 1,
+                    "title": "Opening",
+                    "text": "Start [[IMAGE:img-1]] End",
+                    "images": [{
+                        "marker": "[[IMAGE:img-1]]",
+                        "bytes": b"img-bytes",
+                        "content_type": "image/png",
+                        "filename": "image.png",
+                    }],
+                }],
+                "screenplay_payload": None,
+                "parser_diagnostics": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(imports, "persist_editor_chapter_content", _fake_persist)
+    monkeypatch.setattr(books, "extract_novel_scene_candidates", lambda **_kwargs: [])
+    monkeypatch.setattr(books, "replace_chapter_novel_scenes", _fake_replace)
+    monkeypatch.setattr(books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(books, "invalidate_advisor_caches_for_book", _async_value(None))
+    monkeypatch.setattr("app.services.editor_project_service.maybe_auto_reprocess_editor_project", _async_value((False, [], 0)))
+
+    db = _FakeDB(execute_values=[_Result(scalar=None), _Result(scalar=None)], scalar_values=[1])
+    payload = await books.import_manuscript_content(
+        book.id,
+        text=None,
+        html=None,
+        title=None,
+        files=[_upload("story.txt", b"mock body")],
+        work_type=None,
+        chapter_number=None,
+        replace_existing="false",
+        chunk_long_documents="false",
+        split_into_chapters="true",
+        db=db,
+        current_user=user,
+        _=None,
+    )
+
+    assert payload.imported_chapters == [1]
+    assert persisted_payloads[0]["images"] == [{
+        "marker": "[[IMAGE:img-1]]",
+        "bytes": b"img-bytes",
+        "content_type": "image/png",
+        "filename": "image.png",
+    }]
+
+
+@pytest.mark.asyncio
 async def test_series_routes_and_user_stats(monkeypatch):
     user = _user()
     book = _book(user_id=user.id)
@@ -980,6 +1086,8 @@ async def test_book_notes_vault_and_workspace_routes(monkeypatch):
     monkeypatch.setattr(books, "get_owned_book", _async_value(book))
     monkeypatch.setattr(books, "list_user_notes", _async_value([note]))
     monkeypatch.setattr(books, "book_out", _async_value({"id": str(book.id)}))
+
+
     monkeypatch.setattr(books, "list_book_notes", _async_value([note]))
     monkeypatch.setattr(books, "save_book_note", _async_value(note))
     monkeypatch.setattr(books, "delete_book_note", _async_value(None))
@@ -1056,6 +1164,125 @@ async def test_book_notes_vault_and_workspace_routes(monkeypatch):
     char = SimpleNamespace(mention_count=9, name="Iris")
     arc = await books.get_emotional_arc(book.id, db=_FakeDB(execute_values=[_Result(scalars=[char])]), current_user=user)
     assert arc.focus_character_count == 1
+
+
+@pytest.mark.asyncio
+async def test_novel_export_routes_dispatch_formats_and_workspace_preface(monkeypatch):
+    user = _user()
+    book = _book(
+        user_id=user.id,
+        title="Atlas Draft",
+        writer_workspace={
+            "manuscript_front_matter": {"title": "Atlas Draft", "author_name": "M. Author"},
+            "novel_preface": "Before the voyage.",
+            "novel_front_matter": {"dedication": "For readers."},
+            "novel_epub_metadata": {"publisher": "LoreVia Press", "language": "en"},
+            "index_format": "roman",
+        },
+    )
+    chapter_id = uuid.uuid4()
+    compiled_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(books, "get_book_with_collaboration_access", _async_value((book, None)))
+    monkeypatch.setattr(books, "require_author_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.utils.book_utils.download_book", lambda _key: b'{"text":"Chapter body","html":"<p>Chapter body</p>"}')
+    monkeypatch.setattr("app.utils.book_utils.deserialize_manuscript_content", lambda _raw: {"text": "Chapter body", "html": "<p>Chapter body</p>"})
+    monkeypatch.setattr(
+        books,
+        "build_writer_workspace_payload",
+        lambda _book: {
+            "manuscript_front_matter": {"title": "Atlas Draft", "author_name": "M. Author"},
+            "novel_preface": "Before the voyage.",
+            "novel_front_matter": {"dedication": "For readers."},
+            "novel_epub_metadata": {"publisher": "LoreVia Press", "language": "en"},
+            "index_format": "roman",
+        },
+    )
+    monkeypatch.setattr(books, "novel_pdf_compiled", lambda **kwargs: compiled_calls.append({"format": "pdf", **kwargs}) or b"pdf")
+    monkeypatch.setattr(books, "novel_epub_compiled", lambda **kwargs: compiled_calls.append({"format": "epub", **kwargs}) or b"epub")
+    monkeypatch.setattr(books, "novel_docx", lambda **kwargs: compiled_calls.append({"format": "docx", **kwargs}) or b"docx")
+    monkeypatch.setattr(books, "mark_book_cache_dirty", _async_value(None))
+
+    for fmt, media_type in (
+        ("pdf", "application/pdf"),
+        ("epub", "application/epub+zip"),
+        ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ):
+        db = _FakeDB(execute_values=[_Result(all_rows=[(chapter_id, 1, "Opening", "chapters/1.json")])])
+        response = await books.export_novel(
+            book.id,
+            format=fmt,
+            preset="large_print",
+            include_images=False,
+            image_placement="inline",
+            include_image_captions=False,
+            db=db,
+            current_user=user,
+        )
+        assert response.media_type == media_type
+        assert response.headers["Content-Disposition"] == f'attachment; filename="Atlas-Draft-novel.{fmt}"'
+
+    assert [call["format"] for call in compiled_calls] == ["pdf", "epub", "docx"]
+    assert all(call["chapters"] == [{"number": 1, "title": "Opening", "text": "Chapter body", "media": []}] for call in compiled_calls)
+    assert all(call["preface"] == "Before the voyage." for call in compiled_calls)
+    assert all(call["novel_front_matter"] == {"dedication": "For readers."} for call in compiled_calls)
+    assert all(call["epub_metadata"] == {"publisher": "LoreVia Press", "language": "en"} for call in compiled_calls)
+    assert all(call["preset"] == "large_print" for call in compiled_calls)
+    assert all(call["image_placement"] == "inline" for call in compiled_calls)
+    assert all(call["include_image_captions"] is False for call in compiled_calls)
+    assert all(call["index_format"] == "roman" for call in compiled_calls)
+
+    preview_db = _FakeDB(execute_values=[_Result(all_rows=[(chapter_id, 1, "Opening", "chapters/1.json")])])
+    preview_response = await books.export_novel(
+        book.id,
+        format="pdf",
+        preview_chapters=2,
+        db=preview_db,
+        current_user=user,
+    )
+    assert preview_response.headers["Content-Disposition"] == 'attachment; filename="Atlas-Draft-novel-preview.pdf"'
+
+    db = _FakeDB()
+    result = await books.save_novel_preface(
+        book.id,
+        NovelPrefaceBody(preface="  Fresh preface.  "),
+        db=db,
+        current_user=user,
+    )
+
+    assert result == {"preface": "Fresh preface."}
+    assert book.writer_workspace["novel_preface"] == "Fresh preface."
+    assert db.commits == 1
+
+    settings_db = _FakeDB()
+    settings_result = await books.save_novel_settings(
+        book.id,
+        NovelSettingsBody(
+            preface="Final preface.",
+            front_matter={
+                "dedication": "For readers.",
+                "acknowledgements": "Thanks.",
+                "copyright_page": "Copyright 2026",
+                "about_author": "M. Author.",
+                "series_book_list": "Atlas Cycle",
+            },
+            epub_metadata={
+                "publisher": "LoreVia Press",
+                "language": "en-US",
+                "isbn": "9780000000000",
+                "description": "A blurb.",
+                "series_name": "Atlas",
+                "series_number": "1",
+            },
+        ),
+        db=settings_db,
+        current_user=user,
+    )
+
+    assert settings_result["preface"] == "Final preface."
+    assert settings_result["front_matter"]["copyright_page"] == "Copyright 2026"
+    assert settings_result["epub_metadata"]["publisher"] == "LoreVia Press"
+    assert settings_db.commits == 1
 
 
 @pytest.mark.asyncio

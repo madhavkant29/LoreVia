@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 
 import { LegalPageShell, LegalRightRail } from "@/components/legal/LegalPageShell"
-import { COPYRIGHT_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
+import { COPYRIGHT_EMAIL, DELETION_REQUEST_EMAIL, SUPPORT_EMAIL } from "@/lib/constants/contact"
 import { TRUST_EFFECTIVE_DATE } from "@/lib/constants/trust"
 
 export const metadata: Metadata = {
@@ -98,14 +98,28 @@ const sections = [
   {
     title: "Retention and deletion",
     paragraphs: [
-      "We keep data only as long as needed to provide the service or as required by law.",
+      "We keep data only as long as needed to provide the service or as required by law. You may request deletion of your personal data and uploaded manuscript data by using the account deletion option in LoreVia settings or by contacting support@mail.getlorevia.com. We may retain limited information where required for legal, tax, billing, security, or fraud-prevention purposes.",
     ],
     bullets: [
       "Account data is retained while your account is active",
       "Manuscripts, notes, and outputs are retained until you delete them or request deletion",
       "Public books may remain visible until unpublished, removed, or deleted",
-      "You can contact LoreVia to request deletion of account data or public content",
-      "After deletion, data is removed from active systems within 30 days and backups within 90 days",
+      `To request deletion of your account or manuscript data, email ${DELETION_REQUEST_EMAIL}`,
+      "Account deletion makes the account inaccessible immediately and queues hard deletion of product and manuscript data after 30 days",
+      "Billing invoices, tax records, fraud-prevention records, and security logs may be retained where legally required and detached from product data where possible",
+    ],
+  },
+  {
+    title: "Your privacy rights",
+    paragraphs: [
+      "Depending on where you live, including under GDPR-style data rights, you may have the right to access, erase, correct, object to certain processing, and receive a portable copy of personal data you provided.",
+    ],
+    bullets: [
+      "The Right to Access: you can ask to see what data LoreVia holds about you and how it is used",
+      "The Right to Erasure: you can request deletion of personal data and uploaded manuscript data under applicable circumstances",
+      "The Right to Rectification: you can request correction of inaccurate or incomplete data",
+      "The Right to Object: you can object to specific processing such as optional analytics or direct marketing",
+      "Data Portability: you can obtain a machine-readable export of your data from Settings or by contacting support",
     ],
   },
   {

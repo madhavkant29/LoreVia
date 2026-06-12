@@ -41,6 +41,13 @@ export interface TierLimits {
   architect_continuity_per_minute: number
 }
 
+export interface AccountDeletionResponse {
+  ok: boolean
+  deletion_status: string
+  scheduled_for?: string | null
+  provider_followup_required: boolean
+}
+
 export const authApi = {
   register: (email: string, username: string, password: string, accepted_terms: boolean, device_id: string) =>
     apiClient.post<RegisterResponse>("/auth/register", { email, username, password, accepted_terms, device_id }).then(r => r.data),
@@ -74,6 +81,22 @@ export const authApi = {
       }
       throw error
     }
+  },
+  exportData: () =>
+    apiClient.get<Blob>("/auth/me/data-export", { responseType: "blob" }).then(r => r.data),
+  deleteAccount: async (payload: { confirmationText: string; password?: string }) => {
+    const response = await apiClient.delete<AccountDeletionResponse>("/auth/me", {
+      data: {
+        confirmation_text: payload.confirmationText,
+        password: payload.password || null,
+      },
+    })
+    try {
+      await supabase?.auth.signOut({ scope: "local" })
+    } catch {
+      // Local provider-session cleanup should not mask a completed account deletion.
+    }
+    return response.data
   },
   setReadingMode: (mode: string) =>
     apiClient.patch(`/auth/me/reading-mode?mode=${mode}`).then(r => r.data),

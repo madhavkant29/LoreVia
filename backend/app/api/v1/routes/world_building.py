@@ -54,7 +54,8 @@ from app.utils.world_building_utils import (
 )
 from app.utils.tag_utils import ENTITY_TYPE_WORLD_NOTE, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
 from app.utils.upload_security_utils import read_upload_bounded
-from app.utils.billing_utils import worldbuilding_upload_cost_for_book
+from app.utils.billing_utils import require_author_access, worldbuilding_upload_cost_for_book
+from app.utils.storage_utils import delete_storage_keys_best_effort
 
 router = APIRouter()
 
@@ -134,6 +135,7 @@ async def list_world_documents(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     documents = await list_world_building_documents(db, book, include_inactive=include_inactive)
     return [_serialize_document(document) for document in documents]
 
@@ -150,6 +152,7 @@ async def upload_world_documents(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     upload_files = [upload for upload in (files or []) if upload.filename]
 
     if upload_files:
@@ -181,6 +184,13 @@ async def upload_world_documents(
             raw_files.append((upload.filename, raw))
     prepared = await prepare_world_building_uploads(files=raw_files, text=text, html=html, title=title)
     requested_uploads = len(prepared) * worldbuilding_upload_cost
+    replaced_document_keys: list[str] = []
+    if replace_flag:
+        replaced_document_keys = [
+            document.s3_key
+            for document in current_documents
+            if document.s3_key
+        ]
     await check_upload_limit(
         db,
         current_user,
@@ -199,6 +209,7 @@ async def upload_world_documents(
         replace_existing=replace_flag,
     )
     await db.commit()
+    await delete_storage_keys_best_effort(replaced_document_keys, context="world_building_document")
     for document in documents:
         await db.refresh(document)
     return [_serialize_document(document) for document in documents]
@@ -212,6 +223,7 @@ async def get_world_document(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     document = await get_world_building_document(db, book, document_id)
     payload = await load_world_building_document_payload(document)
     return _serialize_document(document, payload)
@@ -226,7 +238,9 @@ async def patch_world_document(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     document = await get_world_building_document(db, book, document_id)
+    previous_s3_key = document.s3_key
     updated = await update_world_building_document(
         db,
         book=book,
@@ -236,6 +250,8 @@ async def patch_world_document(
         html=body.html,
     )
     await db.commit()
+    if previous_s3_key and previous_s3_key != updated.s3_key:
+        await delete_storage_keys_best_effort([previous_s3_key], context="world_building_document")
     await db.refresh(updated)
     payload = await load_world_building_document_payload(updated)
     return _serialize_document(updated, payload)
@@ -249,9 +265,12 @@ async def remove_world_document(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     document = await get_world_building_document(db, book, document_id)
+    previous_s3_key = document.s3_key
     await delete_world_building_document(db, book=book, document=document)
     await db.commit()
+    await delete_storage_keys_best_effort([previous_s3_key], context="world_building_document")
     return Response(status_code=204)
 
 
@@ -264,6 +283,7 @@ async def analyze_world_building(
     _=Depends(rate_limit_world_building_ai),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     mode = body.mode or classify_world_intent(body.query)
     await extract_world_elements(db, book)
     if mode == "story_integration":
@@ -324,6 +344,7 @@ async def get_world_gaps(
     _=Depends(rate_limit_world_building_ai),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     payload = await detect_world_gaps(db, book)
     return GapAnalysisResponse(**payload)
 
@@ -335,6 +356,7 @@ async def get_world_integration(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     payload = await detect_integration_analysis(db, book)
     return IntegrationAnalysisResponse(**payload)
 
@@ -346,6 +368,7 @@ async def list_world_elements(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     return await list_extracted_world_elements(db, book)
 
 
@@ -356,6 +379,7 @@ async def list_auto_wiki(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     rows = (
         await db.execute(
             select(WikiEntry).where(WikiEntry.book_id == book.id).order_by(WikiEntry.entry_type.asc(), WikiEntry.name.asc())
@@ -383,6 +407,7 @@ async def generate_auto_wiki(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     generated = await generate_wiki_from_manuscript(db, book)
     await db.commit()
     return WikiGenerationResponse(
@@ -413,6 +438,7 @@ async def query_world_building(
     _=Depends(rate_limit_world_building_ai),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     mode = body.mode or classify_world_intent(body.query)
     payload = await build_world_logic_response(db, book, body.query, mode)
     return WorldQueryResponse(**payload)
@@ -427,6 +453,7 @@ async def get_series_world_analysis(
     series = await db.get(Series, series_id)
     if not series or series.user_id != current_user.id:
         raise HTTPException(404, "Series not found")
+    require_author_access(current_user)
     payload = await detect_series_world_analysis(db, series_id)
     return {**payload, "series_name": series.name}
 
@@ -444,6 +471,7 @@ async def accept_world_suggestion(
     book = await db.get(Book, element.book_id)
     if not book or book.user_id != current_user.id:
         raise HTTPException(404, "World element not found")
+    require_author_access(current_user)
     suggestions = list(element.suggestions or [])
     remaining = []
     for item in suggestions:
@@ -468,6 +496,7 @@ async def list_canon_overrides(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     overrides = (
         await db.execute(
             select(WorldCanonicalIdentity)
@@ -486,6 +515,7 @@ async def create_canon_override(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     identity = await save_canon_override(
         db,
         user_id=current_user.id,
@@ -507,6 +537,7 @@ async def list_world_notes(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     notes = (
         await db.execute(
             select(WorldNote)
@@ -531,6 +562,7 @@ async def create_world_note(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     world_element_id = uuid.UUID(body.world_element_id) if body.world_element_id else None
     world_document_id = uuid.UUID(body.world_document_id) if body.world_document_id else None
     if world_document_id:
@@ -573,6 +605,7 @@ async def delete_world_note(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     note = await db.get(WorldNote, note_id)
     if not note or note.book_id != book.id:
         raise HTTPException(404, "Note not found")
@@ -590,6 +623,7 @@ async def update_world_note_status(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     note = await db.get(WorldNote, note_id)
     if not note or note.book_id != book.id:
         raise HTTPException(404, "Note not found")
@@ -616,6 +650,7 @@ async def get_world_notes_by_chapter(
     current_user=Depends(get_current_user),
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
     notes = (
         await db.execute(
             select(WorldNote)

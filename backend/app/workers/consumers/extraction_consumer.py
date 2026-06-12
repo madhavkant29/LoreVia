@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -32,6 +33,7 @@ from app.engine.character.deduplicator import (
     resolve_character_match_id,
     resolve_character_match_ids,
 )
+from app.engine.character.adjudicator import ADJUDICATION_PROMOTED_CHARACTER, adjudicate_character_candidate
 from app.engine.character.entity_filters import CharacterPersistenceDecision, character_persistence_decision
 from app.engine.character.extractor import extract_characters_and_relationships, fallback_character_mentions
 from app.engine.character.profile_builder import build_character_profile, update_profile
@@ -128,14 +130,37 @@ def _relationship_signature(
     sentiment: float | None,
     from_chapter: int,
     description: str | None,
-) -> tuple[str, str, str, float | None, str, int]:
+    shared_labels: object | None = None,
+    character_a_to_b_labels: object | None = None,
+    character_b_to_a_labels: object | None = None,
+) -> tuple[str, str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...], float | None, str, int]:
     left_id, right_id = canonical_relationship_pair_key(character_a_id, character_b_id)
-    normalized_type, normalized_sentiment, normalized_description = relationship_state_signature(
+    (
+        normalized_type,
+        normalized_shared,
+        normalized_a_to_b,
+        normalized_b_to_a,
+        normalized_sentiment,
+        normalized_description,
+    ) = relationship_state_signature(
         rel_type=rel_type or "neutral",
         sentiment=sentiment,
         description=description,
+        shared_labels=shared_labels,
+        character_a_to_b_labels=character_a_to_b_labels,
+        character_b_to_a_labels=character_b_to_a_labels,
     )
-    return left_id, right_id, normalized_type, normalized_sentiment, normalized_description, int(from_chapter or 0)
+    return (
+        left_id,
+        right_id,
+        normalized_type,
+        normalized_shared,
+        normalized_a_to_b,
+        normalized_b_to_a,
+        normalized_sentiment,
+        normalized_description,
+        int(from_chapter or 0),
+    )
 
 
 def _relationship_resolution_candidates(
@@ -178,10 +203,14 @@ def _relationship_evidence_payload(
         "relationship": {
             "character_a": " ".join(str(rel.get("character_a") or "").split()).strip(),
             "character_b": " ".join(str(rel.get("character_b") or "").split()).strip(),
-            "type": " ".join(str(rel.get("type") or "neutral").split()).strip() or "neutral",
+            "type": " ".join(str(rel.get("primary_type") or rel.get("type") or "neutral").split()).strip() or "neutral",
             "description": " ".join(str(rel.get("description") or "").split()).strip(),
             "chapter_number": int(chapter_number or 0),
             "source_batch_key": rel.get("source_batch_key"),
+            "shared_labels": rel.get("shared_labels") or [],
+            "character_a_to_b_labels": rel.get("character_a_to_b_labels") or [],
+            "character_b_to_a_labels": rel.get("character_b_to_a_labels") or [],
+            "label_evidence": rel.get("label_evidence") or rel.get("evidence") or {},
         },
         "review_kind": "relationship_resolution",
         "unresolved_side": unresolved_side,
@@ -240,7 +269,7 @@ async def _record_relationship_review_candidates(
             raw_character_b=right_name,
             matched_character_a_id=left_matches[0] if len(left_matches) == 1 else None,
             matched_character_b_id=right_matches[0] if len(right_matches) == 1 else None,
-            rel_type=str(rel.get("rel_type") or rel.get("type") or rel.get("relationship") or "connection").strip() or None,
+            rel_type=str(rel.get("rel_type") or rel.get("primary_type") or rel.get("type") or rel.get("relationship") or "connection").strip() or None,
             sentiment=rel.get("sentiment"),
             description=str(rel.get("description") or "").strip() or None,
             status=disposition.status,
@@ -262,7 +291,7 @@ async def _persist_relationship_records(
     existing_characters: list[Character],
     relationships: list[dict[str, Any]],
     key_cache: dict[uuid.UUID, set[str]],
-    persisted_signatures: set[tuple[str, str, str, float | None, str, int]],
+    persisted_signatures: set[tuple[str, str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...], float | None, str, int]],
 ) -> tuple[int, list[dict[str, Any]], int]:
     persisted = 0
     unresolved: list[dict[str, Any]] = []
@@ -283,20 +312,27 @@ async def _persist_relationship_records(
             signature = _relationship_signature(
                 left_matches[0],
                 right_matches[0],
-                str(rel.get("type") or "neutral"),
+                str(rel.get("primary_type") or rel.get("type") or "neutral"),
                 rel.get("sentiment"),
                 chapter_number,
                 str(rel.get("description") or ""),
+                rel.get("shared_labels"),
+                rel.get("character_a_to_b_labels"),
+                rel.get("character_b_to_a_labels"),
             )
             relationship, created = await upsert_relationship_timeline_state(
                 db,
                 book_id=book_id,
                 character_a_id=left_matches[0],
                 character_b_id=right_matches[0],
-                rel_type=str(rel.get("type") or "neutral"),
+                rel_type=str(rel.get("primary_type") or rel.get("type") or "neutral"),
                 sentiment=rel.get("sentiment"),
                 description=str(rel.get("description") or ""),
                 from_chapter=chapter_number,
+                shared_labels=rel.get("shared_labels"),
+                character_a_to_b_labels=rel.get("character_a_to_b_labels"),
+                character_b_to_a_labels=rel.get("character_b_to_a_labels"),
+                label_evidence=rel.get("label_evidence") if isinstance(rel.get("label_evidence"), dict) else rel.get("evidence") if isinstance(rel.get("evidence"), dict) else None,
             )
             if created:
                 persisted_signatures.add(signature)
@@ -306,8 +342,12 @@ async def _persist_relationship_records(
         unresolved_entry = {
             "character_a": left_name,
             "character_b": right_name,
-            "type": str(rel.get("type") or "neutral"),
+            "type": str(rel.get("primary_type") or rel.get("type") or "neutral"),
             "description": " ".join(str(rel.get("description") or "").split()).strip(),
+            "shared_labels": rel.get("shared_labels") or [],
+            "character_a_to_b_labels": rel.get("character_a_to_b_labels") or [],
+            "character_b_to_a_labels": rel.get("character_b_to_a_labels") or [],
+            "label_evidence": rel.get("label_evidence") if isinstance(rel.get("label_evidence"), dict) else rel.get("evidence") if isinstance(rel.get("evidence"), dict) else {},
             "source_batch_key": rel.get("source_batch_key"),
             "chapter_number": chapter_number,
             "character_a_matches": [str(item) for item in left_matches[:3]],
@@ -349,9 +389,9 @@ async def _process_book_impl(book_id: str, queue_wait_ms: int | None = None) -> 
         if not book:
             return {"error": "not found"}
 
-        if book.hidden_at is not None:
-            log.info("Skipping processing for hidden book %s", book_id)
-            return {"skipped": "book_hidden"}
+        if await is_book_hidden(db, book.id):
+            log.info("Skipping processing for unavailable book %s", book_id)
+            return {"skipped": "book_unavailable"}
 
         book.status = "processing"
         book.writer_workspace = update_book_processing_state(
@@ -664,8 +704,8 @@ async def _process_chapter(
     manual_reprocess: bool = False,
 ):
     """Extract characters, relationships, store chunks for one chapter."""
-    if book.hidden_at is not None:
-        log.info("Skipping chapter processing for hidden book %s", book.id)
+    if await is_book_hidden(db, book.id):
+        log.info("Skipping chapter processing for unavailable book %s", book.id)
         return
 
     from app.services.editor_project_service import get_rebuild_run_id
@@ -909,13 +949,16 @@ async def _process_chapter(
                     CharacterRelationship.sentiment,
                     CharacterRelationship.from_chapter,
                     CharacterRelationship.description,
+                    CharacterRelationship.shared_labels,
+                    CharacterRelationship.character_a_to_b_labels,
+                    CharacterRelationship.character_b_to_a_labels,
                 ).where(
                     CharacterRelationship.book_id == book.id,
                     CharacterRelationship.from_chapter == chapter_number,
                 )
             )
         ).all()
-        persisted_relationship_signatures: set[tuple[str, str, str, float | None, str, int]] = {
+        persisted_relationship_signatures: set[tuple[str, str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...], float | None, str, int]] = {
             _relationship_signature(
                 row.character_a_id,
                 row.character_b_id,
@@ -923,6 +966,9 @@ async def _process_chapter(
                 row.sentiment,
                 row.from_chapter,
                 row.description,
+                row.shared_labels,
+                row.character_a_to_b_labels,
+                row.character_b_to_a_labels,
             )
             for row in existing_relationship_rows
         }
@@ -1258,6 +1304,44 @@ async def _process_chapter(
                 )
                 continue
 
+            promotion_adjudication = adjudicate_character_candidate(
+                str(entity.get("name") or ""),
+                aliases=entity.get("aliases") if isinstance(entity.get("aliases"), list) else [],
+                confidence=entity.get("confidence"),
+                evidence=_candidate_record_evidence(entity),
+                reason_codes=decision.reasons,
+            )
+            if promotion_adjudication.adjudication_status != ADJUDICATION_PROMOTED_CHARACTER:
+                quarantined_candidate_count += 1
+                status, resolved_reasons, _evidence = await _record_character_disposition_candidate(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    reason_codes=["adjudication_requires_review", *list(promotion_adjudication.reason_codes)],
+                    source_batch_key=entity_source_batch_key,
+                )
+                await _record_cluster_member_candidates(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    reason_code=resolved_reasons[0] if resolved_reasons else "adjudication_requires_review",
+                    status=status,
+                )
+                await _record_entity_cluster_mentions(
+                    db,
+                    book_id=book.id,
+                    chapter_number=chapter_number,
+                    entity=entity,
+                    matched_character_id=None,
+                    resolver_status="suppressed" if status == CHARACTER_CANDIDATE_SUPPRESSED else "held_for_review",
+                    resolver_reasons=resolved_reasons,
+                )
+                continue
+
             pending_new_entities.append((entity, blocked_ids, entity_source_batch_key))
 
         new_entity_embeddings = await _embed_new_character_candidates(
@@ -1492,6 +1576,15 @@ async def _process_chapter(
                 elapsed_ms(earliest_started),
                 len(pending_first_chapter_candidates),
             )
+        adjudication_status_rows = (
+            await db.execute(
+                select(CharacterCandidate.adjudication_status).where(
+                    CharacterCandidate.book_id == book.id,
+                    CharacterCandidate.chapter_number == chapter_number,
+                )
+            )
+        ).scalars().all()
+        adjudication_counts = Counter(str(status or "unknown") for status in adjudication_status_rows)
         extraction_diagnostics = dict(current_parser_diagnostics(book) or {})
         previous_character_diagnostics = (
             extraction_diagnostics.get("character_extraction")
@@ -1510,8 +1603,15 @@ async def _process_chapter(
             "fallback_character_count": extraction_fallback_character_count,
             "raw_mentions": len(raw_character_entities),
             "candidate_clusters": len(aggregated_entities),
+            "extracted_candidates": sum(adjudication_counts.values()),
             "saved_characters": saved_character_count,
             "quarantined_candidates": quarantined_candidate_count,
+            "adjudicated_promoted_characters": int(adjudication_counts.get("promoted_character", 0)),
+            "adjudicated_quarantined_candidates": int(adjudication_counts.get("quarantined", 0)),
+            "adjudicated_rejected_noise": int(adjudication_counts.get("rejected", 0)),
+            "adjudicated_place_entities": int(adjudication_counts.get("place", 0)),
+            "adjudicated_alias_merges": int(adjudication_counts.get("merged_alias", 0)),
+            "ambiguous_llm_adjudications": 0,
             "ambiguity_rate": round(ambiguous_entity_count / max(1, len(aggregated_entities)), 3),
             "strict_hold_rate": round(strict_hold_count / max(1, len(aggregated_entities)), 3),
             "mention_to_promotion_rate": round(saved_character_count / max(1, len(raw_character_entities)), 3),
@@ -1539,6 +1639,12 @@ async def _process_chapter(
             "totals": {
                 "saved_characters": int(previous_totals.get("saved_characters") or 0) + saved_character_count,
                 "quarantined_candidates": int(previous_totals.get("quarantined_candidates") or 0) + quarantined_candidate_count,
+                "adjudicated_promoted_characters": int(previous_totals.get("adjudicated_promoted_characters") or 0) + int(adjudication_counts.get("promoted_character", 0)),
+                "adjudicated_quarantined_candidates": int(previous_totals.get("adjudicated_quarantined_candidates") or 0) + int(adjudication_counts.get("quarantined", 0)),
+                "adjudicated_rejected_noise": int(previous_totals.get("adjudicated_rejected_noise") or 0) + int(adjudication_counts.get("rejected", 0)),
+                "adjudicated_place_entities": int(previous_totals.get("adjudicated_place_entities") or 0) + int(adjudication_counts.get("place", 0)),
+                "adjudicated_alias_merges": int(previous_totals.get("adjudicated_alias_merges") or 0) + int(adjudication_counts.get("merged_alias", 0)),
+                "ambiguous_llm_adjudications": int(previous_totals.get("ambiguous_llm_adjudications") or 0),
                 "rejected_entities": int(previous_totals.get("rejected_entities") or 0) + len(extraction_rejected_characters),
                 "relationships_persisted": int(previous_totals.get("relationships_persisted") or 0) + persisted_relationship_count,
                 "unresolved_relationships_count": int(previous_totals.get("unresolved_relationships_count") or 0) + len(unresolved_relationships),

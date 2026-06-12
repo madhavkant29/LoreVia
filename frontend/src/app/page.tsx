@@ -2,9 +2,11 @@ import Link from "next/link"
 import type { Metadata } from "next"
 import type { Route } from "next"
 import type { ReactNode } from "react"
+import Image from "next/image"
 
 import { AudienceSection } from "@/components/marketing/AudienceSection"
 import { HomePricingSection } from "@/components/marketing/HomePricingSection"
+import { LandingShowcase } from "@/components/marketing/LandingShowcase"
 import { MarketingHeader } from "@/components/marketing/MarketingHeader"
 import { Reveal } from "@/components/marketing/Reveal"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
@@ -19,9 +21,9 @@ import {
 } from "@/lib/seo"
 
 export const metadata: Metadata = {
-  title: "LoreVia | Write, revise, and remember every thread of your story",
+  title: "LoreVia | Find plot holes before your readers do",
   description:
-    "Draft chapters, organize scenes, export manuscripts, and let LoreVia build editable story memory for characters, relationships, timelines, continuity issues, and grounded answers from your draft.",
+    "Analyze manuscripts for continuity issues, timeline conflicts, character inconsistencies, unresolved story logic, and grounded revision context without losing your voice.",
   keywords: [
     "fiction writing workspace",
     "manuscript continuity software",
@@ -34,77 +36,51 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   openGraph: {
-    title: "LoreVia | Write, revise, and remember every thread of your story",
+    title: "LoreVia | Find plot holes before your readers do",
     description:
-      "Draft chapters, organize scenes, export manuscripts, and let LoreVia build editable story memory for characters, relationships, timelines, continuity issues, and grounded answers from your draft.",
+      "Analyze manuscripts for continuity issues, timeline conflicts, character inconsistencies, unresolved story logic, and grounded revision context without losing your voice.",
     url: SITE_URL,
     images: [DEFAULT_OG_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
-    title: "LoreVia | Write, revise, and remember every thread of your story",
+    title: "LoreVia | Find plot holes before your readers do",
     description:
-      "Draft chapters, organize scenes, export manuscripts, and let LoreVia build editable story memory for characters, relationships, timelines, continuity issues, and grounded answers from your draft.",
+      "Analyze manuscripts for continuity issues, timeline conflicts, character inconsistencies, unresolved story logic, and grounded revision context without losing your voice.",
     images: [DEFAULT_OG_IMAGE],
   },
 }
 
 const fileFormats = ["DOCX", "PDF", "EPUB", "Markdown", "TXT", "Vault"]
 
-const featureStrip = [
-  {
-    title: "Chapter-grounded answers",
-    body: "Ask what changed in Chapter 12 and get answers grounded in that chapter, not a generic manuscript recap.",
-    icon: <QuestionIcon />,
-  },
-  {
-    title: "Continuity review",
-    body: "Catch contradictions, dropped details, and timeline mismatches before readers do.",
-    icon: <CompassIcon />,
-  },
-  {
-    title: "Character memory",
-    body: "Keep editable character, relationship, and recurring-detail memory tied directly to the draft.",
-    icon: <CharacterIcon />,
-  },
-  {
-    title: "Timeline and threads",
-    body: "See where plot threads begin, stall, and return so revision does not bury your story logic.",
-    icon: <ThreadIcon />,
-  },
-  {
-    title: "Export and compile",
-    body: "Export clean manuscript files while keeping your working notes, scans, and story memory intact.",
-    icon: <ExportIcon />,
-  },
-  {
-    title: "Version control",
-    body: "Track draft changes, compare revision passes, and restore earlier versions without losing context.",
-    icon: <VersionIcon />,
-  },
-]
-
 const workflowSteps = [
   {
-    step: "Draft or import",
-    body: "Write from scratch or bring in an existing manuscript. LoreVia keeps chapters, scenes, exports, and revisions in one place.",
+    step: "Upload the draft",
+    body: "Start with the manuscript you already have. LoreVia keeps chapters, scenes, exports, and revisions in one place.",
   },
   {
-    step: "LoreVia builds story memory",
+    step: "Build story memory",
     body: "Characters, relationships, locations, timelines, and callbacks become editable working data instead of scattered notes.",
   },
   {
-    step: "Review continuity and drift",
-    body: "Inspect contradictions, missing thread payoffs, and detail inconsistencies while the manuscript is still easy to correct.",
+    step: "Surface the conflicts",
+    body: "Inspect contradictions, missing thread payoffs, detail drift, and timeline issues while the manuscript is still easy to correct.",
   },
   {
     step: "Ask grounded questions",
-    body: "Query the draft without losing chapter context or relying on unsupported summaries.",
+    body: "Query the draft without losing chapter context or relying on unsupported summaries when you need a second pass.",
   },
   {
     step: "Export or keep revising",
     body: "Compile the manuscript, hand it to collaborators, or keep iterating with version history and spoiler-safe reading.",
   },
+]
+
+const beforeAfterRows = [
+  ["Before", "Continuity issues live in memory, scattered comments, and separate notes."],
+  ["After", "LoreVia ties issues to chapters, characters, timelines, scenes, and revision targets."],
+  ["Before", "A rewrite can quietly break a reveal, injury timeline, relationship beat, or world rule."],
+  ["After", "The workspace shows where the story logic changed and what needs another author decision."],
 ]
 
 const faqItems = [
@@ -169,86 +145,50 @@ function SectionHeading({
 
 function WorkflowPanel() {
   return (
-    <div className="rounded-lg border border-white/8 bg-[#0d1715] p-6 md:p-8">
-      <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr]">
+    <div className="rounded-lg border border-white/[0.08] bg-[#121214] p-6 md:p-8">
+      <div className="grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
         <div>
-          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Your writing workflow</p>
-          <h2 className="mt-5 max-w-lg font-display text-4xl font-semibold leading-[1.02] text-white md:text-5xl">
-            A workspace that guides your entire process
+          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#d6a84f]">Before vs after workflow</p>
+          <h2 className="mt-5 max-w-lg font-display text-4xl font-semibold leading-[1.02] text-[#f4f1ea] md:text-5xl">
+            Move from memory-based revision to manuscript evidence.
           </h2>
-          <div className="mt-8 space-y-5">
+          <p className="mt-5 max-w-xl text-lg leading-8 text-[#a09a90]">
+            The page still keeps the full writing workflow: import, story memory, continuity review, grounded questions, export, and ongoing revision.
+          </p>
+          <div className="mt-8 space-y-4">
             {workflowSteps.map((item, index) => (
               <div key={item.step} className="flex gap-4">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#2a6f67] text-sm font-semibold text-[#86decd]">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#665128] text-sm font-semibold text-[#d6a84f]">
                   {index + 1}
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-white">{item.step}</h3>
-                  <p className="mt-2 text-sm leading-7 text-[#aeb9b3]">{item.body}</p>
+                  <h3 className="text-lg font-semibold text-[#f4f1ea]">{item.step}</h3>
+                  <p className="mt-2 text-sm leading-7 text-[#a09a90]">{item.body}</p>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            {[
-              ["Characters", "23", "Total characters"],
-              ["Plot threads", "17", "Active threads"],
-              ["Timeline events", "86", "Tracked events"],
-            ].map(([label, value, note]) => (
-              <div key={label} className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
-                <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">{label}</p>
-                <p className="mt-3 text-4xl font-semibold tracking-tight text-white">{value}</p>
-                <p className="mt-2 text-sm text-[#8fa19a]">{note}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-[0.8fr_1.2fr_0.7fr]">
-            <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
-              <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Continuity score</p>
-              <p className="mt-3 text-4xl font-semibold tracking-tight text-white">92%</p>
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
-                <div className="h-full w-[92%] rounded-full bg-[#4fb6a3]" />
-              </div>
-              <p className="mt-3 text-sm text-[#8fa19a]">Good</p>
-            </div>
-
-            <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
-              <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Recent finding</p>
-              <p className="mt-4 text-lg font-semibold text-white">Timeline gap</p>
-              <p className="mt-2 text-sm leading-7 text-[#aeb9b3]">
-                Travel time between ch. 9 and ch. 10 is unusually short for the route the manuscript establishes.
+        <div className="grid gap-4">
+          {beforeAfterRows.map(([label, body]) => (
+            <div key={`${label}-${body}`} className="rounded-md border border-white/[0.08] bg-[#0c0c0d] p-5">
+              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${label === "After" ? "text-[#8fbc8f]" : "text-[#d96c5f]"}`}>
+                {label}
               </p>
-              <div className="mt-4 inline-flex rounded-full border border-[#276a63] bg-[#11312d] px-3 py-1.5 text-xs font-semibold text-[#86decd]">
-                Review finding
-              </div>
+              <p className="mt-3 text-lg leading-8 text-[#f4f1ea]">{body}</p>
             </div>
-
-            <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
-              <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Chapters</p>
-              <p className="mt-3 text-4xl font-semibold tracking-tight text-white">24</p>
-              <p className="mt-2 text-sm text-[#8fa19a]">Total chapters</p>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-white/8 bg-[#0d1715] p-5">
-            <p className="text-3xs uppercase tracking-[0.22em] text-[#6fae9f]">Ask LoreVia about your manuscript</p>
-            <div className="mt-4 rounded-xl border border-white/8 bg-[#0b1513] px-4 py-3 text-sm text-[#d9e0db]">
-              What are the motivations driving Kael in the last three chapters?
-            </div>
-            <div className="mt-4 rounded-xl border border-[#20443f] bg-[#0e1d1b] p-4">
-              <p className="text-sm leading-7 text-[#d9e0db]">
-                In the last three chapters, Kael is driven by three core motivations:
-              </p>
-              <ul className="mt-3 space-y-2 text-sm leading-7 text-[#aeb9b3]">
-                <li>- Protecting his sister at any cost</li>
-                <li>- Finding the truth about the old order</li>
-                <li>- Earning the trust of a reluctant ally</li>
-              </ul>
-            </div>
+          ))}
+          <div className="rounded-md border border-[#665128] bg-[#171719] p-5">
+            <p className="text-3xs font-semibold uppercase tracking-[0.22em] text-[#d6a84f]">
+              Grounded question
+            </p>
+            <p className="mt-4 rounded-md border border-white/[0.08] bg-[#0c0c0d] px-4 py-3 text-sm text-[#f4f1ea]">
+              What changed in Chapter 12 that could break the vault reveal?
+            </p>
+            <p className="mt-4 text-sm leading-7 text-[#a09a90]">
+              LoreVia answers from the draft context, then points you back to the chapter, character, and timeline evidence.
+            </p>
           </div>
         </div>
       </div>
@@ -258,26 +198,21 @@ function WorkflowPanel() {
 
 function HeroWorkspaceSummary() {
   return (
-    <aside className="rounded-lg border border-white/10 bg-[#0d1715] p-6 md:p-8">
-      <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#6fae9f]">Author workspace</p>
-      <h2 className="mt-4 font-display text-3xl leading-tight text-white md:text-4xl">
-        A serious revision system for long-form fiction.
-      </h2>
-      <p className="mt-4 text-sm leading-7 text-[#aeb9b3]">
-        LoreVia keeps manuscript work, story memory, review, collaboration, and export in one structured workspace. Product screenshots will appear here after the redesigned flows complete visual QA.
-      </p>
-      <div className="mt-7 grid gap-3 sm:grid-cols-2">
-        {[
-          ["Manuscript", "Draft chapters, scenes, and version history"],
-          ["Story Bible", "Track characters, relationships, timelines, and threads"],
-          ["Review Center", "Resolve continuity, voice, and reader feedback"],
-          ["Publish & Export", "Control collaborators, exports, and public visibility"],
-        ].map(([title, detail]) => (
-          <div key={title} className="rounded-md border border-white/8 bg-[#101a18] p-4">
-            <p className="text-sm font-semibold text-white">{title}</p>
-            <p className="mt-2 text-sm leading-6 text-[#9fb0a8]">{detail}</p>
-          </div>
-        ))}
+    <aside className="overflow-hidden rounded-lg border border-white/10 bg-[#121214] shadow-[0_28px_90px_rgba(0,0,0,0.35)]">
+      <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3">
+        <p className="text-3xs font-semibold uppercase tracking-[0.24em] text-[#d6a84f]">Live manuscript scan</p>
+        <span className="text-xs text-[#a09a90]">Sky of Ash / demo draft</span>
+      </div>
+      <div className="relative aspect-[2503/1389] bg-[#0c0c0d]">
+        <Image
+          src="/landing/manuscript-analysis.png"
+          alt="LoreVia manuscript editor showing continuity issues beside a draft"
+          fill
+          priority
+          fetchPriority="high"
+          sizes="(min-width: 1024px) 62vw, 100vw"
+          className="object-contain"
+        />
       </div>
     </aside>
   )
@@ -305,7 +240,7 @@ function HomepageComparisonSection() {
                 <Link
                   key={item.slug}
                   href={`/compare/${item.slug}`}
-                  className="rounded-md border border-white/8 bg-white/5 px-4 py-4 transition hover:border-white/16 hover:bg-white/8"
+                  className="rounded-md border border-white/[0.08] bg-white/5 px-4 py-4 transition hover:border-white/[0.16] hover:bg-white/[0.08]"
                 >
                   <p className="text-base font-semibold text-white">LoreVia vs {item.name}</p>
                   <p className="mt-2 text-sm leading-7 text-[#9fb0a8]">{item.summary}</p>
@@ -331,7 +266,7 @@ function HomepageComparisonSection() {
                   {["Feature", "Scrivener", "Campfire", "Google Docs", "LoreVia"].map((heading) => (
                     <th
                       key={heading}
-                      className={`border-b border-white/8 px-5 py-4 font-semibold ${
+                      className={`border-b border-white/[0.08] px-5 py-4 font-semibold ${
                         heading === "LoreVia" ? "bg-[#0f2320] text-[#7ad3c1]" : ""
                       }`}
                     >
@@ -412,41 +347,40 @@ export default function HomePage() {
         <div className="relative overflow-hidden">
           <MarketingHeader />
 
-          <Section className="relative pb-14 pt-12 md:pt-14">
-            <div className="grid gap-10 lg:grid-cols-[0.85fr_1.25fr] lg:items-center">
-              <Reveal>
+          <Section className="relative max-w-[1760px] pb-16 pt-10 md:pt-14">
+            <div className="grid gap-10 lg:grid-cols-[minmax(0,1.35fr)_minmax(420px,0.85fr)] lg:items-center lg:gap-12 2xl:grid-cols-[minmax(820px,1.4fr)_minmax(500px,0.8fr)]">
+              <Reveal className="lg:order-2">
                 <div>
                   
-                  <h1 className="mt-8 max-w-2xl font-display text-5xl font-semibold leading-[0.95] tracking-[-0.045em] text-white md:text-[5.5rem]">
-                    Revise coherently.                  <br />
-                     <span className="text-[#67c6b4]">LoreVia remembers every thread.</span>
+                  <h1 className="max-w-2xl font-display text-5xl font-semibold leading-[0.95] tracking-[-0.025em] text-[#f4f1ea] md:text-[4.15rem] xl:text-[4.7rem]">
+                    Find plot holes before your readers do.
                   </h1>
-                  <p className="mt-6 max-w-xl text-lg leading-8 text-[#aeb9b3]">
-                    Draft, organize, export, and let LoreVia track your story’s characters, timelines, relationships, and continuity.
+                  <p className="mt-6 max-w-xl text-lg leading-8 text-[#a09a90]">
+                    LoreVia analyzes your manuscript for continuity issues, timeline conflicts, character inconsistencies, and unresolved story logic without changing your voice.
                   </p>
 
                   <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                     <Link
                       href={ctaHref}
-                      className="inline-flex items-center justify-center rounded-xl bg-[#1f615d] px-6 py-3.5 text-base font-semibold text-white transition hover:bg-[#25756f]"
+                      className="inline-flex items-center justify-center rounded-md bg-[#d6a84f] px-6 py-3.5 text-base font-semibold text-[#15120b] transition hover:bg-[#e4bb67]"
                     >
-                      Start writing free
+                      Start analyzing your manuscript
                     </Link>
                     <Link
-                      href="/pricing"
-                      className="inline-flex items-center justify-center rounded-xl border border-white/12 bg-white/5 px-6 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
+                      href="#features"
+                      className="inline-flex items-center justify-center rounded-md border border-white/[0.12] bg-white/5 px-6 py-3.5 text-base font-semibold text-[#f4f1ea] transition hover:bg-white/[0.08]"
                     >
-                      View pricing
+                      See how it works
                     </Link>
                   </div>
 
                   <div className="mt-9">
-                    <p className="text-sm text-[#8fa19a]">Works with your files</p>
+                    <p className="text-sm text-[#a09a90]">Built for fiction writers, novelists, beta readers, and editors.</p>
                     <div className="mt-4 flex flex-wrap gap-3">
                       {fileFormats.map((format) => (
                         <span
                           key={format}
-                          className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-[#d9e0db]"
+                          className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-[#f4f1ea]"
                         >
                           {format}
                         </span>
@@ -456,32 +390,14 @@ export default function HomePage() {
                 </div>
               </Reveal>
 
-              <Reveal delay={90}>
+              <Reveal delay={90} className="lg:order-1">
                 <HeroWorkspaceSummary />
               </Reveal>
             </div>
           </Section>
         </div>
 
-        <Section id="features" className="pb-18 pt-4">
-          <SectionHeading
-            title="Everything you need to write with clarity"
-            align="center"
-          />
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {featureStrip.map((item, index) => (
-              <Reveal key={item.title} delay={index * 60}>
-                <article className="h-full rounded-lg border border-white/8 bg-[#0d1715] p-5 md:p-6">
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[#7fd7c5]">
-                    {item.icon}
-                  </div>
-                  <h3 className="mt-5 text-2xl font-semibold text-white">{item.title}</h3>
-                  <p className="mt-4 text-sm leading-7 text-[#aeb9b3]">{item.body}</p>
-                </article>
-              </Reveal>
-            ))}
-          </div>
-        </Section>
+        <LandingShowcase />
 
         <Section id="workflow" className="pb-18 pt-8">
           <WorkflowPanel />
@@ -500,7 +416,7 @@ export default function HomePage() {
             {faqItems.map((item) => (
               <details
                 key={item.q}
-                className="group self-start rounded-lg border border-white/8 bg-[#0d1715] p-5 open:border-[#235f57]"
+                className="group self-start rounded-lg border border-white/[0.08] bg-[#0d1715] p-5 open:border-[#235f57]"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-lg font-semibold text-white">
                   <span>{item.q}</span>
@@ -513,26 +429,26 @@ export default function HomePage() {
         </Section>
 
         <section className="mx-auto max-w-7xl px-5 pb-22 pt-6 md:px-8">
-          <div className="rounded-lg border border-[#1e5a53] bg-[#12322e] px-6 py-8 md:px-10 md:py-10">
+          <div className="rounded-lg border border-[#665128] bg-[#171719] px-6 py-8 md:px-10 md:py-10">
             <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
-                <h2 className="font-display text-4xl font-semibold leading-tight text-white md:text-5xl">
-                  Start with the draft you already have.
+                <h2 className="font-display text-4xl font-semibold leading-tight text-[#f4f1ea] md:text-5xl">
+                  Your manuscript already contains the answers. LoreVia helps you see where they conflict.
                 </h2>
-                <p className="mt-4 max-w-2xl text-lg leading-8 text-[#aeb9b3]">
+                <p className="mt-4 max-w-2xl text-lg leading-8 text-[#a09a90]">
                   Import a manuscript, build story memory, and begin revising with continuity in view.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
                 <Link
                   href={ctaHref}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#1f615d] px-7 py-3.5 text-base font-semibold text-white transition hover:bg-[#25756f]"
+                  className="inline-flex items-center justify-center rounded-md bg-[#d6a84f] px-7 py-3.5 text-base font-semibold text-[#15120b] transition hover:bg-[#e4bb67]"
                 >
-                  Start free
+                  Start your 10-day trial
                 </Link>
                 <Link
                   href="/pricing"
-                  className="inline-flex items-center justify-center rounded-xl border border-white/12 bg-white/5 px-7 py-3.5 text-base font-semibold text-white transition hover:bg-white/8"
+                  className="inline-flex items-center justify-center rounded-md border border-white/[0.12] bg-white/5 px-7 py-3.5 text-base font-semibold text-[#f4f1ea] transition hover:bg-white/[0.08]"
                 >
                   View pricing
                 </Link>
@@ -549,65 +465,6 @@ function ArrowIcon() {
   return (
     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14m-6-6 6 6-6 6" />
-    </svg>
-  )
-}
-
-function QuestionIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 9a2.5 2.5 0 115 0c0 1.8-2.5 2.1-2.5 4" />
-      <circle cx="12" cy="17.5" r="0.75" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="12" r="9" />
-    </svg>
-  )
-}
-
-function CompassIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <circle cx="12" cy="12" r="8.5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m14.9 9.1-2.8 5.8-5.8 2.8 2.8-5.8 5.8-2.8Z" />
-    </svg>
-  )
-}
-
-function CharacterIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <circle cx="12" cy="8.5" r="3.25" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5.5 18.5c1.4-2.7 3.6-4 6.5-4s5.1 1.3 6.5 4" />
-    </svg>
-  )
-}
-
-function ThreadIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.5h9m-9 7h9" />
-      <circle cx="7" cy="8.5" r="1.75" fill="none" />
-      <circle cx="17" cy="15.5" r="1.75" fill="none" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8.7 9.7 15.3 14.3" />
-    </svg>
-  )
-}
-
-function ExportIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v10" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8.5 10.5 3.5 3.5 3.5-3.5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 18.5h14" />
-    </svg>
-  )
-}
-
-function VersionIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.5v5l3.5 2" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5.5 12A6.5 6.5 0 1 0 8 7" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 7.5H8v3.5" />
     </svg>
   )
 }

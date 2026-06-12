@@ -119,6 +119,7 @@ async def upload_book_endpoint(
     current_user=Depends(get_current_user),
     __=Depends(rate_limit_upload),
 ):
+    require_author_access(current_user)
     title = _clean_text(title) if title else ""
     if author:
         author = _clean_text(author)
@@ -137,8 +138,6 @@ async def upload_book_endpoint(
         )
     if mode not in {"reader", "author"}:
         raise HTTPException(400, "Invalid mode")
-    if mode == "author":
-        require_author_access(current_user)
     if not title.strip():
         raise HTTPException(400, "Title is required")
 
@@ -217,7 +216,7 @@ async def preview_upload_endpoint(
     __=Depends(rate_limit_upload),
 ):
     """Parse a manuscript file and return a structure preview without creating any DB records."""
-    _ = current_user  # auth check
+    require_author_access(current_user)
     if not file.filename:
         raise HTTPException(400, "No file")
 
@@ -516,6 +515,7 @@ async def import_manuscript_content(
                 description=str(job.get("description") or "") or None,
                 chapter_kind=str(job.get("chapter_kind") or ""),
                 content_version=int(job.get("content_version") or 1),
+                images=list(job.get("images") or []),
             )
             if not should_auto_reprocess:
                 update_reprocess_metadata(book, add_pending_chapters=[job_number])

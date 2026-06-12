@@ -19,7 +19,7 @@ export function MarketingHeader() {
   const ctaHref: Route = "/register"
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/8 bg-[#08110f]">
+    <header className="sticky top-0 z-50 border-b border-white/[0.08] bg-[#08110f]">
       <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 md:px-8">
         <Link href="/" aria-label="LoreVia home" className="shrink-0">
           <BrandLockup size="md" tone="dark" />
