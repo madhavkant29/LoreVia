@@ -170,3 +170,14 @@ export interface CanonOverride {
   created_at: string
   updated_at: string
 }
+
+export interface WorldBuildingBootstrapPayload {
+  documents: WorldBuildingDocument[]
+  selected_document?: WorldBuildingDocumentDetail | null
+  notes: WorldNote[]
+  canon_overrides: CanonOverride[]
+  elements: WorldElement[]
+  wiki: WikiEntry[]
+  stats?: import("./book").UserStats | null
+  gap_analysis?: WorldGapResult | null
+}

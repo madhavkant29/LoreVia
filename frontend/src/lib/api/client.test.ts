@@ -272,6 +272,14 @@ describe("api client", () => {
     expect(axiosPostMock).not.toHaveBeenCalled()
   })
 
+  it("does not refresh auth session failures", async () => {
+    const { captured } = await loadClientModule()
+    const error = { config: { url: "/auth/session" }, response: { status: 401 } }
+
+    await expect(captured.responseError?.(error)).rejects.toBe(error)
+    expect(axiosPostMock).not.toHaveBeenCalled()
+  })
+
   it("does not refresh auth login failures", async () => {
     const { captured } = await loadClientModule()
     const error = { config: { url: "/auth/login" }, response: { status: 401 } }

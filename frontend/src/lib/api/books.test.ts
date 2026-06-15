@@ -88,6 +88,26 @@ describe("books api", () => {
     expect(getMock).toHaveBeenCalledWith("/books/book-1/overview")
   })
 
+  it("loads the reader bootstrap payload", async () => {
+    await booksApi.getReaderBootstrap("book-1")
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/reader-bootstrap")
+  })
+
+  it("loads the manuscript bootstrap payload with optional chapter params", async () => {
+    await booksApi.getManuscriptBootstrap("book-1", {
+      activeChapterNumber: 3,
+      annotationChapterNumber: 2,
+    })
+
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/manuscript-bootstrap", {
+      params: {
+        active_chapter_number: 3,
+        annotation_chapter_number: 2,
+      },
+    })
+  })
+
   it("loads manuscript annotations", async () => {
     await booksApi.getManuscriptAnnotations("book-1", 2)
 

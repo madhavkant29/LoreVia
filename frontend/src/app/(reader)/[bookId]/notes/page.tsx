@@ -75,6 +75,7 @@ export default function BookNotesPage() {
   const { data: notes = [], isLoading: notesLoading } = useQuery<VaultNote[]>({
     queryKey: asQueryKey(bookCacheKey(bookId, "vault-notes")),
     queryFn: () => booksApi.listVaultNotes(bookId),
+    enabled: secondaryDataEnabled,
     staleTime: 30_000,
   })
   const { data: graph = EMPTY_GRAPH } = useQuery<VaultGraph>({
@@ -83,6 +84,7 @@ export default function BookNotesPage() {
     enabled: secondaryDataEnabled,
     staleTime: 30_000,
   })
+  const vaultNotesLoading = !secondaryDataEnabled || notesLoading
 
   return (
     <div className={`min-h-screen ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
@@ -100,7 +102,7 @@ export default function BookNotesPage() {
           />
 
           <div className="space-y-8">
-            {notesLoading ? (
+            {vaultNotesLoading ? (
               <div className={`rounded-lg border border-dashed py-24 text-center ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>Loading vault notes workspace...</div>
             ) : (
               <>

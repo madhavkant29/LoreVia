@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ActionableEmptyState } from "../ActionableEmptyState"
 import { ConfirmDialog } from "../ConfirmDialog"
 import { MobileActionBar } from "../MobileActionBar"
+import { ProcessingStatusStrip, SaveStatePill } from "../ResponsivenessStatus"
 import { StatusToastProvider, useStatusToast } from "../StatusToast"
 
 let container: HTMLDivElement | null = null
@@ -83,6 +84,39 @@ describe("UX primitives", () => {
     expect(button?.textContent).toContain("Summary")
     act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
     expect(onSelect).toHaveBeenCalled()
+  })
+
+  it("renders processing status with retry action", () => {
+    const onRetry = vi.fn()
+    const rendered = render(
+      <ProcessingStatusStrip
+        status={{
+          stage: "failed",
+          label: "Processing failed",
+          detail: "Retry is available",
+          progressPct: 64,
+          chaptersCompleted: 4,
+          chaptersTotal: 6,
+          lastError: "Worker failed",
+          retryAvailable: true,
+          partialReady: false,
+          ready: false,
+          failed: true,
+        }}
+        onRetry={onRetry}
+      />
+    )
+
+    expect(rendered.textContent).toContain("Processing failed")
+    const button = rendered.querySelector("button")
+    expect(button?.textContent).toContain("Retry")
+    act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(onRetry).toHaveBeenCalled()
+  })
+
+  it("renders standardized save state copy", () => {
+    const rendered = render(<SaveStatePill state="offline_draft" />)
+    expect(rendered.textContent).toContain("Offline draft")
   })
 
   it("shows status toast messages from the provider", () => {

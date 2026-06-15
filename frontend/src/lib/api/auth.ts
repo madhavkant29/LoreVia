@@ -65,6 +65,8 @@ export const authApi = {
     apiClient.post("/auth/reset-password", { token, password }).then(r => r.data),
   refresh: () =>
     apiClient.post<User>("/auth/refresh").then(r => r.data),
+  session: () =>
+    apiClient.post<User>("/auth/session").then(r => r.data),
   logout: async () => {
     try {
       return await apiClient.post("/auth/logout").then(r => r.data)

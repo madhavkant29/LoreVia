@@ -11,16 +11,18 @@ import { ContextualUpgradePrompt } from "@/components/billing/ContextualUpgradeP
 import { CreateFab } from "@/components/overview/CreateFab"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
+import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
 import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
-import { capture } from "@/lib/analytics/posthog"
+import { capture, captureTiming } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey, booksQuotesCacheKey, booksStatsCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
+import { getBookRouteSegment, normalizeBookRouteId } from "@/lib/utils/bookRoutes"
+import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
+import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, ReaderBootstrapPayload, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
 import type { ReadingProgress } from "@/types/reader"
 import type { RecentActivityItem } from "@/types/ux"
 
@@ -151,6 +153,7 @@ export default function BookOverviewPage() {
   const [workspaceSaveMessage, setWorkspaceSaveMessage] = useState<string | null>(null)
   const [featureGateMessage, setFeatureGateMessage] = useState<string | null>(null)
   const [modeSaving, setModeSaving] = useState(false)
+  const [processingRetrying, setProcessingRetrying] = useState(false)
   const router = useRouter()
   const queryClient = useQueryClient()
   const { theme, toggleTheme } = usePreferencesStore()
@@ -170,11 +173,26 @@ export default function BookOverviewPage() {
   const overviewQuery = useQuery({
     queryKey: overviewQueryKey,
     queryFn: async () => {
-      const payload = await booksApi.getOverview(bookId)
+      const startedAt = typeof performance !== "undefined" ? performance.now() : 0
+      const bootstrap: ReaderBootstrapPayload = await booksApi.getReaderBootstrap(bookId)
+      captureTiming("reader_bootstrap_ms", startedAt, { book_id: bookId })
+      const payload = bootstrap.overview
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(`book-route-segment:${normalizeBookRouteId(bookId)}`, getBookRouteSegment(payload.book))
+      }
       queryClient.setQueryData(bookQueryKey, payload.book)
       queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "progress")), payload.progress)
       queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "chapters")), payload.chapter_list)
       queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "summary-collection")), payload.summary_collection)
+      queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "notes")), bootstrap.notes)
+      queryClient.setQueryData(asQueryKey(booksQuotesCacheKey()), bootstrap.saved_quotes)
+      if (bootstrap.stats) queryClient.setQueryData(asQueryKey(booksStatsCacheKey()), bootstrap.stats)
+      queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "characters")), bootstrap.characters)
+      queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "chapter-reports:6")), bootstrap.chapter_reports)
+      if (bootstrap.prewriting_check) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "pre-writing:auto")), bootstrap.prewriting_check)
+      if (bootstrap.story_health) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "story-health")), bootstrap.story_health)
+      if (bootstrap.writer_workspace) queryClient.setQueryData(writerWorkspaceQueryKey, bootstrap.writer_workspace)
+      if (bootstrap.revision_intelligence) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), bootstrap.revision_intelligence)
       return payload
     },
     staleTime: 20_000,
@@ -319,14 +337,10 @@ export default function BookOverviewPage() {
   useEffect(() => {
     if (!overviewQuery.isSuccess || !overviewQuery.data || overviewReadyCaptured.current) return
     overviewReadyCaptured.current = true
-    capture("reader_overview_critical_ready", {
+    captureTiming("reader_first_paint_ms", overviewLoadStartedAt.current ?? 0, {
       book_id: bookId,
       active_mode: overviewQuery.data.book.workspace_shell ?? overviewQuery.data.book.mode,
       critical_request_count: 1,
-      duration_ms:
-        typeof performance !== "undefined" && overviewLoadStartedAt.current !== null
-          ? Math.round(performance.now() - overviewLoadStartedAt.current)
-          : null,
     })
   }, [bookId, overviewQuery.data, overviewQuery.isSuccess])
 
@@ -377,8 +391,10 @@ export default function BookOverviewPage() {
   const hasCollaboratorAuthorAccess = Boolean(collaborationPermissions?.can_edit_manuscript)
   const canUseAuthorWorkspace = isCollaboratorSession ? hasCollaboratorAuthorAccess : hasOwnAuthorAccess
   const canEditSharedManuscript = canUsePaidAuthorTools
+  const isLimitedAuthorOwner = book?.mode === "author" && book.access_class === "owner" && !hasOwnAuthorAccess
   const shouldShowAuthorWorkspace = activeBookMode === "author" && canUsePaidAuthorTools
   const processingSummary = getProcessingSummary(book)
+  const normalizedProcessingStatus = normalizeProcessingStatus(book?.processing, book)
   const unitTitle = storyUnitTitle(book?.work_type)
   const unitPrefix = storyUnitPrefix(book?.work_type)
   const chapters = chapterList?.chapters ?? []
@@ -484,6 +500,20 @@ export default function BookOverviewPage() {
     navigateWithMemory(`/${bookId}/graph`)
   }
 
+  const retryProcessing = async () => {
+    if (!book) return
+    setProcessingRetrying(true)
+    try {
+      const processing = await booksApi.retryProcessing(book.id)
+      queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
+        current ? { ...current, book: { ...current.book, status: "processing", processing } } : current
+      ))
+      await overviewQuery.refetch()
+    } finally {
+      setProcessingRetrying(false)
+    }
+  }
+
   const updateMode = async (nextMode: "reader" | "author") => {
     if (modeSaving) return
     if (nextMode === activeBookMode) return
@@ -580,6 +610,12 @@ export default function BookOverviewPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
+          <ProcessingStatusPanel
+            status={normalizedProcessingStatus}
+            retrying={processingRetrying}
+            onRetry={normalizedProcessingStatus?.retryAvailable ? () => void retryProcessing() : undefined}
+          />
+
           <RecentActivityList
             title="Project signals"
             items={overviewActivityItems}
@@ -591,6 +627,13 @@ export default function BookOverviewPage() {
               featureName="Manuscript Editor"
               body={featureGateMessage}
               onBack={() => setFeatureGateMessage(null)}
+            />
+          ) : null}
+
+          {!featureGateMessage && isLimitedAuthorOwner ? (
+            <ContextualUpgradePrompt
+              featureName="Manuscript Editor"
+              body="Author drafting tools are locked on the Free plan. You can still read the project, review existing notes, and compare plans when you are ready to continue editing."
             />
           ) : null}
 

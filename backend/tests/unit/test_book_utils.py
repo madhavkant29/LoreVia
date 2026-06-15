@@ -43,11 +43,13 @@ from app.utils.book_utils import (
     normalize_chapter_kind,
     normalize_chapter_title,
     normalize_imported_chapters,
+    normalize_public_processing_stage,
     normalize_scene_metadata,
     normalize_scene_reorder_ids,
     normalize_writer_workspace,
     parse_screenplay_upload,
     parse_book_upload_for_ingestion,
+    processing_retry_available,
     resolve_upload_format_and_work_type,
     search_author_workspace,
     save_manuscript_annotation,
@@ -77,6 +79,20 @@ class _ScalarList:
 
     def all(self):
         return list(self._rows)
+
+
+def test_normalize_public_processing_stage_maps_internal_values():
+    assert normalize_public_processing_stage("processing", "extraction") == "extracting"
+    assert normalize_public_processing_stage("processing", "analysis") == "analyzing"
+    assert normalize_public_processing_stage("ready", "complete", is_fully_ready=True) == "ready"
+    assert normalize_public_processing_stage("failed", "extraction") == "failed"
+
+
+def test_processing_retry_available_requires_actionable_state():
+    assert processing_retry_available("failed", "failed", [], None) is True
+    assert processing_retry_available("processing", "extracting", ["retry_extraction"], None) is True
+    assert processing_retry_available("processing", "analyzing", ["wait_for_analysis"], None) is False
+    assert processing_retry_available("ready", "ready", [], None) is False
 
 
 class _FakeAnnotationDB:

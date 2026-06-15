@@ -214,3 +214,14 @@ class WikiGenerationResponse(BaseModel):
     generated_count: int
     updated_names: list[str] = Field(default_factory=list)
     entries: list[WikiEntryOut] = Field(default_factory=list)
+
+
+class WorldBuildingBootstrapOut(BaseModel):
+    documents: list[WorldBuildingDocumentOut] = Field(default_factory=list)
+    selected_document: WorldBuildingDocumentDetailOut | None = None
+    notes: list[WorldNoteOut] = Field(default_factory=list)
+    canon_overrides: list[CanonOverrideOut] = Field(default_factory=list)
+    elements: list[WorldElementOut] = Field(default_factory=list)
+    wiki: list[WikiEntryOut] = Field(default_factory=list)
+    stats: dict | None = None
+    gap_analysis: GapAnalysisResponse | None = None

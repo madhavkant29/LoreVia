@@ -9,6 +9,7 @@ import {
   getNotePreview,
 } from "./ManuscriptWriteRightRail"
 import type { BookNote, VaultNote } from "@/types/book"
+import type { PlotThread } from "@/types/reader"
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
@@ -38,6 +39,25 @@ const vaultNote: VaultNote = {
   content: "# Mirror reveal\n\nTrack the reflection clue.",
   created_at: "2026-06-05T10:00:00Z",
   updated_at: "2026-06-05T10:00:00Z",
+}
+
+const plotThread: PlotThread = {
+  id: "thread-1",
+  title: "Gregor's locked room remains unexplained",
+  type: "mystery",
+  status: "open",
+  description: null,
+  introduced_at: 1,
+  resolved_at: null,
+  first_mentioned: 1,
+  last_mentioned: 2,
+  mention_count: 3,
+  importance: 7,
+  note: null,
+  character_ids: [],
+  related_characters: [],
+  risk: null,
+  suggested_action: null,
 }
 
 function renderRail(props: Partial<React.ComponentProps<typeof ManuscriptWriteRightRail>> = {}) {
@@ -151,5 +171,22 @@ describe("ManuscriptWriteRightRail UI", () => {
 
     expect(container.textContent).toContain("Chapter advisor")
     expect(container.textContent).toContain("Previously: strengthen the chapter transition.")
+  })
+
+  it("shows inline thread and timeline previews before the view-all links", () => {
+    const rendered = renderRail({
+      activeRightPane: "context",
+      plotThreads: [plotThread],
+      recentEventSummary: [{ chapter_number: 2, detail: "Grete hears Gregor moving behind the door." }],
+    })
+    root = rendered.root
+    container = rendered.container
+
+    expect(container.textContent).toContain("Gregor's locked room remains unexplained")
+    expect(container.textContent).toContain("Ch. 2: Grete hears Gregor moving behind the door.")
+    expect(container.textContent).toContain("View all threads ->")
+    expect(container.textContent).toContain("View all timeline events ->")
+    expect(container.textContent).not.toContain("No unresolved threads loaded yet.")
+    expect(container.textContent).not.toContain("Recent chapter events will appear here.")
   })
 })

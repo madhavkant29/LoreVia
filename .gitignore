@@ -138,3 +138,7 @@ frontend\test-results
 tmp/
 frontend/playwright-report/
 frontend/test-results/
+
+# Generated marketing campaign assets
+/instagram-campaign/
+/social-campaign-50/

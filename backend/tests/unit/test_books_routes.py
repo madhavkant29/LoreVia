@@ -1486,19 +1486,19 @@ async def test_get_book_overview_and_writer_workspace_use_cache(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_books_repairs_stale_editor_processing_before_serializing(monkeypatch):
+async def test_list_books_enqueues_stale_processing_repair_before_serializing(monkeypatch):
     user = SimpleNamespace(id=uuid.uuid4(), email="owner@getlorevia.com")
     book = _book(user_id=user.id, is_editor_project=True, status="processing")
-    repaired_book_ids: list[uuid.UUID] = []
+    enqueued_book_ids: list[uuid.UUID] = []
 
-    async def _fake_repair(_db, candidate):
-        repaired_book_ids.append(candidate.id)
+    async def _fake_enqueue(candidate):
+        enqueued_book_ids.append(candidate.id)
         return True
 
     async def _fake_build_book_out_list(_db, *, books, user_id, collaborators_by_book_id=None):
         return [SimpleNamespace(id=item.id, title=item.title) for item in books]
 
-    monkeypatch.setattr(books, "repair_stale_editor_processing_state", _fake_repair)
+    monkeypatch.setitem(books.list_books.__globals__, "enqueue_processing_state_repair_if_needed", _fake_enqueue)
     monkeypatch.setattr(books, "build_book_out_list", _fake_build_book_out_list)
 
     payload = await books.list_books(
@@ -1511,28 +1511,28 @@ async def test_list_books_repairs_stale_editor_processing_before_serializing(mon
         current_user=user,
     )
 
-    assert repaired_book_ids == [book.id]
+    assert enqueued_book_ids == [book.id]
     assert len(payload) == 1
     assert payload[0].id == book.id
 
 
 @pytest.mark.asyncio
-async def test_get_book_repairs_stale_editor_processing_before_serializing(monkeypatch):
+async def test_get_book_enqueues_stale_processing_repair_before_serializing(monkeypatch):
     user = _user()
     book = _book(user_id=user.id, is_editor_project=True, status="processing")
-    repaired_book_ids: list[uuid.UUID] = []
+    enqueued_book_ids: list[uuid.UUID] = []
 
-    async def _fake_repair(_db, candidate):
-        repaired_book_ids.append(candidate.id)
+    async def _fake_enqueue(candidate):
+        enqueued_book_ids.append(candidate.id)
         return True
 
     monkeypatch.setattr(books, "get_book_with_collaboration_access", _async_value((book, None)))
-    monkeypatch.setattr(books, "repair_stale_editor_processing_state", _fake_repair)
+    monkeypatch.setitem(books.get_book.__globals__, "enqueue_processing_state_repair_if_needed", _fake_enqueue)
     monkeypatch.setattr(books, "book_out", _async_value(SimpleNamespace(id=book.id)))
 
     payload = await books.get_book(book.id, db=_FakeDB(), current_user=user)
 
-    assert repaired_book_ids == [book.id]
+    assert enqueued_book_ids == [book.id]
     assert payload.id == book.id
 
 

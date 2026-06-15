@@ -126,6 +126,12 @@ describe("auth api", () => {
     expect(postMock).toHaveBeenCalledWith("/auth/refresh")
   })
 
+  it("loads the combined auth session", async () => {
+    await authApi.session()
+
+    expect(postMock).toHaveBeenCalledWith("/auth/session")
+  })
+
   it("logs out the current session", async () => {
     await authApi.logout()
 

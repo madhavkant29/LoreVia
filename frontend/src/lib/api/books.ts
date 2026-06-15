@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookProcessing, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -55,6 +55,22 @@ export const booksApi = {
   listNotes: () => apiClient.get<BookNote[]>("/books/notes").then(r => r.data),
   get: (id: string) => apiClient.get<Book>(bookPath(id)).then(r => r.data),
   getOverview: (id: string) => apiClient.get<BookOverviewPayload>(bookPath(id, "/overview")).then(r => r.data),
+  retryProcessing: (id: string) => apiClient.post<BookProcessing>(bookPath(id, "/processing/retry")).then(r => {
+    invalidateBookCache(id)
+    invalidateReaderCache(id)
+    return r.data
+  }),
+  getReaderBootstrap: (id: string) =>
+    apiClient.get<ReaderBootstrapPayload>(bookPath(id, "/reader-bootstrap")).then(r => r.data),
+  getManuscriptBootstrap: (
+    id: string,
+    params?: { activeChapterNumber?: number | null; annotationChapterNumber?: number | null }
+  ) => apiClient.get<ManuscriptBootstrapPayload>(bookPath(id, "/manuscript-bootstrap"), {
+    params: {
+      ...(typeof params?.activeChapterNumber === "number" ? { active_chapter_number: params.activeChapterNumber } : {}),
+      ...(typeof params?.annotationChapterNumber === "number" ? { annotation_chapter_number: params.annotationChapterNumber } : {}),
+    },
+  }).then(r => r.data),
   listCollaborators: (id: string) =>
     apiClient.get<BookCollaborator[]>(bookPath(id, "/collaborators")).then(r => r.data),
   getCollaboratorActivity: (id: string, collaborationId: string) =>

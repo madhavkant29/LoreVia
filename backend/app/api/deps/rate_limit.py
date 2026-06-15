@@ -4,13 +4,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException, Request
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import get_redis, key_ratelimit
-from app.models.user import User, UserRateLimitOverride
+from app.models.user import User
 from app.utils.billing_utils import (
     DAILY_LIMIT_MESSAGE,
     continuity_limit_per_day,
@@ -21,6 +20,7 @@ from app.utils.billing_utils import (
     recall_limit_per_day,
 )
 from app.utils.email_utils import track_usage_limit_friction_and_maybe_send
+from app.utils.rate_limit_utils import limit_for_user
 
 
 async def _window(key: str, limit: int, window: int = 60) -> bool:
@@ -438,12 +438,4 @@ async def _limit_for_user(
     field: str,
     default: int,
 ) -> int:
-    override = (
-        await db.execute(
-            select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
-        )
-    ).scalar()
-    if not override:
-        return default
-    value = getattr(override, field, None)
-    return int(value) if isinstance(value, int) and value > 0 else default
+    return await limit_for_user(db, user_id, field, default)

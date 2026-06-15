@@ -358,12 +358,15 @@ export function ManuscriptWriteRightRail({
               {recentEventSummary.map((event) => (
                 <div key={`${event.chapter_number}-${event.detail}`} className="flex items-start gap-3">
                   <span className="mt-1.5 h-2 w-2 rounded-full bg-emerald-400" />
-                  <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{event.detail}</p>
+                  <p className={`text-sm leading-6 ${isDark ? "text-slate-200" : "text-stone-700"}`}>
+                    <span className={isDark ? "text-slate-500" : "text-stone-500"}>Ch. {event.chapter_number}: </span>
+                    {event.detail}
+                  </p>
                 </div>
               ))}
               {recentEventSummary.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>Recent chapter events will appear here.</p> : null}
             </div>
-            <Link href={`/${bookId}/timeline`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View timeline -&gt;</Link>
+            <Link href={`/${bookId}/timeline`} className={`mt-4 inline-flex text-sm ${isDark ? "text-sky-300" : "text-sky-700"}`}>View all timeline events -&gt;</Link>
           </div>
 
           <div className={`border-b p-5 ${isDark ? "border-white/10 bg-[#11171a]" : "border-stone-200 bg-white/90"}`}>

@@ -1,7 +1,7 @@
 "use client"
 
 import axios from "axios"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { memo, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import Link from "next/link"
@@ -16,6 +16,7 @@ import type {
   CanonOverride,
   WikiEntry,
   WorldBuildingDocument,
+  WorldBuildingBootstrapPayload,
   WorldElement,
   WorldGapItem,
   WorldGapResult,
@@ -79,10 +80,28 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   const [chapterFilter, setChapterFilter] = useState("")
   const [chapterNotes, setChapterNotes] = useState<WorldNote[] | null>(null)
   const [loadingChapterNotes, setLoadingChapterNotes] = useState(false)
+  const queryClient = useQueryClient()
+
+  const bootstrapQuery = useQuery<WorldBuildingBootstrapPayload>({
+    queryKey: [`worldbuilding:${bookId}:bootstrap:${focus}`],
+    queryFn: async () => {
+      const payload = await worldBuildingApi.getBootstrap(bookId, { focus })
+      queryClient.setQueryData([`worldbuilding:${bookId}:documents`], payload.documents)
+      queryClient.setQueryData([`worldbuilding:${bookId}:notes`], payload.notes)
+      queryClient.setQueryData([`worldbuilding:${bookId}:canon-overrides`], payload.canon_overrides)
+      queryClient.setQueryData([`worldbuilding:${bookId}:elements`], payload.elements)
+      queryClient.setQueryData([`worldbuilding:${bookId}:wiki`], payload.wiki)
+      if (payload.stats) queryClient.setQueryData(asQueryKey(booksStatsCacheKey()), payload.stats)
+      if (payload.gap_analysis) queryClient.setQueryData([`worldbuilding:${bookId}:analysis:${focus}`], payload.gap_analysis)
+      return payload
+    },
+    staleTime: 30_000,
+  })
 
   const { data: documents = [], isLoading: loadingDocuments, refetch: refetchDocuments } = useQuery<WorldBuildingDocument[]>({
     queryKey: [`worldbuilding:${bookId}:documents`],
     queryFn: () => worldBuildingApi.listDocuments(bookId),
+    enabled: false,
   })
 
   const { data: selectedDocumentData = null, isLoading: loadingDocumentBody, refetch: refetchSelectedDocument } = useQuery<(WorldBuildingDocument & { text: string }) | null>({
@@ -97,33 +116,44 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   const { data: notes = [], isLoading: loadingNotes, refetch: refetchNotes } = useQuery<WorldNote[]>({
     queryKey: [`worldbuilding:${bookId}:notes`],
     queryFn: () => worldBuildingApi.listNotes(bookId),
+    enabled: false,
   })
 
   const { data: canonOverrides = [], refetch: refetchCanonOverrides } = useQuery<CanonOverride[]>({
     queryKey: [`worldbuilding:${bookId}:canon-overrides`],
     queryFn: () => worldBuildingApi.listCanonOverrides(bookId),
+    enabled: false,
   })
 
   const { data: extractedElements = [], isLoading: loadingElements, refetch: refetchElements } = useQuery<WorldElement[]>({
     queryKey: [`worldbuilding:${bookId}:elements`],
     queryFn: () => worldBuildingApi.listElements(bookId),
+    enabled: false,
   })
 
   const { data: wikiEntries = [], isLoading: wikiLoading, refetch: refetchWiki } = useQuery<WikiEntry[]>({
     queryKey: [`worldbuilding:${bookId}:wiki`],
     queryFn: () => worldBuildingApi.listWiki(bookId),
+    enabled: false,
   })
 
   const { data: uploadStats = null, refetch: refetchUploadStats } = useQuery<UserStats | null>({
     queryKey: asQueryKey(booksStatsCacheKey()),
     queryFn: () => booksApi.getStats(),
+    enabled: bootstrapQuery.isSuccess && !bootstrapQuery.data?.stats,
   })
 
   const { data: initialAnalysis = null, isLoading: loadingAnalysis, refetch: refetchAnalysis } = useQuery<WorldGapResult | null>({
     queryKey: [`worldbuilding:${bookId}:analysis:${focus}`],
     queryFn: () => worldBuildingApi.getGaps(bookId),
-    enabled: focus === "gap" && documents.length > 0,
+    enabled: false,
   })
+  const loadingBootstrap = bootstrapQuery.isLoading
+  const documentsLoading = loadingBootstrap || loadingDocuments
+  const notesLoading = loadingBootstrap || loadingNotes
+  const elementsLoading = loadingBootstrap || loadingElements
+  const wikiEntriesLoading = loadingBootstrap || wikiLoading
+  const analysisLoading = loadingBootstrap && focus === "gap" ? true : loadingAnalysis
 
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
@@ -539,12 +569,26 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
             </button>
           </div>
           <div className="p-4">
-            {loadingDocuments ? <LoadingState label="Loading world documents..." isDark={isDark} /> : null}
-            {!loadingDocuments && documents.length === 0 ? (
+            {documentsLoading ? <LoadingState label="Loading world documents..." isDark={isDark} /> : null}
+            {!documentsLoading && documents.length === 0 ? (
               <EmptyState
                 title="No world documents yet."
-                description="Add or upload reference documents to begin."
+                description="Reference material is missing. Upload a world guide, bible, or notes file so LoreVia can compare canon against the manuscript."
                 isDark={isDark}
+                action={(
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDocumentId(null)
+                      setDraftTitle("")
+                      setDraftText("")
+                      setDocumentDraftDirty(false)
+                    }}
+                    className={secondaryButtonClass(isDark)}
+                  >
+                    Start a reference doc
+                  </button>
+                )}
               />
             ) : null}
             <div className="space-y-2">
@@ -575,7 +619,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                 )
               })}
               </div>
-              {!loadingDocuments && documents.length > INITIAL_DOCUMENT_COUNT ? (
+              {!documentsLoading && documents.length > INITIAL_DOCUMENT_COUNT ? (
                 <button
                   type="button"
                   onClick={() => setShowAllDocuments((current) => !current)}
@@ -698,14 +742,14 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
               <button
                 type="button"
                 onClick={() => void runAnalysis()}
-                disabled={loadingAnalysis || documents.length === 0}
+                disabled={analysisLoading || documents.length === 0}
                 className={secondaryButtonClass(isDark)}
               >
-                {loadingAnalysis ? "Checking gaps..." : "Run gap detection"}
+                {analysisLoading ? "Checking gaps..." : "Run gap detection"}
               </button>
             )}
           >
-            {loadingAnalysis ? (
+            {analysisLoading ? (
               <LoadingState label="Comparing the world corpus against chapters, characters, and timeline signals..." isDark={isDark} />
             ) : analysis ? (
               <div className="space-y-4">
@@ -734,8 +778,18 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                 {analysis.gap_groups.length === 0 && analysis.consistency_flags.length === 0 ? (
                   <EmptyState
                     title="No analysis yet."
-                    description="Upload reference docs and run gap detection to see results here."
+                    description="Gap results need reference documents and a completed scan. Upload canon material, then run detection."
                     isDark={isDark}
+                    action={(
+                      <button
+                        type="button"
+                        onClick={() => void runAnalysis()}
+                        disabled={loadingAnalysis || documents.length === 0}
+                        className={secondaryButtonClass(isDark)}
+                      >
+                        {loadingAnalysis ? "Running..." : "Run gap detection"}
+                      </button>
+                    )}
                   />
                 ) : (
                   analysis.gap_groups.map((group) => (
@@ -812,9 +866,32 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
               <EmptyState
                 title="No analysis yet."
                 description={documents.length === 0
-                  ? "Upload reference docs and run gap detection to see results here."
-                  : "No analysis yet. Upload reference docs and run gap detection to see results here."}
+                  ? "Reference docs are missing. Upload canon material first, then run gap detection."
+                  : "Gap detection has not run yet. Start a scan to compare your reference docs with the manuscript."}
                 isDark={isDark}
+                action={documents.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDocumentId(null)
+                      setDraftTitle("")
+                      setDraftText("")
+                      setDocumentDraftDirty(false)
+                    }}
+                    className={secondaryButtonClass(isDark)}
+                  >
+                    Start a reference doc
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void runAnalysis()}
+                    disabled={loadingAnalysis}
+                    className={secondaryButtonClass(isDark)}
+                  >
+                    {loadingAnalysis ? "Running..." : "Run gap detection"}
+                  </button>
+                )}
               />
             )}
           </WorkspaceCard>
@@ -841,8 +918,18 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                 {integration.integration_opportunities.length === 0 ? (
                   <EmptyState
                     title="No opportunities yet."
-                    description="Run the scan to discover underused canon elements."
+                    description="Opportunity mapping has not run, or the last scan found nothing underused. Run the scan after adding reference docs."
                     isDark={isDark}
+                    action={(
+                      <button
+                        type="button"
+                        onClick={() => void runIntegration()}
+                        disabled={loadingIntegration || documents.length === 0}
+                        className={secondaryButtonClass(isDark)}
+                      >
+                        {loadingIntegration ? "Mapping..." : "Run opportunities scan"}
+                      </button>
+                    )}
                   />
                 ) : (
                   visibleOpportunities.map((item) => (
@@ -890,8 +977,18 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
             ) : (
               <EmptyState
                 title="No opportunities yet."
-                description="No opportunities yet. Run the scan to discover underused canon elements."
+                description="No opportunity scan is loaded yet. Run the scan after adding reference docs to find underused canon elements."
                 isDark={isDark}
+                action={(
+                  <button
+                    type="button"
+                    onClick={() => void runIntegration()}
+                    disabled={loadingIntegration || documents.length === 0}
+                    className={secondaryButtonClass(isDark)}
+                  >
+                    {loadingIntegration ? "Mapping..." : "Run opportunities scan"}
+                  </button>
+                )}
               />
             )}
           </WorkspaceCard>
@@ -1001,10 +1098,10 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                 <button
                   type="button"
                   onClick={() => void refetchElements()}
-                  disabled={loadingElements}
+                  disabled={elementsLoading}
                   className={secondaryButtonClass(isDark)}
                 >
-                  {loadingElements ? "Refreshing..." : "Refresh"}
+                  {elementsLoading ? "Refreshing..." : "Refresh"}
                 </button>
               )}
             >
@@ -1153,12 +1250,22 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                   ))}
                 </div>
                 <div className="mt-4 space-y-3">
-                  {wikiLoading ? <LoadingState label="Loading wiki entries..." isDark={isDark} /> : null}
-                  {!wikiLoading && wikiEntries.length === 0 ? (
+                  {wikiEntriesLoading ? <LoadingState label="Loading wiki entries..." isDark={isDark} /> : null}
+                  {!wikiEntriesLoading && wikiEntries.length === 0 ? (
                     <EmptyState
                       title="No wiki entries yet."
-                      description="No wiki entries yet. Generate them from the manuscript when you want a fresh lore review."
+                      description="The wiki has not been generated from the manuscript yet. Generate entries when processing has enough story text."
                       isDark={isDark}
+                      action={(
+                        <button
+                          type="button"
+                          onClick={() => void generateWiki()}
+                          disabled={wikiGenerating}
+                          className={secondaryButtonClass(isDark)}
+                        >
+                          {wikiGenerating ? "Generating..." : "Generate wiki"}
+                        </button>
+                      )}
                     />
                   ) : null}
                   {visibleWikiEntries.map((entry) => (
@@ -1250,10 +1357,10 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
                 <button
                   type="button"
                   onClick={() => void runAnalysis()}
-                  disabled={loadingAnalysis || documents.length === 0}
+                  disabled={analysisLoading || documents.length === 0}
                   className={accentOutlineButtonClass("amber", isDark)}
                 >
-                  {loadingAnalysis ? "Checking gaps..." : "Run world gap detection"}
+                  {analysisLoading ? "Checking gaps..." : "Run world gap detection"}
                 </button>
               </div>
             </div>
@@ -1289,7 +1396,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
               </div>
             )}
           >
-            {loadingNotes ? (
+            {notesLoading ? (
               <LoadingState label="Loading saved world-gap notes..." isDark={isDark} />
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
@@ -1458,17 +1565,20 @@ function EmptyState({
   title,
   description,
   isDark,
+  action,
   compact = false,
 }: {
   title: string
   description: string
   isDark: boolean
+  action?: ReactNode
   compact?: boolean
 }) {
   return (
     <div className={`rounded-lg border border-dashed px-5 text-center ${isDark ? "border-white/10 bg-white/[0.02]" : "border-stone-300 bg-stone-50"} ${compact ? "py-6" : "py-10"}`}>
       <p className={`text-sm font-medium ${titleTextClass(isDark)}`}>{title}</p>
       <p className={`mt-2 text-sm ${mutedTextClass(isDark)}`}>{description}</p>
+      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
     </div>
   )
 }

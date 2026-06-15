@@ -3,13 +3,14 @@
 import type { ReactNode } from "react"
 import type { Route } from "next"
 import axios from "axios"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { startTransition, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { LastSavedLabel, ProcessingStatusStrip, RecoverableInlineError, SaveStatePill } from "@/components/ui/ResponsivenessStatus"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { ManuscriptExportMenu } from "@/components/reader/ManuscriptExportMenu"
 import { ManuscriptModeSwitch } from "@/components/reader/ManuscriptModeSwitch"
@@ -21,7 +22,8 @@ import type { TemplateDestination } from "@/components/reader/ManuscriptPlanWork
 import { booksApi } from "@/lib/api/books"
 import { deriveReprocessCta, isBookActivelyProcessing } from "@/lib/utils/editorProjectCta"
 import { intelligenceApi } from "@/lib/api/intelligence"
-import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import {
   buildManuscriptAutosaveKey,
@@ -48,12 +50,15 @@ import { htmlToPlainText, renderRichTextHtml, sanitizeRichTextHtml } from "@/lib
 import { formatIndex } from "@/lib/utils/chapterLabels"
 import { moveSceneIdToIndex, reorderWorkspaceSceneTree } from "@/lib/utils/sceneWorkspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { capture } from "@/lib/analytics/posthog"
-import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCard, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptAnnotationCategory, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, SceneVersion, SceneVersionDetail, VaultNote, WriterWorkspace, WritingTemplate } from "@/types/book"
+import { useAuthStore } from "@/lib/stores/authStore"
+import { capture, captureTiming } from "@/lib/analytics/posthog"
+import { useOptimisticSave } from "@/lib/hooks/useOptimisticSave"
+import type { Book, BookNote, ChapterVersion, ChapterVersionDetail, CorkboardCard, EmotionalArcOverview, ManuscriptAnnotation, ManuscriptAnnotationCategory, ManuscriptBootstrapPayload, ManuscriptFrontMatter, ManuscriptWorkspaceTree, NovelScene, PreWritingCheck, ReadabilityMetrics, SaveState, SceneVersion, SceneVersionDetail, VaultNote, WriterWorkspace, WritingTemplate } from "@/types/book"
 import type { Character } from "@/types/character"
 import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, InlineContinuityResponse, ManuscriptSynopsis } from "@/types/intelligence"
-import type { ChapterData, ChapterListResponse, ChapterMedia, PlotThread, SearchResult } from "@/types/reader"
+import type { ChapterData, ChapterListResponse, ChapterMedia, PlotThread, SearchResult, TimelineResponse } from "@/types/reader"
+import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
 
 const WhatsTheWordPanel = dynamic(
   () => import("@/components/intelligence/WhatsTheWordPanel").then((module) => module.WhatsTheWordPanel),
@@ -142,6 +147,20 @@ type WorkspaceTab = "write" | "plan" | "analysis"
 type RightPane = "context" | "advisor" | "notes" | "arcs" | "insights" | "character"
 type DraggedSceneState = { chapterNumber: number; sceneId: string }
 type SceneDropTarget = { chapterNumber: number; index: number }
+type SaveTarget = "book_note" | "vault_note" | "workspace" | "corkboard" | "chapter_title" | "annotation"
+type ManuscriptAnnotationSaveInput = {
+  annotationId?: string | null
+  chapterNumber?: number | null
+  category?: string | null
+  status?: "open" | "resolved" | null
+  visibility?: "shared" | "private" | null
+  quote?: string | null
+  comment?: string | null
+  anchorContextBefore?: string | null
+  anchorContextAfter?: string | null
+  startOffset?: number | null
+  endOffset?: number | null
+}
 const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string; title: string }> = [
   { id: "write", label: "Write", title: "Write manuscript" },
   { id: "plan", label: "Plan", title: "Plan story structure" },
@@ -209,6 +228,9 @@ function ManuscriptPageInner() {
   const searchParams = useSearchParams()
   const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
+  const userTier = useAuthStore((state) => state.user?.tier)
+  const authHydrated = useAuthStore((state) => state.hydrated)
+  const queryClient = useQueryClient()
   const isDark = theme === "dark"
 
   useEffect(() => {
@@ -309,6 +331,7 @@ function ManuscriptPageInner() {
   const [contentVersionByChapter, setContentVersionByChapter] = useState<Record<number, number>>({})
   const [exporting, setExporting] = useState<"pdf" | "docx" | "epub" | "vault" | null>(null)
   const [reprocessing, setReprocessing] = useState(false)
+  const [processingRetrying, setProcessingRetrying] = useState(false)
   const [reprocessingChapterNumber, setReprocessingChapterNumber] = useState<number | null>(null)
   const [jumpTarget, setJumpTarget] = useState<number | null>(null)
   const [activeFindIndex, setActiveFindIndex] = useState(0)
@@ -348,17 +371,28 @@ function ManuscriptPageInner() {
   const [selectionMenu, setSelectionMenu] = useState<{ text: string; top: number; left: number } | null>(null)
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
   const [addCharacterText, setAddCharacterText] = useState("")
+  const [saveStateByTarget, setSaveStateByTarget] = useState<Partial<Record<SaveTarget, SaveState>>>({})
+  const [failedSaveByTarget, setFailedSaveByTarget] = useState<Partial<Record<SaveTarget, () => Promise<void>>>>({})
+
+  const setTargetSaveState = (target: SaveTarget, state: SaveState) => {
+    setSaveStateByTarget((current) => ({ ...current, [target]: state }))
+  }
+
+  const setTargetRetry = (target: SaveTarget, retry: (() => Promise<void>) | null) => {
+    setFailedSaveByTarget((current) => {
+      const next = { ...current }
+      if (retry) next[target] = retry
+      else delete next[target]
+      return next
+    })
+  }
 
   useEffect(() => {
     if (loading || manuscriptReadyCapturedRef.current) return
     manuscriptReadyCapturedRef.current = true
-    capture("author_manuscript_ready", {
+    captureTiming("manuscript_shell_ready_ms", manuscriptLoadStartedAtRef.current ?? 0, {
       book_id: bookId,
       optional_panels_deferred: true,
-      duration_ms:
-        typeof performance !== "undefined" && manuscriptLoadStartedAtRef.current !== null
-          ? Math.round(performance.now() - manuscriptLoadStartedAtRef.current)
-          : null,
     })
   }, [bookId, loading])
 
@@ -371,6 +405,7 @@ function ManuscriptPageInner() {
   const pendingAnnotationJumpIdRef = useRef<string | null>(null)
   const selectionMenuAnchorRef = useRef<ManuscriptSelectionAnchor | null>(null)
   const manuscriptReadyCapturedRef = useRef(false)
+  const firstChapterLoadedCapturedRef = useRef(false)
   const manuscriptLoadStartedAtRef = useRef<number | null>(typeof performance !== "undefined" ? performance.now() : null)
   const deferredChecksSeedRef = useRef<{ chapterNumber: number; text: string } | null>(null)
   const lastAutoChecksRef = useRef<Record<number, number>>({})
@@ -378,11 +413,13 @@ function ManuscriptPageInner() {
   const { data: charactersData = EMPTY_CHARACTERS } = useQuery<Character[]>({
     queryKey: [`manuscript:${bookId}:characters`],
     queryFn: () => booksApi.getCharacters(bookId),
+    enabled: false,
     staleTime: 60_000,
   })
   const { data: writerWorkspaceData = null, refetch: refetchWriterWorkspace } = useQuery<WriterWorkspace | null>({
     queryKey: [bookCacheKey(bookId, "writer-workspace")],
     queryFn: () => booksApi.getWriterWorkspace(bookId),
+    enabled: false,
     staleTime: 60_000,
   })
   const { data: emotionalArcData = null, refetch: refetchEmotionalArc } = useQuery<EmotionalArcOverview | null>({
@@ -400,6 +437,7 @@ function ManuscriptPageInner() {
   const { data: workspaceTreeData = null, refetch: refetchWorkspaceTree } = useQuery<ManuscriptWorkspaceTree | null>({
     queryKey: [bookCacheKey(bookId, "workspace-tree")],
     queryFn: () => booksApi.getWorkspaceTree(bookId),
+    enabled: false,
     staleTime: 60_000,
   })
   const annotationChapterNumber = selectedChapter ?? draftChapterNumber
@@ -443,10 +481,39 @@ function ManuscriptPageInner() {
   }, [chapterList])
 
   const activeChapterNumber = selectedChapter ?? draftChapterNumber ?? nextChapterNumber
+  const annotationSave = useOptimisticSave<ManuscriptAnnotationSaveInput, ManuscriptAnnotation>({
+    storageKey: `lorevia:manuscript-annotation:${bookId}:${activeChapterNumber}`,
+    metricProperties: { book_id: bookId, save_target: "manuscript_annotation" },
+    getDraftId: (input) => input.annotationId ?? `chapter-${input.chapterNumber ?? activeChapterNumber}`,
+    save: (input) => booksApi.saveManuscriptAnnotation(bookId, input),
+    onSuccess: (saved) => {
+      setAnnotations((current) => [saved, ...current.filter((annotation) => annotation.id !== saved.id)])
+      setAnnotationAnchor(null)
+      setAnnotationDraft("")
+      setActiveAnnotationId(saved.id)
+      pendingAnnotationJumpIdRef.current = saved.id
+      setStatusMessage(`Saved annotation for chapter ${saved.chapter_number ?? activeChapterNumber}.`)
+    },
+    onError: () => {
+      setStatusMessage("Could not save annotation. Your draft is still kept locally.")
+    },
+  })
   const { data: preWritingCheckData = null } = useQuery<PreWritingCheck | null>({
     queryKey: [`manuscript:${bookId}:prewriting:${activeChapterNumber}`],
     queryFn: () => booksApi.getPreWritingCheck(bookId, activeChapterNumber),
-    enabled: workspaceTab !== "write" && !loading && activeChapterNumber > 0,
+    enabled: !loading && activeChapterNumber > 0 && (workspaceTab !== "write" || (showRightRail && activeRightPane === "context")),
+    staleTime: 30_000,
+  })
+  const { data: rightRailPlotThreads = [] } = useQuery<PlotThread[]>({
+    queryKey: [`manuscript:${bookId}:right-rail:plot-threads:${activeChapterNumber}`],
+    queryFn: () => readerApi.getPlotThreads(bookId, activeChapterNumber),
+    enabled: !loading && workspaceTab === "write" && showRightRail && activeRightPane === "context" && activeChapterNumber > 0,
+    staleTime: 30_000,
+  })
+  const { data: rightRailTimelineData = null } = useQuery<TimelineResponse | null>({
+    queryKey: [`manuscript:${bookId}:right-rail:timeline`],
+    queryFn: () => readerApi.getTimeline(bookId, { limit: 25 }),
+    enabled: !loading && workspaceTab === "write" && showRightRail && activeRightPane === "context",
     staleTime: 30_000,
   })
   const sceneDraftDirty = useMemo(() => {
@@ -645,7 +712,19 @@ function ManuscriptPageInner() {
   const activeChapterWordTarget = writerWorkspace?.word_count_goals.chapter_target ?? 0
   const activeChapterContextCharacters = (preWritingCheck?.active_characters ?? []).slice(0, 4)
   const activeThreadSummary = preWritingCheck?.unresolved_threads.slice(0, 3) ?? []
-  const recentEventSummary = preWritingCheck?.recent_events.slice(0, 3) ?? []
+  const rightRailThreadItems = plotThreads.length
+    ? plotThreads
+    : rightRailPlotThreads.filter((thread) => thread.status !== "resolved").slice(0, 8)
+  const recentEventSummary = preWritingCheck?.recent_events.length
+    ? preWritingCheck.recent_events.slice(0, 3)
+    : (rightRailTimelineData?.events ?? [])
+      .filter((event) => event.chapter_number <= activeChapterNumber)
+      .slice(-3)
+      .reverse()
+      .map((event) => ({
+        chapter_number: event.chapter_number,
+        detail: event.detail || event.title,
+      }))
   const warningSummary = preWritingCheck?.alerts.slice(0, 3) ?? []
   const arcSummaryCharacter = emotionalArc?.characters[0] ?? null
   const filteredSceneGroups = useMemo(() => {
@@ -711,13 +790,24 @@ function ManuscriptPageInner() {
   }
 
   const saveWorkspace = async (patch: Partial<WriterWorkspace>, options?: { silent?: boolean }) => {
+    const startedAt = typeof performance !== "undefined" ? performance.now() : 0
+    const target: SaveTarget = patch.corkboard_cards ? "corkboard" : "workspace"
+    setTargetSaveState(target, "saving")
+    setTargetRetry(target, null)
+    setWriterWorkspace((current) => current ? { ...current, ...patch } : current)
     setWorkspaceSaving(true)
     try {
       const updated = await booksApi.updateWriterWorkspace(bookId, patch)
       setWriterWorkspace(updated)
+      setTargetSaveState(target, "saved")
+      captureTiming("save_latency_ms", startedAt, { book_id: bookId, save_target: target })
       if (!options?.silent) setStatusMessage("Workspace preferences saved.")
     } catch {
-      if (!options?.silent) setStatusMessage("Workspace save failed. Please try again.")
+      setTargetSaveState(target, "error")
+      setTargetRetry(target, () => saveWorkspace(patch, options))
+      captureTiming("save_latency_ms", startedAt, { book_id: bookId, save_target: target, save_state: "error" })
+      capture("save_failure_count", { book_id: bookId, save_target: target })
+      if (!options?.silent) setStatusMessage("Workspace save failed. Your local changes are still visible.")
     } finally {
       setWorkspaceSaving(false)
     }
@@ -1220,12 +1310,12 @@ function ManuscriptPageInner() {
 
   const applyTemplateToChapter = async (template: WritingTemplate, destination: TemplateDestination) => {
     if (destination === "chapter_note") {
-      const saved = await booksApi.saveBookNote(bookId, {
+      const saved = await persistNote({
         chapterNumber: activeChapterNumber,
         title: `Template: ${template.title}`,
         body: buildTemplateNoteBody(template),
       })
-      setNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id)])
+      if (!saved) return
       setStatusMessage(`Saved ${template.title} as a chapter note.`)
       return
     }
@@ -1372,11 +1462,32 @@ function ManuscriptPageInner() {
   }
 
   const loadBase = async () => {
-    const [bookData, chapters] = await Promise.all([
-      booksApi.get(bookId),
+    const [bootstrap, chapters] = await Promise.all([
+      booksApi.getManuscriptBootstrap(bookId, { activeChapterNumber: selectedChapter }),
       readerApi.getChapterList(bookId),
     ])
+    const bookData = bootstrap.book
+    const isOwnerAuthorBook = bookData.mode === "author" && bookData.access_class === "owner"
+    if (authHydrated && isOwnerAuthorBook && !canUseAuthorFeatures(userTier)) {
+      router.replace(`/${bookId}` as Route)
+      return
+    }
+    queryClient.setQueryData([`manuscript:${bookId}:characters`], bootstrap.characters)
+    queryClient.setQueryData([bookCacheKey(bookId, "writer-workspace")], bootstrap.writer_workspace)
+    queryClient.setQueryData([bookCacheKey(bookId, "emotional-arc")], bootstrap.emotional_arc)
+    queryClient.setQueryData([bookCacheKey(bookId, "workspace-tree")], bootstrap.workspace_tree)
+    queryClient.setQueryData([`manuscript:${bookId}:notes`], bootstrap.notes)
+    queryClient.setQueryData([bookCacheKey(bookId, "vault-notes")], bootstrap.vault_notes)
+    if (selectedChapter !== null) {
+      queryClient.setQueryData([`manuscript:${bookId}:chapter-versions:${selectedChapter}`], bootstrap.chapter_versions)
+    }
+    if (bootstrap.prewriting_check) {
+      queryClient.setQueryData([`manuscript:${bookId}:prewriting:${bootstrap.prewriting_check.upcoming_chapter}`], bootstrap.prewriting_check)
+    }
     setBook(bookData)
+    setCharacters(bootstrap.characters)
+    setWriterWorkspace(bootstrap.writer_workspace)
+    setWorkspaceTree(bootstrap.workspace_tree)
     setChapterList(chapters)
     const initialChapterNumber = chapters.chapters.some((item) => item.number === selectedChapter)
       ? selectedChapter
@@ -1405,6 +1516,13 @@ function ManuscriptPageInner() {
         text: nextDraft.text.trim(),
       }
       initialChapterLoadedRef.current = initialChapterNumber
+      if (!firstChapterLoadedCapturedRef.current) {
+        firstChapterLoadedCapturedRef.current = true
+        captureTiming("first_chapter_loaded_ms", manuscriptLoadStartedAtRef.current ?? 0, {
+          book_id: bookId,
+          chapter_number: initialChapterNumber,
+        })
+      }
       setDraftChapterNumber(null)
       setChapterTitle(nextDraft.title)
       setText(nextDraft.text)
@@ -1454,7 +1572,7 @@ function ManuscriptPageInner() {
 
   useEffect(() => {
     loadBase().finally(() => setLoading(false))
-  }, [bookId])
+  }, [authHydrated, bookId, queryClient, router, userTier])
 
   useEffect(() => {
     if (!isBookProcessing) return
@@ -2131,6 +2249,22 @@ function ManuscriptPageInner() {
     }
   }
 
+  const retryProcessing = async () => {
+    if (!book || processingRetrying) return
+    setProcessingRetrying(true)
+    setStatusMessage(null)
+    try {
+      const processing = await booksApi.retryProcessing(book.id)
+      setBook((current) => current ? { ...current, status: "processing", processing } : current)
+      setStatusMessage("Processing retry started.")
+      await loadBase()
+    } catch {
+      setStatusMessage("Processing retry is not available right now.")
+    } finally {
+      setProcessingRetrying(false)
+    }
+  }
+
   const toggleAutoReprocess = async (enabled: boolean) => {
     const currentReprocess = writerWorkspace?.reprocess ?? {
       auto_reprocess_enabled: true,
@@ -2203,8 +2337,15 @@ function ManuscriptPageInner() {
     if (!draftToPersist.text.trim()) return
 
     setSaving(true)
+    setTargetSaveState("chapter_title", "saving")
+    setTargetRetry("chapter_title", null)
     try {
       await saveChapterDraft(parsed.chapterNumber, draftToPersist)
+      setTargetSaveState("chapter_title", "saved")
+    } catch {
+      setTargetSaveState("chapter_title", "error")
+      setTargetRetry("chapter_title", () => handleChapterHeadingBlur(rawValue, fallbackNumber, fallbackTitle))
+      setStatusMessage("Could not save chapter title. Your local title is still kept here.")
     } finally {
       setSaving(false)
     }
@@ -2234,7 +2375,23 @@ function ManuscriptPageInner() {
     }
   }
 
+  const prefetchManuscriptChapter = (chapterNum: number) => {
+    if (!chapterNum || chapterNum < 1) return
+    void queryClient.prefetchQuery({
+      queryKey: [readerCacheKey(bookId, chapterNum)],
+      queryFn: () => readerApi.getChapter(bookId, chapterNum),
+      staleTime: 30_000,
+    })
+    void queryClient.prefetchQuery({
+      queryKey: [`manuscript:${bookId}:chapter-versions:${chapterNum}`],
+      queryFn: () => booksApi.getChapterVersions(bookId, chapterNum),
+      staleTime: 30_000,
+    })
+  }
+
   const jumpToChapter = (chapterNum: number) => {
+    prefetchManuscriptChapter(chapterNum - 1)
+    prefetchManuscriptChapter(chapterNum + 1)
     setEditorMode("book")
     setSelectedChapter(chapterNum)
     setJumpTarget(chapterNum)
@@ -2280,17 +2437,45 @@ function ManuscriptPageInner() {
     const nextBody = payload?.body ?? noteBody
     const nextText = htmlToPlainText(nextBody)
     if (!nextText.trim()) return null
+    const startedAt = typeof performance !== "undefined" ? performance.now() : 0
+    const chapterNumber = payload?.chapterNumber ?? (noteScope === "chapter" ? activeChapterNumber : null)
+    const title = payload?.title ?? (noteTitle.trim() || null)
+    const localId = payload?.noteId ?? `local-note-${Date.now()}`
+    const optimisticNote: BookNote = {
+      id: localId,
+      book_id: bookId,
+      book_title: book?.title ?? "",
+      chapter_number: chapterNumber,
+      chapter_title: chapterNumber ? chapterList?.chapters.find((chapter) => chapter.number === chapterNumber)?.title ?? null : null,
+      title,
+      body: nextBody,
+      tags: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setTargetSaveState("book_note", "saving")
+    setTargetRetry("book_note", null)
+    setNotes((current) => [optimisticNote, ...current.filter((note) => note.id !== localId)])
     setSavingNote(true)
     try {
       const saved = await booksApi.saveBookNote(bookId, {
         noteId: payload?.noteId ?? null,
-        chapterNumber: payload?.chapterNumber ?? (noteScope === "chapter" ? activeChapterNumber : null),
-        title: payload?.title ?? (noteTitle.trim() || null),
+        chapterNumber,
+        title,
         body: nextBody,
       })
-      setNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id)])
+      setNotes((current) => [saved, ...current.filter((note) => note.id !== saved.id && note.id !== localId)])
+      setTargetSaveState("book_note", "saved")
+      captureTiming("save_latency_ms", startedAt, { book_id: bookId, save_target: "book_note" })
       setStatusMessage(`Saved note${saved.chapter_number ? ` for chapter ${saved.chapter_number}` : ""}.`)
       return saved
+    } catch {
+      setTargetSaveState("book_note", "error")
+      setTargetRetry("book_note", () => persistNote(payload).then(() => undefined))
+      captureTiming("save_latency_ms", startedAt, { book_id: bookId, save_target: "book_note", save_state: "error" })
+      capture("save_failure_count", { book_id: bookId, save_target: "book_note" })
+      setStatusMessage("Could not save note. Your draft is still kept locally.")
+      return null
     } finally {
       setSavingNote(false)
     }
@@ -2304,18 +2489,42 @@ function ManuscriptPageInner() {
     const nextBody = payload?.body ?? noteBody
     const nextText = htmlToPlainText(nextBody).trim()
     if (!nextText) return null
+    const startedAt = typeof performance !== "undefined" ? performance.now() : 0
     const title = payload?.title?.trim() || noteTitle.trim() || `Chapter ${activeChapterNumber} note`
     const chapterFolder = noteScope === "chapter" && activeChapterNumber ? [`Chapter ${activeChapterNumber}`] : ["Whole Book"]
 
-    const saved = await saveContextualVaultNote({
-      bookId,
-      title,
-      content: nextText,
-      context: "manual_editor",
-      folderSegments: payload?.folderSegments?.length ? payload.folderSegments : chapterFolder,
-    })
-    setStatusMessage(`Saved to notes workspace: ${saved.path}`)
-    return saved
+    setTargetSaveState("vault_note", "saving")
+    setTargetRetry("vault_note", null)
+    try {
+      const saved = await saveContextualVaultNote({
+        bookId,
+        title,
+        content: nextText,
+        context: "manual_editor",
+        folderSegments: payload?.folderSegments?.length ? payload.folderSegments : chapterFolder,
+      })
+      try {
+        window.localStorage.removeItem(`lorevia:vault-note-draft:${bookId}`)
+      } catch {
+        // local draft cleanup is best-effort
+      }
+      setTargetSaveState("vault_note", "saved")
+      captureTiming("save_latency_ms", startedAt, { book_id: bookId, save_target: "vault_note" })
+      setStatusMessage(`Saved to notes workspace: ${saved.path}`)
+      return saved
+    } catch {
+      try {
+        window.localStorage.setItem(`lorevia:vault-note-draft:${bookId}`, JSON.stringify({ title, body: nextBody, folderSegments: payload?.folderSegments ?? chapterFolder }))
+      } catch {
+        // local draft persistence is best-effort
+      }
+      setTargetSaveState("vault_note", "error")
+      setTargetRetry("vault_note", () => saveWorkspaceVaultNote(payload).then(() => undefined))
+      captureTiming("save_latency_ms", startedAt, { book_id: bookId, save_target: "vault_note", save_state: "error" })
+      capture("save_failure_count", { book_id: bookId, save_target: "vault_note" })
+      setStatusMessage("Could not save to workspace notes. Your draft is still kept locally.")
+      return null
+    }
   }
 
   const saveNote = async () => {
@@ -2367,7 +2576,7 @@ function ManuscriptPageInner() {
     if (!annotationAnchor || !annotationDraft.trim()) return
     setAnnotationActionId("new")
     try {
-      const saved = await booksApi.saveManuscriptAnnotation(bookId, {
+      await annotationSave.save({
         chapterNumber: activeChapterNumber,
         category: annotationCategory,
         visibility: annotationVisibility,
@@ -2379,12 +2588,6 @@ function ManuscriptPageInner() {
         startOffset: annotationAnchor.startOffset,
         endOffset: annotationAnchor.endOffset,
       })
-      setAnnotations((current) => [saved, ...current.filter((annotation) => annotation.id !== saved.id)])
-      setAnnotationAnchor(null)
-      setAnnotationDraft("")
-      setActiveAnnotationId(saved.id)
-      pendingAnnotationJumpIdRef.current = saved.id
-      setStatusMessage(`Saved annotation for chapter ${activeChapterNumber}.`)
     } finally {
       setAnnotationActionId(null)
     }
@@ -2455,11 +2658,12 @@ function ManuscriptPageInner() {
     if (!editingNoteId) return
     setEditingNoteSaving(true)
     try {
-      const updated = await booksApi.saveBookNote(bookId, {
+      const updated = await persistNote({
         noteId: editingNoteId,
         title: editNoteTitle.trim() || null,
         body: editNoteBody,
       })
+      if (!updated) return
       setNotes((current) => current.map((note) => note.id === updated.id ? updated : note))
       cancelEditingNote()
       setStatusMessage("Note updated.")
@@ -2557,7 +2761,17 @@ function ManuscriptPageInner() {
     return `Local autosave at ${new Date(chapterAutosave.updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
   }
 
-  const activeSaveLabel = saving ? "Saving..." : dirtyDrafts.includes(activeChapterNumber) ? "Unsaved" : "Saved"
+  const activeSaveState = saving
+    ? "saving"
+    : saveStateByTarget.chapter_title === "error"
+      ? "error"
+    : autosaveState[activeChapterNumber]?.status === "error"
+      ? "error"
+      : dirtyDrafts.includes(activeChapterNumber)
+        ? "offline_draft"
+        : "saved"
+  const activeLastSavedAt = autosaveState[activeChapterNumber]?.updatedAt ?? annotationSave.lastSavedAt
+  const normalizedProcessingStatus = normalizeProcessingStatus(book?.processing, book)
   const inspectorRailClass = isDark
     ? "min-w-0 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:self-start xl:overflow-y-auto border-l border-white/[0.08] bg-[#0b0f11] text-slate-100"
     : "min-w-0 xl:sticky xl:top-[8.25rem] xl:max-h-[calc(100vh-8.25rem)] xl:self-start xl:overflow-y-auto border-l border-stone-200 bg-white text-stone-950"
@@ -2672,8 +2886,8 @@ function ManuscriptPageInner() {
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${activeSaveLabel === "Unsaved" ? "bg-teal-400" : "bg-emerald-400"}`} />
-                  <p className={`text-sm font-medium ${activeSaveLabel === "Unsaved" ? isDark ? "text-teal-300" : "text-teal-700" : isDark ? "text-emerald-300" : "text-emerald-700"}`}>{activeSaveLabel}</p>
+                  <SaveStatePill state={activeSaveState} />
+                  <LastSavedLabel value={activeLastSavedAt} className="hidden sm:inline" />
                 </div>
                 <ManuscriptExportMenu
                   isDark={isDark}
@@ -2704,6 +2918,8 @@ function ManuscriptPageInner() {
                 <button onClick={() => setFocusMode((value) => !value)} className={`min-h-10 rounded-sm border px-4 text-sm font-medium ${focusMode ? isDark ? "border-emerald-300/40 bg-emerald-400/15 text-white" : "border-emerald-300 bg-emerald-50 text-stone-900" : isDark ? "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]" : "border-stone-200 bg-white text-stone-700"}`}>
                   {focusMode ? "Exit focus" : "Focus mode"}
                 </button>
+                {saveStateByTarget.workspace ? <SaveStatePill state={saveStateByTarget.workspace} /> : null}
+                {saveStateByTarget.corkboard ? <SaveStatePill state={saveStateByTarget.corkboard} /> : null}
                 <label
                   className={`flex min-h-10 items-center gap-2 rounded-sm border px-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
                   title="Turning this off stops LoreVia from reprocessing saved edits automatically."
@@ -2749,6 +2965,31 @@ function ManuscriptPageInner() {
             {!autoReprocessEnabled ? (
               <div className={`border-t px-4 py-2 text-sm lg:px-6 ${isDark ? "border-white/10 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
                 Turning this off stops LoreVia from reprocessing saved edits automatically. To update story memory, open each edited chapter and click Reprocess. This adds extra steps, but can reduce token usage.
+              </div>
+            ) : null}
+            {normalizedProcessingStatus && !normalizedProcessingStatus.ready ? (
+              <div className={`border-t px-4 py-2 lg:px-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+                <ProcessingStatusStrip
+                  status={normalizedProcessingStatus}
+                  retrying={processingRetrying}
+                  onRetry={normalizedProcessingStatus.retryAvailable ? () => void retryProcessing() : undefined}
+                />
+              </div>
+            ) : null}
+            {Object.entries(saveStateByTarget).find(([, state]) => state === "error") ? (
+              <div className={`border-t px-4 py-2 lg:px-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+                {(() => {
+                  const failedTarget = Object.entries(saveStateByTarget).find(([, state]) => state === "error")?.[0] as SaveTarget | undefined
+                  return failedTarget ? (
+                    <RecoverableInlineError
+                      message="One change could not be saved."
+                      actionLabel="Retry"
+                      onAction={failedSaveByTarget[failedTarget] ? () => void failedSaveByTarget[failedTarget]?.() : undefined}
+                    >
+                      Your local draft is still visible in this browser.
+                    </RecoverableInlineError>
+                  ) : null
+                })()}
               </div>
             ) : null}
             <div className={`flex flex-col gap-3 border-t px-4 py-2 lg:flex-row lg:items-center lg:justify-between lg:px-6 ${isDark ? "border-white/10" : "border-stone-200"}`}>
@@ -2867,7 +3108,11 @@ function ManuscriptPageInner() {
                     <div className="flex items-start justify-between gap-3">
                       <button
                         type="button"
+                        onMouseEnter={() => prefetchManuscriptChapter(chapter.number)}
+                        onFocus={() => prefetchManuscriptChapter(chapter.number)}
                         onClick={() => {
+                          prefetchManuscriptChapter(chapter.number - 1)
+                          prefetchManuscriptChapter(chapter.number + 1)
                           setSelectedChapter(chapter.number)
                           setDraftChapterNumber(null)
                           setReplaceExisting(true)
@@ -3511,7 +3756,7 @@ function ManuscriptPageInner() {
               characters={characters}
               onOpenCharCard={openCharCard}
               activeThreadSummary={activeThreadSummary}
-              plotThreads={plotThreads}
+              plotThreads={rightRailThreadItems}
               recentEventSummary={recentEventSummary}
               warningSummary={warningSummary}
               review={review}
@@ -3800,7 +4045,10 @@ function ManuscriptPageInner() {
                     <p className={`mt-1 text-xs ${inspectorMutedTextClass}`}>Click a name to open their card.</p>
                     <div className="mt-3 space-y-2">
                       {characters.length === 0 ? (
-                        <p className={`text-sm ${inspectorMutedTextClass}`}>No characters extracted yet.</p>
+                        <div className={`rounded-md border border-dashed px-3 py-3 text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-200 text-stone-500"}`}>
+                          <p className="font-medium">No characters extracted yet.</p>
+                          <p className="mt-1 text-xs leading-5">Profiles appear after processing has enough manuscript evidence. Keep writing, or retry processing from the header if extraction failed.</p>
+                        </div>
                       ) : characters.map(char => (
                         <button
                           key={char.id}
@@ -4104,6 +4352,8 @@ function ManuscriptPageInner() {
                       >
                         Open notes workspace
                       </Link>
+                      {saveStateByTarget.book_note ? <SaveStatePill state={saveStateByTarget.book_note} /> : null}
+                      {saveStateByTarget.vault_note ? <SaveStatePill state={saveStateByTarget.vault_note} /> : null}
                     </div>
                   </div>
                 </div>
@@ -4163,14 +4413,29 @@ function ManuscriptPageInner() {
                         aria-label="Inline annotation"
                       />
                       <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Leave an inline annotation for the selected passage.</p>
+                      {annotationSave.saveState === "error" || annotationSave.saveState === "offline_draft" ? (
+                        <RecoverableInlineError
+                          className="mt-3"
+                          message={annotationSave.saveState === "offline_draft" ? "Annotation is saved as an offline draft." : "Annotation could not be saved."}
+                          actionLabel="Retry save"
+                          onAction={() => void annotationSave.retry()}
+                        >
+                          Your draft remains in this browser until it is saved or cleared.
+                        </RecoverableInlineError>
+                      ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           onClick={() => void saveAnnotation()}
-                          disabled={annotationActionId === "new" || !annotationDraft.trim()}
+                          disabled={annotationActionId === "new" || annotationSave.saveState === "saving" || annotationSave.saveState === "retrying" || !annotationDraft.trim()}
                           className={`${inspectorPrimaryButtonClass} px-4 py-2 text-sm`}
                         >
-                          {annotationActionId === "new" ? "Saving..." : "Save annotation"}
+                          {annotationSave.saveState === "saving" || annotationActionId === "new"
+                            ? "Saving..."
+                            : annotationSave.saveState === "retrying"
+                              ? "Retrying..."
+                              : "Save annotation"}
                         </button>
+                        <SaveStatePill state={annotationSave.saveState} />
                         <button
                           type="button"
                           onClick={() => {
@@ -4378,6 +4643,28 @@ function ManuscriptPageInner() {
           ) : null}
         </div>
         ) : null}
+
+        <div className={`fixed inset-x-0 bottom-0 z-40 border-t px-4 py-3 shadow-lg lg:hidden ${isDark ? "border-white/10 bg-[#111416]/95" : "border-stone-200 bg-white/95"}`}>
+          <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-stone-950"}`}>
+                {chapterTitle || `Chapter ${activeChapterNumber}`}
+              </p>
+              <LastSavedLabel value={activeLastSavedAt} />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <SaveStatePill state={activeSaveState} />
+              <button
+                type="button"
+                onClick={() => void saveCurrentChapter()}
+                disabled={saving}
+                className="app-button-primary min-h-9 px-3 text-xs"
+              >
+                {saving ? "Saving..." : activeSaveState === "error" ? "Retry" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
 
         {showReprocessConfirm ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">

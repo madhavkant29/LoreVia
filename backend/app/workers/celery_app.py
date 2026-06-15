@@ -172,6 +172,11 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/15"),
             "kwargs": {"limit": 100},
         },
+        "maintenance-repair-processing-books-every-5-minutes": {
+            "task": "maintenance_tasks.repair_processing_books",
+            "schedule": crontab(minute="*/5"),
+            "kwargs": {"limit": 50},
+        },
         "maintenance-process-data-deletion-requests-hourly": {
             "task": "maintenance_tasks.process_data_deletion_requests",
             "schedule": crontab(minute=20),

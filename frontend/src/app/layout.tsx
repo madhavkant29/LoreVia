@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import "./globals.css"
 import { PostHogClientProvider } from "@/components/analytics/PostHogClient"
-import { SiteFooter } from "@/components/layout/SiteFooter"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
 import {
   DEFAULT_OG_IMAGE,
@@ -121,7 +120,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased">
         <PostHogClientProvider>
           {children}
-          <SiteFooter />
         </PostHogClientProvider>
       </body>
     </html>

@@ -1730,7 +1730,7 @@ const preWritingCheck = {
     {
       chapter_number: 2,
       chapter_title: "The Ember Gate",
-      summary: "Nora enters the city and hears the bells.",
+      detail: "Nora enters the city and hears the bells.",
     },
   ],
   alerts: [
@@ -2311,6 +2311,110 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   }
   let bookDetailReadCount = 0
 
+  const buildBookOverview = () => ({
+    book: mockBook,
+    progress: {
+      current_chapter: 2,
+      scroll_pct: 35,
+      chapters_read_count: 2,
+      percent_complete: 64,
+      chapters_left: 1,
+    },
+    chapter_list: mockChapterList,
+    summary_collection: {
+      read_upto: 2,
+      summaries: [
+        {
+          chapter_number: 1,
+          chapter_title: "Ashfall",
+          read: true,
+          available: true,
+          content: "Nora leaves the ash road and reaches the city wall.",
+          key_events: [{ event: "Nora reaches the gate city.", importance: 0.88 }],
+        },
+        {
+          chapter_number: 2,
+          chapter_title: "The Ember Gate",
+          read: true,
+          available: true,
+          content: "The ember gate opens and Nora steps into the city under watch.",
+          key_events: [{ event: "The gate crossing changes the story stakes.", importance: 0.93 }],
+        },
+        {
+          chapter_number: 3,
+          chapter_title: "River of Glass",
+          read: false,
+          available: false,
+          content: null,
+          key_events: [],
+        },
+      ],
+    },
+  })
+
+  const buildReaderBootstrap = () => ({
+    overview: buildBookOverview(),
+    notes: mockNotes,
+    saved_quotes: [],
+    stats: booksStats,
+    characters: mockCharacterBibleCharacters,
+    chapter_reports: [],
+    prewriting_check: preWritingCheck,
+    story_health: storyHealth,
+    writer_workspace: mockWriterWorkspace,
+    revision_intelligence: revisionIntelligence,
+  })
+
+  const buildBookDetailResponse = () => {
+    bookDetailReadCount += 1
+    if (manuscriptProcessingMode === "refresh-after-two-book-reads") {
+      // The manuscript route performs multiple detail reads while the page is
+      // still settling; keep one poll cycle visible before switching to ready.
+      const processingActive = bookDetailReadCount <= 3
+      return {
+        ...mockBook,
+        status: processingActive ? "processing" : "ready",
+        processing: {
+          ...(mockBook.processing ?? {}),
+          status: processingActive ? "processing" : "ready",
+          stage: processingActive ? "extracting" : "ready",
+          progress_pct: processingActive ? 53 : 100,
+          chapters_completed: processingActive ? 2 : 3,
+          chapters_total: 3,
+          eta_seconds: processingActive ? 180 : 0,
+          current_step_label: processingActive ? "Extracting characters" : "Ready",
+          retry_available: false,
+        },
+      }
+    }
+    return mockBook
+  }
+
+  const buildManuscriptBootstrap = () => ({
+    book: buildBookDetailResponse(),
+    characters: mockCharacterBibleCharacters,
+    writer_workspace: mockWriterWorkspace,
+    emotional_arc: emotionalArc,
+    synopsis,
+    workspace_tree: mockWorkspaceTree,
+    annotations: mockManuscriptAnnotations,
+    notes: mockNotes,
+    vault_notes: mockVaultNotes,
+    chapter_versions: [],
+    prewriting_check: preWritingCheck,
+  })
+
+  const buildWorldBuildingBootstrap = () => ({
+    documents: worldBuildingDocuments,
+    selected_document: worldBuildingDocumentDetail,
+    notes: [],
+    canon_overrides: [],
+    elements: worldElements,
+    wiki: [],
+    stats: booksStats,
+    gap_analysis: worldGapAnalysis,
+  })
+
   const buildBetaReadDetail = (assignmentId: string) => {
     const assignment = mockBetaReads.find((item: typeof mockBetaReads[number]) => item.id === assignmentId)
     if (!assignment) return null
@@ -2335,6 +2439,10 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     const method = route.request().method()
 
     if (path === "/api/v1/auth/me" && method === "GET") {
+      return session === "authenticated" ? json(route, mockUser) : json(route, { detail: "Unauthorized" }, 401)
+    }
+
+    if (path === "/api/v1/auth/session" && method === "POST") {
       return session === "authenticated" ? json(route, mockUser) : json(route, { detail: "Unauthorized" }, 401)
     }
 
@@ -2573,26 +2681,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
-      bookDetailReadCount += 1
-      if (manuscriptProcessingMode === "refresh-after-two-book-reads") {
-        // The manuscript route performs multiple detail reads while the page is
-        // still settling; keep one poll cycle visible before switching to ready.
-        const processingActive = bookDetailReadCount <= 3
-        return json(route, {
-          ...mockBook,
-          status: processingActive ? "processing" : "ready",
-          processing: {
-            ...(mockBook.processing ?? {}),
-            status: processingActive ? "processing" : "ready",
-            stage: processingActive ? "extraction" : "complete",
-            progress_pct: processingActive ? 53 : 100,
-            chapters_completed: processingActive ? 2 : 3,
-            chapters_total: 3,
-            eta_seconds: processingActive ? 180 : 0,
-          },
-        })
-      }
-      return json(route, mockBook)
+      return json(route, buildBookDetailResponse())
     }
 
     if (path === "/api/v1/books/book-1/permanent" && method === "DELETE") {
@@ -2656,6 +2745,14 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       })
     }
 
+    if (path === "/api/v1/books/book-1/reader-bootstrap" && method === "GET") {
+      return json(route, buildReaderBootstrap())
+    }
+
+    if (path === "/api/v1/books/book-1/manuscript-bootstrap" && method === "GET") {
+      return json(route, buildManuscriptBootstrap())
+    }
+
     if (path === "/api/v1/books/book-1/forum-metadata" && method === "PUT") {
       const payload = route.request().postDataJSON() as {
         title?: string
@@ -2679,46 +2776,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/overview" && method === "GET") {
-      return json(route, {
-        book: mockBook,
-        progress: {
-          current_chapter: 2,
-          scroll_pct: 35,
-          chapters_read_count: 2,
-          percent_complete: 64,
-          chapters_left: 1,
-        },
-        chapter_list: chapterList,
-        summary_collection: {
-          read_upto: 2,
-          summaries: [
-            {
-              chapter_number: 1,
-              chapter_title: "Ashfall",
-              read: true,
-              available: true,
-              content: "Nora leaves the ash road and reaches the city wall.",
-              key_events: [{ event: "Nora reaches the gate city.", importance: 0.88 }],
-            },
-            {
-              chapter_number: 2,
-              chapter_title: "The Ember Gate",
-              read: true,
-              available: true,
-              content: "The ember gate opens and Nora steps into the city under watch.",
-              key_events: [{ event: "The gate crossing changes the story stakes.", importance: 0.93 }],
-            },
-            {
-              chapter_number: 3,
-              chapter_title: "River of Glass",
-              read: false,
-              available: false,
-              content: null,
-              key_events: [],
-            },
-          ],
-        },
-      })
+      return json(route, buildBookOverview())
     }
 
     if (path === "/api/v1/books/book-1/collaborators" && method === "GET") {
@@ -3519,6 +3577,10 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/intelligence/book-1/world-building/documents" && method === "GET") {
       return json(route, worldBuildingDocuments)
+    }
+
+    if (path === "/api/v1/intelligence/book-1/world-building/bootstrap" && method === "GET") {
+      return json(route, buildWorldBuildingBootstrap())
     }
 
     if (path === "/api/v1/intelligence/book-1/world-building/documents/world-doc-1" && method === "GET") {

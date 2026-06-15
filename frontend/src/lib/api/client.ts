@@ -124,6 +124,7 @@ apiClient.interceptors.response.use(
     const isAuthEndpoint =
       requestPath === "/auth/me" ||
       requestPath === "/auth/refresh" ||
+      requestPath === "/auth/session" ||
       requestPath === "/auth/login" ||
       requestPath === "/auth/register" ||
       requestPath.startsWith("/auth/oauth/")

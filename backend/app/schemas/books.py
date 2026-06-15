@@ -119,6 +119,33 @@ class BookOverviewOut(BaseModel):
     summary_collection: SummaryCollectionResponseOut | None = None
 
 
+class ReaderBootstrapOut(BaseModel):
+    overview: BookOverviewOut
+    notes: list["BookNoteOut"] = Field(default_factory=list)
+    saved_quotes: list[dict[str, Any]] = Field(default_factory=list)
+    stats: "UserStatsOut | None" = None
+    characters: list[dict[str, Any]] = Field(default_factory=list)
+    chapter_reports: list["ChapterConsistencyReport"] = Field(default_factory=list)
+    prewriting_check: "PreWritingCheckOut | None" = None
+    story_health: "StoryHealthOut | None" = None
+    writer_workspace: "WriterWorkspaceOut | None" = None
+    revision_intelligence: "RevisionIntelligenceOut | None" = None
+
+
+class ManuscriptBootstrapOut(BaseModel):
+    book: BookOut
+    characters: list[dict[str, Any]] = Field(default_factory=list)
+    writer_workspace: "WriterWorkspaceOut | None" = None
+    emotional_arc: "EmotionalArcOverviewOut | None" = None
+    synopsis: dict[str, Any] | None = None
+    workspace_tree: "ManuscriptWorkspaceTreeOut | None" = None
+    annotations: list["ManuscriptAnnotationOut"] = Field(default_factory=list)
+    notes: list["BookNoteOut"] = Field(default_factory=list)
+    vault_notes: list["VaultNoteOut"] = Field(default_factory=list)
+    chapter_versions: list["ChapterVersionOut"] = Field(default_factory=list)
+    prewriting_check: "PreWritingCheckOut | None" = None
+
+
 class BookForumMetadataBody(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     genre: str = Field(..., min_length=1, max_length=120)
@@ -760,6 +787,7 @@ class BookProcessingOut(BaseModel):
 
     status: str | None = None
     stage: str | None = None
+    current_step_label: str | None = None
     progress_pct: float | None = None
     chapters_completed: int | None = None
     chapters_total: int | None = None
@@ -774,6 +802,7 @@ class BookProcessingOut(BaseModel):
     is_fully_ready: bool = False
     pipeline: ProcessingPipelineOut | None = None
     retry_actions: list[str] = Field(default_factory=list)
+    retry_available: bool = False
 
 
 class WriterWorkspaceOut(BaseModel):
@@ -1473,6 +1502,8 @@ class DialogueOut(BaseModel):
 
 WorkspaceStructureNodeOut.model_rebuild()
 WorkspaceStructureNodeBody.model_rebuild()
+ReaderBootstrapOut.model_rebuild()
+ManuscriptBootstrapOut.model_rebuild()
 
 
 class ScreenplayImportResult(BaseModel):

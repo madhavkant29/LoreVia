@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const useQueryClientMock = vi.hoisted(() => vi.fn())
 const prefetchQueryMock = vi.hoisted(() => vi.fn())
-const getOverviewMock = vi.hoisted(() => vi.fn())
+const getReaderBootstrapMock = vi.hoisted(() => vi.fn())
+const getManuscriptBootstrapMock = vi.hoisted(() => vi.fn())
 const advisorGreetingMock = vi.hoisted(() => vi.fn())
 const getCharactersMock = vi.hoisted(() => vi.fn())
-const listDocumentsMock = vi.hoisted(() => vi.fn())
-const listElementsMock = vi.hoisted(() => vi.fn())
+const getWorldBootstrapMock = vi.hoisted(() => vi.fn())
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: useQueryClientMock,
@@ -31,26 +31,26 @@ describe("useNavigationPrefetch", () => {
     vi.useFakeTimers()
     useQueryClientMock.mockReset()
     prefetchQueryMock.mockReset()
-    getOverviewMock.mockReset()
+    getReaderBootstrapMock.mockReset()
+    getManuscriptBootstrapMock.mockReset()
     advisorGreetingMock.mockReset()
     getCharactersMock.mockReset()
-    listDocumentsMock.mockReset()
-    listElementsMock.mockReset()
+    getWorldBootstrapMock.mockReset()
 
     hookResult = null
     useQueryClientMock.mockReturnValue({
       prefetchQuery: prefetchQueryMock,
     })
     vi.spyOn(useNavigationPrefetchModule.prefetchLoaders, "loadBooksApi").mockResolvedValue({
-      getOverview: getOverviewMock,
+      getReaderBootstrap: getReaderBootstrapMock,
+      getManuscriptBootstrap: getManuscriptBootstrapMock,
       getCharacters: getCharactersMock,
     } as unknown as Awaited<ReturnType<typeof useNavigationPrefetchModule.prefetchLoaders.loadBooksApi>>)
     vi.spyOn(useNavigationPrefetchModule.prefetchLoaders, "loadIntelligenceApi").mockResolvedValue({
       advisorGreeting: advisorGreetingMock,
     } as unknown as Awaited<ReturnType<typeof useNavigationPrefetchModule.prefetchLoaders.loadIntelligenceApi>>)
     vi.spyOn(useNavigationPrefetchModule.prefetchLoaders, "loadWorldBuildingApi").mockResolvedValue({
-      listDocuments: listDocumentsMock,
-      listElements: listElementsMock,
+      getBootstrap: getWorldBootstrapMock,
     } as unknown as Awaited<ReturnType<typeof useNavigationPrefetchModule.prefetchLoaders.loadWorldBuildingApi>>)
   })
 
@@ -101,9 +101,25 @@ describe("useNavigationPrefetch", () => {
 
     expect(prefetchQueryMock).toHaveBeenCalledTimes(1)
     expect(prefetchQueryMock).toHaveBeenCalledWith({
-      queryKey: ["book:book-1:overview"],
+      queryKey: ["book:book-1:reader-bootstrap"],
       queryFn: expect.any(Function),
       staleTime: 20_000,
+    })
+  })
+
+  it("prefetches manuscript bootstrap when manuscript navId is triggered", () => {
+    render("book-1")
+
+    act(() => {
+      hookResult?.prefetchByNavId("manuscript")
+    })
+    advanceTimers()
+
+    expect(prefetchQueryMock).toHaveBeenCalledTimes(1)
+    expect(prefetchQueryMock).toHaveBeenCalledWith({
+      queryKey: ["book:book-1:manuscript-bootstrap"],
+      queryFn: expect.any(Function),
+      staleTime: 30_000,
     })
   })
 
@@ -139,7 +155,7 @@ describe("useNavigationPrefetch", () => {
     })
   })
 
-  it("prefetches world-gap documents and elements", () => {
+  it("prefetches world-gap bootstrap", () => {
     render("book-1")
 
     act(() => {
@@ -147,14 +163,9 @@ describe("useNavigationPrefetch", () => {
     })
     advanceTimers()
 
-    expect(prefetchQueryMock).toHaveBeenCalledTimes(2)
+    expect(prefetchQueryMock).toHaveBeenCalledTimes(1)
     expect(prefetchQueryMock).toHaveBeenCalledWith({
-      queryKey: ["worldbuilding:book-1:documents"],
-      queryFn: expect.any(Function),
-      staleTime: 30_000,
-    })
-    expect(prefetchQueryMock).toHaveBeenCalledWith({
-      queryKey: ["worldbuilding:book-1:elements"],
+      queryKey: ["worldbuilding:book-1:bootstrap:gap"],
       queryFn: expect.any(Function),
       staleTime: 30_000,
     })
@@ -247,16 +258,17 @@ describe("useNavigationPrefetch", () => {
   })
 
   it("invokes the correct API functions", async () => {
-    getOverviewMock.mockResolvedValue({})
+    getReaderBootstrapMock.mockResolvedValue({})
+    getManuscriptBootstrapMock.mockResolvedValue({})
     advisorGreetingMock.mockResolvedValue({})
     getCharactersMock.mockResolvedValue([])
-    listDocumentsMock.mockResolvedValue([])
-    listElementsMock.mockResolvedValue([])
+    getWorldBootstrapMock.mockResolvedValue({})
 
     render("book-1")
 
     act(() => {
       hookResult?.prefetchByNavId("overview")
+      hookResult?.prefetchByNavId("manuscript")
       hookResult?.prefetchByNavId("advisor")
       hookResult?.prefetchByNavId("characters")
       hookResult?.prefetchByNavId("world-gap")
@@ -266,10 +278,10 @@ describe("useNavigationPrefetch", () => {
     const calls = prefetchQueryMock.mock.calls as Array<[{ queryFn: () => Promise<unknown> }]>
     await Promise.all(calls.map((call) => call[0].queryFn()))
 
-    expect(getOverviewMock).toHaveBeenCalledWith("book-1")
+    expect(getReaderBootstrapMock).toHaveBeenCalledWith("book-1")
+    expect(getManuscriptBootstrapMock).toHaveBeenCalledWith("book-1")
     expect(advisorGreetingMock).toHaveBeenCalledWith("book-1")
     expect(getCharactersMock).toHaveBeenCalledWith("book-1")
-    expect(listDocumentsMock).toHaveBeenCalledWith("book-1")
-    expect(listElementsMock).toHaveBeenCalledWith("book-1")
+    expect(getWorldBootstrapMock).toHaveBeenCalledWith("book-1", { focus: "gap" })
   })
 })

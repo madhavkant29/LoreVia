@@ -2,7 +2,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from app.schemas.world_building import (
     WikiGenerationResponse,
     WorldBuildingDocumentDetailOut,
     WorldBuildingDocumentOut,
+    WorldBuildingBootstrapOut,
     WorldBuildingDocumentUpdateBody,
     WorldElementOut,
     WorldNoteBody,
@@ -125,6 +126,72 @@ async def _get_owned_book(db: AsyncSession, book_id: uuid.UUID, user_id: uuid.UU
     if not book or book.user_id != user_id:
         raise HTTPException(404, "Book not found")
     return book
+
+
+@router.get("/{book_id}/world-building/bootstrap", response_model=WorldBuildingBootstrapOut)
+async def get_world_building_bootstrap(
+    book_id: uuid.UUID,
+    document_id: uuid.UUID | None = Query(None),
+    focus: str = Query("editor", pattern="^(editor|gap)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await _get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    documents = await list_world_building_documents(db, book)
+    selected_document = None
+    if document_id is not None:
+        document = await get_world_building_document(db, book, document_id)
+        selected_document = _serialize_document(document, await load_world_building_document_payload(document))
+
+    notes = (
+        await db.execute(
+            select(WorldNote)
+            .where(WorldNote.book_id == book.id, WorldNote.note_type != "canon_override")
+            .order_by(WorldNote.created_at.desc())
+        )
+    ).scalars().all()
+    tags_by_note = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_WORLD_NOTE,
+        entity_ids=[note.id for note in notes],
+        book_id=book.id,
+    )
+    canon_overrides = (
+        await db.execute(
+            select(WorldCanonicalIdentity)
+            .where(WorldCanonicalIdentity.book_id == book.id)
+            .order_by(WorldCanonicalIdentity.updated_at.desc(), WorldCanonicalIdentity.created_at.desc())
+        )
+    ).scalars().all()
+    wiki_rows = (
+        await db.execute(
+            select(WikiEntry).where(WikiEntry.book_id == book.id).order_by(WikiEntry.entry_type.asc(), WikiEntry.name.asc())
+        )
+    ).scalars().all()
+    gap_analysis = GapAnalysisResponse(**(await detect_world_gaps(db, book))) if focus == "gap" and documents else None
+    return WorldBuildingBootstrapOut(
+        documents=[_serialize_document(document) for document in documents],
+        selected_document=selected_document,
+        notes=[_serialize_note(note, tags=tags_by_note.get(note.id, [])) for note in notes],
+        canon_overrides=[_serialize_canon_override(identity) for identity in canon_overrides],
+        elements=await list_extracted_world_elements(db, book),
+        wiki=[
+            WikiEntryOut(
+                id=str(item.id),
+                book_id=str(item.book_id),
+                entry_type=item.entry_type,
+                name=item.name,
+                description=item.description,
+                first_mention=item.first_mention,
+                related_char_ids=item.related_char_ids,
+                created_at=item.created_at,
+            )
+            for item in wiki_rows
+        ],
+        stats=None,
+        gap_analysis=gap_analysis,
+    )
 
 
 @router.get("/{book_id}/world-building/documents", response_model=list[WorldBuildingDocumentOut])

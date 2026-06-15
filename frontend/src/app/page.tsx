@@ -6,6 +6,7 @@ import { preload } from "react-dom"
 import Image from "next/image"
 
 import { AudienceSection } from "@/components/marketing/AudienceSection"
+import { SiteFooter } from "@/components/layout/SiteFooter"
 import { HomePricingSection } from "@/components/marketing/HomePricingSection"
 import { LandingShowcase } from "@/components/marketing/LandingShowcase"
 import { MarketingHeader } from "@/components/marketing/MarketingHeader"
@@ -470,6 +471,7 @@ export default function HomePage() {
           </div>
         </section>
       </main>
+      <SiteFooter />
     </>
   )
 }

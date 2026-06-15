@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
+import { captureTiming } from "@/lib/analytics/posthog"
 import { shouldSkipAuthBootstrap } from "@/lib/routes"
 import { useAuthStore } from "@/lib/stores/authStore"
 
@@ -14,6 +15,7 @@ function debug(label: string, ...args: unknown[]) {
 export function AuthBootstrap() {
   const { user, setUser, setHydrated, logout } = useAuthStore()
   const ran = useRef(false)
+  const startedAt = useRef(typeof performance !== "undefined" ? performance.now() : 0)
   const pathname = usePathname()
   const router = useRouter()
 
@@ -21,6 +23,7 @@ export function AuthBootstrap() {
     if (shouldSkipAuthBootstrap(pathname)) {
       debug("skipped", pathname)
       setHydrated()
+      captureTiming("auth_ready_ms", startedAt.current, { skipped: true })
       return
     }
 
@@ -32,67 +35,41 @@ export function AuthBootstrap() {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`)
     }
 
-    const restore = async () => {
-      debug("restore — no cached user")
+    const restoreSession = async ({ cachedUser }: { cachedUser: boolean }) => {
+      debug(cachedUser ? "validate cached user via session" : "restore via session")
       try {
-        let me = await authApi.me()
-        debug("me result", me ? "has user" : "null")
-        if (!me) {
-          debug("trying refresh")
-          await authApi.refresh()
-          me = await authApi.me()
-          debug("me after refresh", me ? "has user" : "null")
-        }
+        const me = await authApi.session()
+        debug("session result", me ? "has user" : "null")
         if (me) {
           debug("setting user", me.id)
           document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
           setUser(me)
-        } else {
-          debug("no session — hydrating then redirecting")
-          setHydrated()
-          redirectLogin()
-        }
-      } catch {
-        debug("restore threw — logout + redirect")
-        logout()
-        redirectLogin()
-      }
-    }
-
-    const validateExistingSession = async () => {
-      debug("validate — cached user exists", user?.id)
-      try {
-        let me = await authApi.me()
-        debug("me result", me ? "has user" : "null")
-        if (!me) {
-          debug("trying refresh")
-          await authApi.refresh()
-          me = await authApi.me()
-          debug("me after refresh", me ? "has user" : "null")
-        }
-        if (me) {
-          debug("user still valid", me.id)
-          setUser(me)
+          captureTiming("auth_ready_ms", startedAt.current, { cached_user: cachedUser })
           return
         }
-        debug("session dead — logout + redirect")
-        logout()
-        redirectLogin()
       } catch {
-        debug("validate threw — logout + redirect")
+        debug("session failed")
+      }
+
+      if (cachedUser) {
         logout()
         redirectLogin()
+        return
       }
+
+      setHydrated()
+      captureTiming("auth_ready_ms", startedAt.current, { authenticated: false })
+      redirectLogin()
     }
 
     if (user) {
       setHydrated()
       debug("cached user found, validating", user.id)
-      void validateExistingSession()
+      void restoreSession({ cachedUser: true })
       return
     }
 
-    void restore()
+    void restoreSession({ cachedUser: false })
   }, [pathname, user, setHydrated, setUser, logout, router])
 
   return null
