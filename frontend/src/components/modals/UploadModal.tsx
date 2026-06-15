@@ -12,14 +12,16 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { useBookModeStore, type BookMode } from "@/lib/stores/bookModeStore"
 import { GENRE_TAGS } from "@/lib/constants/genreTags"
 import { asQueryKey, bookCacheKey, booksListCacheKey, booksSeriesCacheKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
-import { capture } from "@/lib/analytics/posthog"
+import { capture, captureTiming } from "@/lib/analytics/posthog"
 import type { Book, BookSeries, BookWorkType, ChapterConsistencyReport, ImportPreview, PaginatedSeries, SectionMeta, UserStats } from "@/types/book"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
 import { ImportStructureEditor } from "@/components/modals/ImportStructureEditor"
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { Tooltip } from "@/components/ui/Tooltip"
+import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
 
 const MAX_TAGS = 8
 const TAG_SUGGESTION_LIMIT = 18
@@ -75,6 +77,7 @@ export const UploadModal = memo(function UploadModal({
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "processing">("idle")
   const [processingBookId, setProcessingBookId] = useState<string | null>(null)
+  const [processingRetrying, setProcessingRetrying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [postImportReview, setPostImportReview] = useState<EditorialReview | null>(null)
   const [postImportPassages, setPostImportPassages] = useState<EditorialReviewPassage[]>([])
@@ -91,6 +94,8 @@ export const UploadModal = memo(function UploadModal({
   const inputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const existingBookMenuRef = useRef<HTMLDivElement>(null)
+  const uploadStartedAtRef = useRef<number | null>(null)
+  const processingReadyCapturedRef = useRef(false)
   const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const user = useAuthStore((state) => state.user)
@@ -203,6 +208,13 @@ export const UploadModal = memo(function UploadModal({
     setUploading(false)
     setProcessingBookId(null)
     if (processingBook.status === "ready") {
+      if (!processingReadyCapturedRef.current) {
+        processingReadyCapturedRef.current = true
+        captureTiming("processing_ready_ms", uploadStartedAtRef.current ?? 0, {
+          book_id: processingBook.id,
+          route: "upload_modal",
+        })
+      }
       const timer = setTimeout(() => onClose(), 600)
       return () => clearTimeout(timer)
     }
@@ -321,6 +333,8 @@ export const UploadModal = memo(function UploadModal({
     setUploading(true)
     setUploadProgress(0)
     setUploadStage("uploading")
+    uploadStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : 0
+    processingReadyCapturedRef.current = false
     resetImportFeedback()
     let startedProcessing = false
     try {
@@ -337,6 +351,7 @@ export const UploadModal = memo(function UploadModal({
           files: chapterSource === "upload" ? files : undefined,
         })
         bookId = response.book_id
+        captureTiming("upload_first_result_ms", uploadStartedAtRef.current ?? 0, { mode: "author", kind: "manuscript_import" })
         setBookMode(response.book_id, "author")
         capture("book_uploaded", {
           mode: "author",
@@ -377,6 +392,7 @@ export const UploadModal = memo(function UploadModal({
           series_ids: selectedSeriesIds.length > 0 ? selectedSeriesIds : null,
         })
         bookId = response.book_id
+        captureTiming("upload_first_result_ms", uploadStartedAtRef.current ?? 0, { mode, kind: "empty_project" })
         setBookMode(response.book_id, mode)
         capture("book_uploaded", {
           mode,
@@ -406,6 +422,7 @@ export const UploadModal = memo(function UploadModal({
           },
         })
         bookId = typeof response?.book_id === "string" ? response.book_id : null
+        captureTiming("upload_first_result_ms", uploadStartedAtRef.current ?? 0, { mode, kind: "new_upload" })
         if (bookId) setBookMode(bookId, mode)
         capture("book_uploaded", {
           mode,
@@ -469,18 +486,18 @@ export const UploadModal = memo(function UploadModal({
     ? "Upload a screenplay PDF, Fountain, TXT, or Markdown script segment. LoreVia will turn scenes into synthetic chapters for the rest of the pipeline."
     : "Click to select a chapter file. Use PDF, EPUB, DOCX, TXT, or Markdown."
   const processingSummary = processingBook?.processing
-    ? [
-        processingBook.processing.stage ?? processingBook.processing.status,
-        typeof processingBook.processing.progress_pct === "number" ? `${Math.round(processingBook.processing.progress_pct)}%` : null,
-        typeof processingBook.processing.eta_seconds === "number"
-          ? processingBook.processing.eta_seconds <= 0
-            ? "almost done"
-            : `${Math.max(1, Math.round(processingBook.processing.eta_seconds / 60))} min left`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" - ")
+    ? normalizeProcessingStatus(processingBook.processing, processingBook)
     : null
+  async function retryProcessing() {
+    if (!processingBookId) return
+    setProcessingRetrying(true)
+    try {
+      await booksApi.retryProcessing(processingBookId)
+      await refetchBooks()
+    } finally {
+      setProcessingRetrying(false)
+    }
+  }
   const uploadLimitCopy = uploadStats
     ? uploadStats.private.upload_limit_unlimited
       ? "Uploads are still tracked here, and worldbuilding manuscripts count as uploads on every tier. Architect stays unlimited, even when worldbuilding is linked across a series."
@@ -551,14 +568,13 @@ export const UploadModal = memo(function UploadModal({
         />
 
         {uploadStage === "processing" && processingBook ? (
-          <div className={`mb-4 rounded-xl border p-4 ${isDark ? "border-amber-500/20 bg-amber-500/10" : "border-amber-200 bg-amber-50"}`}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-amber-200" : "text-amber-700"}`}>Processing status</p>
-                <p className={`mt-1 text-sm ${isDark ? "text-slate-200" : "text-slate-700"}`}>
-                  {processingSummary ?? "Your upload is still being processed."}
-                </p>
-              </div>
+          <div className="mb-4 space-y-3 px-6 pt-4">
+            <ProcessingStatusPanel
+              status={processingSummary}
+              retrying={processingRetrying}
+              onRetry={processingSummary?.retryAvailable ? () => void retryProcessing() : undefined}
+            />
+            <div className="flex justify-end">
               <button
                 type="button"
                 onClick={onClose}

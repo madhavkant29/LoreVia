@@ -5,7 +5,7 @@ import { useRef } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
@@ -14,14 +14,16 @@ import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { MobileActionBar } from "@/components/ui/MobileActionBar"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
+import { ProcessingStatusStrip } from "@/components/ui/ResponsivenessStatus"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { Tooltip } from "@/components/ui/Tooltip"
 import { LibraryWorkspaceHeader } from "@/components/library/LibraryWorkspaceHeader"
 import { booksApi } from "@/lib/api/books"
-import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, bookCacheKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
+import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
 import type { Book, BookStatus } from "@/types/book"
 import type { NextBestAction, RecentActivityItem } from "@/types/ux"
 
@@ -235,6 +237,7 @@ function formatNumber(value: number) {
 
 export function LibraryClient() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
   const authUser = useAuthStore((s) => s.user)
@@ -478,6 +481,16 @@ export function LibraryClient() {
     router.push(getBookHref(book) as Route)
   }
 
+  function prefetchBook(book: Book) {
+    const href = getBookHref(book) as Route
+    router.prefetch(href)
+    void queryClient.prefetchQuery({
+      queryKey: asQueryKey(bookCacheKey(book.id, "reader-bootstrap")),
+      queryFn: () => booksApi.getReaderBootstrap(book.id),
+      staleTime: 30_000,
+    })
+  }
+
   function togglePinned(bookId: string) {
     setPinnedIds((current) => ({ ...current, [bookId]: !current[bookId] }))
     setMenuBookId(null)
@@ -508,6 +521,16 @@ export function LibraryClient() {
       await booksApi.unpublishPublicly(bookId)
       await refetch()
       setMenuBookId(null)
+    } finally {
+      setBusyBookId(null)
+    }
+  }
+
+  async function handleRetryProcessing(bookId: string) {
+    setBusyBookId(bookId)
+    try {
+      await booksApi.retryProcessing(bookId)
+      await refetch()
     } finally {
       setBusyBookId(null)
     }
@@ -794,6 +817,8 @@ export function LibraryClient() {
                     menuOpen={menuBookId === book.id}
                     onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
                     onOpen={() => openBook(book)}
+                    onPrefetch={() => prefetchBook(book)}
+                    onRetryProcessing={() => void handleRetryProcessing(book.id)}
                     onTogglePinned={() => togglePinned(book.id)}
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
@@ -822,6 +847,8 @@ export function LibraryClient() {
                     menuOpen={menuBookId === book.id}
                     onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
                     onOpen={() => openBook(book)}
+                    onPrefetch={() => prefetchBook(book)}
+                    onRetryProcessing={() => void handleRetryProcessing(book.id)}
                     onTogglePinned={() => togglePinned(book.id)}
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
@@ -884,6 +911,8 @@ export function LibraryClient() {
                     menuOpen={menuBookId === book.id}
                     onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
                     onOpen={() => openBook(book)}
+                    onPrefetch={() => prefetchBook(book)}
+                    onRetryProcessing={() => void handleRetryProcessing(book.id)}
                     onTogglePinned={() => togglePinned(book.id)}
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
@@ -920,6 +949,8 @@ export function LibraryClient() {
                     menuOpen={menuBookId === book.id}
                     onMenuToggle={() => setMenuBookId((current) => (current === book.id ? null : book.id))}
                     onOpen={() => openBook(book)}
+                    onPrefetch={() => prefetchBook(book)}
+                    onRetryProcessing={() => void handleRetryProcessing(book.id)}
                     onTogglePinned={() => togglePinned(book.id)}
                     onArchive={() => handleArchive(book.id, true)}
                     onRestore={() => handleArchive(book.id, false)}
@@ -1291,6 +1322,8 @@ function ProjectCard({
   menuOpen,
   onMenuToggle,
   onOpen,
+  onPrefetch,
+  onRetryProcessing,
   onTogglePinned,
   onArchive,
   onRestore,
@@ -1307,6 +1340,8 @@ function ProjectCard({
   menuOpen: boolean
   onMenuToggle: () => void
   onOpen: () => void
+  onPrefetch: () => void
+  onRetryProcessing: () => void
   onTogglePinned: () => void
   onArchive: () => void
   onRestore: () => void
@@ -1321,6 +1356,7 @@ function ProjectCard({
   const currentWords = estimateWordCount(book)
   const targetWords = estimateTargetWordCount(book, currentWords)
   const warningCount = countWarnings(book)
+  const processingStatus = normalizeProcessingStatus(book.processing, book)
   const isArchived = !!book.archived_at
   const publicSampleStatus = getPublicSampleStatus(book)
   const unitLabel = storyUnitLabel(book.work_type, true)
@@ -1345,6 +1381,8 @@ function ProjectCard({
           onOpen()
         }
       }}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
       className={`group relative cursor-pointer rounded-sm border p-4 transition duration-150 hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 sm:p-5 ${
         isDark ? "border-white/[0.08] bg-[#101b24] hover:bg-[#13212b]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"
       }`}
@@ -1426,6 +1464,15 @@ function ProjectCard({
 
         <p className={`mt-5 text-sm leading-6 ${subtextClass}`}>{getProgressLine(book)}</p>
 
+        {processingStatus && !processingStatus.ready ? (
+          <ProcessingStatusStrip
+            status={processingStatus}
+            retrying={busy}
+            onRetry={processingStatus.retryAvailable ? onRetryProcessing : undefined}
+            className="mt-4"
+          />
+        ) : null}
+
         <div className="mt-4 space-y-3">
           <ProjectStatusBadge status={book.status} isDark={isDark} />
           <div className={`h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`}>
@@ -1458,6 +1505,8 @@ function ProjectRow({
   menuOpen,
   onMenuToggle,
   onOpen,
+  onPrefetch,
+  onRetryProcessing,
   onTogglePinned,
   onArchive,
   onRestore,
@@ -1474,6 +1523,8 @@ function ProjectRow({
   menuOpen: boolean
   onMenuToggle: () => void
   onOpen: () => void
+  onPrefetch: () => void
+  onRetryProcessing: () => void
   onTogglePinned: () => void
   onArchive: () => void
   onRestore: () => void
@@ -1488,6 +1539,7 @@ function ProjectRow({
   const currentWords = estimateWordCount(book)
   const targetWords = estimateTargetWordCount(book, currentWords)
   const isArchived = !!book.archived_at
+  const processingStatus = normalizeProcessingStatus(book.processing, book)
   const publicSampleStatus = getPublicSampleStatus(book)
   const subtextClass = isDark ? "text-[#b8b2a8]" : "text-stone-600"
   const metaClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
@@ -1509,6 +1561,8 @@ function ProjectRow({
           onOpen()
         }
       }}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
       className={`relative cursor-pointer rounded-sm border px-5 py-5 transition hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${isDark ? "border-white/[0.08] bg-[#101b24] hover:bg-[#13212b]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"}`}
     >
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
@@ -1557,6 +1611,13 @@ function ProjectRow({
             <span>{progress}% complete</span>
             <span>{formatRelativeTime(getBookUpdatedAt(book))}</span>
           </div>
+          {processingStatus && !processingStatus.ready ? (
+            <ProcessingStatusStrip
+              status={processingStatus}
+              retrying={busy}
+              onRetry={processingStatus.retryAvailable ? onRetryProcessing : undefined}
+            />
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-3 xl:justify-end">

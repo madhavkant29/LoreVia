@@ -61,6 +61,7 @@ from app.services.admin_service import (
     revoke_admin_principal,
     serialize_pending_public_shares,
 )
+from app.utils.rate_limit_utils import invalidate_rate_limit_override_cache
 from app.services.refund_service import (
     approve_refund_review,
     create_refund_review_request,
@@ -770,6 +771,7 @@ async def upsert_rate_limit_override(
         scopes_snapshot=_admin_scopes_from_request(request),
     )
     await db.commit()
+    await invalidate_rate_limit_override_cache(user_id)
     return {"ok": True, "user_id": str(user_id)}
 
 

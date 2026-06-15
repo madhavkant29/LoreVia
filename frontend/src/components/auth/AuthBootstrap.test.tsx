@@ -4,8 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 const usePathnameMock = vi.hoisted(() => vi.fn())
 const useRouterMock = vi.hoisted(() => vi.fn(() => ({ replace: vi.fn(), push: vi.fn() })))
-const meMock = vi.hoisted(() => vi.fn())
-const refreshMock = vi.hoisted(() => vi.fn())
+const sessionMock = vi.hoisted(() => vi.fn())
 const shouldSkipAuthBootstrapMock = vi.hoisted(() => vi.fn())
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 
@@ -16,8 +15,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api/auth", () => ({
   authApi: {
-    me: meMock,
-    refresh: refreshMock,
+    session: sessionMock,
   },
 }))
 
@@ -49,8 +47,7 @@ describe("AuthBootstrap", () => {
       container.remove()
     }
     usePathnameMock.mockReset()
-    meMock.mockReset()
-    refreshMock.mockReset()
+    sessionMock.mockReset()
     shouldSkipAuthBootstrapMock.mockReset()
     useAuthStoreMock.mockReset()
     container = null
@@ -63,7 +60,7 @@ describe("AuthBootstrap", () => {
 
     usePathnameMock.mockReturnValue("/library")
     shouldSkipAuthBootstrapMock.mockReturnValue(false)
-    meMock.mockResolvedValue({ id: "user-1", username: "reader" })
+    sessionMock.mockResolvedValue({ id: "user-1", username: "reader" })
     useAuthStoreMock.mockReturnValue({
       user: { id: "user-1" },
       setUser,
@@ -78,8 +75,32 @@ describe("AuthBootstrap", () => {
     })
 
     expect(setHydrated).toHaveBeenCalledTimes(1)
-    expect(meMock).toHaveBeenCalledTimes(1)
+    expect(sessionMock).toHaveBeenCalledTimes(1)
     expect(setUser).toHaveBeenCalledWith({ id: "user-1", username: "reader" })
+  })
+
+  it("restores a missing cached user with one session request", async () => {
+    const setHydrated = vi.fn()
+    const setUser = vi.fn()
+
+    usePathnameMock.mockReturnValue("/library")
+    shouldSkipAuthBootstrapMock.mockReturnValue(false)
+    sessionMock.mockResolvedValue({ id: "user-2", username: "author" })
+    useAuthStoreMock.mockReturnValue({
+      user: null,
+      setUser,
+      setHydrated,
+      logout: vi.fn(),
+    })
+
+    renderAuthBootstrap()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(sessionMock).toHaveBeenCalledTimes(1)
+    expect(setUser).toHaveBeenCalledWith({ id: "user-2", username: "author" })
   })
 })
 

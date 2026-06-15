@@ -51,6 +51,48 @@ def _book_cache_access_key(current_user_id: uuid.UUID, collaborator: Any | None)
     )
 
 
+async def _bootstrap_characters(db: AsyncSession, book: Any) -> list[dict[str, Any]]:
+    result = await db.execute(
+        select(Character)
+        .where(Character.book_id == book.id)
+        .options(selectinload(Character.voice_profile), selectinload(Character.alias_records))
+        .order_by(Character.first_chapter, Character.name)
+    )
+    all_characters = list(result.scalars().all())
+    characters = (
+        [char for char in all_characters if is_cast_visible_character(char)]
+        if book.mode == "author"
+        else [char for char in all_characters if is_displayable_character(char)]
+    )
+    counterpart_names = {char.id: char.name for char in characters}
+    return [
+        serialize_book_character(
+            char,
+            rel_summaries={},
+            states=[],
+            relationships=[],
+            counterpart_names=counterpart_names,
+            voice_profile=getattr(char, "voice_profile", None),
+            total_chapters=book.total_chapters,
+            tags=[],
+            skip_arc_tracker=True,
+            skip_analysis_metadata=False,
+            skip_tags=True,
+        )
+        for char in characters
+    ]
+
+
+def _can_include_author_bootstrap(current_user: Any, collaborator: Any | None) -> bool:
+    if collaborator is not None:
+        return collaboration_can_edit(collaborator)
+    try:
+        require_author_access(current_user)
+    except HTTPException:
+        return False
+    return True
+
+
 async def _read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) -> bytes:
     parts: list[bytes] = []
     total = 0
@@ -133,6 +175,7 @@ from app.schemas.books import (
     BookNoteBody,
     BookNoteOut,
     BookOut,
+    BookProcessingOut,
     ChapterConsistencyReport,
     ChapterVersionOut,
     CharacterCreateBody,
@@ -150,6 +193,7 @@ from app.schemas.books import (
     EntityTagUpdateBody,
     MajorEventOut,
     ManuscriptImportResult,
+    ManuscriptBootstrapOut,
     PermanentBookDeletionBody,
     PermanentBookDeletionOut,
     VaultGraphOut,
@@ -165,6 +209,7 @@ from app.schemas.books import (
     ReadabilityRequestBody,
     RelationshipCreateBody,
     RelationshipUpdateBody,
+    ReaderBootstrapOut,
     RevisionIntelligenceOut,
     SeriesBibleOut,
     SeriesBody,
@@ -185,10 +230,9 @@ from app.utils.billing_utils import calculate_upload_usage_summary, require_auth
 from app.services.pipeline_state_service import (
     build_writer_workspace_response,
     build_writer_workspace_update,
-    repair_stale_completed_processing_state,
-    requeue_stalled_book_processing_if_needed,
+    enqueue_processing_state_repair_if_needed,
+    retry_book_processing,
 )
-from app.services.editor_project_service import repair_stale_editor_processing_state
 from app.utils.book_utils import (
     _append_recent_revision_edit,
     as_bool,
@@ -196,6 +240,7 @@ from app.utils.book_utils import (
     build_book_out_list,
     build_character_card_payload,
     build_emotional_arc_payload,
+    build_manuscript_workspace_tree,
     build_vault_graph,
     build_prewriting_check,
     build_revision_intelligence_payload,
@@ -224,6 +269,7 @@ from app.utils.book_utils import (
     import_vault_notes_zip,
     list_book_notes,
     list_chapter_consistency_reports,
+    list_manuscript_annotations,
     list_chapter_versions,
     list_novel_scenes,
     list_vault_note_relations,
@@ -457,8 +503,7 @@ async def list_books(
             if candidate.id in repair_seen_book_ids:
                 continue
             repair_seen_book_ids.add(candidate.id)
-            await repair_stale_completed_processing_state(db, candidate)
-            await repair_stale_editor_processing_state(db, candidate)
+            await enqueue_processing_state_repair_if_needed(candidate)
 
         owned_payloads = await build_book_out_list(db, books=books, user_id=current_user_id)
         shared_payloads = await build_book_out_list(
@@ -574,9 +619,21 @@ async def get_book(book_id: uuid.UUID, db: AsyncSession = Depends(get_db), curre
             selectinload(Book.plot_threads),
         ),
     )
-    await repair_stale_completed_processing_state(db, book)
-    await repair_stale_editor_processing_state(db, book)
+    await enqueue_processing_state_repair_if_needed(book)
     return await book_out(db, book, current_user.id, collaborator)
+
+
+@router.post("/{book_id}/processing/retry", response_model=BookProcessingOut)
+async def retry_book_processing_endpoint(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, _collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    processing = await retry_book_processing(db, book)
+    if processing is None:
+        raise HTTPException(409, "Processing retry is not available for this book.")
+    return processing
 
 
 @router.get("/{book_id}/overview", response_model=BookOverviewOut)
@@ -590,8 +647,7 @@ async def get_book_overview(
     book, collaborator = await get_book_with_collaboration_access(
         db, book_id, current_user,
     )
-    await repair_stale_completed_processing_state(db, book)
-    await repair_stale_editor_processing_state(db, book)
+    await enqueue_processing_state_repair_if_needed(book)
     use_cache = parse_csv_param(include) is None
     if use_cache:
         cache_version = await get_book_cache_version(str(book.id))
@@ -744,9 +800,7 @@ async def get_writer_workspace(
         raise HTTPException(403, "This share cannot edit the manuscript.")
     if collaborator is None:
         require_author_access(current_user)
-    await requeue_stalled_book_processing_if_needed(db, book=book)
-    await repair_stale_completed_processing_state(db, book)
-    await repair_stale_editor_processing_state(db, book)
+    await enqueue_processing_state_repair_if_needed(book)
     cache_version = await get_book_cache_version(str(book.id))
     access_key = _book_cache_access_key(current_user.id, collaborator)
     cached = await get_writer_workspace_cache(str(book.id), str(current_user.id), access_key, cache_version)
@@ -817,6 +871,126 @@ async def get_emotional_arc(
 
 
 # ─── Book lifecycle ──────────────────────────────────────────────────────────
+
+@router.get("/{book_id}/reader-bootstrap", response_model=ReaderBootstrapOut)
+async def get_reader_bootstrap(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    overview = await get_book_overview(book_id, None, None, db, current_user)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    author_bootstrap = _can_include_author_bootstrap(current_user, collaborator)
+
+    notes: list[BookNoteOut] = []
+    saved_quotes: list[dict[str, Any]] = []
+    stats: UserStatsOut | None = None
+    characters: list[dict[str, Any]] = []
+    chapter_reports: list[ChapterConsistencyReport] = []
+    prewriting_check: PreWritingCheckOut | None = None
+    story_health: StoryHealthOut | None = None
+    writer_workspace: WriterWorkspaceOut | None = None
+    revision_intelligence: RevisionIntelligenceOut | None = None
+
+    if book.workspace_shell == "reader":
+        notes = await list_book_notes(db, book, collaborator=collaborator)
+        if collaborator is None:
+            try:
+                saved_quotes = await list_saved_quotes(db, current_user)
+            except HTTPException:
+                saved_quotes = []
+
+    if author_bootstrap:
+        stats = await get_user_stats(db, current_user)
+        characters = await _bootstrap_characters(db, book)
+        chapter_reports = await list_chapter_consistency_reports(db, book, 6)
+        prewriting_check = await build_prewriting_check(db, book, (book.total_chapters or 0) + 1)
+        story_health = await build_story_health_payload(db, book)
+        writer_workspace = build_writer_workspace_response(book)
+        revision_intelligence = RevisionIntelligenceOut(**(await build_revision_intelligence_payload(db, book)))
+
+    return ReaderBootstrapOut(
+        overview=overview,
+        notes=notes,
+        saved_quotes=saved_quotes,
+        stats=stats,
+        characters=characters,
+        chapter_reports=chapter_reports,
+        prewriting_check=prewriting_check,
+        story_health=story_health,
+        writer_workspace=writer_workspace,
+        revision_intelligence=revision_intelligence,
+    )
+
+
+@router.get("/{book_id}/manuscript-bootstrap", response_model=ManuscriptBootstrapOut)
+async def get_manuscript_bootstrap(
+    book_id: uuid.UUID,
+    active_chapter_number: int | None = Query(None, ge=1),
+    annotation_chapter_number: int | None = Query(None, ge=1),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot edit the manuscript.")
+    if collaborator is None:
+        require_author_access(current_user)
+
+    chapter_number = active_chapter_number or ((book.total_chapters or 0) + 1)
+    book_payload = await book_out(db, book, current_user.id, collaborator)
+    characters = await _bootstrap_characters(db, book)
+    writer_workspace = build_writer_workspace_response(book)
+    emotional_arc = await get_emotional_arc(book_id, db, current_user) if collaborator is None else None
+    workspace_tree = await build_manuscript_workspace_tree(
+        db,
+        book=book,
+        user_id=current_user.id,
+        collaborator=collaborator,
+    )
+    annotations = (
+        await list_manuscript_annotations(
+            db,
+            book=book,
+            actor=current_user,
+            collaborator=collaborator,
+            chapter_number=annotation_chapter_number,
+        )
+        if annotation_chapter_number is not None
+        else []
+    )
+    notes = await list_book_notes(db, book, collaborator=collaborator)
+    vault_notes = (
+        await list_vault_notes(
+            db,
+            book=book,
+            user_id=current_user.id,
+            source=VaultNoteSource.USER_NOTES.value,
+        )
+        if collaborator is None
+        else []
+    )
+    chapter_versions = (
+        await list_chapter_versions(db, book, active_chapter_number, 12)
+        if active_chapter_number is not None
+        else []
+    )
+    prewriting_check = await build_prewriting_check(db, book, chapter_number)
+
+    return ManuscriptBootstrapOut(
+        book=book_payload,
+        characters=characters,
+        writer_workspace=writer_workspace,
+        emotional_arc=emotional_arc,
+        synopsis=None,
+        workspace_tree=workspace_tree,
+        annotations=annotations,
+        notes=notes,
+        vault_notes=vault_notes,
+        chapter_versions=chapter_versions,
+        prewriting_check=prewriting_check,
+    )
+
 
 @router.put("/{book_id}/archive", response_model=BookOut)
 async def archive_book(

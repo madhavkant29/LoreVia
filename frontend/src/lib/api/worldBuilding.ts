@@ -3,6 +3,7 @@ import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import type {
   CanonOverride,
   WorldBuildingDocument,
+  WorldBuildingBootstrapPayload,
   WorldBuildingDocumentDetail,
   WorldGapResult,
   WorldIntegrationResult,
@@ -18,6 +19,16 @@ function worldBuildingPath(bookId: string, suffix = "") {
 }
 
 export const worldBuildingApi = {
+  getBootstrap: (
+    bookId: string,
+    params?: { documentId?: string | null; focus?: "editor" | "gap" }
+  ) =>
+    apiClient.get<WorldBuildingBootstrapPayload>(worldBuildingPath(bookId, "/world-building/bootstrap"), {
+      params: {
+        ...(params?.documentId ? { document_id: params.documentId } : {}),
+        ...(params?.focus ? { focus: params.focus } : {}),
+      },
+    }).then(r => r.data),
   listDocuments: (bookId: string, includeInactive = false) =>
     apiClient.get<WorldBuildingDocument[]>(worldBuildingPath(bookId, "/world-building/documents"), {
       params: includeInactive ? { include_inactive: true } : undefined,

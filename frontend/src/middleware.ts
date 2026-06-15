@@ -1,6 +1,5 @@
 import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
-import { createServerClient } from "@supabase/ssr"
 
 const NONCE_HEADER = "x-nonce"
 const AUTHENTICATED_HOME_PATH = "/library"
@@ -355,46 +354,9 @@ export function middleware(request: NextRequest) {
   //   return applySecurityHeaders(request, buildAuthenticatedRedirect(request))
   // }
 
-  // Initialize Supabase client for session management (auth routes and authenticated pages)
-  let supabaseResponse = NextResponse.next()
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  if (supabaseUrl && supabaseAnonKey) {
-    supabaseResponse = NextResponse.next({
-      request: {
-        headers: request.headers,
-      },
-    })
-
-    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => {
-            request.cookies.set(name, value)
-          })
-          supabaseResponse = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          })
-          cookiesToSet.forEach(({ name, value, options }) => {
-            supabaseResponse.cookies.set(name, value, options)
-          })
-        },
-      },
-    })
-
-    // Refresh Supabase session if it exists - this ensures PKCE flow works correctly
-    supabase.auth.getUser()
-  }
-
   const security = buildSecurityHeaders(request)
   if (!security) {
-    return supabaseResponse
+    return NextResponse.next()
   }
 
   const requestHeaders = new Headers(request.headers)
@@ -406,13 +368,6 @@ export function middleware(request: NextRequest) {
       headers: requestHeaders,
     },
   })
-
-  // Copy Supabase cookies to final response
-  if (supabaseUrl && supabaseAnonKey) {
-    supabaseResponse.cookies.getAll().forEach((cookie) => {
-      response.cookies.set(cookie.name, cookie.value)
-    })
-  }
 
   return applySecurityHeaders(request, response, security)
 }

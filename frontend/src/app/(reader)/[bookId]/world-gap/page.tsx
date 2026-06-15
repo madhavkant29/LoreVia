@@ -1,12 +1,19 @@
 "use client"
 
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 
-import { WorldbuildingWorkspace } from "@/components/reader/WorldbuildingWorkspace"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { WorkspacePage } from "@/components/ui/Workspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+
+const WorldbuildingWorkspace = dynamic(
+  () => import("@/components/reader/WorldbuildingWorkspace").then((module) => module.WorldbuildingWorkspace),
+  {
+    loading: () => <div className="app-panel min-h-[28rem] animate-pulse" aria-label="Loading worldbuilding workspace" />,
+  }
+)
 
 export default function WorldGapPage() {
   const { bookId } = useParams<{ bookId: string }>()

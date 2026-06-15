@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 
 import { QueryProvider } from "@/components/app/QueryProvider"
 import { Navbar } from "@/components/layout/Navbar"
+import { SiteFooter } from "@/components/layout/SiteFooter"
 
 export const metadata: Metadata = {
   robots: {
@@ -17,6 +18,7 @@ export default function PublicContentLayout({ children }: { children: React.Reac
         <Navbar />
         {children}
       </div>
+      <SiteFooter />
     </QueryProvider>
   )
 }

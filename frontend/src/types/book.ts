@@ -1,4 +1,6 @@
 export type BookStatus = "pending" | "processing" | "ready" | "failed"
+export type ProcessingStage = "queued" | "parsing" | "extracting" | "summarizing" | "embedding" | "analyzing" | "ready" | "failed"
+export type SaveState = "saved" | "saving" | "offline_draft" | "retrying" | "error"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
 export type NovelExportPreset = "standard_novel" | "trade_novel" | "large_print" | "ebook_optimized"
@@ -8,6 +10,8 @@ export type WorkspaceShell = "reader" | "author"
 export type BookAccessClass = "owner" | "author_collaborator" | "reader_collaborator"
 
 import type { ChapterListResponse, ReadingProgress, SummaryCollectionResponse } from "./reader"
+import type { Character } from "./character"
+import type { ManuscriptSynopsis } from "./intelligence"
 
 export interface Book {
   id: string
@@ -74,6 +78,33 @@ export interface BookOverviewPayload {
   progress: ReadingProgress
   chapter_list: ChapterListResponse
   summary_collection: SummaryCollectionResponse
+}
+
+export interface ReaderBootstrapPayload {
+  overview: BookOverviewPayload
+  notes: BookNote[]
+  saved_quotes: SavedQuote[]
+  stats: UserStats | null
+  characters: Character[]
+  chapter_reports: ChapterConsistencyReport[]
+  prewriting_check: PreWritingCheck | null
+  story_health: StoryHealth | null
+  writer_workspace: WriterWorkspace | null
+  revision_intelligence: RevisionIntelligence | null
+}
+
+export interface ManuscriptBootstrapPayload {
+  book: Book
+  characters: Character[]
+  writer_workspace: WriterWorkspace | null
+  emotional_arc: EmotionalArcOverview | null
+  synopsis: ManuscriptSynopsis | null
+  workspace_tree: ManuscriptWorkspaceTree | null
+  annotations: ManuscriptAnnotation[]
+  notes: BookNote[]
+  vault_notes: VaultNote[]
+  chapter_versions: ChapterVersion[]
+  prewriting_check: PreWritingCheck | null
 }
 
 export type CollaborationRole =
@@ -912,7 +943,8 @@ export interface ChapterSceneOrder {
 
 export interface BookProcessing {
   status?: string | null
-  stage?: string | null
+  stage?: ProcessingStage | string | null
+  current_step_label?: string | null
   progress_pct?: number | null
   chapters_completed?: number | null
   chapters_total?: number | null
@@ -923,6 +955,31 @@ export interface BookProcessing {
   started_at?: string | null
   updated_at?: string | null
   last_error?: string | null
+  is_fully_ready?: boolean
+  retry_actions?: string[]
+  retry_available?: boolean
+  pipeline?: {
+    extraction?: ProcessingPipelineStage | null
+    analysis?: ProcessingPipelineStage | null
+  } | null
+}
+
+export interface ProcessingPipelineStage {
+  status?: string | null
+  completed_chapters?: number | null
+  total_chapters?: number | null
+  updated_at?: string | null
+  eta_seconds?: number | null
+  last_error?: string | null
+  failed_chapters?: number[]
+}
+
+export interface OptimisticDraft<T> {
+  id: string
+  value: T
+  saveState: SaveState
+  updatedAt: string
+  error?: string | null
 }
 
 export interface ReadabilityMetrics {

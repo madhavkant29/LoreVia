@@ -19,12 +19,22 @@ function buildPrefetchEntries(bookId: string): Record<string, PrefetchEntry[]> {
   return {
     overview: [
       {
-        queryKey: [`book:${bookId}:overview`],
+        queryKey: [`book:${bookId}:reader-bootstrap`],
         queryFn: async () => {
           const booksApi = await prefetchLoaders.loadBooksApi()
-          return booksApi.getOverview(bookId)
+          return booksApi.getReaderBootstrap(bookId)
         },
         staleTime: 20_000,
+      },
+    ],
+    manuscript: [
+      {
+        queryKey: [`book:${bookId}:manuscript-bootstrap`],
+        queryFn: async () => {
+          const booksApi = await prefetchLoaders.loadBooksApi()
+          return booksApi.getManuscriptBootstrap(bookId)
+        },
+        staleTime: 30_000,
       },
     ],
     advisor: [
@@ -49,18 +59,10 @@ function buildPrefetchEntries(bookId: string): Record<string, PrefetchEntry[]> {
     ],
     "world-gap": [
       {
-        queryKey: [`worldbuilding:${bookId}:documents`],
+        queryKey: [`worldbuilding:${bookId}:bootstrap:gap`],
         queryFn: async () => {
           const worldBuildingApi = await prefetchLoaders.loadWorldBuildingApi()
-          return worldBuildingApi.listDocuments(bookId)
-        },
-        staleTime: 30_000,
-      },
-      {
-        queryKey: [`worldbuilding:${bookId}:elements`],
-        queryFn: async () => {
-          const worldBuildingApi = await prefetchLoaders.loadWorldBuildingApi()
-          return worldBuildingApi.listElements(bookId)
+          return worldBuildingApi.getBootstrap(bookId, { focus: "gap" })
         },
         staleTime: 30_000,
       },

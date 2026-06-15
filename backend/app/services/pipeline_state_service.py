@@ -7,17 +7,18 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.redis import mark_book_cache_dirty, mark_user_dashboard_cache_dirty
+from app.core.redis import cache_set_if_absent, mark_book_cache_dirty, mark_user_dashboard_cache_dirty
 from app.models.book import Book, Chapter
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.schemas.books import WriterWorkspaceOut
-from app.utils.book_utils import build_writer_workspace_payload, normalize_writer_workspace
-from app.utils.ingestion_utils import get_processing_started_at, merge_processing_pipeline
+from app.utils.book_utils import build_book_processing_payload, build_writer_workspace_payload, normalize_writer_workspace
+from app.utils.ingestion_utils import get_processing_started_at, merge_processing_pipeline, update_book_processing_state
 from app.workers.tasks.extraction_tasks import process_book_task
 
 log = logging.getLogger("lorevia.pipeline_state")
 
 STALE_PROCESSING_REQUEUE_AFTER = timedelta(minutes=5)
+PROCESSING_REPAIR_ENQUEUE_TTL_SECONDS = 60
 
 
 def build_writer_workspace_response(book: Book) -> WriterWorkspaceOut:
@@ -31,6 +32,75 @@ def build_writer_workspace_update(book: Book, updates: dict[str, Any]) -> dict[s
             **updates,
         }
     )
+
+
+async def enqueue_processing_state_repair_if_needed(book: Book) -> bool:
+    if book.status != "processing":
+        return False
+    key = f"processing_state_repair_enqueue:{book.id}"
+    if not await cache_set_if_absent(key, "1", ttl=PROCESSING_REPAIR_ENQUEUE_TTL_SECONDS):
+        return False
+    from app.workers.tasks.maintenance_tasks import repair_processing_books_task
+
+    repair_processing_books_task.apply_async(kwargs={"book_id": str(book.id)}, queue="intelligence")
+    return True
+
+
+def _book_processing_retry_actions(book: Book) -> list[str]:
+    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    actions = processing.get("retry_actions") if isinstance(processing, dict) else []
+    return [
+        " ".join(str(action).split()).strip()
+        for action in (actions if isinstance(actions, list) else [])
+        if " ".join(str(action).split()).strip()
+    ]
+
+
+def _book_processing_last_error(book: Book) -> str | None:
+    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    last_error = " ".join(str((processing or {}).get("last_error") or "").split()).strip()
+    return last_error or None
+
+
+def _book_has_retryable_processing_state(book: Book) -> bool:
+    if book.status == "failed":
+        return True
+    actions = [action for action in _book_processing_retry_actions(book) if action != "wait_for_analysis"]
+    return bool(actions or _book_processing_last_error(book))
+
+
+async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] | None:
+    if not _book_has_retryable_processing_state(book):
+        return None
+
+    actions = set(_book_processing_retry_actions(book))
+    should_restart_extraction = book.status == "failed" or "retry_extraction" in actions or "retry_analysis" in actions
+
+    if should_restart_extraction:
+        book.status = "processing"
+        book.writer_workspace = update_book_processing_state(
+            book,
+            status="processing",
+            stage="queued",
+            total_chapters=book.total_chapters,
+            completed_chapters=0,
+            started_at=datetime.now(UTC),
+            last_error=None,
+            progress_pct=0,
+        )
+        process_book_task.apply_async(args=[str(book.id)], queue="extraction")
+    else:
+        book.status = "processing"
+        await enqueue_processing_state_repair_if_needed(book)
+
+    await db.commit()
+    await db.refresh(book)
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(str(book.user_id))
+    processing = build_book_processing_payload(book)
+    return processing if processing is not None else {}
 
 
 def _parse_chapter_status_updated_at(chapter: Chapter) -> datetime | None:

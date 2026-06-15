@@ -941,9 +941,17 @@ export const RelationshipGraph = memo(function RelationshipGraph({
           </div>
         ) : (
           <div className="mt-3 flex min-h-[220px] items-center justify-center rounded-md border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
-            <div className="max-w-sm space-y-2 px-6">
+            <div className="max-w-sm space-y-3 px-6">
               <p className="text-base font-semibold text-white">No graphable relationships yet</p>
-              <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
+              <p className="text-sm leading-6">Relationships appear after character extraction has enough scene evidence. Clear filters, open Characters, or retry processing if extraction failed.</p>
+              <div className="flex flex-wrap justify-center gap-2 pt-1">
+                <Link href={`/${bookId}/characters`} className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]">
+                  Open characters
+                </Link>
+                <Link href={`/${bookId}/manuscript`} className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]">
+                  Open manuscript
+                </Link>
+              </div>
             </div>
           </div>
         )}
@@ -1090,9 +1098,17 @@ export const RelationshipGraph = memo(function RelationshipGraph({
             </div>
           ) : (
             <div className="flex h-[40vh] min-h-[340px] items-center justify-center rounded-lg border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
-              <div className="max-w-sm space-y-2 px-6">
+              <div className="max-w-sm space-y-3 px-6">
                 <p className="text-lg font-semibold text-white">No graphable relationships yet</p>
-                <p className="text-sm leading-6">Read further or clear the active filter to see more of the character network.</p>
+                <p className="text-sm leading-6">Relationship edges appear after character extraction has enough scene evidence. If this manuscript just finished uploading, processing may still be catching up.</p>
+                <div className="flex flex-wrap justify-center gap-2 pt-1">
+                  <Link href={`/${bookId}/manuscript`} className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]">
+                    Open manuscript
+                  </Link>
+                  <Link href={`/${bookId}/characters`} className="rounded-md bg-violet-500/20 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/30">
+                    Review characters
+                  </Link>
+                </div>
               </div>
             </div>
           )}

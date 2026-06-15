@@ -931,6 +931,72 @@ def normalize_processing_timestamp(value: object | None) -> str | None:
     return normalized
 
 
+PUBLIC_PROCESSING_STAGE_LABELS: dict[str, str] = {
+    "queued": "Queued for processing",
+    "parsing": "Parsing manuscript",
+    "extracting": "Extracting story data",
+    "summarizing": "Building summaries",
+    "embedding": "Indexing search",
+    "analyzing": "Running story analysis",
+    "ready": "Ready",
+    "failed": "Processing failed",
+}
+
+PROCESSING_STAGE_ALIASES: dict[str, str] = {
+    "": "queued",
+    "pending": "queued",
+    "processing": "extracting",
+    "uploading": "queued",
+    "parse": "parsing",
+    "parser": "parsing",
+    "parsed": "parsing",
+    "extraction": "extracting",
+    "extract": "extracting",
+    "chunking": "extracting",
+    "summary": "summarizing",
+    "summaries": "summarizing",
+    "summarize": "summarizing",
+    "embedding": "embedding",
+    "embeddings": "embedding",
+    "indexing": "embedding",
+    "analysis": "analyzing",
+    "analyze": "analyzing",
+    "complete": "ready",
+    "completed": "ready",
+    "done": "ready",
+    "error": "failed",
+    "failed": "failed",
+}
+
+
+def normalize_public_processing_stage(status: str | None, stage: str | None, *, is_fully_ready: bool = False) -> str:
+    normalized_status = " ".join(str(status or "").strip().lower().replace("-", "_").split())
+    normalized_stage = " ".join(str(stage or "").strip().lower().replace("-", "_").split())
+    if is_fully_ready or normalized_status == "ready":
+        return "ready"
+    if normalized_status in {"failed", "error"}:
+        return "failed"
+    if normalized_stage in {"failed", "error"}:
+        return "failed"
+    if normalized_stage in PROCESSING_STAGE_ALIASES:
+        return PROCESSING_STAGE_ALIASES[normalized_stage]
+    if normalized_status in PROCESSING_STAGE_ALIASES:
+        return PROCESSING_STAGE_ALIASES[normalized_status]
+    return "extracting"
+
+
+def processing_retry_available(status: str | None, stage: str | None, retry_actions: list[str], last_error: str | None) -> bool:
+    normalized_status = str(status or "").strip().lower()
+    normalized_stage = str(stage or "").strip().lower()
+    actionable_retries = [action for action in retry_actions if action != "wait_for_analysis"]
+    return bool(
+        normalized_status in {"failed", "error"}
+        or normalized_stage in {"failed", "error"}
+        or actionable_retries
+        or last_error
+    )
+
+
 def _normalize_processing_state(raw: dict | None) -> dict | None:
     source = raw if isinstance(raw, dict) else {}
 
@@ -956,10 +1022,10 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
     raw_pipeline = source.get("pipeline") if isinstance(source.get("pipeline"), dict) else {}
 
     payload: dict[str, Any] = {}
-    if status:
-        payload["status"] = status
-    if stage:
-        payload["stage"] = stage
+    public_stage = normalize_public_processing_stage(status, stage, is_fully_ready=is_fully_ready)
+    payload["status"] = status or ("ready" if public_stage == "ready" else "processing")
+    payload["stage"] = public_stage
+    payload["current_step_label"] = PUBLIC_PROCESSING_STAGE_LABELS[public_stage]
     if isinstance(progress_pct, (int, float)):
         payload["progress_pct"] = float(progress_pct)
     if isinstance(chapters_completed, (int, float)) and int(chapters_completed) >= 0:
@@ -985,6 +1051,7 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
     payload["is_fully_ready"] = is_fully_ready
     if retry_actions:
         payload["retry_actions"] = retry_actions
+    payload["retry_available"] = processing_retry_available(status, public_stage, retry_actions, last_error)
     if raw_pipeline:
         pipeline: dict[str, Any] = {}
         for key in ("extraction", "analysis"):
@@ -1022,6 +1089,32 @@ def _normalize_processing_state(raw: dict | None) -> dict | None:
         if pipeline:
             payload["pipeline"] = pipeline
 
+    return payload or None
+
+
+def _normalize_internal_processing_state(raw: dict | None) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    payload = json.loads(json.dumps(raw, default=str))
+    for key in ("status", "stage", "last_chapter_title", "last_error"):
+        if key not in payload:
+            continue
+        cleaned = " ".join(str(payload.get(key) or "").split()).strip()
+        if cleaned:
+            payload[key] = cleaned
+        else:
+            payload.pop(key, None)
+    for key in ("started_at", "updated_at"):
+        if payload.get(key):
+            normalized = normalize_processing_timestamp(payload.get(key))
+            if normalized:
+                payload[key] = normalized
+    if isinstance(payload.get("retry_actions"), list):
+        payload["retry_actions"] = [
+            cleaned
+            for cleaned in (" ".join(str(item).split()).strip() for item in payload["retry_actions"])
+            if cleaned
+        ]
     return payload or None
 
 
@@ -1340,7 +1433,7 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
         }
     payload["revision_board"] = _normalize_revision_board(source.get("revision_board"))
     payload["revision_recent_edits"] = _normalize_revision_recent_edits(source.get("revision_recent_edits") or [])
-    payload["processing"] = _normalize_processing_state(source.get("processing")) if isinstance(source.get("processing"), dict) else None
+    payload["processing"] = _normalize_internal_processing_state(source.get("processing")) if isinstance(source.get("processing"), dict) else None
     payload["reprocess"] = normalize_reprocess_metadata(source.get("reprocess") if isinstance(source.get("reprocess"), dict) else None)
 
     index_fmt = source.get("index_format")
@@ -1352,6 +1445,7 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
 
 def build_writer_workspace_payload(book: Book) -> dict:
     payload = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    payload["processing"] = _normalize_processing_state(payload.get("processing")) if isinstance(payload.get("processing"), dict) else None
     payload["manuscript_front_matter"] = _derive_front_matter_defaults(
         payload.get("manuscript_front_matter"),
         title=book.title or "",
@@ -1365,7 +1459,7 @@ def build_book_processing_payload(book: Book) -> dict[str, Any] | None:
     processing = workspace.get("processing")
     if not isinstance(processing, dict) or not processing:
         return None
-    return BookProcessingOut.model_validate(processing).model_dump(mode="json")
+    return BookProcessingOut.model_validate(_normalize_processing_state(processing)).model_dump(mode="json")
 
 
 def _stable_revision_item_id(*parts: object) -> str:

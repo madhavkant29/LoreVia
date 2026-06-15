@@ -525,6 +525,65 @@ async def reset_password(
     return {"ok": True}
 
 
+@router.post("/session", response_model=UserOut)
+async def session(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    access_token = get_auth_token(request)
+    access_payload = decode_token(access_token) if access_token else None
+    if access_payload and access_payload.get("type") == "access":
+        try:
+            claimed_version = int(access_payload.get("ver"))
+        except (TypeError, ValueError):
+            claimed_version = -1
+        try:
+            user = await get_user_for_auth_subject(db, access_payload.get("sub"))
+        except ValueError:
+            user = None
+        if (
+            user
+            and not user_is_deleted(user)
+            and claimed_version == current_token_version(user)
+            and user.email_verified_at
+        ):
+            return await _build_user_out(user, db)
+
+    enforce_cookie_csrf(request)
+    await rate_limit_auth_refresh(request)
+
+    refresh_token = get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(401, "Invalid refresh token")
+    payload = decode_token(refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(401, "Invalid refresh token")
+    claimed_version = payload.get("ver")
+    session_id = payload.get("sid")
+    if claimed_version is None or not session_id:
+        raise HTTPException(401, "Invalid refresh token")
+
+    try:
+        user = await get_user_for_auth_subject(db, payload["sub"])
+    except ValueError:
+        raise HTTPException(401, "Invalid refresh token")
+    if not user:
+        raise HTTPException(401, "User not found")
+    if user_is_deleted(user):
+        raise HTTPException(401, "Account has been deleted.")
+    current_version = current_token_version(user)
+    if int(claimed_version) != current_version:
+        raise HTTPException(401, "Refresh token expired")
+    if not await consume_refresh_session(payload["sub"], session_id):
+        raise HTTPException(401, "Refresh token expired")
+    if not user.email_verified_at:
+        raise HTTPException(403, "Please verify your email before signing in.")
+    device_id = get_device_cookie(request)
+    user_out, access_token, refresh_token = await _mint_token_pair(user, db)
+    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+
+
 @router.post("/refresh", response_model=UserOut)
 async def refresh(
     request: Request,

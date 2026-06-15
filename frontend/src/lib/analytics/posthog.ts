@@ -19,3 +19,16 @@ export function capture(event: string, properties?: AnalyticsProps) {
   }
 }
 
+export function captureTiming(event: string, startedAt: number, properties?: AnalyticsProps) {
+  try {
+    if (typeof window === "undefined") return
+    const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
+    capture(event, {
+      ...properties,
+      duration_ms: durationMs,
+    })
+  } catch {
+    // never block UX on analytics
+  }
+}
+

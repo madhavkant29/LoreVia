@@ -19,7 +19,9 @@ export function isBookActivelyProcessing(
     && (
       processing.status === "processing"
       || processing.stage === "extraction"
+      || processing.stage === "extracting"
       || processing.stage === "analysis"
+      || processing.stage === "analyzing"
     ),
   )
 }
