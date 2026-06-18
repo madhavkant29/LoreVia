@@ -15,6 +15,7 @@ from app.utils.world_building_utils import (
     detect_series_world_analysis,
     detect_world_gaps,
     generate_wiki_from_manuscript,
+    ingest_world_elements_from_chapter,
     save_canon_override,
 )
 
@@ -644,3 +645,94 @@ async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_
             "needs a clearer canon note" in item["title"] or "needs one more story anchor" in item["title"]
             for item in coverage_group["items"]
         )
+
+
+@pytest.mark.asyncio
+async def test_ingest_world_elements_creates_then_merges_story_evidence(db, monkeypatch):
+    user = User(
+        email="world-ingest@lorevia.app",
+        username="worldingest",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="World Ingest",
+        format="txt",
+        s3_key="world/ingest.txt",
+        status="ready",
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(
+        book_id=book.id,
+        number=3,
+        title="Ice Gate",
+        s3_key="chapters/world-ingest/3.txt",
+    )
+    db.add(chapter)
+    db.add(
+        WorldCanonicalIdentity(
+            book_id=book.id,
+            canonical_name="Northreach",
+            aliases=["North Reach"],
+            entity_type="location",
+            source="author",
+            confidence=1.0,
+        )
+    )
+    await db.commit()
+
+    candidates = [
+        {
+            "name": "North Reach",
+            "canonical_name": "Northreach",
+            "element_type": "geography",
+            "description": "A frozen capital behind an ice gate.",
+            "usage_count": 2,
+            "aliases": ["North Reach"],
+            "confidence": 0.91,
+            "provenance": [{"chapter_number": 3}],
+            "claims": [{"subject": "Northreach", "predicate": "climate", "value": "frozen"}],
+            "chapter_numbers": [3],
+            "presence_score": 0.8,
+            "narrative_modes": ["description"],
+            "source_excerpt": "North Reach glittered with ice.",
+            "author_override": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "app.utils.world_building_utils.extract_world_elements_from_text",
+        lambda *_args, **_kwargs: candidates,
+    )
+
+    created = await ingest_world_elements_from_chapter(
+        db,
+        book=book,
+        chapter=chapter,
+        chapter_text="North Reach glittered with ice.",
+    )
+    assert len(created) == 1
+    assert created[0].name == "Northreach"
+    assert created[0].usage_count == 2
+
+    candidates[0] = {
+        **candidates[0],
+        "description": "A frozen capital behind an ice gate, ruled by the winter court.",
+        "usage_count": 1,
+        "aliases": ["The Northern Reach"],
+        "chapter_numbers": [3, 4],
+        "confidence": 0.97,
+    }
+    merged = await ingest_world_elements_from_chapter(
+        db,
+        book=book,
+        chapter=chapter,
+        chapter_text="The winter court rules Northreach.",
+    )
+    assert merged[0].id == created[0].id
+    assert merged[0].usage_count == 3
+    assert merged[0].analysis_metadata["confidence"] == 0.97
+    assert 3 in merged[0].analysis_metadata["chapter_numbers"]
+    assert merged[0].analysis_metadata["canonical_name"] == "Northreach"

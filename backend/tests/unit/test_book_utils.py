@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from PIL import Image
 
-from app.models.book import Book, Chapter, ChapterMedia, ManuscriptAnnotation
+from app.models.book import Book, Chapter, ChapterMedia, ManuscriptAnnotation, NovelScene
 from app.models.user import User
 from app.utils.book_utils import (
     _build_revision_change_summary,
@@ -20,6 +20,7 @@ from app.utils.book_utils import (
     _build_knowledge_timeline,
     _build_narration_signature,
     _describe_narration_shift,
+    _genre_match_score,
     _select_genre_checks,
     build_chapter_title_from_summary,
     build_emotional_arc_payload,
@@ -60,6 +61,17 @@ from app.utils.book_utils import (
     story_unit_name,
 )
 from app.models.character import Character, CharacterState
+from app.models.intelligence import CharacterRelationship, ChapterSummary, PlotThread, WorldElement
+from app.utils.advisor_utils import build_advisor_suggestions_payload
+from app.utils.book_utils import (
+    build_import_preview,
+    build_character_card_payload,
+    build_manuscript_workspace_tree,
+    build_prewriting_check,
+    build_revision_intelligence_payload,
+    list_chapter_consistency_reports,
+    parse_import_upload,
+)
 
 
 class _ScalarResult:
@@ -292,6 +304,29 @@ class TestMarkdownToHtml:
         text = "[link text](https://example.com)"
         result = markdown_to_html(text)
         assert "link text" in result
+
+    def test_import_fallback_handles_headings_lists_paragraphs_and_large_heading(self, monkeypatch):
+        """The dependency-free fallback should retain basic manuscript structure."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def import_without_markdown_it(name, *args, **kwargs):
+            if name == "markdown_it":
+                raise ImportError("markdown-it unavailable")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", import_without_markdown_it)
+        result = markdown_to_html(
+            "Opening line\ncontinued\n\n# Chapter One\n####### Literal heading\n- First clue\n* Second clue\n\nFinal line"
+        )
+
+        assert "<p>Opening linecontinued</p>" in result
+        assert "<h1>Chapter One</h1>" in result
+        assert "####### Literal heading" in result
+        assert "<li>First clue</li>" in result
+        assert "<li>Second clue</li>" in result
+        assert "<p>Final line</p>" in result
 
 
 class TestManuscriptHtmlImages:
@@ -1372,3 +1407,296 @@ async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_so
 
     assert parse_calls == [False]
     assert payload["chapters"][0]["title"] == "Chapter 7"
+
+
+@pytest.mark.asyncio
+async def test_chapter_consistency_reports_load_full_context(db):
+    user = User(
+        email=f"consistency-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"consistency{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="The Context Book",
+        format="txt",
+        s3_key="books/context.txt",
+        status="ready",
+        total_chapters=2,
+        mode="author",
+        work_type="novel",
+    )
+    db.add(book)
+    await db.flush()
+    chapters = [
+        Chapter(book_id=book.id, number=1, title="Arrival", s3_key="chapters/context/1.txt"),
+        Chapter(book_id=book.id, number=2, title="Reckoning", s3_key="chapters/context/2.txt"),
+    ]
+    db.add_all(chapters)
+    await db.flush()
+    mara = Character(
+        book_id=book.id,
+        name="Mara",
+        normalized_name="mara",
+        role="protagonist",
+        first_chapter=1,
+        last_seen_chapter=2,
+        mention_count=4,
+    )
+    jon = Character(
+        book_id=book.id,
+        name="Jon",
+        normalized_name="jon",
+        role="supporting",
+        first_chapter=2,
+        last_seen_chapter=2,
+        mention_count=2,
+    )
+    db.add_all([mara, jon])
+    await db.flush()
+    db.add_all(
+        [
+            ChapterSummary(chapter_id=chapters[1].id, mode="short", content="Mara confronts Jon at the gate."),
+            CharacterRelationship(
+                book_id=book.id,
+                character_a_id=mara.id,
+                character_b_id=jon.id,
+                rel_type="uneasy_allies",
+                description="They agree to cooperate.",
+                from_chapter=2,
+            ),
+            PlotThread(
+                book_id=book.id,
+                title="The sealed gate",
+                status="resolved",
+                introduced_at=1,
+                resolved_at=2,
+                importance=8,
+                character_ids=[str(mara.id)],
+            ),
+            CharacterState(character_id=mara.id, at_chapter=1, trait_snapshot={"location": "harbor", "eyes": "blue"}),
+            CharacterState(character_id=mara.id, at_chapter=2, trait_snapshot={"location": "citadel", "eyes": "green"}),
+            WorldElement(
+                book_id=book.id,
+                source_scope="story",
+                element_type="location",
+                name="Northreach",
+                description="A frozen capital.",
+                usage_count=4,
+            ),
+            NovelScene(
+                book_id=book.id,
+                chapter_id=chapters[1].id,
+                chapter_number=2,
+                title="Gate confrontation",
+                body="Mara confronts Jon.",
+                path="scenes/chapter-02/gate-confrontation.md",
+                status="assigned",
+                sort_order=1,
+            ),
+            NovelScene(
+                book_id=book.id,
+                chapter_number=None,
+                title="Unused fragment",
+                body="A possible later scene.",
+                path="scenes/unassigned/unused-fragment.md",
+                status="unassigned",
+                sort_order=1,
+            ),
+        ]
+    )
+    await db.commit()
+
+    reports = await list_chapter_consistency_reports(db, book, limit=12)
+
+    assert [report.chapter_number for report in reports] == [2, 1]
+    latest = reports[0]
+    assert latest.chapter_title == "Reckoning"
+    assert latest.new_characters[0].name == "Jon"
+    assert len(latest.relationship_changes) == 1
+    assert latest.relationship_changes[0].startswith("Mara and Jon: uneasy allies")
+    assert latest.relationship_changes[0].endswith("They agree to cooperate.")
+    assert latest.plot_threads_resolved == ["The sealed gate"]
+    assert "Mara confronts Jon" in latest.summary
+
+    prewriting = await build_prewriting_check(db, book, upcoming_chapter=3)
+    assert prewriting["upcoming_chapter"] == 3
+    assert prewriting["active_characters"][0]["name"] in {"Mara", "Jon"}
+    assert prewriting["recent_events"] == []
+
+    tree = await build_manuscript_workspace_tree(db, book=book, user_id=user.id)
+    assert [chapter["chapter_number"] for chapter in tree["chapters"]] == [1, 2]
+    assert tree["scene_groups"][0]["label"] == "Unassigned Scenes"
+    assert tree["scene_groups"][2]["scenes"][0]["title"] == "Gate confrontation"
+    assert tree["scene_breadcrumbs"]
+
+    book.total_chapters = 50
+    revision = await build_revision_intelligence_payload(db, book)
+    assert revision["summary"]["active_item_count"] >= 0
+    assert revision["revision_plan"]
+    assert isinstance(revision["knowledge_timeline"], list)
+
+    advisor_scan = await build_advisor_suggestions_payload(
+        db=db,
+        book=book,
+        user_id=user.id,
+        skip_llm=True,
+    )
+    assert advisor_scan["suggestions"]
+    assert "characters" in advisor_scan["meta"]["scan_basis"]
+    assert any(item["type"] == "trait_contradiction" for item in advisor_scan["suggestions"])
+
+
+@pytest.mark.asyncio
+async def test_character_card_payload_includes_relationships_threads_and_watchlist(db):
+    user = User(
+        email=f"card-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"card{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Long Road",
+        format="txt",
+        s3_key="books/long-road.txt",
+        status="ready",
+        total_chapters=40,
+        mode="author",
+        work_type="novel",
+    )
+    db.add(book)
+    await db.flush()
+    hero = Character(
+        book_id=book.id,
+        name="Ari Vale",
+        normalized_name="ari vale",
+        aliases=["Ari"],
+        role="protagonist",
+        first_chapter=1,
+        last_seen_chapter=10,
+        mention_count=12,
+        personality_tags=["wary"],
+        motivations=["protect the city"],
+        fears=["failure"],
+    )
+    ally = Character(
+        book_id=book.id,
+        name="Mina",
+        normalized_name="mina",
+        role="supporting",
+        first_chapter=2,
+        last_seen_chapter=12,
+        mention_count=5,
+    )
+    db.add_all([hero, ally])
+    await db.flush()
+    db.add_all(
+        [
+            CharacterRelationship(
+                book_id=book.id,
+                character_a_id=hero.id,
+                character_b_id=ally.id,
+                rel_type="trusted_ally",
+                sentiment=0.8,
+                description="Mina guards Ari's secret.",
+                from_chapter=3,
+            ),
+            PlotThread(
+                book_id=book.id,
+                title="Ari's missing map",
+                status="developing",
+                introduced_at=4,
+                importance=9,
+                character_ids=["Ari"],
+            ),
+            CharacterState(character_id=hero.id, at_chapter=3, trait_snapshot={"mood": "hopeful"}),
+        ]
+    )
+    await db.commit()
+
+    payload = await build_character_card_payload(db, book, hero)
+
+    assert payload["name"] == "Ari Vale"
+    assert payload["relationships"][0]["name"] == "Mina"
+    assert payload["plot_threads"][0]["title"] == "Ari's missing map"
+    assert any("has not appeared for 30 chapters" in item for item in payload["continuity_watch"])
+    assert any("unresolved threads" in item for item in payload["continuity_watch"])
+    assert payload["filename_base"] == "Long-Road-Ari-Vale"
+
+
+@pytest.mark.asyncio
+async def test_parse_import_upload_covers_text_markdown_pdf_epub_and_unsupported(monkeypatch):
+    markdown = await parse_import_upload("draft.md", b"# Chapter One\n\nOpening.", False)
+    assert markdown[0]["title"] == "draft"
+    assert "<h1>Chapter One</h1>" in markdown[0]["html"]
+
+    split_text = await parse_import_upload(
+        "draft.txt",
+        b"Chapter One\nOpening.\n\nChapter Two\nEnding.",
+        True,
+    )
+    assert split_text
+
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf",
+        lambda _raw: [
+            {"number": 1, "title": "One", "text": "First"},
+            {"number": 2, "title": "Two", "text": "Second"},
+        ],
+    )
+    monkeypatch.setattr(
+        "app.parsers.epub_parser.parse_epub",
+        lambda _raw: [{"number": 1, "title": "EPUB", "text": "Book text"}],
+    )
+    merged_pdf = await parse_import_upload("book.pdf", b"pdf", False)
+    split_pdf = await parse_import_upload("book.pdf", b"pdf", True)
+    merged_epub = await parse_import_upload("book.epub", b"epub", False)
+    assert merged_pdf[0]["text"] == "First\n\nSecond"
+    assert len(split_pdf) == 2
+    assert merged_epub[0]["text"] == "Book text"
+
+    with pytest.raises(HTTPException, match="Unsupported manuscript import"):
+        await parse_import_upload("book.xyz", b"unknown", False)
+
+
+def test_build_import_preview_covers_text_screenplay_and_invalid_format(monkeypatch):
+    monkeypatch.setattr(
+        "app.utils.language_utils.detect_language",
+        lambda *_args, **_kwargs: {"detected": "en", "confidence": 0.99},
+    )
+    text_preview = build_import_preview(
+        format_name="txt",
+        work_type="novel",
+        raw=b"Chapter One\nOpening.\n\nChapter Two\nEnding.",
+    )
+    assert text_preview["detected_language"] == "en"
+    assert text_preview["chapter_count"] >= 1
+
+    screenplay = build_import_preview(
+        format_name="fountain",
+        work_type="screenplay",
+        raw=b"INT. ROOM - DAY\n\nMARA\nWe begin.",
+    )
+    assert screenplay["chapter_count"] == 1
+
+    with pytest.raises(ValueError, match="Unsupported format"):
+        build_import_preview(format_name="xyz", work_type="novel", raw=b"text", language="en")
+
+
+@pytest.mark.parametrize(
+    ("genre", "item"),
+    [
+        ("epic fantasy", {"category": "confusion", "title": "Magic kingdom lore conflict"}),
+        ("science fiction", {"category": "impact", "title": "Technology system rule"}),
+        ("romance", {"category": "voice", "title": "Relationship chemistry payoff"}),
+        ("mystery thriller", {"category": "impact", "title": "Clue timeline reveal"}),
+        ("horror", {"category": "scene", "title": "Ominous creature threat"}),
+        ("young adult", {"category": "voice", "title": "Coming-of-age peer conflict"}),
+    ],
+)
+def test_genre_match_score_covers_genre_specific_revision_signals(genre, item):
+    assert _genre_match_score(genre, item) > 0

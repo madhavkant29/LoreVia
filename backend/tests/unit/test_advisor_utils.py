@@ -1,13 +1,20 @@
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import ProgrammingError
+from app.models.book import Book, Series, SeriesBook
+from app.models.character import Character
+from app.models.intelligence import PlotThread
+from app.models.user import User
+from app.utils import advisor_utils
 
 from app.utils.advisor_utils import (
     advisor_retrieval_settings,
     build_story_context,
     build_advisor_world_context,
+    build_series_story_context,
     language_context_hint,
     build_fallback_advisor_suggestions,
     classify_intent_fast,
@@ -222,6 +229,100 @@ async def test_build_story_context_returns_cached_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_story_context_builds_and_caches_complete_runtime_context(monkeypatch):
+    book_id = uuid.uuid4()
+    cached_payloads = []
+
+    async def _fake_get_version(_book_id):
+        return 4
+
+    async def _fake_get_cache(*_args):
+        return None
+
+    async def _fake_set_cache(*args):
+        cached_payloads.append(args)
+
+    monkeypatch.setattr("app.utils.advisor_utils.get_book_cache_version", _fake_get_version)
+    monkeypatch.setattr("app.utils.advisor_utils.get_story_context_cache", _fake_get_cache)
+    monkeypatch.setattr("app.utils.advisor_utils.set_story_context_cache", _fake_set_cache)
+
+    character = SimpleNamespace(
+        name="Mara",
+        role="mc",
+        first_chapter=1,
+        arc_summary="Learns to trust the gate council " * 8,
+        personality_tags=["guarded", "precise", "loyal", "unused"],
+        motivations=["protect the gate", "learn the truth", "unused"],
+        growth_events=["invalid", {"event_title": "Hands Joren the key"}],
+        trait_state={
+            "eyes": {"value": "gray"},
+            "hair": "black",
+            "build": 42,
+            "age_descriptor": {"value": "twenty-nine"},
+        },
+    )
+    book = SimpleNamespace(
+        characters=[character],
+        plot_threads=[SimpleNamespace(
+            title="The Brass Key",
+            importance=9,
+            introduced_at=2,
+            status=None,
+            description="The key predates the city and may open the ash gate. " * 4,
+        )],
+        world_elements=[SimpleNamespace(
+            name="Ash Gate",
+            element_type="place",
+            usage_count=12,
+            description="An ancient silver arch " * 8,
+        )],
+    )
+
+    class _Result:
+        def __init__(self, *, scalar=None, rows=None):
+            self.scalar = scalar
+            self.rows = rows or []
+
+        def scalars(self):
+            return self
+
+        def first(self):
+            return self.scalar
+
+        def all(self):
+            return list(self.rows)
+
+    class _FakeDB:
+        def __init__(self):
+            self.results = [
+                _Result(scalar=book),
+                _Result(rows=[("Gate Codex", "document", "Author supplied canon " * 12, 8)]),
+                _Result(rows=[
+                    (7, "The Choice", [{"event_title": "Mara opens the gate"}, {"event": " \'  "}, "invalid"]),
+                    (6, None, "invalid"),
+                ]),
+                _Result(rows=[
+                    (7, [{"theme": "Trust", "signal": "rising", "depth": "deep", "evidence": "Mara shares the key."}, {"theme": ""}]),
+                    (6, [{"theme": "trust", "evidence": "duplicate"}, "invalid"]),
+                ]),
+            ]
+
+        async def execute(self, _statement):
+            return self.results.pop(0)
+
+    payload = await build_story_context(_FakeDB(), book_id, 9)
+
+    assert "Total chapters processed: 9" in payload
+    assert "CHARACTERS" in payload and "Recent growth beat: Hands Joren the key" in payload
+    assert "PLOT THREADS" in payload and "[INTRODUCED] The Brass Key" in payload
+    assert "WORLD REFERENCE CORPUS" in payload and "Gate Codex" in payload
+    assert "MAJOR EVENTS" in payload and "Mara opens the gate [ch.7 (The Choice)]" in payload
+    assert "WORLD ELEMENTS" in payload and "Ash Gate" in payload
+    assert payload.count("Trust (chapter") == 1
+    assert cached_payloads == [(str(book_id), 4, 9, payload)]
+
+
+@pytest.mark.asyncio
 async def test_classify_response_type_no_llm_warning_marker():
     result = await classify_response_type(None, "⚠️ This contradicts chapter 3")
     assert result == "warning"
@@ -392,3 +493,327 @@ def test_language_hint_none_returns_empty():
 def test_language_hint_unsupported_returns_empty():
     assert language_context_hint("zh") == ""
     assert language_context_hint("ja") == ""
+
+
+@pytest.mark.asyncio
+async def test_prepare_advisor_reply_context_builds_grounded_messages(monkeypatch):
+    closed: list[bool] = []
+
+    class FakeClient:
+        async def close(self):
+            closed.append(True)
+
+    async def no_cache(*_args, **_kwargs):
+        return None
+
+    async def story_context(*_args, **_kwargs):
+        return "Mara guards the northern gate."
+
+    async def search(*_args, **_kwargs):
+        return [
+            {
+                "chapter_num": 4,
+                "chapter_title": "The Gate",
+                "text": "Mara refuses to open the gate.",
+                "relevance": 0.88,
+            }
+        ]
+
+    monkeypatch.setattr(advisor_utils, "AsyncOpenAI", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr(advisor_utils, "get_advisor_response_cache", no_cache)
+    monkeypatch.setattr(advisor_utils, "build_story_context", story_context)
+    monkeypatch.setattr(advisor_utils, "semantic_search", search)
+    monkeypatch.setattr(advisor_utils, "classify_intent_fast", lambda _text: "consistency")
+
+    book = SimpleNamespace(id=uuid.uuid4(), title="Gate Book", total_chapters=6)
+    prepared = await advisor_utils._prepare_advisor_reply_context(
+        db=SimpleNamespace(),
+        book=book,
+        user_id=uuid.uuid4(),
+        messages=[
+            {"role": "assistant", "content": "What should I inspect?"},
+            {"role": "user", "content": "Does Mara contradict the gate rule?"},
+        ],
+        total_chapters=6,
+    )
+
+    assert prepared["cached"] is None
+    assert prepared["intent"] == "consistency"
+    assert prepared["hits"][0]["chapter_num"] == 4
+    assert "Retrieved passages" in prepared["llm_messages"][-1]["content"]
+    assert "Chapter 4" in prepared["llm_messages"][-1]["content"]
+    assert closed == []
+
+    async def cached(*_args, **_kwargs):
+        return {"reply": "Cached answer"}
+
+    monkeypatch.setattr(advisor_utils, "get_advisor_response_cache", cached)
+    cached_payload = await advisor_utils._prepare_advisor_reply_context(
+        db=SimpleNamespace(),
+        book=book,
+        user_id=uuid.uuid4(),
+        messages=[{"role": "user", "content": "Same question"}],
+        total_chapters=6,
+    )
+    assert cached_payload == {"cached": {"reply": "Cached answer", "cached": True}}
+
+
+@pytest.mark.asyncio
+async def test_build_series_story_context_labels_books_characters_and_threads(db, monkeypatch):
+    user = User(
+        email=f"series-context-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"seriescontext{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    series = Series(user_id=user.id, name="Winter Cycle")
+    db.add(series)
+    await db.flush()
+    books = [
+        Book(user_id=user.id, title="Ice Gate", format="txt", s3_key="series/ice.txt", status="ready"),
+        Book(user_id=user.id, title="Ash Crown", format="txt", s3_key="series/ash.txt", status="ready"),
+    ]
+    db.add_all(books)
+    await db.flush()
+    db.add_all(
+        [
+            SeriesBook(series_id=series.id, book_id=books[0].id, position=1),
+            SeriesBook(series_id=series.id, book_id=books[1].id, position=2),
+            Character(
+                book_id=books[0].id,
+                name="Mara",
+                normalized_name="mara",
+                role="protagonist",
+                first_chapter=1,
+                arc_summary="Learns why the gate was sealed.",
+                personality_tags=["resolute"],
+                motivations=["protect the city"],
+            ),
+            PlotThread(
+                book_id=books[0].id,
+                title="The sealed gate",
+                description="The old gate cannot be opened safely.",
+                status="developing",
+                introduced_at=2,
+                importance=8,
+            ),
+        ]
+    )
+    await db.commit()
+
+    async def version(*_args, **_kwargs):
+        return 2
+
+    async def no_cache(*_args, **_kwargs):
+        return None
+
+    stored: dict[str, object] = {}
+
+    async def set_cache(key, version_value, payload):
+        stored.update(key=key, version=version_value, payload=payload)
+
+    monkeypatch.setattr(advisor_utils, "get_book_cache_version", version)
+    monkeypatch.setattr(advisor_utils, "get_series_cache_version", version)
+    monkeypatch.setattr(advisor_utils, "get_series_story_context_cache", no_cache)
+    monkeypatch.setattr(advisor_utils, "set_series_story_context_cache", set_cache)
+
+    payload = await build_series_story_context(
+        db,
+        [book.id for book in books],
+        {book.id: book.title for book in books},
+    )
+
+    assert "Book: Ice Gate" in payload
+    assert "Book: Ash Crown" in payload
+    assert "Mara" in payload
+    assert "The sealed gate" in payload
+    assert stored["payload"] == payload
+
+
+@pytest.mark.asyncio
+async def test_stream_advisor_payload_records_usage_and_finalizes(monkeypatch):
+    closed: list[bool] = []
+
+    async def chunks():
+        yield SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=4, total_tokens=14),
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="First "))],
+        )
+        yield SimpleNamespace(usage=None, choices=[SimpleNamespace(delta=SimpleNamespace(content="answer"))])
+
+    class Completions:
+        async def create(self, **_kwargs):
+            return chunks()
+
+    class Client:
+        chat = SimpleNamespace(completions=Completions())
+
+        async def close(self):
+            closed.append(True)
+
+    async def prepare(**_kwargs):
+        return {
+            "cached": None,
+            "client": Client(),
+            "cache_key": "cache-key",
+            "intent": "direction",
+            "hits": [],
+            "world_analysis": None,
+            "llm_messages": [{"role": "user", "content": "Question"}],
+        }
+
+    usage: list[dict] = []
+
+    async def capacity(*_args, **_kwargs):
+        return None
+
+    async def record(**kwargs):
+        usage.append(kwargs)
+
+    async def finalize(**kwargs):
+        return {"reply": kwargs["reply"], "cached": False}
+
+    monkeypatch.setattr(advisor_utils, "_prepare_advisor_reply_context", prepare)
+    monkeypatch.setattr(advisor_utils, "assert_llm_token_capacity", capacity)
+    monkeypatch.setattr(advisor_utils, "record_llm_usage_counts", record)
+    monkeypatch.setattr(advisor_utils, "_finalize_advisor_reply_payload", finalize)
+
+    events = [
+        event
+        async for event in advisor_utils.stream_advisor_reply_payload(
+            db=SimpleNamespace(),
+            book=SimpleNamespace(id=uuid.uuid4()),
+            user_id=uuid.uuid4(),
+            messages=[{"role": "user", "content": "Question"}],
+            total_chapters=3,
+        )
+    ]
+    assert [event["event"] for event in events] == ["delta", "delta", "done"]
+    assert events[-1]["data"]["reply"] == "First answer"
+    assert usage[0]["total_tokens"] == 14
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_stream_series_advisor_payload_records_usage_and_finalizes(monkeypatch):
+    closed: list[bool] = []
+
+    async def chunks():
+        yield SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=12, completion_tokens=3, total_tokens=15),
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="Series answer"))],
+        )
+
+    class Completions:
+        async def create(self, **_kwargs):
+            return chunks()
+
+    class Client:
+        chat = SimpleNamespace(completions=Completions())
+
+        async def close(self):
+            closed.append(True)
+
+    async def prepare(**_kwargs):
+        return {
+            "cached": None,
+            "client": Client(),
+            "cache_key": "series-cache",
+            "intent": "consistency",
+            "book_count": 2,
+            "llm_messages": [{"role": "user", "content": "Compare volumes"}],
+        }
+
+    usage: list[dict] = []
+
+    async def capacity(*_args, **_kwargs):
+        return None
+
+    async def record(**kwargs):
+        usage.append(kwargs)
+
+    async def finalize(**kwargs):
+        return {"reply": kwargs["reply"], "book_count": kwargs["book_count"]}
+
+    monkeypatch.setattr(advisor_utils, "_prepare_series_advisor_reply_context", prepare)
+    monkeypatch.setattr(advisor_utils, "assert_llm_token_capacity", capacity)
+    monkeypatch.setattr(advisor_utils, "record_llm_usage_counts", record)
+    monkeypatch.setattr(advisor_utils, "_finalize_series_advisor_reply_payload", finalize)
+
+    series = SimpleNamespace(id=uuid.uuid4())
+    events = [
+        event
+        async for event in advisor_utils.stream_series_advisor_reply_payload(
+            db=SimpleNamespace(),
+            series=series,
+            user_id=uuid.uuid4(),
+            messages=[{"role": "user", "content": "Compare volumes"}],
+        )
+    ]
+    assert [event["event"] for event in events] == ["delta", "done"]
+    assert events[-1]["data"] == {"reply": "Series answer", "book_count": 2}
+    assert usage[0]["total_tokens"] == 15
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_prepare_series_advisor_context_builds_history_and_handles_empty_series(monkeypatch):
+    series_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def all(self):
+            return list(self.rows)
+
+    class Db:
+        def __init__(self, results):
+            self.results = list(results)
+
+        async def execute(self, _statement):
+            return Result(self.results.pop(0))
+
+    async def no_cache(*_args, **_kwargs):
+        return None
+
+    async def context(*_args, **_kwargs):
+        return "Earlier volume context"
+
+    class Client:
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(advisor_utils, "get_series_advisor_response_cache", no_cache)
+    monkeypatch.setattr(advisor_utils, "build_series_story_context", context)
+    monkeypatch.setattr(advisor_utils, "AsyncOpenAI", lambda **_kwargs: Client())
+    monkeypatch.setattr(advisor_utils, "classify_intent_fast", lambda _text: "opportunity")
+
+    prepared = await advisor_utils._prepare_series_advisor_reply_context(
+        db=Db(
+            [
+                [SimpleNamespace(book_id=book_id, position=1)],
+                [SimpleNamespace(id=book_id, title="Volume One")],
+            ]
+        ),
+        series=SimpleNamespace(id=series_id, name="Cycle"),
+        user_id=uuid.uuid4(),
+        messages=[
+            {"role": "assistant", "content": "What should we compare?"},
+            {"role": "user", "content": "Where can volume two echo volume one?"},
+        ],
+    )
+    assert prepared["book_count"] == 1
+    assert prepared["intent"] == "opportunity"
+    assert "Earlier volume context" in prepared["llm_messages"][0]["content"]
+    assert prepared["llm_messages"][-1]["content"].startswith("Where can")
+
+    with pytest.raises(ValueError, match="no_books_found_in_series"):
+        await advisor_utils._prepare_series_advisor_reply_context(
+            db=Db([[]]),
+            series=SimpleNamespace(id=series_id, name="Empty Cycle"),
+            user_id=uuid.uuid4(),
+            messages=[{"role": "user", "content": "Compare the books"}],
+        )

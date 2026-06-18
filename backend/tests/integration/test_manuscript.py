@@ -112,6 +112,177 @@ async def test_restore_version_dispatches_async(client, db, auth_headers, monkey
 
 
 @pytest.mark.asyncio
+async def test_manuscript_workspace_scene_annotation_and_version_workflow(client, db, auth_headers, monkeypatch):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    user = await db.get(User, user_id)
+    user.tier = "author"
+
+    storage: dict[str, bytes] = {}
+
+    def download(key):
+        return storage[key]
+
+    def upload(key, raw, _content_type=None):
+        storage[key] = raw
+        return key
+
+    monkeypatch.setattr("app.utils.book_utils.download_book", download)
+    monkeypatch.setattr("app.utils.book_utils.upload_binary", upload)
+
+    book = Book(
+        user_id=user_id,
+        title="Workspace Flow",
+        format="manual",
+        s3_key="books/workspace-flow.txt",
+        status="ready",
+        mode="author",
+        total_chapters=1,
+        is_editor_project=True,
+        writer_workspace={"index_format": "roman-upper"},
+    )
+    db.add(book)
+    await db.flush()
+    chapter_key = f"chapters/{book.id}/1.txt"
+    storage[chapter_key] = serialize_manuscript_content("Opening paragraph.", "<p>Opening paragraph.</p>").encode()
+    chapter = Chapter(
+        book_id=book.id,
+        number=1,
+        title="Opening",
+        s3_key=chapter_key,
+        processed=True,
+        structure_version=0,
+    )
+    db.add(chapter)
+    await db.commit()
+
+    created = await client.post(
+        f"/api/v1/books/{book.id}/scenes",
+        headers=auth_headers,
+        json={
+            "title": "Arrival",
+            "description": "The protagonist arrives.",
+            "body": "Mara enters the frozen city.",
+            "html_body": "<p>Mara enters the frozen city.</p>",
+            "chapter_number": 1,
+            "status": "assigned",
+            "sort_order": 1,
+            "metadata": {"pov": "Mara", "location": "Northreach"},
+        },
+    )
+    assert created.status_code == 200, created.text
+    scene_id = created.json()["id"]
+
+    updated = await client.put(
+        f"/api/v1/books/{book.id}/scenes/{scene_id}",
+        headers=auth_headers,
+        json={
+            "title": "Arrival Revised",
+            "description": "The protagonist enters through the ice gate.",
+            "body": "Mara crosses the ice gate and enters Northreach.",
+            "chapter_number": 1,
+            "status": "assigned",
+            "sort_order": 2,
+            "metadata": {"pov": "Mara", "location": "Ice Gate"},
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "Arrival Revised"
+
+    listed = await client.get(
+        f"/api/v1/books/{book.id}/scenes?chapter_number=1&query=Arrival",
+        headers=auth_headers,
+    )
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [scene_id]
+
+    tree = await client.get(f"/api/v1/books/{book.id}/workspace/tree", headers=auth_headers)
+    assert tree.status_code == 200
+    assert tree.json()["chapters"][0]["scene_count"] == 1
+
+    reader_bootstrap = await client.get(
+        f"/api/v1/books/{book.id}/reader-bootstrap",
+        headers=auth_headers,
+    )
+    assert reader_bootstrap.status_code == 200, reader_bootstrap.text
+    assert reader_bootstrap.json()["overview"]["book"]["id"] == str(book.id)
+    assert reader_bootstrap.json()["writer_workspace"] is not None
+
+    manuscript_bootstrap = await client.get(
+        f"/api/v1/books/{book.id}/manuscript-bootstrap?active_chapter_number=1",
+        headers=auth_headers,
+    )
+    assert manuscript_bootstrap.status_code == 200, manuscript_bootstrap.text
+    assert manuscript_bootstrap.json()["book"]["id"] == str(book.id)
+
+    search = await client.post(
+        f"/api/v1/books/{book.id}/workspace/search",
+        headers=auth_headers,
+        json={"query": "Northreach", "scopes": ["manuscript", "scenes"]},
+    )
+    assert search.status_code == 200
+    assert search.json()
+
+    annotation = await client.post(
+        f"/api/v1/books/{book.id}/annotations",
+        headers=auth_headers,
+        json={
+            "chapter_number": 1,
+            "category": "continuity",
+            "status": "open",
+            "visibility": "private",
+            "quote": "ice gate",
+            "comment": "Check this against the world bible.",
+            "start_offset": 17,
+            "end_offset": 25,
+        },
+    )
+    assert annotation.status_code == 200
+    annotation_id = annotation.json()["id"]
+    annotations = await client.get(
+        f"/api/v1/books/{book.id}/annotations?chapter_number=1",
+        headers=auth_headers,
+    )
+    assert annotations.status_code == 200
+    assert annotations.json()[0]["id"] == annotation_id
+
+    snapshot = await client.post(
+        f"/api/v1/books/{book.id}/scenes/{scene_id}/snapshot?note=Before revision",
+        headers=auth_headers,
+    )
+    assert snapshot.status_code == 200, snapshot.text
+    version_id = snapshot.json()["id"]
+    versions = await client.get(
+        f"/api/v1/books/{book.id}/scenes/{scene_id}/versions",
+        headers=auth_headers,
+    )
+    assert versions.status_code == 200
+    assert versions.json()[0]["id"] == version_id
+    detail = await client.get(
+        f"/api/v1/books/{book.id}/scene-versions/{version_id}",
+        headers=auth_headers,
+    )
+    assert detail.status_code == 200
+    assert "Mara crosses" in detail.json()["body"]
+    restored = await client.post(
+        f"/api/v1/books/{book.id}/scene-versions/{version_id}/restore",
+        headers=auth_headers,
+    )
+    assert restored.status_code == 200
+
+    removed_annotation = await client.delete(
+        f"/api/v1/books/{book.id}/annotations/{annotation_id}",
+        headers=auth_headers,
+    )
+    assert removed_annotation.status_code == 204
+    removed_scene = await client.delete(
+        f"/api/v1/books/{book.id}/scenes/{scene_id}",
+        headers=auth_headers,
+    )
+    assert removed_scene.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_history(client, db, auth_headers, monkeypatch):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200

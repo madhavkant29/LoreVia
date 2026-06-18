@@ -7,7 +7,14 @@ from urllib.parse import urlparse
 
 import pytest
 
-from app.schemas.public import PublicAuthorAnalyticsOut, PublicForumCommentOut, PublicUserProfileOut
+from app.schemas.public import (
+    PublicAuthorAnalyticsOut,
+    PublicForumCommentCreateBody,
+    PublicForumCommentOut,
+    PublicForumPostCreateBody,
+    PublicForumPostUpdateBody,
+    PublicUserProfileOut,
+)
 from app.utils import public_utils
 
 
@@ -27,9 +34,13 @@ class _Result:
 
 
 class _FakeDB:
-    def __init__(self, *, execute_values=None):
+    def __init__(self, *, execute_values=None, get_values=None):
         self._execute_values = list(execute_values or [])
+        self._get_values = dict(get_values or {})
         self.added: list[object] = []
+        self.deleted: list[object] = []
+        self.refreshed: list[object] = []
+        self.commits = 0
         self.flush_called = False
 
     async def execute(self, *_args, **_kwargs):
@@ -39,6 +50,22 @@ class _FakeDB:
 
     def add(self, value):
         self.added.append(value)
+
+    async def get(self, model, item_id):
+        return self._get_values.get((model, item_id), self._get_values.get(item_id))
+
+    async def delete(self, value):
+        self.deleted.append(value)
+
+    async def commit(self):
+        self.commits += 1
+
+    async def refresh(self, value):
+        if hasattr(value, "created_at") and value.created_at is None:
+            value.created_at = datetime.now(UTC)
+        if hasattr(value, "updated_at") and value.updated_at is None:
+            value.updated_at = datetime.now(UTC)
+        self.refreshed.append(value)
 
     async def flush(self):
         self.flush_called = True
@@ -192,6 +219,250 @@ def test_nest_public_forum_comments_builds_reply_tree():
     assert nested[0].id == parent_id
     assert len(nested[0].replies) == 1
     assert nested[0].replies[0].id == reply_id
+
+
+@pytest.mark.asyncio
+async def test_react_to_public_forum_comment_adds_switches_and_clears_reactions(monkeypatch):
+    comment_id = uuid.uuid4()
+    post_id = uuid.uuid4()
+    author_id = uuid.uuid4()
+    viewer_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    post = SimpleNamespace(id=post_id)
+    comment = SimpleNamespace(
+        id=comment_id,
+        post_id=post_id,
+        book_id=None,
+        parent_comment_id=None,
+        author_user_id=author_id,
+        body="Useful note",
+        image_s3_key=None,
+        image_filename=None,
+        image_content_type=None,
+        like_count=0,
+        dislike_count=0,
+        created_at=now,
+        updated_at=now,
+    )
+    author = SimpleNamespace(
+        id=author_id,
+        username="author",
+        email="author@example.test",
+        reputation_score=0,
+        reputation_likes_received=0,
+        reputation_dislikes_received=0,
+    )
+    viewer = SimpleNamespace(id=viewer_id, username="viewer")
+
+    async def visible(*_args, **_kwargs):
+        return post, None
+
+    async def no_cache(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(public_utils, "_get_visible_forum_post", visible)
+    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
+
+    db = _FakeDB(
+        execute_values=[_Result(scalar=None)],
+        get_values={(public_utils.BookForumComment, comment_id): comment, (public_utils.User, author_id): author},
+    )
+    payload = await public_utils.react_to_public_forum_comment(
+        db,
+        comment_id=comment_id,
+        current_user=viewer,
+        reaction="like",
+    )
+    assert payload.reaction == "like"
+    assert comment.like_count == 1 and author.reputation_score > 0
+    assert len(db.added) == 1 and db.commits == 1
+
+    existing = SimpleNamespace(reaction="like")
+    db = _FakeDB(
+        execute_values=[_Result(scalar=existing)],
+        get_values={(public_utils.BookForumComment, comment_id): comment, (public_utils.User, author_id): author},
+    )
+    cleared = await public_utils.react_to_public_forum_comment(
+        db,
+        comment_id=comment_id,
+        current_user=viewer,
+        reaction="clear",
+    )
+    assert cleared.reaction is None
+    assert db.deleted == [existing]
+    assert comment.like_count == 0
+
+
+@pytest.mark.asyncio
+async def test_react_to_public_forum_post_updates_counts_and_handles_noop(monkeypatch):
+    post_id = uuid.uuid4()
+    author_id = uuid.uuid4()
+    viewer = SimpleNamespace(id=uuid.uuid4())
+    post = SimpleNamespace(
+        id=post_id,
+        author_user_id=author_id,
+        like_count=0,
+        dislike_count=0,
+    )
+    author = SimpleNamespace(
+        id=author_id,
+        reputation_score=3,
+        reputation_likes_received=0,
+        reputation_dislikes_received=0,
+    )
+
+    async def visible(*_args, **_kwargs):
+        return post, None
+
+    async def detail(*_args, **_kwargs):
+        return SimpleNamespace(reaction="like", like_count=post.like_count, dislike_count=post.dislike_count)
+
+    async def no_cache(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(public_utils, "_get_visible_forum_post", visible)
+    monkeypatch.setattr(public_utils, "get_public_forum_post_detail", detail)
+    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
+
+    db = _FakeDB(
+        execute_values=[_Result(scalar=None)],
+        get_values={(public_utils.User, author_id): author},
+    )
+    result = await public_utils.react_to_public_forum_post(db, post_id=post_id, current_user=viewer, reaction="like")
+    assert result.like_count == 1
+    assert post.like_count == 1 and len(db.added) == 1
+
+    existing = SimpleNamespace(reaction="like")
+    noop_db = _FakeDB(
+        execute_values=[_Result(scalar=existing)],
+        get_values={(public_utils.User, author_id): author},
+    )
+    await public_utils.react_to_public_forum_post(noop_db, post_id=post_id, current_user=viewer, reaction="like")
+    assert noop_db.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_create_and_update_general_forum_posts_execute_runtime_lifecycle(monkeypatch):
+    user = SimpleNamespace(id=uuid.uuid4(), tier="free")
+    captured = {}
+
+    async def enforce_limit(*_args, **_kwargs):
+        captured["limit"] = True
+
+    async def detail(_db, *, post_id, current_user):
+        captured["post_id"] = post_id
+        return SimpleNamespace(id=str(post_id), headline="Updated headline")
+
+    async def no_cache(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(public_utils, "enforce_daily_general_forum_post_limit", enforce_limit)
+    monkeypatch.setattr(public_utils, "get_public_forum_post_detail", detail)
+    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
+    db = _FakeDB()
+
+    created = await public_utils.create_public_forum_post(
+        db,
+        current_user=user,
+        body=PublicForumPostCreateBody(
+            thread_type="general",
+            headline="  General   craft question  ",
+            body=" How do you pace a difficult reveal? ",
+            allow_contact_requests=True,
+        ),
+    )
+
+    post = db.added[0]
+    assert captured["limit"] is True
+    assert post.headline == "General craft question"
+    assert post.body == "How do you pace a difficult reveal?"
+    assert post.book_id is None and post.allow_contact_requests is False
+    assert db.commits == 1 and db.refreshed == [post]
+    assert created.id == str(post.id)
+
+    post.author_user_id = user.id
+    post.thread_type = "general"
+    post.image_s3_key = "forum/old.png"
+    post.image_content_type = "image/png"
+    post.image_filename = "old.png"
+    deleted_keys = []
+
+    async def get_post(*_args, **_kwargs):
+        return post
+
+    async def delete_key(key, *, context):
+        deleted_keys.append((key, context))
+
+    monkeypatch.setattr(public_utils, "_get_forum_post", get_post)
+    monkeypatch.setattr(public_utils, "delete_storage_key_best_effort", delete_key)
+    updated = await public_utils.update_public_forum_post(
+        db,
+        post_id=post.id,
+        current_user=user,
+        body=PublicForumPostUpdateBody(
+            thread_type="general",
+            headline="Updated headline",
+            body="This updated discussion body is long enough.",
+            status="closed",
+            remove_image=True,
+        ),
+    )
+    assert post.status == "closed"
+    assert post.image_s3_key is None
+    assert deleted_keys == [("forum/old.png", "public_forum_image")]
+    assert updated.headline == "Updated headline"
+
+
+@pytest.mark.asyncio
+async def test_create_forum_reply_notifies_post_and_parent_authors(monkeypatch):
+    post_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    post_author_id = uuid.uuid4()
+    parent_author_id = uuid.uuid4()
+    current_user = SimpleNamespace(
+        id=uuid.uuid4(),
+        username="replying-reader",
+        reputation_score=5,
+        reputation_likes_received=0,
+        reputation_dislikes_received=0,
+    )
+    post = SimpleNamespace(
+        id=post_id,
+        book_id=book_id,
+        author_user_id=post_author_id,
+        thread_type="novel",
+        last_activity_at=None,
+    )
+    parent = SimpleNamespace(id=uuid.uuid4(), post_id=post_id, author_user_id=parent_author_id)
+
+    async def visible(*_args, **_kwargs):
+        return post, SimpleNamespace(id=book_id)
+
+    async def no_cache(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(public_utils, "_get_visible_forum_post", visible)
+    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
+    db = _FakeDB(get_values={(public_utils.BookForumComment, parent.id): parent})
+
+    payload = await public_utils.create_public_forum_comment(
+        db,
+        post_id=post_id,
+        current_user=current_user,
+        body=PublicForumCommentCreateBody(body="This reply identifies the missing clue.", parent_comment_id=parent.id),
+    )
+
+    comment = next(item for item in db.added if isinstance(item, public_utils.BookForumComment))
+    notifications = [item for item in db.added if isinstance(item, public_utils.Notification)]
+    assert comment.parent_comment_id == parent.id
+    assert payload.can_edit is True
+    assert payload.author_username == "replying-reader"
+    assert {notification.user_id for notification in notifications} == {post_author_id, parent_author_id}
+    assert db.flush_called is True and db.commits == 1
 
 
 @pytest.mark.asyncio
@@ -654,3 +925,153 @@ async def test_list_public_forum_interests_for_author_uses_joined_user_rows(monk
 
     assert items[0].interested_username == "reader"
     assert items[0].interested_email == "reader@example.com"
+
+
+@pytest.mark.asyncio
+async def test_rebuild_public_rankings_scores_every_surface_and_ranking_key(monkeypatch):
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    book_id = uuid.uuid4()
+    author_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=book_id,
+        user_id=author_id,
+        title="Ranked Novel",
+        public_updated_at=now - timedelta(days=1),
+        published_at=now - timedelta(days=2),
+        created_at=now - timedelta(days=3),
+    )
+
+    async def visible_books(_db):
+        return [(book, "ranked_author")]
+
+    async def beta_books(_db):
+        return [(book, "ranked_author", str(uuid.uuid4()))]
+
+    async def character_counts(_db, *, book_ids):
+        return {book_id: 12}
+
+    async def craft_profile(_db, *, book, visible_character_count):
+        return {
+            "complexity_score": 91.0,
+            "well_written_score": 87.0,
+            "beginner_friendly_score": 74.0,
+            "visible_character_count": visible_character_count,
+        }
+
+    async def rating_stats(_db, *, book_ids, window_start):
+        return {
+            book_id: {
+                "average_rating": 0.9,
+                "rating_count": 6,
+                "positive_rating_count": 5,
+                "neutral_rating_count": 1,
+                "negative_rating_count": 0,
+                "latest_rating_at": now,
+            }
+        }
+
+    async def forum_stats(_db, *, book_ids, window_start):
+        return {
+            book_id: {
+                "open_discussion_count": 1,
+                "discussion_comment_count": 4,
+                "discussion_interest_count": 3,
+                "latest_activity_at": now,
+            }
+        }
+
+    async def view_stats(_db, *, book_ids, window_start):
+        return {book_id: {"book_view_count": 10, "chapter_view_count": 20, "unique_reader_count": 7}}
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(public_utils, "list_visible_creator_public_books", visible_books)
+    monkeypatch.setattr(public_utils, "_list_open_beta_ranking_books", beta_books)
+    monkeypatch.setattr(public_utils, "_visible_character_count_map", character_counts)
+    monkeypatch.setattr(public_utils, "_build_public_book_craft_profile", craft_profile)
+    monkeypatch.setattr(public_utils, "_book_rating_stats_by_window", rating_stats)
+    monkeypatch.setattr(public_utils, "_book_forum_activity_by_window", forum_stats)
+    monkeypatch.setattr(public_utils, "_public_book_view_counts_by_window", view_stats)
+    monkeypatch.setattr(public_utils, "cache_del", noop)
+    monkeypatch.setattr(public_utils, "cache_set_version_marker", noop)
+    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", noop)
+    monkeypatch.setattr(public_utils, "VALID_PUBLIC_RANKING_WINDOWS", ["weekly", "all_time"])
+
+    db = _FakeDB()
+    result = await public_utils.rebuild_public_book_rankings_snapshot(db, snapshot_at=now)
+    ranking_rows = [item for item in db.added if hasattr(item, "ranking_key")]
+
+    expected = 2 * len(public_utils.VALID_PUBLIC_RANKING_WINDOWS) * len(public_utils.VALID_PUBLIC_RANKING_KEYS)
+    assert result == {"snapshot_rows": expected, "book_count": 1}
+    assert len(ranking_rows) == expected
+    assert {row.surface for row in ranking_rows} == {
+        public_utils.PUBLIC_RANKING_SURFACE_UPLOADS,
+        public_utils.PUBLIC_RANKING_SURFACE_BETA,
+    }
+    assert {row.ranking_key for row in ranking_rows} == set(public_utils.VALID_PUBLIC_RANKING_KEYS)
+    assert all(row.rank_position == 1 for row in ranking_rows)
+
+
+@pytest.mark.asyncio
+async def test_public_ranking_window_aggregators_count_views_ratings_and_forum_activity():
+    book_id = uuid.uuid4()
+    post_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    view_payload = await public_utils._public_book_view_counts_by_window(
+        _FakeDB(
+            execute_values=[
+                _Result(
+                    all_rows=[
+                        (book_id, public_utils.PUBLIC_ANALYTICS_EVENT_BOOK_VIEW, "reader-a"),
+                        (book_id, public_utils.PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW, "reader-a"),
+                        (book_id, public_utils.PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW, "reader-b"),
+                    ]
+                )
+            ]
+        ),
+        book_ids=[book_id],
+        window_start=now - timedelta(days=7),
+    )
+    assert view_payload[book_id] == {
+        "book_view_count": 1,
+        "chapter_view_count": 2,
+        "unique_reader_count": 2,
+    }
+
+    rating_payload = await public_utils._book_rating_stats_by_window(
+        _FakeDB(
+            execute_values=[
+                _Result(
+                    all_rows=[
+                        (book_id, 4.5, now, None, None, now),
+                        (book_id, 3.0, now, None, None, now),
+                        (book_id, 1.0, now, None, None, now),
+                        (book_id, 5.0, now - timedelta(days=30), None, None, now),
+                    ]
+                )
+            ]
+        ),
+        book_ids=[book_id],
+        window_start=now - timedelta(days=7),
+    )
+    assert rating_payload[book_id]["rating_count"] == 3
+    assert rating_payload[book_id]["positive_rating_count"] == 1
+    assert rating_payload[book_id]["neutral_rating_count"] == 1
+    assert rating_payload[book_id]["negative_rating_count"] == 1
+
+    forum_payload = await public_utils._book_forum_activity_by_window(
+        _FakeDB(
+            execute_values=[
+                _Result(all_rows=[(post_id, book_id, public_utils.FORUM_POST_OPEN, now, now, now)]),
+                _Result(all_rows=[(post_id, 4)]),
+                _Result(all_rows=[(post_id, 3)]),
+            ]
+        ),
+        book_ids=[book_id],
+        window_start=now - timedelta(days=7),
+    )
+    assert forum_payload[book_id]["open_discussion_count"] == 1
+    assert forum_payload[book_id]["discussion_comment_count"] == 4
+    assert forum_payload[book_id]["discussion_interest_count"] == 3

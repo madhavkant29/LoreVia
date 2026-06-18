@@ -41,12 +41,12 @@ jobs:
           - 6379:6379
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install dependencies
       run: |
@@ -107,12 +107,12 @@ jobs:
     environment: production
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install dependencies
       run: |
@@ -134,7 +134,7 @@ jobs:
         echo "BACKUP_NAME=$BACKUP_NAME" >> "$GITHUB_ENV"
 
     - name: Upload database backup artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pre-migration-backup-${{ github.run_id }}
         path: ${{ env.BACKUP_NAME }}

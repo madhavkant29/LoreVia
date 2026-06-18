@@ -10,7 +10,9 @@ from app.utils.notification_utils import (
     build_book_ready_notification,
     build_revision_digest_notification,
     collect_book_ready_stats,
+    sync_revision_digest_notifications,
 )
+from app.utils import notification_utils
 
 
 def test_build_revision_digest_notification_includes_revision_summary():
@@ -44,6 +46,73 @@ def test_build_revision_digest_notification_includes_revision_summary():
     assert notification.data["high_severity_count"] == 2
     assert notification.data["top_item_title"] == "Chapter 2 assumption may break later payoff"
     assert notification.data["signature"] == "5:2:You changed Chapter 2: removed silver gate.:impact-1"
+
+
+@pytest.mark.asyncio
+async def test_sync_revision_digest_notifications_updates_adds_and_removes_stale(monkeypatch):
+    user_id = uuid.uuid4()
+    first_book = SimpleNamespace(id=uuid.uuid4(), user_id=user_id, title="First")
+    second_book = SimpleNamespace(id=uuid.uuid4(), user_id=user_id, title="Second")
+    latest = SimpleNamespace(
+        book_id=first_book.id,
+        data={"signature": "old"},
+        read_at=datetime.now(UTC),
+    )
+    duplicate = SimpleNamespace(book_id=first_book.id, data={"signature": "older"}, read_at=None)
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return list(self.rows)
+
+    class Db:
+        def __init__(self):
+            self.results = [[first_book, second_book], [latest, duplicate]]
+            self.added = []
+            self.deleted = []
+            self.commits = 0
+
+        async def execute(self, _statement):
+            return Result(self.results.pop(0))
+
+        def add(self, item):
+            self.added.append(item)
+
+        async def delete(self, item):
+            self.deleted.append(item)
+
+        async def commit(self):
+            self.commits += 1
+
+    async def payload(_db, book):
+        return {"book": book.title}
+
+    def notification(book, _payload):
+        return SimpleNamespace(
+            book_id=book.id,
+            title=f"Digest {book.title}",
+            body="Review changes",
+            data={"signature": f"new-{book.id}"},
+            read_at=None,
+        )
+
+    monkeypatch.setattr(notification_utils, "build_revision_intelligence_payload", payload)
+    monkeypatch.setattr(notification_utils, "build_revision_digest_notification", notification)
+    db = Db()
+
+    await sync_revision_digest_notifications(db, user_id)
+
+    assert db.deleted == [duplicate]
+    assert len(db.added) == 1
+    assert db.added[0].book_id == second_book.id
+    assert latest.data["signature"].startswith("new-")
+    assert latest.read_at is None
+    assert db.commits == 1
 
 
 def test_build_revision_digest_notification_prefers_active_high_severity_top_issue():

@@ -426,7 +426,7 @@ async def _hard_delete_account_product_data(db: AsyncSession, request: DataDelet
     await db.execute(delete(BetaReadFeedbackItem).where(or_(BetaReadFeedbackItem.author_user_id == user_id, BetaReadFeedbackItem.reader_user_id == user_id)))
     await db.execute(delete(BetaReadQuestion).where(BetaReadQuestion.author_user_id == user_id))
     await db.execute(delete(BetaReadAssignment).where(or_(BetaReadAssignment.author_user_id == user_id, BetaReadAssignment.reader_user_id == user_id)))
-    await db.execute(delete(BookCollaborator).where(BookCollaborator.collaborator_user_id == user_id))
+    await db.execute(delete(BookCollaborator).where(BookCollaborator.invited_user_id == user_id))
     await db.execute(delete(BookForumInterest).where(or_(BookForumInterest.author_user_id == user_id, BookForumInterest.interested_user_id == user_id)))
     await db.execute(delete(BookForumPost).where(BookForumPost.author_user_id == user_id))
     await db.execute(delete(BookForumComment).where(BookForumComment.author_user_id == user_id))

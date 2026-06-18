@@ -128,7 +128,12 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
 
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
     monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
+    monkeypatch.setattr("app.api.deps.rate_limit.free_advisor_limit_per_week", lambda _user: None)
     monkeypatch.setattr("app.api.deps.rate_limit.protected_authoring_limit_per_day", lambda _user: 2)
+    monkeypatch.setattr(
+        "app.api.deps.rate_limit._current_utc",
+        lambda now=None: datetime(2026, 6, 10, 10, 0, tzinfo=UTC),
+    )
     monkeypatch.setattr("app.core.config.settings.TRIAL_HIGH_COST_TURNS_PER_DAY", 2, raising=False)
     monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
     user = SimpleNamespace(

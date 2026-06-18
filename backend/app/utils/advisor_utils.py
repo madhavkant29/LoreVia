@@ -996,7 +996,7 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
     ).all()
     if world_rows:
         lines.append("\nWORLD REFERENCE CORPUS (author-supplied lore):")
-        for name, element_type, description in world_rows:
+        for name, element_type, description, _usage_count in world_rows:
             snippet = (description[:120] + "...") if description and len(description) > 120 else (description or "")
             lines.append(f"  • {name} [{element_type}] {snippet}")
 

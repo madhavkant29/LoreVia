@@ -8,6 +8,15 @@ import type { Book } from "@/types/book"
 
 const mockRefetch = vi.fn()
 const mockPush = vi.fn()
+const mockPrefetch = vi.fn()
+const mockArchive = vi.fn()
+const mockHide = vi.fn()
+const mockPublishPublicly = vi.fn()
+const mockUnpublishPublicly = vi.fn()
+const mockRetryProcessing = vi.fn()
+const mockDeletePermanently = vi.fn()
+const mockGetReaderBootstrap = vi.fn()
+const mockConfirm = vi.fn()
 let mockBooks: Book[] = []
 let mockIsLoading = false
 let mockIsError = true
@@ -35,7 +44,7 @@ vi.mock("@tanstack/react-query", () => ({
     isError: mockIsError,
     refetch: mockRefetch,
   }),
-  useQueryClient: () => ({}),
+  useQueryClient: () => ({ prefetchQuery: mockPrefetch }),
 }))
 
 vi.mock("next/navigation", () => ({
@@ -53,7 +62,14 @@ vi.mock("next/link", () => ({
 
 vi.mock("next/dynamic", () => ({
   default: () => {
-    const Component = () => null
+    const Component = ({ onClose, initialMode, initialExistingBookId }: { onClose?: () => void; initialMode?: string; initialExistingBookId?: string }) => (
+      <section>
+        <p>Upload modal inline</p>
+        {initialMode ? <p>Mode {initialMode}</p> : null}
+        {initialExistingBookId ? <p>Book {initialExistingBookId}</p> : null}
+        <button type="button" onClick={onClose}>Close upload</button>
+      </section>
+    )
     Component.displayName = "DynamicMock"
     return Component
   },
@@ -62,11 +78,18 @@ vi.mock("next/dynamic", () => ({
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
     list: vi.fn(),
-    archive: vi.fn(),
-    hide: vi.fn(),
-    publishPublicly: vi.fn(),
-    unpublishPublicly: vi.fn(),
+    archive: (...args: unknown[]) => mockArchive(...args),
+    hide: (...args: unknown[]) => mockHide(...args),
+    publishPublicly: (...args: unknown[]) => mockPublishPublicly(...args),
+    unpublishPublicly: (...args: unknown[]) => mockUnpublishPublicly(...args),
+    retryProcessing: (...args: unknown[]) => mockRetryProcessing(...args),
+    deletePermanently: (...args: unknown[]) => mockDeletePermanently(...args),
+    getReaderBootstrap: (...args: unknown[]) => mockGetReaderBootstrap(...args),
   },
+}))
+
+vi.mock("@/components/ui/ConfirmDialog", () => ({
+  useConfirmDialog: () => mockConfirm,
 }))
 
 vi.mock("@/lib/query/cacheKeys", () => ({
@@ -96,14 +119,33 @@ let root: Root | null = null
 
 beforeEach(() => {
   localStorageMock.clear()
+  mockRefetch.mockResolvedValue({})
+  mockArchive.mockResolvedValue({})
+  mockHide.mockResolvedValue({})
+  mockPublishPublicly.mockResolvedValue({})
+  mockUnpublishPublicly.mockResolvedValue({})
+  mockRetryProcessing.mockResolvedValue({})
+  mockDeletePermanently.mockResolvedValue({})
+  mockGetReaderBootstrap.mockResolvedValue({})
+  mockConfirm.mockResolvedValue(true)
   mockBooks = []
   mockIsLoading = false
   mockIsError = true
+  window.prompt = vi.fn(() => "DELETE BOOK")
 })
 
 afterEach(() => {
   mockRefetch.mockClear()
   mockPush.mockClear()
+  mockPrefetch.mockClear()
+  mockArchive.mockClear()
+  mockHide.mockClear()
+  mockPublishPublicly.mockClear()
+  mockUnpublishPublicly.mockClear()
+  mockRetryProcessing.mockClear()
+  mockDeletePermanently.mockClear()
+  mockGetReaderBootstrap.mockClear()
+  mockConfirm.mockClear()
   if (root) {
     act(() => {
       root?.unmount()
@@ -123,6 +165,80 @@ function render() {
   act(() => {
     root?.render(<LibraryClient />)
   })
+}
+
+async function flushUi(times = 3) {
+  for (let index = 0; index < times; index += 1) {
+    await act(async () => {
+      await Promise.resolve()
+    })
+  }
+}
+
+function clickByText(text: string, index = 0) {
+  const matches = Array.from(container?.querySelectorAll("button, a") ?? []).filter((element) =>
+    element.textContent?.includes(text) || element.getAttribute("aria-label")?.includes(text)
+  )
+  const match = matches[index] as HTMLElement | undefined
+  expect(match, `Expected ${text}`).toBeTruthy()
+  act(() => {
+    match?.click()
+  })
+  return match
+}
+
+function clickExactButton(text: string, index = 0) {
+  const matches = Array.from(container?.querySelectorAll("button") ?? []).filter((element) =>
+    element.textContent?.trim() === text
+  )
+  const match = matches[index] as HTMLElement | undefined
+  expect(match, `Expected exact button ${text}`).toBeTruthy()
+  act(() => {
+    match?.click()
+  })
+  return match
+}
+
+function setValue(field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+  const prototype = field instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype
+    : field instanceof HTMLSelectElement
+      ? HTMLSelectElement.prototype
+      : HTMLInputElement.prototype
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value")
+  act(() => {
+    descriptor?.set?.call(field, value)
+    field.dispatchEvent(new Event("input", { bubbles: true }))
+    field.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+}
+
+function buildBook(overrides: Partial<Book> & Pick<Book, "id" | "title">): Book {
+  return {
+    author: "A. Writer",
+    genre: "Fantasy",
+    format: "pdf",
+    work_type: "novel",
+    status: "ready",
+    mode: "author",
+    workspace_shell: "author",
+    access_class: "owner",
+    can_switch_workspace_mode: true,
+    total_chapters: 10,
+    chapters_read_count: 2,
+    progress_pct: 30,
+    total_tokens: 24000,
+    created_at: "2026-06-01T00:00:00Z",
+    processing: {
+      status: "ready",
+      stage: "ready",
+      label: "Ready",
+      progress_pct: 100,
+      retryAvailable: false,
+      updated_at: "2026-06-05T00:00:00Z",
+    },
+    ...overrides,
+  } as Book
 }
 
 describe("LibraryPage error state", () => {
@@ -205,5 +321,130 @@ describe("LibraryPage shared-book filtering", () => {
 
     expect(container?.textContent).toContain("Owned project")
     expect(container?.textContent).not.toContain("Shared beta project")
+  })
+
+  it("drives filters, project menus, publish, upload, and navigation actions", async () => {
+    mockIsError = false
+    mockBooks = [
+      buildBook({
+        id: "book-ready",
+        title: "Aster Draft",
+        public_status: "draft",
+        public_slug: null,
+        public_description: null,
+      }),
+      buildBook({
+        id: "book-processing",
+        title: "Processing Draft",
+        status: "processing",
+        progress_pct: 12,
+        processing: {
+          status: "processing",
+          stage: "extracting",
+          progress_pct: 34,
+          retry_available: true,
+          updated_at: "2026-06-06T00:00:00Z",
+        },
+      }),
+      buildBook({
+        id: "book-public",
+        title: "Public Draft",
+        is_public: true,
+        public_status: "published",
+        public_slug: "public-draft",
+      }),
+      buildBook({
+        id: "book-archived",
+        title: "Archived Draft",
+        archived_at: "2026-06-02T00:00:00Z",
+      }),
+    ]
+
+    render()
+    await flushUi()
+
+    expect(container?.textContent).toContain("Aster Draft")
+    expect(container?.textContent).not.toContain("Archived Draft")
+
+    const search = container?.querySelector('input[aria-label="Search projects"]') as HTMLInputElement
+    setValue(search, "processing")
+    expect(container?.textContent).toContain("Processing Draft")
+
+    clickByText("Filter")
+    clickByText("Author Workspace")
+    clickByText("Processing")
+    const showArchived = container?.querySelector('button[aria-label="Show archived projects"]') as HTMLButtonElement
+    act(() => showArchived.click())
+    expect(showArchived.getAttribute("aria-pressed")).toBe("true")
+
+    const sort = container?.querySelector('select[aria-label="Sort projects"]') as HTMLSelectElement
+    setValue(sort, "title")
+    clickByText("List view")
+    expect(container?.querySelector('[aria-label="List view"]')?.getAttribute("aria-pressed")).toBe("true")
+
+    setValue(search, "")
+    clickByText("Any")
+    clickByText("Open actions for Aster Draft")
+    clickExactButton("Pin project")
+    expect(localStorageStore["library-pinned-projects:v1"]).toBeDefined()
+
+    clickByText("Open actions for Aster Draft")
+    clickExactButton("Add chapter")
+    expect(mockPush).toHaveBeenCalledWith("/library/add-chapter?book=book-ready")
+
+    clickExactButton("Archive")
+    await flushUi()
+    expect(mockArchive).toHaveBeenCalledWith("book-ready", true)
+
+    clickByText("Open actions for Aster Draft")
+    clickExactButton("Remove")
+    await flushUi()
+    expect(mockConfirm).toHaveBeenCalled()
+    expect(mockHide).toHaveBeenCalledWith("book-ready", true)
+
+    clickByText("Open actions for Aster Draft")
+    clickExactButton("Delete permanently")
+    await flushUi()
+    expect(window.prompt).toHaveBeenCalled()
+    expect(mockDeletePermanently).toHaveBeenCalledWith("book-ready", "DELETE BOOK")
+
+    clickByText("Open actions for Aster Draft")
+    clickExactButton("Publish publicly")
+    expect(container?.textContent).toContain("Publish your own original work")
+    const publishInputs = Array.from(container?.querySelectorAll("input") ?? [])
+    const rightsCheckbox = publishInputs.find((input) => input.type === "checkbox") as HTMLInputElement
+    act(() => rightsCheckbox.click())
+    await flushUi()
+    clickExactButton("Publish publicly", 1)
+    await flushUi()
+    expect(mockPublishPublicly).toHaveBeenCalledWith("book-ready", {
+      publicSlug: "aster-draft",
+      rightsConfirmation: true,
+      description: null,
+    })
+
+    clickByText("Open actions for Public Draft")
+    clickExactButton("Unpublish public book")
+    await flushUi()
+    expect(mockUnpublishPublicly).toHaveBeenCalledWith("book-public")
+
+    clickExactButton("Retry")
+    await flushUi()
+    expect(mockRetryProcessing).toHaveBeenCalledWith("book-processing")
+
+    clickByText("Create new project")
+    expect(container?.textContent).toContain("Upload modal inline")
+    clickByText("Close upload")
+    await flushUi()
+    expect(mockRefetch).toHaveBeenCalled()
+
+    const asterCard = Array.from(container?.querySelectorAll('[role="button"]') ?? []).find((element) =>
+      element.textContent?.includes("Aster Draft")
+    ) as HTMLElement | undefined
+    expect(asterCard).toBeTruthy()
+    act(() => {
+      asterCard?.click()
+    })
+    expect(mockPush).toHaveBeenLastCalledWith("/book-1")
   })
 })

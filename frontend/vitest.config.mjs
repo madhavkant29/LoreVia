@@ -17,6 +17,16 @@ export default defineConfig({
     },
   },
   test: {
+    coverage: {
+      exclude: [
+        "**/*.d.ts",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "src/test/**",
+        "src/types/**",
+      ],
+      include: ["src/**/*.{ts,tsx}"],
+    },
     environment: "jsdom",
     globals: true,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],

@@ -320,3 +320,113 @@ async def test_repair_stale_completed_processing_state_counts_distinct_chapter_n
 
 async def _async_none():
     return None
+
+
+class _RetryDB:
+    def __init__(self):
+        self.commits = 0
+        self.refreshed = []
+
+    async def commit(self):
+        self.commits += 1
+
+    async def refresh(self, value):
+        self.refreshed.append(value)
+
+
+def test_retry_state_helpers_normalize_actions_errors_and_chapter_timestamps():
+    book = SimpleNamespace(
+        status="processing",
+        writer_workspace={"processing": {"retry_actions": [" retry_analysis ", "", None], "last_error": "  provider failed  "}},
+    )
+    assert pipeline_state_service._book_processing_retry_actions(book) == ["retry_analysis", "None"]
+    assert pipeline_state_service._book_processing_last_error(book) == "provider failed"
+    assert pipeline_state_service._book_has_retryable_processing_state(book) is True
+    assert pipeline_state_service._book_has_retryable_processing_state(SimpleNamespace(status="failed", writer_workspace=None)) is True
+
+    aware = datetime.now(UTC)
+    assert pipeline_state_service._parse_chapter_status_updated_at(
+        SimpleNamespace(analysis_state={"updated_at": aware.isoformat()})
+    ) == aware
+    naive = pipeline_state_service._parse_chapter_status_updated_at(
+        SimpleNamespace(analysis_state={"updated_at": "2026-01-01T12:00:00"})
+    )
+    assert naive is not None and naive.tzinfo is UTC
+    assert pipeline_state_service._parse_chapter_status_updated_at(SimpleNamespace(analysis_state={"updated_at": "bad"})) is None
+    assert pipeline_state_service._parse_chapter_status_updated_at(SimpleNamespace(analysis_state=None)) is None
+
+
+@pytest.mark.asyncio
+async def test_enqueue_processing_state_repair_deduplicates_and_queues(monkeypatch):
+    from app.workers.tasks import maintenance_tasks
+
+    book = SimpleNamespace(id=uuid.uuid4(), status="ready")
+    assert await pipeline_state_service.enqueue_processing_state_repair_if_needed(book) is False
+
+    book.status = "processing"
+    async def cache_miss(*_args, **_kwargs):
+        return False
+    monkeypatch.setattr(pipeline_state_service, "cache_set_if_absent", cache_miss)
+    assert await pipeline_state_service.enqueue_processing_state_repair_if_needed(book) is False
+
+    async def cache_claim(*_args, **_kwargs):
+        return True
+    apply_async = Mock()
+    monkeypatch.setattr(pipeline_state_service, "cache_set_if_absent", cache_claim)
+    monkeypatch.setattr(maintenance_tasks.repair_processing_books_task, "apply_async", apply_async)
+    assert await pipeline_state_service.enqueue_processing_state_repair_if_needed(book) is True
+    apply_async.assert_called_once_with(kwargs={"book_id": str(book.id)}, queue="intelligence")
+
+
+@pytest.mark.asyncio
+async def test_retry_book_processing_restarts_failed_extraction_and_invalidates_caches(monkeypatch):
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        status="failed",
+        total_chapters=3,
+        writer_workspace={"processing": {"last_error": "failure", "retry_actions": ["retry_extraction"]}},
+    )
+    db = _RetryDB()
+    apply_async = Mock()
+    dirty = []
+    monkeypatch.setattr(pipeline_state_service.process_book_task, "apply_async", apply_async)
+    monkeypatch.setattr(pipeline_state_service, "update_book_processing_state", lambda *_args, **_kwargs: {"processing": {"status": "processing"}})
+    monkeypatch.setattr(pipeline_state_service, "build_book_processing_payload", lambda _book: {"status": "processing"})
+    monkeypatch.setattr(pipeline_state_service, "mark_book_cache_dirty", lambda value: dirty.append(("book", value)) or _async_none())
+    monkeypatch.setattr(pipeline_state_service, "mark_user_dashboard_cache_dirty", lambda value: dirty.append(("user", value)) or _async_none())
+
+    result = await pipeline_state_service.retry_book_processing(db, book)
+    assert result == {"status": "processing"}
+    assert book.status == "processing"
+    apply_async.assert_called_once_with(args=[str(book.id)], queue="extraction")
+    assert db.commits == 1 and db.refreshed == [book]
+    assert dirty == [("book", str(book.id)), ("user", str(book.user_id))]
+
+
+@pytest.mark.asyncio
+async def test_retry_book_processing_uses_repair_path_and_handles_non_retryable(monkeypatch):
+    no_retry = SimpleNamespace(status="processing", writer_workspace={"processing": {}}, id=uuid.uuid4())
+    assert await pipeline_state_service.retry_book_processing(_RetryDB(), no_retry) is None
+
+    book = SimpleNamespace(
+        id=uuid.uuid4(), user_id=uuid.uuid4(), status="processing", total_chapters=2,
+        writer_workspace={"processing": {"last_error": "stale", "retry_actions": ["wait_for_analysis"]}},
+    )
+    db = _RetryDB()
+    repairs = []
+    async def enqueue(value):
+        repairs.append(value)
+        return True
+    monkeypatch.setattr(pipeline_state_service, "enqueue_processing_state_repair_if_needed", enqueue)
+    monkeypatch.setattr(pipeline_state_service, "build_book_processing_payload", lambda _book: None)
+    monkeypatch.setattr(pipeline_state_service, "mark_book_cache_dirty", lambda *_args: _async_none())
+    monkeypatch.setattr(pipeline_state_service, "mark_user_dashboard_cache_dirty", lambda *_args: _async_none())
+    assert await pipeline_state_service.retry_book_processing(db, book) == {}
+    assert repairs == [book]
+
+
+def test_processing_pipeline_failure_detection_handles_status_and_failed_chapters():
+    assert pipeline_state_service._processing_pipeline_has_blocking_failure({"pipeline": {"analysis": {"status": "failed"}}}) is True
+    assert pipeline_state_service._processing_pipeline_has_blocking_failure({"pipeline": {"extraction": {"failed_chapters": [2]}}}) is True
+    assert pipeline_state_service._processing_pipeline_has_blocking_failure({"pipeline": {"analysis": {"status": "running"}}}) is False

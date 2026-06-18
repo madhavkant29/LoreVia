@@ -792,3 +792,120 @@ async def test_admin_csrf_rejects_missing_bearer_and_csrf_header(client, db):
 
     assert response.status_code == 403
     assert "Invalid admin CSRF token" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_admin_can_hide_remove_and_restore_public_book(client, db):
+    headers, admin_id = await _register_user(
+        client,
+        f"admin-moderation-{uuid.uuid4().hex[:8]}@lorevia.app",
+    )
+    await _grant_admin(client, db, admin_id, headers, scopes=["moderation_admin"])
+    _owner_headers, owner_id = await _register_user(
+        client,
+        f"moderated-owner-{uuid.uuid4().hex[:8]}@lorevia.app",
+    )
+    book = Book(
+        user_id=owner_id,
+        title="Moderated Novel",
+        format="txt",
+        s3_key="public/moderated.txt",
+        status="ready",
+        is_public=True,
+        public_status="published",
+        moderation_status="clean",
+    )
+    db.add(book)
+    await db.commit()
+
+    hidden = await client.post(
+        f"/api/v1/admin/books/{book.id}/hide",
+        headers=headers,
+        json={"reason": "Pending moderation review."},
+    )
+    assert hidden.status_code == 200, hidden.text
+    assert hidden.json()["moderation_status"] == "hidden"
+
+    removed = await client.post(
+        f"/api/v1/admin/books/{book.id}/remove",
+        headers=headers,
+        json={"reason": "Confirmed policy violation."},
+    )
+    assert removed.status_code == 200
+    assert removed.json()["moderation_status"] == "removed"
+
+    restored = await client.post(
+        f"/api/v1/admin/books/{book.id}/restore",
+        headers=headers,
+        json={"reason": "Appeal accepted."},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["moderation_status"] == "clean"
+    await db.refresh(book)
+    assert book.is_public is True
+    assert book.takedown_reason is None
+
+
+@pytest.mark.asyncio
+async def test_owner_admin_manages_access_rate_limits_tiers_and_audit(client, db):
+    headers, owner_id = await _register_user(
+        client,
+        f"admin-owner-{uuid.uuid4().hex[:8]}@lorevia.app",
+    )
+    await _grant_admin(client, db, owner_id, headers)
+    _target_headers, target_id = await _register_user(
+        client,
+        f"admin-target-{uuid.uuid4().hex[:8]}@lorevia.app",
+    )
+
+    granted = await client.post(
+        "/api/v1/admin/access",
+        headers=headers,
+        json={
+            "user_id": str(target_id),
+            "scopes": ["billing_admin"],
+            "is_owner": False,
+            "reason": "Billing support rotation.",
+        },
+    )
+    assert granted.status_code == 200, granted.text
+    principal_id = granted.json()["id"]
+
+    access = await client.get("/api/v1/admin/access", headers=headers)
+    assert access.status_code == 200
+    assert any(item["id"] == principal_id for item in access.json())
+
+    rate_update = await client.put(
+        f"/api/v1/admin/rate-limits/{target_id}",
+        headers=headers,
+        json={
+            "search_per_hour": 50,
+            "summary_per_hour": 20,
+            "chat_per_day": 100,
+            "api_per_minute": 120,
+        },
+    )
+    assert rate_update.status_code == 200, rate_update.text
+    rate_read = await client.get(f"/api/v1/admin/rate-limits/{target_id}", headers=headers)
+    assert rate_read.status_code == 200
+    assert rate_read.json()["override"]["search_per_hour"] == 50
+
+    tier = await client.put(
+        f"/api/v1/admin/users/{target_id}/tier",
+        headers=headers,
+        json={"tier": "architect"},
+    )
+    assert tier.status_code == 200
+    assert tier.json()["tier"] == "architect"
+
+    audit = await client.get("/api/v1/admin/audit", headers=headers)
+    assert audit.status_code == 200
+    assert any(item["action_type"] == "admin_access_granted" for item in audit.json())
+
+    revoked = await client.post(
+        f"/api/v1/admin/access/{principal_id}/revoke",
+        headers=headers,
+        json={"reason": "Rotation completed."},
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"

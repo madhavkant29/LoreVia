@@ -6,9 +6,12 @@ from zipfile import ZipFile
 
 from docx import Document
 import reportlab.platypus
+import pytest
 
-from app.models.book import Book
+from app.models.book import Book, Chapter
 from app.models.character import Character
+from app.models.intelligence import CharacterRelationship, ChapterSummary, PlotThread, WikiEntry
+from app.models.user import User
 from app.utils.export_utils import (
     EXPORT_ATTRIBUTION,
     character_card_docx,
@@ -20,13 +23,16 @@ from app.utils.export_utils import (
     export_filename_base,
     export_font_notice,
     manuscript_epub_compiled,
+    manuscript_epub,
     manuscript_docx,
+    manuscript_pdf,
     manuscript_pdf_compiled,
     manuscript_vault_zip,
     novel_docx,
     novel_epub_compiled,
     novel_pdf_compiled,
     _chapter_body_blocks,
+    build_character_bible_vault_context,
 )
 
 
@@ -561,6 +567,62 @@ def test_manuscript_epub_compiled_declares_selected_font_stack():
     assert "SIL Open Font License" in export_font_notice("eb-garamond")
 
 
+def test_manuscript_pdf_renders_html_and_fallback_chapters_with_metadata():
+    raw = manuscript_pdf(
+        title="Atlas Draft",
+        chapters=[
+            {
+                "number": 1,
+                "title": "Opening",
+                "html": (
+                    "<h1>Part One</h1><p>The &amp; gate opened.</p>"
+                    "<blockquote>A warning.</blockquote><ul><li>First clue</li></ul>"
+                    "<ol><li>Second clue</li></ol><script>alert('no')</script>"
+                ),
+                "text": "ignored",
+            },
+            {"number": 2, "title": "Chapter 2", "html": None, "text": "Fallback line.\n\nLast line."},
+        ],
+        preset="trade_paperback",
+        font_family="eb-garamond",
+    )
+
+    assert raw.startswith(b"%PDF")
+    assert b"Atlas Draft" in raw
+    assert b"LoreVia" in raw
+
+
+def test_manuscript_epub_builds_navigation_styles_and_sanitized_chapters():
+    raw = manuscript_epub(
+        title=" Atlas Draft ",
+        chapters=[
+            {
+                "number": 1,
+                "title": "Opening",
+                "html": "<p>Nora crossed the gate.</p><script>alert('no')</script>",
+                "text": "ignored",
+            },
+            {"number": 2, "title": "", "html": None, "text": "Fallback chapter."},
+        ],
+        preset="large_print",
+        font_family="eb-garamond",
+    )
+
+    with ZipFile(BytesIO(raw)) as archive:
+        names = set(archive.namelist())
+        first = archive.read("EPUB/chapter-1.xhtml").decode("utf-8")
+        second = archive.read("EPUB/chapter-2.xhtml").decode("utf-8")
+        styles = archive.read("EPUB/styles/main.css").decode("utf-8")
+
+    assert "EPUB/nav.xhtml" in names
+    assert "Opening" in first
+    assert "Nora crossed the gate." in first
+    assert "<script" not in first
+    assert "Chapter 2" in second
+    assert "Fallback chapter." in second
+    assert '"EB Garamond", Garamond' in styles
+
+
 def test_novel_docx_includes_cover_toc_preface_chapters_and_end_marker():
     raw = novel_docx(
         title="Atlas",
@@ -814,3 +876,108 @@ def test_manuscript_vault_zip_creates_expected_folders():
     assert any(name.endswith("/notes/story/idea.md") for name in names)
     assert any(name.endswith("/_meta/manuscript-front-matter.md") for name in names)
     assert any(name.endswith("/_meta/FONT-NOTICE.txt") for name in names)
+
+
+@pytest.mark.asyncio
+async def test_character_bible_vault_context_collects_relationships_threads_and_events(db):
+    user = User(
+        email=f"vault-context-{uuid.uuid4().hex[:8]}@lorevia.app",
+        username=f"vaultcontext{uuid.uuid4().hex[:8]}",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Vault Context",
+        format="txt",
+        s3_key="books/vault-context.txt",
+        status="ready",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(
+        book_id=book.id,
+        number=1,
+        title="The Gate",
+        description="Mara reaches the gate.",
+        s3_key="chapters/vault-context/1.txt",
+    )
+    db.add(chapter)
+    await db.flush()
+    mara = Character(
+        book_id=book.id,
+        name="Mara",
+        normalized_name="mara",
+        first_chapter=1,
+        mention_count=4,
+        growth_events=[
+            {
+                "chapter_number": 1,
+                "title": "Mara chooses the city",
+                "description": "She stays to defend it.",
+                "is_major": True,
+                "importance": 9,
+            }
+        ],
+    )
+    jon = Character(
+        book_id=book.id,
+        name="Jon",
+        normalized_name="jon",
+        first_chapter=1,
+        mention_count=3,
+    )
+    db.add_all([mara, jon])
+    await db.flush()
+    db.add_all(
+        [
+            CharacterRelationship(
+                book_id=book.id,
+                character_a_id=mara.id,
+                character_b_id=jon.id,
+                rel_type="allies",
+                description="They defend the gate.",
+                from_chapter=1,
+            ),
+            PlotThread(
+                book_id=book.id,
+                title="The gate siege",
+                status="developing",
+                introduced_at=1,
+                importance=8,
+                character_ids=["Mara"],
+            ),
+            WikiEntry(
+                book_id=book.id,
+                entry_type="location",
+                name="Northreach",
+                description="The frozen capital.",
+                first_mention=1,
+            ),
+            ChapterSummary(
+                chapter_id=chapter.id,
+                mode="short",
+                content="Mara and Jon defend the gate.",
+                key_events=[
+                    {
+                        "event": "The siege begins",
+                        "description": "Enemies surround Northreach.",
+                        "importance": 8,
+                        "involved_characters": ["Mara", "Jon"],
+                    }
+                ],
+            ),
+        ]
+    )
+    await db.commit()
+
+    context = await build_character_bible_vault_context(db, book.id)
+
+    assert context["book"].id == book.id
+    assert len(context["characters"]) == 2
+    assert context["rel_summaries"][str(mara.id)]
+    assert context["thread_summaries"][str(mara.id)]
+    assert any(event["title"] == "The siege begins" for event in context["chapter_events"])
+    assert any(event["title"] == "Mara chooses the city" for event in context["chapter_events"])

@@ -14,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
     
@@ -48,7 +48,7 @@ jobs:
     
     - name: Create Pull Request
       if: steps.verify-changed-files.outputs.changed == 'true'
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@v8
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         commit-message: 'chore: update Python dependencies'
@@ -85,14 +85,14 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
-        node-version: '18'
+        node-version: '22'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
     
@@ -100,7 +100,7 @@ jobs:
       run: |
         cd frontend
         npm update
-        npm audit fix --audit-level=moderate
+        npm audit fix --audit-level=moderate || echo "npm audit fix could not resolve all advisories automatically; continuing."
     
     - name: Check for changes
       id: verify-changed-files
@@ -124,7 +124,7 @@ jobs:
     
     - name: Create Pull Request
       if: steps.verify-changed-files.outputs.changed == 'true'
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@v8
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         commit-message: 'chore: update Node.js dependencies'
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     
     - name: Python Security Audit
       run: |
@@ -177,7 +177,7 @@ jobs:
         npm audit --json > npm-audit-report.json || true
     
     - name: Upload security reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v7
       with:
         name: security-reports
         path: |
@@ -186,7 +186,7 @@ jobs:
     
     - name: Create security issue
       if: failure()
-      uses: actions/github-script@v6
+      uses: actions/github-script@v9
       with:
         script: |
           github.rest.issues.create({

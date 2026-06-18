@@ -202,4 +202,87 @@ describe("intelligence api", () => {
     )
     expect(result.synopsis).toBe("Short synopsis")
   })
+
+  it("builds the remaining intelligence request wrappers and optional payloads", async () => {
+    await intelligenceApi.answer("book-1", "Who holds the key?", 4)
+    await intelligenceApi.getCrossBookIntelligence("book-1")
+    await intelligenceApi.advisorGreeting("book-1")
+    await intelligenceApi.advisorSuggestionsScan("book-1")
+    await intelligenceApi.advisorSuggestionsJobStatus("book-1", "job-1")
+    await intelligenceApi.proseTighten("book-1", "Long line")
+    await intelligenceApi.whatsTheWord("book-1", "a guarded expression", "scowl")
+    await intelligenceApi.continuityReport("book-1", "Passage", "pdf", 3)
+    await intelligenceApi.synopsis("book-1", "none")
+    await intelligenceApi.seriesContinuityCheck("series-1", "gate--book-1", "Passage", 4)
+
+    expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/qa", { question: "Who holds the key?", current_chapter: 4 })
+    expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/cross-book-intelligence")
+    expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/prose-tighten", { text: "Long line", chapter_num: null })
+    expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/whats-the-word", { description: "a guarded expression", previous_word: "scowl" })
+    expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/continuity-report", expect.objectContaining({ responseType: "blob" }))
+    expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/synopsis", { params: { spoiler_level: "none" } })
+    expect(postMock).toHaveBeenCalledWith("/intelligence/series/series-1/continuity-check", { book_id: "book-1", text: "Passage", chapter_num: 4 })
+  })
+
+  it("returns immediate advisor replies and reports failed async tasks", async () => {
+    postMock.mockResolvedValueOnce({ data: { reply: "Immediate", intent: "general", response_type: "standard", retrieved_passages: [] } })
+    await expect(intelligenceApi.advisorMessage("book-1", [], 0)).resolves.toEqual(expect.objectContaining({ reply: "Immediate" }))
+
+    postMock.mockResolvedValueOnce({ data: { task_id: "task-failed", status: "queued" } })
+    getMock.mockResolvedValueOnce({ data: { status: "failed", error: "Provider failed" } })
+    await expect(intelligenceApi.advisorMessage("book-1", [], 0)).rejects.toThrow("Provider failed")
+
+    postMock.mockResolvedValueOnce({ data: { task_id: "series-failed", status: "queued" } })
+    getMock.mockResolvedValueOnce({ data: { status: "failed", error: null } })
+    await expect(intelligenceApi.seriesAdvisorMessage("series-1", [])).rejects.toThrow("Advisor generation failed")
+  })
+
+  it("refreshes a 401 SSE request, sends CSRF, and parses a final buffered event", async () => {
+    document.cookie = "lorevia_csrf=token%201; Path=/"
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"tightened_text":"Tight","rationale":[]}'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, body: null })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: stream })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await intelligenceApi.proseTightenStream("book-1", "Text", 2)
+
+    expect(postMock).toHaveBeenCalledWith("/auth/refresh")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[1].headers["X-CSRF-Token"]).toBe("token 1")
+    expect(result.tightened_text).toBe("Tight")
+  })
+
+  it("reports SSE HTTP, missing-body, event, and incomplete-stream failures", async () => {
+    const encoder = new TextEncoder()
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      text: vi.fn().mockResolvedValue('{"detail":"bad passage"}'),
+    }))
+    await expect(intelligenceApi.answerStream("book-1", "?", 1)).rejects.toThrow("bad passage")
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, body: null }))
+    await expect(intelligenceApi.answerStream("book-1", "?", 1)).rejects.toThrow("unavailable")
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('event: error\ndata: {"error":"stream exploded"}\n\n')); controller.close() } }),
+    }))
+    await expect(intelligenceApi.answerStream("book-1", "?", 1)).rejects.toThrow("stream exploded")
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('event: delta\ndata: {"content":"partial"}\n\n')); controller.close() } }),
+    }))
+    await expect(intelligenceApi.answerStream("book-1", "?", 1)).rejects.toThrow("before a final response")
+  })
 })
