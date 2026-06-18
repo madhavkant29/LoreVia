@@ -386,6 +386,13 @@ test("notifications surface revision digest guidance", async ({ page }) => {
   await expect(page.getByText("Know what your edit breaks before your readers do.")).toBeVisible()
   await expect(page.getByText("2 downstream logic risks need attention first.", { exact: true })).toBeVisible()
   await expect(page.getByRole("link", { name: /open revision command center/i })).toBeVisible()
+  await expect(page.getByRole("button", { name: /toggle notifications, 1 unread/i })).toBeVisible()
+
+  await page.getByRole("button", { name: "Mark read" }).click()
+
+  await expect(page.getByRole("button", { name: "Toggle notifications" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /toggle notifications, 1 unread/i })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Mark read" })).toHaveCount(0)
 })
 
 test("manuscript workspace loads core drafting surfaces", async ({ page }) => {

@@ -70,7 +70,132 @@ describe("ManuscriptPlanWorkspace", () => {
     expect(container.querySelector<HTMLInputElement>('input[aria-label="Book target words"]')?.value).toBe("80000")
     expect(container.querySelector<HTMLInputElement>('input[aria-label="Session target words"]')?.value).toBe("1000")
   })
+
+  it("drives goals, template editing, corkboard movement, readability, and emotional arc actions", async () => {
+    const workspace = buildWorkspace()
+    workspace.corkboard_cards = [
+      { id: "card-1", title: "Open on the gate", lane: "ideas", chapter_number: 2 },
+      { id: "card-2", title: "Pressure the witness", lane: "drafting", chapter_number: null },
+      { id: "card-3", title: "Resolve the key", lane: "revised", chapter_number: 8 },
+    ]
+    workspace.templates?.push({
+      id: "template-2",
+      kind: "custom-kind",
+      title: "Custom Turn",
+      description: "A custom beat.",
+      content: "Turn the scene.",
+    })
+    const onTightenSelectedText = vi.fn()
+    const onWordCountGoalChange = vi.fn()
+    const onSaveGoals = vi.fn()
+    const onApplyTemplate = vi.fn().mockResolvedValue(undefined)
+    const onSaveTemplates = vi.fn().mockResolvedValue(undefined)
+    const onNewCorkboardTitleChange = vi.fn()
+    const onAddCorkboardCard = vi.fn()
+    const onUpdateCardLane = vi.fn()
+
+    container = document.createElement("div")
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root?.render(
+        <ManuscriptPlanWorkspace
+          isDark={false}
+          editorMode="book"
+          writerWorkspace={workspace}
+          tighteningSelection={false}
+          onTightenSelectedText={onTightenSelectedText}
+          chapterWordCount={1250}
+          fullBookWordCount={42000}
+          chapterGoalProgress={50}
+          bookGoalProgress={52}
+          readabilityLoading={false}
+          readability={{ reading_ease: 71.4, average_sentence_length: 13.2, grade_level: 7.1, label: "Easy" }}
+          chapterApproxPages={1}
+          fullBookApproxPages={120}
+          chapterVersionsCount={3}
+          workspaceSaving={false}
+          onWordCountGoalChange={onWordCountGoalChange}
+          onSaveGoals={onSaveGoals}
+          onApplyTemplate={onApplyTemplate}
+          onSaveTemplates={onSaveTemplates}
+          newCorkboardTitle="A new reversal"
+          onNewCorkboardTitleChange={onNewCorkboardTitleChange}
+          onAddCorkboardCard={onAddCorkboardCard}
+          onUpdateCardLane={onUpdateCardLane}
+          emotionalArc={{
+            characters: [{
+              character_id: "char-1",
+              character_name: "Mara",
+              trajectory_score: 2,
+              points: [
+                { chapter_number: 1, label: "Doubt", sentiment: -3 },
+                { chapter_number: 4, label: "Trust", sentiment: 4 },
+              ],
+            }],
+          }}
+        />
+      )
+    })
+
+    expect(container.textContent).toContain("Easy (71)")
+    expect(container.textContent).toContain("Switch to chapter view")
+    expect(container.querySelector('[aria-label="Mara emotional arc"]')).not.toBeNull()
+
+    clickButton(container, "Tighten selected text")
+    clickButton(container, "Save goals")
+    clickButton(container, "Add")
+    clickCardButton(container, "Open on the gate", "Drafting")
+    expect(onTightenSelectedText).toHaveBeenCalled()
+    expect(onSaveGoals).toHaveBeenCalled()
+    expect(onAddCorkboardCard).toHaveBeenCalled()
+    expect(onUpdateCardLane).toHaveBeenCalledWith("card-1", "drafting")
+
+    const goalInput = container.querySelector<HTMLInputElement>('input[aria-label="Chapter target words"]')
+    act(() => changeValue(goalInput, "3200"))
+    expect(onWordCountGoalChange).toHaveBeenCalledWith("chapter_target", 3200)
+
+    act(() => clickButton(container, "Use template", 1))
+    expect(container.textContent).toContain("Use or customize template")
+    const titleInput = Array.from(container.querySelectorAll<HTMLInputElement>('input')).find((input) => input.value === "Custom Turn")
+    act(() => changeValue(titleInput ?? null, "Revised Turn"))
+    const destination = container.querySelector<HTMLInputElement>('input[value="corkboard"]')
+    act(() => destination?.click())
+    await act(async () => {
+      clickButton(container, "Save template changes")
+      await Promise.resolve()
+    })
+    expect(onSaveTemplates).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ id: "template-2", title: "Revised Turn" })]))
+    await act(async () => {
+      clickButton(container, "Use in selected destination")
+      await Promise.resolve()
+    })
+    expect(onApplyTemplate).toHaveBeenCalledWith(expect.objectContaining({ title: "Revised Turn" }), "corkboard")
+
+    act(() => clickButton(container, "New custom template"))
+    expect(container.textContent).toContain("Add scaffold content to preview it here.")
+    act(() => clickButton(container, "Close"))
+    expect(container.textContent).not.toContain("Use or customize template")
+  })
 })
+
+function clickButton(container: HTMLElement, label: string, index = 0) {
+  const button = Array.from(container.querySelectorAll("button")).filter((candidate) => candidate.textContent?.trim() === label)[index]
+  if (!button) throw new Error(`Missing button: ${label}`)
+  button.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+}
+
+function clickCardButton(container: HTMLElement, cardTitle: string, label: string) {
+  const card = Array.from(container.querySelectorAll("article")).find((candidate) => candidate.textContent?.includes(cardTitle))
+  if (!card) throw new Error(`Missing card: ${cardTitle}`)
+  clickButton(card, label)
+}
+
+function changeValue(input: HTMLInputElement | null, value: string) {
+  if (!input) throw new Error("Missing input")
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value)
+  input.dispatchEvent(new Event("input", { bubbles: true }))
+}
 
 function buildWorkspace(): WriterWorkspace {
   return {

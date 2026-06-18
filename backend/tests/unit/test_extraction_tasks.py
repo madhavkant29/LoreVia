@@ -205,3 +205,89 @@ def test_process_book_task_uses_shared_worker_runner(monkeypatch):
 
     assert result == {"ran": True}
     assert calls == ["coroutine"]
+
+
+def test_process_chapter_task_successfully_processes_and_sets_reprocess_guard(monkeypatch):
+    book_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=book_id,
+        hidden_at=None,
+        work_type="novel",
+        total_chapters=1,
+        status="processing",
+    )
+    chapter = SimpleNamespace(title="Chapter 1", s3_key=f"chapters/{book_id}/1.txt")
+    fake_session = _FakeSession(book, chapter)
+    processed: list[dict] = []
+    redis_sets: list[tuple] = []
+
+    class Redis:
+        async def exists(self, _key):
+            return 0
+
+        async def set(self, *args, **kwargs):
+            redis_sets.append((args, kwargs))
+            return True
+
+    async def get_redis():
+        return Redis()
+
+    def run(coro):
+        return asyncio.run(coro)
+
+    async def visible(*_args, **_kwargs):
+        return False
+
+    async def payload(*_args, **_kwargs):
+        return {"number": 1, "title": "Chapter 1", "text": "Chapter text."}
+
+    async def process(_db, _book, chapter_payload, **kwargs):
+        processed.append({"payload": chapter_payload, **kwargs})
+
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", run)
+    monkeypatch.setattr(extraction_tasks, "is_book_hidden", visible)
+    monkeypatch.setattr(extraction_tasks, "load_processing_chapter_payload", payload)
+    monkeypatch.setattr(extraction_tasks, "extract_queue_wait_ms", lambda _headers: 23)
+    monkeypatch.setattr(extraction_tasks, "_process_chapter", process)
+    monkeypatch.setattr("app.core.redis.get_redis", get_redis)
+    monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
+    monkeypatch.setitem(sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: fake_session))
+    monkeypatch.setitem(sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel))
+
+    result = extraction_tasks.process_chapter_task.run(str(book_id), 1, manual_reprocess=True)
+
+    assert result is None
+    assert processed[0]["payload"]["text"] == "Chapter text."
+    assert processed[0]["queue_wait_ms"] == 23
+    assert processed[0]["manual_reprocess"] is True
+    assert redis_sets[0][0][0] == f"chapter_reprocess:{book_id}:1"
+
+
+def test_repair_chapter_payload_task_covers_success_missing_and_hidden_paths(monkeypatch):
+    book_id = uuid.uuid4()
+    book = SimpleNamespace(id=book_id)
+    chapter = SimpleNamespace(number=2)
+    session = _FakeSession(book, chapter)
+    repaired: list[object] = []
+
+    def run(coro):
+        return asyncio.run(coro)
+
+    async def visible(*_args, **_kwargs):
+        return False
+
+    async def repair(db, *, book, chapter):
+        repaired.append((db, book, chapter))
+
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", run)
+    monkeypatch.setattr(extraction_tasks, "is_book_hidden", visible)
+    monkeypatch.setattr(extraction_tasks, "repair_chapter_payload_from_source", repair)
+    monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
+    monkeypatch.setitem(sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: session))
+    monkeypatch.setitem(sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel))
+
+    assert extraction_tasks.repair_chapter_payload_task.run(str(book_id), 2) is None
+    assert repaired == [(session, book, chapter)]
+
+    session._book = None
+    assert extraction_tasks.repair_chapter_payload_task.run(str(book_id), 2) is None

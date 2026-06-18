@@ -8,6 +8,7 @@ import pytest
 from app.models.intelligence import AdvisorJob
 from app.models.user import User
 from app.core.security import hash_password
+from app.services import advisor_jobs_service as jobs
 from app.services.advisor_jobs_service import mark_advisor_job_failed, purge_expired_advisor_jobs
 
 
@@ -72,3 +73,66 @@ async def test_mark_advisor_job_failed_redacts_sensitive_error_detail(db):
     refreshed = await db.get(AdvisorJob, job.id)
     assert refreshed is not None
     assert refreshed.error_detail == "openai_api_key=[REDACTED]"
+
+
+class _FakeJobDB:
+    def __init__(self, stored=None):
+        self.stored = stored
+        self.added = []
+        self.commits = 0
+        self.refreshed = []
+
+    def add(self, value):
+        self.added.append(value)
+
+    async def commit(self):
+        self.commits += 1
+
+    async def refresh(self, value):
+        self.refreshed.append(value)
+
+    async def get(self, model, item_id):
+        assert model is AdvisorJob
+        return self.stored if self.stored is not None and self.stored.id == item_id else None
+
+
+@pytest.mark.asyncio
+async def test_create_get_serialize_and_transition_advisor_job(monkeypatch):
+    monkeypatch.setattr(jobs.settings, "CELERY_RESULT_EXPIRES_SECONDS", 10)
+    db = _FakeJobDB()
+    user_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    job = await jobs.create_advisor_job(
+        db,
+        scope=jobs.ADVISOR_SCOPE_BOOK,
+        user_id=user_id,
+        book_id=book_id,
+    )
+    assert job.user_id == user_id and job.book_id == book_id
+    assert job.scope == "book" and job.status == "queued"
+    assert 299 <= (job.expires_at - datetime.now(UTC)).total_seconds() <= 300
+    assert db.added == [job] and db.commits == 1 and db.refreshed == [job]
+
+    db.stored = job
+    assert await jobs.get_advisor_job(db, job_id=job.id) is job
+    assert jobs.serialize_advisor_job(job) == {
+        "task_id": str(job.id), "status": "queued", "result": None, "error": None
+    }
+
+    await jobs.mark_advisor_job_running(db, job_id=job.id)
+    assert job.status == "running" and job.error_code is None and job.error_detail is None
+
+    payload = {"reply": "The gate should open later."}
+    await jobs.mark_advisor_job_complete(db, job_id=job.id, result_payload=payload)
+    assert job.status == "complete" and job.result_json == payload
+
+
+@pytest.mark.asyncio
+async def test_advisor_job_transitions_return_none_when_job_is_missing():
+    db = _FakeJobDB()
+    job_id = uuid.uuid4()
+    assert await jobs.get_advisor_job(db, job_id=job_id) is None
+    assert await jobs.mark_advisor_job_running(db, job_id=job_id) is None
+    assert await jobs.mark_advisor_job_complete(db, job_id=job_id, result_payload={}) is None
+    assert await jobs.mark_advisor_job_failed(db, job_id=job_id, error_code="missing") is None
+    assert db.commits == 0

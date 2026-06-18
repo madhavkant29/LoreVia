@@ -7,6 +7,8 @@ from app.services.auth_service import (
     build_device_trial,
     ensure_device_trial_available,
     link_device_to_user_if_allowed,
+    authenticate_user,
+    register_user,
 )
 
 
@@ -18,6 +20,9 @@ class _FakeResult:
         return self._value
 
     def scalar_one_or_none(self):
+        return self._value
+
+    def scalar(self):
         return self._value
 
 
@@ -32,6 +37,13 @@ class _FakeSession:
 
     def add(self, value):
         self.added.append(value)
+
+    async def commit(self):
+        return None
+
+    async def refresh(self, value):
+        if value.id is None:
+            value.id = uuid.uuid4()
 
 
 @pytest.mark.asyncio
@@ -107,3 +119,46 @@ def test_build_device_trial_hashes_device_id():
 
     assert trial.device_id_hash
     assert trial.device_id_hash != "550e8400-e29b-41d4-a716-446655440000"
+
+
+@pytest.mark.asyncio
+async def test_register_user_hashes_password_stores_session_and_returns_tokens(monkeypatch):
+    session = _FakeSession()
+    stored = []
+    monkeypatch.setattr("app.services.auth_service.hash_password", lambda value: f"hash:{value}")
+    monkeypatch.setattr("app.services.auth_service.current_token_version", lambda _user: 7)
+    monkeypatch.setattr("app.services.auth_service.create_access_token", lambda user_id, version: f"access:{user_id}:{version}")
+    monkeypatch.setattr("app.services.auth_service.create_refresh_token", lambda user_id, version, sid: f"refresh:{user_id}:{version}:{sid}")
+
+    async def store(user_id, session_id, ttl):
+        stored.append((user_id, session_id, ttl))
+
+    monkeypatch.setattr("app.services.auth_service.store_refresh_session", store)
+    user, access, refresh = await register_user(session, "writer@example.test", "SafePass123!")
+
+    assert user.email == "writer@example.test" and user.password_hash == "hash:SafePass123!"
+    assert access == f"access:{user.id}:7"
+    assert refresh.startswith(f"refresh:{user.id}:7:")
+    assert stored[0][0] == str(user.id)
+    assert stored[0][2] > 0
+
+
+@pytest.mark.asyncio
+async def test_authenticate_user_accepts_valid_password_and_rejects_other_cases(monkeypatch):
+    user = type("UserRow", (), {"password_hash": "stored"})()
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda password, hashed: password == "correct" and hashed == "stored")
+    assert await authenticate_user(_FakeSession(user), "writer@example.test", "correct") is user
+    assert await authenticate_user(_FakeSession(user), "writer@example.test", "wrong") is None
+    assert await authenticate_user(_FakeSession(None), "missing@example.test", "correct") is None
+
+
+@pytest.mark.asyncio
+async def test_non_strict_device_link_silently_skips_account_limit():
+    session = _FakeSession(None, 99)
+    await link_device_to_user_if_allowed(
+        session,
+        uuid.uuid4(),
+        "550e8400-e29b-41d4-a716-446655440000",
+        strict=False,
+    )
+    assert session.added == []

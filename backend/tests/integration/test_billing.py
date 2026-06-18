@@ -1,5 +1,6 @@
 import pytest
 import uuid
+from sqlalchemy import select
 
 from app.models.user import AdminPrincipal, Subscription
 from app.models.user import User
@@ -312,3 +313,88 @@ async def test_billing_confirmation_rejects_public_lookup_without_token(client, 
     response = await client.get("/api/v1/billing/confirmation?transaction_id=txn_blocked_123")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_checkout_creates_pending_subscription_and_portal_session(client, db, auth_headers, monkeypatch):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+    monkeypatch.setattr(
+        "app.api.v1.routes.billing.create_billing_confirmation_token",
+        lambda transaction_id: f"confirm-{transaction_id}",
+    )
+
+    async def create_checkout(user_id_value, email, plan, *, existing_customer_id=None):
+        assert user_id_value == str(user_id)
+        assert plan == "author_monthly"
+        assert existing_customer_id is None
+        return "https://checkout.example/session", "ctm_123", "txn_123"
+
+    monkeypatch.setattr("app.api.v1.routes.billing.create_checkout_url", create_checkout)
+    checkout = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"plan": "author_monthly"},
+    )
+    assert checkout.status_code == 200
+    assert checkout.json()["billing_enabled"] is True
+    assert "confirm-txn_123" in checkout.json()["checkout_url"]
+
+    subscription = await db.scalar(
+        select(Subscription).where(Subscription.user_id == user_id)
+    )
+    assert subscription is not None
+    assert subscription.status == "pending"
+    assert subscription.paddle_customer_id == "ctm_123"
+
+    async def create_portal(customer_id, subscription_ids):
+        assert customer_id == "ctm_123"
+        assert subscription_ids is None
+        return "https://portal.example/customer"
+
+    monkeypatch.setattr("app.api.v1.routes.billing.create_portal_url", create_portal)
+    portal = await client.post("/api/v1/billing/portal", headers=auth_headers)
+    assert portal.status_code == 200
+    assert portal.json() == {
+        "portal_url": "https://portal.example/customer",
+        "billing_enabled": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_checkout_and_portal_cover_disabled_invalid_and_provider_failures(client, auth_headers, monkeypatch):
+    invalid = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"plan": "free"},
+    )
+    assert invalid.status_code == 422
+
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: False)
+    disabled = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"plan": "author_annual"},
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["billing_enabled"] is False
+    portal_disabled = await client.post("/api/v1/billing/portal", headers=auth_headers)
+    assert portal_disabled.status_code == 200
+    assert portal_disabled.json()["billing_enabled"] is False
+
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+
+    async def fail_checkout(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr("app.api.v1.routes.billing.create_checkout_url", fail_checkout)
+    failed = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"plan": "architect_monthly"},
+    )
+    assert failed.status_code == 502

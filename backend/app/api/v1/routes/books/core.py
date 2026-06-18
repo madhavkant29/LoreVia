@@ -455,7 +455,7 @@ async def update_book_forum_metadata(
     touch_public_book_updated_at(book)
     await db.commit()
     await db.refresh(book)
-    await mark_book_cache_dirty(book.id)
+    await mark_book_cache_dirty(str(book.id))
     await mark_user_dashboard_cache_dirty(current_user.id)
     return await book_out(db, book, current_user.id)
 
@@ -892,7 +892,7 @@ async def get_reader_bootstrap(
     writer_workspace: WriterWorkspaceOut | None = None
     revision_intelligence: RevisionIntelligenceOut | None = None
 
-    if book.workspace_shell == "reader":
+    if book.mode == "reader":
         notes = await list_book_notes(db, book, collaborator=collaborator)
         if collaborator is None:
             try:

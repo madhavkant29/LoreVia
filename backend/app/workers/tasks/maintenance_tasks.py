@@ -50,7 +50,7 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
                         await db.execute(
                             select(Book)
                             .where(Book.status == "processing")
-                            .order_by(Book.updated_at.asc().nullsfirst(), Book.created_at.asc())
+                            .order_by(Book.created_at.asc(), Book.id.asc())
                             .limit(limit)
                         )
                     ).scalars().all()

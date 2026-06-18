@@ -13,8 +13,10 @@ const meMock = vi.hoisted(() => vi.fn())
 const listBooksMock = vi.hoisted(() => vi.fn())
 const updateForumMetadataMock = vi.hoisted(() => vi.fn())
 const listRankedBetaNovelsMock = vi.hoisted(() => vi.fn())
+const listForumPostsMock = vi.hoisted(() => vi.fn())
 const listMyForumPostsMock = vi.hoisted(() => vi.fn())
 const createForumPostMock = vi.hoisted(() => vi.fn())
+const eligibleBooksMock = vi.hoisted(() => vi.fn(() => []))
 
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
@@ -34,7 +36,7 @@ vi.mock("@/lib/billing/plans", () => ({
 
 vi.mock("@/lib/utils/publicForum", () => ({
   formatReputationScore: (score: number) => String(score),
-  getEligibleForumAuthorBooks: () => [],
+  getEligibleForumAuthorBooks: (...args: unknown[]) => eligibleBooksMock(...args),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
@@ -53,6 +55,7 @@ vi.mock("@/lib/api/books", () => ({
 vi.mock("@/lib/api/public", () => ({
   publicApi: {
     listRankedBetaNovels: (...args: unknown[]) => listRankedBetaNovelsMock(...args),
+    listForumPosts: (...args: unknown[]) => listForumPostsMock(...args),
     listMyForumPosts: (...args: unknown[]) => listMyForumPostsMock(...args),
     createForumPost: (...args: unknown[]) => createForumPostMock(...args),
   },
@@ -102,8 +105,10 @@ describe("PublicForumPageClient", () => {
     listBooksMock.mockReset()
     updateForumMetadataMock.mockReset()
     listRankedBetaNovelsMock.mockReset()
+    listForumPostsMock.mockReset()
     listMyForumPostsMock.mockReset()
     createForumPostMock.mockReset()
+    eligibleBooksMock.mockReset().mockReturnValue([])
     document.body.innerHTML = ""
   })
 
@@ -250,4 +255,101 @@ describe("PublicForumPageClient", () => {
     })
     unmount()
   })
+
+  it("switches to the general feed and renders general discussion results", async () => {
+    meMock.mockResolvedValue(null)
+    listRankedBetaNovelsMock.mockResolvedValue(emptyFeed("most_popular", "monthly"))
+    listForumPostsMock.mockResolvedValue({
+      ...emptyFeed("most_popular", "monthly"),
+      items: [buildForumPost({ id: "general-1", thread_type: "general", headline: "How do you revise openings?", allow_contact_requests: false })],
+      total: 1,
+    })
+    const { container, unmount } = renderWithQuery(<PublicForumPageClient initialData={emptyFeed("most_popular", "monthly")} />)
+    await flushUi()
+
+    await clickButton(container, "General")
+    await flushUi()
+    expect(listForumPostsMock).toHaveBeenCalledWith(undefined, 1, 20, "general")
+    expect(container.textContent).toContain("General writing discussions.")
+    expect(container.textContent).toContain("How do you revise openings?")
+    expect(container.textContent).toContain("General threads are for broader craft and community discussion.")
+    unmount()
+  })
+
+  it("loads signed-in viewer context, validates, and creates a general thread", async () => {
+    meMock.mockResolvedValue({ id: "user-1", username: "mira", tier: "author" })
+    listBooksMock.mockResolvedValue([{ id: "book-1", title: "Atlas", mode: "author" }])
+    listMyForumPostsMock.mockResolvedValue([])
+    eligibleBooksMock.mockReturnValue([{ id: "book-1", title: "Atlas", genre: "Fantasy", public_description: "A gate story." }])
+    listRankedBetaNovelsMock.mockResolvedValue(emptyFeed("most_popular", "monthly"))
+    listForumPostsMock.mockResolvedValue(emptyFeed("most_popular", "monthly"))
+    createForumPostMock.mockResolvedValue({ id: "created-general" })
+    const { container, unmount } = renderWithQuery(<PublicForumPageClient initialData={emptyFeed("most_popular", "monthly")} />)
+    await flushUi()
+    await flushUi()
+    expect(container.textContent).toContain("Open a new thread")
+    expect(container.textContent).toContain("@mira")
+
+    await clickButton(container, "General discussion")
+    await clickButton(container, "Open general thread")
+    expect(container.textContent).toContain("Add a headline and body")
+
+    const headline = container.querySelector('[aria-label="General discussion headline"]') as HTMLInputElement
+    const body = container.querySelector('[aria-label="Discussion body"]') as HTMLTextAreaElement
+    await act(async () => {
+      setFieldValue(headline, "Opening chapters")
+      setFieldValue(body, "How do you decide whether an opening chapter starts too slowly?")
+      await Promise.resolve()
+    })
+    await clickButton(container, "Open general thread")
+    await flushUi()
+    expect(createForumPostMock).toHaveBeenCalledWith(expect.objectContaining({
+      threadType: "general",
+      bookId: null,
+      headline: "Opening chapters",
+      allowContactRequests: false,
+    }))
+    expect(pushMock).toHaveBeenCalledWith("/public/forum/created-general")
+    unmount()
+  })
 })
+
+function emptyFeed(rankingKey: string, timeWindow: string) {
+  return { items: [], total: 0, page: 1, page_size: 20, has_more: false, ranking_key: rankingKey, time_window: timeWindow, surface: "beta_novels" }
+}
+
+function buildForumPost(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "post-1", thread_type: "novel", book_id: "book-1", author_user_id: "user-1", author_username: "writer",
+    author_reputation_score: 14, author_trust_level: "Trusted", title: "Atlas", author: "A. Writer", genre: "Fantasy",
+    description: "A ranked thread.", work_type: "novel", headline: "Need readers", body: "A sufficiently detailed forum body.",
+    desired_beta_reader_count: 3, allow_contact_requests: true, status: "open", viewer_interest_status: null, reaction: null,
+    interest_count: 2, comment_count: 4, like_count: 5, dislike_count: 1,
+    rating_summary: { average_rating: 4.2, rating_count: 5, positive_rating_count: 4, neutral_rating_count: 1, negative_rating_count: 0 },
+    discoverability_score: 80, ranking: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    ...overrides,
+  }
+}
+
+async function flushUi() {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+async function clickButton(container: HTMLElement, label: string) {
+  const button = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label)
+  expect(button, `button ${label}`).toBeTruthy()
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    await Promise.resolve()
+  })
+}
+
+function setFieldValue(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(field, value)
+  field.dispatchEvent(new Event("input", { bubbles: true }))
+}

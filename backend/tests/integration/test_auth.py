@@ -1429,3 +1429,130 @@ async def test_manuscript_import_updates_today_word_count(client, db, auth_heade
     refreshed = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert refreshed.status_code == 200
     assert refreshed.json()["today_word_count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_session_uses_valid_access_cookie_then_rotates_refresh_cookie(client, db, auth_headers, monkeypatch):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user = await db.get(User, uuid.UUID(me.json()["id"]))
+    user.email_verified_at = datetime.now(UTC)
+    await db.commit()
+
+    access_token = create_access_token(str(user.id), version=user.token_version)
+    access_response = await client.post(
+        "/api/v1/auth/session",
+        headers={"Cookie": f"lorevia_access_token={access_token}"},
+    )
+    assert access_response.status_code == 200
+    assert access_response.json()["id"] == str(user.id)
+
+    session_id = uuid.uuid4().hex
+    refresh_token = create_refresh_token(
+        str(user.id),
+        version=user.token_version,
+        session_id=session_id,
+    )
+
+    async def consume_refresh(user_id, sid):
+        assert user_id == str(user.id)
+        assert sid == session_id
+        return True
+
+    monkeypatch.setattr("app.api.v1.routes.auth.consume_refresh_session", consume_refresh)
+    refresh_response = await client.post(
+        "/api/v1/auth/session",
+        headers=cookie_auth_headers(f"lorevia_refresh_token={refresh_token}"),
+    )
+    assert refresh_response.status_code == 200
+    assert refresh_response.json()["id"] == str(user.id)
+    assert "lorevia_access_token=" in refresh_response.headers.get("set-cookie", "")
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_creates_user_and_links_existing_email(client, db, monkeypatch):
+    supabase_id = uuid.uuid4()
+
+    class VerificationResponse:
+        status_code = 200
+        text = "ok"
+
+        @staticmethod
+        def json():
+            return {"id": str(supabase_id), "email": "oauth-user@example.com"}
+
+    class FakeHttpClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url, headers):
+            assert url.endswith("/auth/v1/user")
+            assert headers["Authorization"] == "Bearer oauth-token"
+            return VerificationResponse()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeHttpClient)
+
+    created = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={
+            "token": "oauth-token",
+            "accepted_terms": True,
+            "device_id": f"oauth-device-{uuid.uuid4().hex[:16]}",
+        },
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["email"] == "oauth-user@example.com"
+    created_user = await db.get(User, uuid.UUID(created.json()["id"]))
+    assert created_user.supabase_auth_id == supabase_id
+    assert created_user.email_verified_at is not None
+
+    second = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-existing-device-123456"},
+    )
+    assert second.status_code == 200
+    assert second.json()["id"] == created.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_supabase_oauth_rejects_missing_config_and_bad_provider_token(client, monkeypatch):
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", None, raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", None, raising=False)
+    missing = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "token", "accepted_terms": False, "device_id": "oauth-error-device-123456"},
+    )
+    assert missing.status_code == 503
+
+    class BadResponse:
+        status_code = 401
+        text = "invalid"
+
+    class FakeHttpClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, *_args, **_kwargs):
+            return BadResponse()
+
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeHttpClient)
+    invalid = await client.post(
+        "/api/v1/auth/oauth/supabase",
+        json={"token": "bad-token", "accepted_terms": False, "device_id": "oauth-error-device-123456"},
+    )
+    assert invalid.status_code == 401
