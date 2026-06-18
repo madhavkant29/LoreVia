@@ -83,8 +83,8 @@ describe("previously uncovered runtime pages", () => {
     publicServerMock.getChapter.mockRejectedValue(new Error("missing"))
     expect(await generateMetadata({ params: Promise.resolve({ bookId: "missing", chapterId: "4" }) })).toEqual({})
     await render(await PublicChapterPage({ params: Promise.resolve({ bookId: "missing", chapterId: "4" }) }))
-    expect(container?.textContent).toContain("Public chapter client empty")
-    expect(container?.querySelectorAll("script")).toHaveLength(0)
+    expect((container as HTMLDivElement | null)?.textContent).toContain("Public chapter client empty")
+    expect((container as HTMLDivElement | null)?.querySelectorAll("script")).toHaveLength(0)
   })
 
   it("renders pricing metadata, structured data, nonce, and plan surface", async () => {

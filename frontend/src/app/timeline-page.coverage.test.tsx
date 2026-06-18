@@ -236,8 +236,8 @@ describe("timeline runtime page", () => {
     expect(text()).toContain("Building your timeline...")
     expect(container?.querySelector("main")?.className).toContain("text-slate-100")
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
 
@@ -255,8 +255,8 @@ describe("timeline runtime page", () => {
     await renderPage()
     expect(text()).toContain("No major-event data yet")
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
 

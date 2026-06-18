@@ -74,9 +74,9 @@ describe("ManuscriptPlanWorkspace", () => {
   it("drives goals, template editing, corkboard movement, readability, and emotional arc actions", async () => {
     const workspace = buildWorkspace()
     workspace.corkboard_cards = [
-      { id: "card-1", title: "Open on the gate", lane: "ideas", chapter_number: 2 },
-      { id: "card-2", title: "Pressure the witness", lane: "drafting", chapter_number: null },
-      { id: "card-3", title: "Resolve the key", lane: "revised", chapter_number: 8 },
+      { id: "card-1", title: "Open on the gate", description: "Opening beat", status: "planned", lane: "ideas", chapter_number: 2 },
+      { id: "card-2", title: "Pressure the witness", description: "Middle beat", status: "drafting", lane: "drafting", chapter_number: null },
+      { id: "card-3", title: "Resolve the key", description: "Closing beat", status: "revised", lane: "revised", chapter_number: 8 },
     ]
     workspace.templates?.push({
       id: "template-2",
@@ -110,7 +110,7 @@ describe("ManuscriptPlanWorkspace", () => {
           chapterGoalProgress={50}
           bookGoalProgress={52}
           readabilityLoading={false}
-          readability={{ reading_ease: 71.4, average_sentence_length: 13.2, grade_level: 7.1, label: "Easy" }}
+          readability={{ reading_ease: 71.4, average_sentence_length: 13.2, grade_level: 7.1, label: "Easy", words: 1250, sentences: 95, paragraphs: 18 }}
           chapterApproxPages={1}
           fullBookApproxPages={120}
           chapterVersionsCount={3}
@@ -124,19 +124,23 @@ describe("ManuscriptPlanWorkspace", () => {
           onAddCorkboardCard={onAddCorkboardCard}
           onUpdateCardLane={onUpdateCardLane}
           emotionalArc={{
+            focus_character_count: 1,
+            latest_turning_points: [],
             characters: [{
               character_id: "char-1",
               character_name: "Mara",
               trajectory_score: 2,
               points: [
-                { chapter_number: 1, label: "Doubt", sentiment: -3 },
-                { chapter_number: 4, label: "Trust", sentiment: 4 },
+                { chapter_number: 1, label: "Doubt", sentiment: -3, impact_score: 2, growth_direction: "negative" },
+                { chapter_number: 4, label: "Trust", sentiment: 4, impact_score: 4, growth_direction: "positive" },
               ],
             }],
           }}
         />
       )
     })
+
+    const rendered = container
 
     expect(container.textContent).toContain("Easy (71)")
     expect(container.textContent).toContain("Switch to chapter view")
@@ -155,26 +159,26 @@ describe("ManuscriptPlanWorkspace", () => {
     act(() => changeValue(goalInput, "3200"))
     expect(onWordCountGoalChange).toHaveBeenCalledWith("chapter_target", 3200)
 
-    act(() => clickButton(container, "Use template", 1))
+    act(() => clickButton(rendered, "Use template", 1))
     expect(container.textContent).toContain("Use or customize template")
     const titleInput = Array.from(container.querySelectorAll<HTMLInputElement>('input')).find((input) => input.value === "Custom Turn")
     act(() => changeValue(titleInput ?? null, "Revised Turn"))
     const destination = container.querySelector<HTMLInputElement>('input[value="corkboard"]')
     act(() => destination?.click())
     await act(async () => {
-      clickButton(container, "Save template changes")
+      clickButton(rendered, "Save template changes")
       await Promise.resolve()
     })
     expect(onSaveTemplates).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ id: "template-2", title: "Revised Turn" })]))
     await act(async () => {
-      clickButton(container, "Use in selected destination")
+      clickButton(rendered, "Use in selected destination")
       await Promise.resolve()
     })
     expect(onApplyTemplate).toHaveBeenCalledWith(expect.objectContaining({ title: "Revised Turn" }), "corkboard")
 
-    act(() => clickButton(container, "New custom template"))
+    act(() => clickButton(rendered, "New custom template"))
     expect(container.textContent).toContain("Add scaffold content to preview it here.")
-    act(() => clickButton(container, "Close"))
+    act(() => clickButton(rendered, "Close"))
     expect(container.textContent).not.toContain("Use or customize template")
   })
 })

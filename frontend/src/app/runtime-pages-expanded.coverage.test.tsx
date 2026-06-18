@@ -540,16 +540,16 @@ describe("expanded runtime page coverage", () => {
     expect(text()).toContain("Books finished")
     expect(text()).toContain("LLM tokens")
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
     useQueryMock.mockReturnValueOnce({ data: null, isLoading: true, isError: false, refetch: queryRefetchMock })
     await renderPage(<StatsPage />)
     expect(text()).toContain("Loading dashboard")
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
     useQueryMock.mockReturnValueOnce({ data: null, isLoading: false, isError: false, refetch: queryRefetchMock })

@@ -48,7 +48,7 @@ describe("ChapterText", () => {
       textContent: "Mara crossed the bridge with Theo.\n\nThe lantern hummed.",
       htmlContent: null,
       media: [],
-      characters: [{ name: "Mara", aliases: ["Keeper"] }],
+      characters: [{ id: "char-1", name: "Mara", aliases: ["Keeper"], role: "mc", first_chapter: 1, personality_tags: [] }],
       onTap: vi.fn(),
       onQuoteSelect: vi.fn(),
       theme: "light",

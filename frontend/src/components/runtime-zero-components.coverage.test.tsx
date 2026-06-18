@@ -304,7 +304,7 @@ describe("zero-coverage runtime components", () => {
         selectedQuote="The lantern hummed when Mara lied."
         chapterNumber={3}
         chapterTitle="The Lock"
-        characters={[{ name: "Mara Vale" }, { name: "Theo" }]}
+        characters={[{ id: "char-1", name: "Mara Vale", aliases: [], role: "mc", first_chapter: 1, personality_tags: [] }, { id: "char-2", name: "Theo", aliases: [], role: "supporting", first_chapter: 1, personality_tags: [] }]}
       />
     )
 
@@ -331,7 +331,7 @@ describe("zero-coverage runtime components", () => {
     container = null
     await renderElement(
       <ContextPanel
-        result={{ type: "search", results: [{ chapter_num: 4, text: "Theo finds the spare key." }] }}
+        result={{ type: "search", results: [{ chapter_num: 4, chapter_title: "The Lock", text: "Theo finds the spare key.", summary: "Theo finds a key.", relevance: 0.9 }] }}
         loading={false}
         onClose={onClose}
         theme="light"
@@ -343,8 +343,8 @@ describe("zero-coverage runtime components", () => {
     )
     expect(text()).toContain("Theo finds the spare key")
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
     await renderElement(
@@ -367,7 +367,7 @@ describe("zero-coverage runtime components", () => {
     const onDeleted = vi.fn()
     await renderElement(
       <CharacterCard
-        character={characterFixture}
+        character={{ ...characterFixture, book_id: "book-1" } as never}
         bookId="book-1"
         editable
         onUpdated={onUpdated}

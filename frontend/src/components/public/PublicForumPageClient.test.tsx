@@ -5,6 +5,8 @@ import type { ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRoot } from "react-dom/client"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import type { Book } from "@/types/book"
+import type { PublicForumPost } from "@/types/public"
 
 import { PublicForumPageClient } from "./PublicForumPageClient"
 
@@ -16,7 +18,7 @@ const listRankedBetaNovelsMock = vi.hoisted(() => vi.fn())
 const listForumPostsMock = vi.hoisted(() => vi.fn())
 const listMyForumPostsMock = vi.hoisted(() => vi.fn())
 const createForumPostMock = vi.hoisted(() => vi.fn())
-const eligibleBooksMock = vi.hoisted(() => vi.fn(() => []))
+const eligibleBooksMock = vi.hoisted(() => vi.fn((_books: Book[], _posts: PublicForumPost[]) => [] as Book[]))
 
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
@@ -36,7 +38,7 @@ vi.mock("@/lib/billing/plans", () => ({
 
 vi.mock("@/lib/utils/publicForum", () => ({
   formatReputationScore: (score: number) => String(score),
-  getEligibleForumAuthorBooks: (...args: unknown[]) => eligibleBooksMock(...args),
+  getEligibleForumAuthorBooks: (books: Book[], posts: PublicForumPost[]) => eligibleBooksMock(books, posts),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
@@ -280,7 +282,7 @@ describe("PublicForumPageClient", () => {
     meMock.mockResolvedValue({ id: "user-1", username: "mira", tier: "author" })
     listBooksMock.mockResolvedValue([{ id: "book-1", title: "Atlas", mode: "author" }])
     listMyForumPostsMock.mockResolvedValue([])
-    eligibleBooksMock.mockReturnValue([{ id: "book-1", title: "Atlas", genre: "Fantasy", public_description: "A gate story." }])
+    eligibleBooksMock.mockReturnValue([{ id: "book-1", title: "Atlas", genre: "Fantasy", public_description: "A gate story." }] as unknown as Book[])
     listRankedBetaNovelsMock.mockResolvedValue(emptyFeed("most_popular", "monthly"))
     listForumPostsMock.mockResolvedValue(emptyFeed("most_popular", "monthly"))
     createForumPostMock.mockResolvedValue({ id: "created-general" })

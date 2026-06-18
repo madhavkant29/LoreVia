@@ -359,6 +359,6 @@ describe("AdminPage", () => {
     adminApiMock.session.mockRejectedValueOnce(new Error("not found"))
     await renderPage(<AdminPage />)
     await waitForText("404")
-    expect(container?.textContent).toContain("Not found.")
+    expect((container as HTMLDivElement | null)?.textContent).toContain("Not found.")
   })
 })

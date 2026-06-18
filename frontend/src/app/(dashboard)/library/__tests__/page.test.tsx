@@ -215,8 +215,6 @@ function setValue(field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElem
 
 function buildBook(overrides: Partial<Book> & Pick<Book, "id" | "title">): Book {
   return {
-    id: overrides.id,
-    title: overrides.title,
     author: "A. Writer",
     genre: "Fantasy",
     format: "pdf",
@@ -343,7 +341,6 @@ describe("LibraryPage shared-book filtering", () => {
         processing: {
           status: "processing",
           stage: "extracting",
-          label: "Processing",
           progress_pct: 34,
           retry_available: true,
           updated_at: "2026-06-06T00:00:00Z",

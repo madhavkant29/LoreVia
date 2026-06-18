@@ -144,7 +144,7 @@ describe("runtime editor components", () => {
         bookId="book-1"
         chapterNumber={4}
         editText="Mara breaks the gate rule."
-        editPassages={[{ chapter_num: 2, chapter_title: "The Rule", excerpt: "The rule was sworn." }]}
+        editPassages={[{ chapter_num: 2, chapter_title: "The Rule", excerpt: "The rule was sworn.", relevance: 0.9 }]}
         editResult={{
           overall_verdict: "Strong scene with continuity risks.",
           thematic_fit: { score: "weak", notes: "Theme needs a clearer echo." },
@@ -343,7 +343,7 @@ function plotThreads() {
   ]
 }
 
-function overlayProps(handlers: Record<string, vi.Mock>) {
+function overlayProps(handlers: Record<string, ReturnType<typeof vi.fn>>) {
   return {
     isDark: false,
     sceneEditorOpen: true,
@@ -388,5 +388,5 @@ function overlayProps(handlers: Record<string, vi.Mock>) {
     exporting: null,
     workspaceSaving: false,
     ...handlers,
-  } as never
+  } as React.ComponentProps<typeof ManuscriptOverlayDialogs>
 }

@@ -33,13 +33,14 @@ let queryClient: QueryClient | null = null
 async function renderElement(element: ReactElement) {
   container = document.createElement("div")
   document.body.appendChild(container)
-  queryClient = new QueryClient({
+  const client = new QueryClient({
     defaultOptions: { queries: { gcTime: 0, retry: false } },
   })
+  queryClient = client
   root = createRoot(container)
 
   await act(async () => {
-    root?.render(<QueryClientProvider client={queryClient}>{element}</QueryClientProvider>)
+    root?.render(<QueryClientProvider client={client}>{element}</QueryClientProvider>)
     await flush()
   })
 }

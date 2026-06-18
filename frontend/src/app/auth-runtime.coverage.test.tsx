@@ -144,7 +144,8 @@ describe("auth and root runtime pages", () => {
     const config = robots()
 
     expect(config.host).toContain("lorevia")
-    expect(config.rules[0]?.disallow).toContain("/auth/")
+    const rules = Array.isArray(config.rules) ? config.rules : [config.rules]
+    expect(rules[0]?.disallow).toContain("/auth/")
   })
 
   it("renders the global error recovery surface", async () => {
@@ -157,10 +158,10 @@ describe("auth and root runtime pages", () => {
   })
 
   it.each([
-    ["login", <LoginPage />, "Sign in"],
-    ["register", <RegisterPage />, "Create account"],
-    ["forgot password", <ForgotPasswordPage />, "Reset your password"],
-    ["reset password", <ResetPasswordPage />, "Choose a new password"],
+    ["login", <LoginPage key="login" />, "Sign in"],
+    ["register", <RegisterPage key="register" />, "Create account"],
+    ["forgot password", <ForgotPasswordPage key="forgot-password" />, "Reset your password"],
+    ["reset password", <ResetPasswordPage key="reset-password" />, "Choose a new password"],
   ])("renders the %s page", async (_name, element, expectedText) => {
     await renderElement(element)
 
@@ -264,7 +265,7 @@ describe("auth and root runtime pages", () => {
     await renderElement(<LoginPage />)
     await flushUi()
     expect(authState.logout).toHaveBeenCalled()
-    expect(container?.textContent).toContain("Sign in")
+    expect((container as HTMLDivElement | null)?.textContent).toContain("Sign in")
   })
 
   it("validates registration fields, generates a password, and creates an account", async () => {

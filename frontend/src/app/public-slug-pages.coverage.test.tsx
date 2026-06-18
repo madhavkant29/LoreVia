@@ -102,19 +102,19 @@ describe("public slug runtime pages", () => {
     await renderElement(await DemoPage({ params: Promise.resolve({ slug: demo.slug }) }))
     expect(bodyText()).toContain(demo.title)
     expect(bodyText()).toContain(demo.featuredInsight)
-    expect(container?.querySelector("main")?.getAttribute("data-active-section")).toBe("demo")
-    expect(container?.querySelector(`[data-testid="demo-jsonld-${demo.slug}"]`)).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector("main")?.getAttribute("data-active-section")).toBe("demo")
+    expect((container as HTMLDivElement | null)?.querySelector(`[data-testid="demo-jsonld-${demo.slug}"]`)).toBeTruthy()
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
 
     await renderElement(await AnswerPage({ params: Promise.resolve({ slug: answer.slug }) }))
     expect(bodyText()).toContain(answer.question)
     expect(bodyText()).toContain(answer.shortAnswer)
-    expect(container?.querySelector("main")?.getAttribute("data-active-section")).toBe("answers")
-    expect(container?.querySelector(`[data-testid="answers-jsonld-${answer.slug}"]`)).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector("main")?.getAttribute("data-active-section")).toBe("answers")
+    expect((container as HTMLDivElement | null)?.querySelector(`[data-testid="answers-jsonld-${answer.slug}"]`)).toBeTruthy()
 
     const blogMetadata = await generateBlogMetadata({ params: Promise.resolve({ slug: article.slug }) })
     const demoMetadata = await generateDemoMetadata({ params: Promise.resolve({ slug: demo.slug }) })

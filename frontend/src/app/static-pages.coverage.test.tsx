@@ -94,20 +94,20 @@ afterEach(() => {
 
 describe("static public pages", () => {
   it.each([
-    ["home", <HomePage />, "LoreVia"],
-    ["answers", <AnswersPage />, "Answers"],
-    ["blog", <BlogPage />, "Blog"],
-    ["compare", <CompareIndexPage />, "Compare"],
-    ["compliance", <CompliancePage />, "Compliance"],
-    ["contact", <ContactPage />, "Contact"],
-    ["copyright", <CopyrightPage />, "Copyright"],
-    ["demo", <DemoIndexPage />, "Demo"],
-    ["eula", <EulaPage />, "End User License"],
-    ["font notice", <FontNoticePage />, "Font"],
-    ["refund", <RefundPage />, "Refund"],
-    ["status", <StatusPage />, "Status"],
-    ["terms", <TermsPage />, "Terms"],
-    ["privacy", <PrivacyPage />, "Privacy"],
+    ["home", <HomePage key="home" />, "LoreVia"],
+    ["answers", <AnswersPage key="answers" />, "Answers"],
+    ["blog", <BlogPage key="blog" />, "Blog"],
+    ["compare", <CompareIndexPage key="compare" />, "Compare"],
+    ["compliance", <CompliancePage key="compliance" />, "Compliance"],
+    ["contact", <ContactPage key="contact" />, "Contact"],
+    ["copyright", <CopyrightPage key="copyright" />, "Copyright"],
+    ["demo", <DemoIndexPage key="demo" />, "Demo"],
+    ["eula", <EulaPage key="eula" />, "End User License"],
+    ["font notice", <FontNoticePage key="font-notice" />, "Font"],
+    ["refund", <RefundPage key="refund" />, "Refund"],
+    ["status", <StatusPage key="status" />, "Status"],
+    ["terms", <TermsPage key="terms" />, "Terms"],
+    ["privacy", <PrivacyPage key="privacy" />, "Privacy"],
   ])("renders the %s page", async (_name, element, expectedText) => {
     await renderElement(element)
 

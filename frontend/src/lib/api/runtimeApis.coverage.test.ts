@@ -75,11 +75,11 @@ describe("runtime api wrappers", () => {
   })
 
   it("builds billing checkout, confirmation, and portal requests", async () => {
-    await billingApi.checkout("pro")
+    await billingApi.checkout("author_monthly")
     await billingApi.confirmation("txn-1", "confirm-1")
     await billingApi.portal()
 
-    expect(postMock).toHaveBeenNthCalledWith(1, "/billing/checkout", { plan: "pro" })
+    expect(postMock).toHaveBeenNthCalledWith(1, "/billing/checkout", { plan: "author_monthly" })
     expect(getMock).toHaveBeenCalledWith("/billing/confirmation", {
       params: { transaction_id: "txn-1", confirmation_token: "confirm-1" },
     })

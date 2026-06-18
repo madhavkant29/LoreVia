@@ -612,14 +612,15 @@ function renderWithQueryClient(node: ReactNode) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
-  queryClient = new QueryClient({
+  const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
     },
   })
+  queryClient = client
 
   act(() => {
-    root?.render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>)
+    root?.render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
   })
 }
 
@@ -709,9 +710,10 @@ function buildChapterList(): ChapterListResponse {
   return {
     book_id: "book-1",
     total_chapters: 2,
+    read_upto: 0,
     chapters: [
-      { number: 1, title: "The Door", processed: true, word_count: 5 },
-      { number: 2, title: "The Key", processed: true, word_count: 7 },
+      { number: 1, title: "The Door", processed: true, read: true, word_count: 5 },
+      { number: 2, title: "The Key", processed: true, read: false, word_count: 7 },
     ],
   } as ChapterListResponse
 }
@@ -720,6 +722,8 @@ function buildChapter(): ChapterData {
   return {
     chapter_number: 2,
     chapter_title: "The Key",
+    text_url: null,
+    characters: [],
     text_content: "The opening chamber glowed with a patient amber light.",
     html_content: "<p>The opening chamber glowed with a patient amber light.</p>",
     content_version: 3,
@@ -732,24 +736,24 @@ function buildChapter(): ChapterData {
         sort_order: 1,
       },
     ],
-  } as ChapterData
+  } as unknown as ChapterData
 }
 
 function buildBootstrap(book: Book, workspace: WriterWorkspace): ManuscriptBootstrapPayload {
   return {
     book,
-    characters: [buildRuntimeCharacter()],
+    characters: [buildRuntimeCharacter() as ManuscriptBootstrapPayload["characters"][number]],
     writer_workspace: workspace,
     emotional_arc: null,
-    synopsis: { synopsis: "Mara opens a dangerous gate.", focus_points: ["gate", "key"] },
-    workspace_tree: buildWorkspaceTree(),
-    annotations: [{ id: "annotation-1", chapter_number: 2, quote: "amber light", comment: "Check color.", category: "continuity", status: "open", visibility: "shared", can_edit: true }],
+    synopsis: { synopsis: "Mara opens a dangerous gate.", focus_points: ["gate", "key"] } as ManuscriptBootstrapPayload["synopsis"],
+    workspace_tree: buildWorkspaceTree() as unknown as ManuscriptBootstrapPayload["workspace_tree"],
+    annotations: [{ id: "annotation-1", chapter_number: 2, quote: "amber light", comment: "Check color.", category: "continuity", status: "open", visibility: "shared", can_edit: true }] as ManuscriptBootstrapPayload["annotations"],
     notes: [
       { id: "note-1", title: "Chapter note", body: "Remember the key.", chapter_number: 2, updated_at: "2026-01-01T00:00:00Z" },
       { id: "note-2", title: "Book note", body: "Overall theme.", chapter_number: null, updated_at: "2026-01-01T00:00:00Z" },
-    ],
-    vault_notes: [{ id: "vault-1", title: "Gate lore", content: "The gate needs a brass key.", path: "World/Gate.md", updated_at: "2026-01-01T00:00:00Z" }],
-    chapter_versions: [{ id: "version-1", name: "Draft one", created_at: "2026-01-01T00:00:00Z" }],
+    ] as ManuscriptBootstrapPayload["notes"],
+    vault_notes: [{ id: "vault-1", title: "Gate lore", content: "The gate needs a brass key.", path: "World/Gate.md", updated_at: "2026-01-01T00:00:00Z" }] as unknown as ManuscriptBootstrapPayload["vault_notes"],
+    chapter_versions: [{ id: "version-1", name: "Draft one", created_at: "2026-01-01T00:00:00Z" }] as unknown as ManuscriptBootstrapPayload["chapter_versions"],
     prewriting_check: null,
   }
 }
@@ -817,7 +821,8 @@ function buildWorkspace(): WriterWorkspace {
         lane: "setup",
         title: "Open the gate",
         description: "Establish the locked gate and the protagonist's choice.",
-        chapter: 1,
+        chapter_number: 1,
+        status: "planned",
       },
     ],
     templates: [
@@ -884,5 +889,5 @@ function buildWorkspace(): WriterWorkspace {
     },
     processing: null,
     index_format: "number",
-  } as WriterWorkspace
+  } as unknown as WriterWorkspace
 }

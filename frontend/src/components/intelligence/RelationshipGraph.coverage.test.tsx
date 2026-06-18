@@ -307,12 +307,13 @@ async function renderGraph(element: ReactElement) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
-  queryClient = new QueryClient({
+  const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
+  queryClient = client
 
   await act(async () => {
-    root?.render(<QueryClientProvider client={queryClient}>{element}</QueryClientProvider>)
+    root?.render(<QueryClientProvider client={client}>{element}</QueryClientProvider>)
     await Promise.resolve()
     await Promise.resolve()
   })

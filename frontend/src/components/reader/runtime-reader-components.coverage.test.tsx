@@ -404,8 +404,8 @@ describe("reader runtime components", () => {
       <GraphViewer
         graph={{
           nodes: [
-            { id: "Story Vault/Characters/Mara.md", path: "Story Vault/Characters/Mara.md", title: "Mara", link_count: 3 },
-            { id: "Story Vault/Plot/Key.md", path: "Story Vault/Plot/Key.md", title: "Key", link_count: 1 },
+            { id: "Story Vault/Characters/Mara.md", path: "Story Vault/Characters/Mara.md", title: "Mara", folder: "Characters", link_count: 3 },
+            { id: "Story Vault/Plot/Key.md", path: "Story Vault/Plot/Key.md", title: "Key", folder: "Plot", link_count: 1 },
           ],
           edges: [
             { source: "Story Vault/Characters/Mara.md", target: "Story Vault/Plot/Key.md", label: "links" },

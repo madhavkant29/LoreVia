@@ -265,8 +265,8 @@ describe("runtime UI components", () => {
     await renderElement(<ReaderView bookId="book-1" chapterNum={2} />)
     expect(text()).toContain("Loading chapter")
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
     readerState.value = {
@@ -284,8 +284,8 @@ describe("runtime UI components", () => {
     expect(replaceMock).toHaveBeenCalledWith("/library")
     expect(text()).toContain("Chapter unavailable")
 
-    root?.unmount()
-    container?.remove()
+    ;(root as Root | null)?.unmount()
+    ;(container as HTMLDivElement | null)?.remove()
     root = null
     container = null
     readerState.value = makeLoadedReaderState()

@@ -158,7 +158,7 @@ describe("manuscript annotation utilities", () => {
 
   it("clears highlights and handles unavailable browser APIs", () => {
     const highlights = { delete: vi.fn(), set: vi.fn() }
-    clearAnnotationHighlights(highlights)
+    clearAnnotationHighlights(highlights as never)
     expect(highlights.delete).toHaveBeenCalledTimes(3)
 
     expect(applyAnnotationHighlights(null, [], null)).toEqual(new Map())

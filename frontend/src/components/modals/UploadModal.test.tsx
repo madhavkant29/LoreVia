@@ -139,21 +139,21 @@ describe("UploadModal", () => {
 
     useQueryMock.mockReturnValue({ data: undefined, refetch: vi.fn() })
     uploadMock.mockResolvedValue({ book_id: "book-99" })
-    vi.mocked(booksApi.previewUpload).mockResolvedValue(importPreviewFixture())
-    vi.mocked(booksApi.importManuscript).mockResolvedValue(importResponseFixture())
-    vi.mocked(booksApi.createEmptyProject).mockResolvedValue({ book_id: "empty-1" })
-    vi.mocked(booksApi.delete).mockResolvedValue({})
+    vi.mocked(booksApi.previewUpload).mockResolvedValue(importPreviewFixture() as never)
+    vi.mocked(booksApi.importManuscript).mockResolvedValue(importResponseFixture() as never)
+    vi.mocked(booksApi.createEmptyProject).mockResolvedValue({ book_id: "empty-1" } as never)
+    vi.mocked(booksApi.delete).mockResolvedValue({} as never)
     vi.mocked(intelligenceApi.editorialReview).mockResolvedValue({
       review: editorialReviewFixture(),
       retrieved_passages: [{ chapter_num: 2, chapter_title: "Gate", excerpt: "The oath appears." }],
-    })
+    } as never)
     vi.mocked(intelligenceApi.advisorSuggestions).mockResolvedValue({
       suggestions: [{ id: "suggestion-1", title: "Clarify oath", description: "Add setup.", chapter_ref: 2 }],
-    })
-    vi.mocked(intelligenceApi.synopsis).mockResolvedValue({ synopsis: "Spoiler-light synopsis.", focus_points: ["oath"] })
+    } as never)
+    vi.mocked(intelligenceApi.synopsis).mockResolvedValue({ synopsis: "Spoiler-light synopsis.", focus_points: ["oath"] } as never)
     vi.mocked(intelligenceApi.continuityReport).mockResolvedValue(new Blob(["report"], { type: "application/pdf" }))
-    vi.mocked(readerApi.getChapter).mockResolvedValue({ text_content: "Recovered chapter text." })
-    vi.mocked(readerApi.getPlotThreads).mockResolvedValue([{ id: "thread-1", title: "Oath thread", status: "developing", introduced_at: 1 }])
+    vi.mocked(readerApi.getChapter).mockResolvedValue({ text_content: "Recovered chapter text." } as never)
+    vi.mocked(readerApi.getPlotThreads).mockResolvedValue([{ id: "thread-1", title: "Oath thread", status: "developing", introduced_at: 1 }] as never)
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:report") })
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() })
     Object.defineProperty(HTMLAnchorElement.prototype, "click", { configurable: true, value: vi.fn() })
