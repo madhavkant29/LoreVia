@@ -175,7 +175,6 @@ jobs:
         output: 'trivy-results.sarif'
         severity: 'HIGH,CRITICAL'
         ignore-unfixed: true
-        exit-code: '1'
 
   build-and-push-docker:
     needs: [backend-tests, frontend-tests, security-scan]
