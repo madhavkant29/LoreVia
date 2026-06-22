@@ -54,7 +54,9 @@ async def test_complete_with_fallback_forwards_usage_db(monkeypatch):
     async def _fake_create_tracked_chat_completion(**kwargs):
         captured.update(kwargs)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="Tracked with current session."))]
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content="Tracked with current session."))
+            ]
         )
 
     usage_db = object()

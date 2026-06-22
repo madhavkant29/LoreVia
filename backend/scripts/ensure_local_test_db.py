@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -13,10 +13,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.config import settings
-from app.utils.migration_utils import is_safe_test_database_url, redact_database_target
 from app.utils.logging import get_logger
+from app.utils.migration_utils import is_safe_test_database_url, redact_database_target
 
 log = get_logger("lorevia.ensure_local_test_db")
+
 
 def _raw_test_database_url() -> str | None:
     return os.getenv("TEST_DATABASE_URL")

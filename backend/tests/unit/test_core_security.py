@@ -1,6 +1,11 @@
 import jwt
 
-from app.core.security import create_access_token, create_asset_token, create_refresh_token, decode_token
+from app.core.security import (
+    create_access_token,
+    create_asset_token,
+    create_refresh_token,
+    decode_token,
+)
 
 
 def test_create_access_token_sets_type_and_version_claims():

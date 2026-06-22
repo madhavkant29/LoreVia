@@ -27,7 +27,9 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], str]:
 
 @pytest.mark.asyncio
 async def test_upload_endpoint_accepts_explicit_screenplay_work_type_for_text_script(client, db):
-    headers, _ = await _register_user(client, f"screenplay-explicit-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, _ = await _register_user(
+        client, f"screenplay-explicit-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -48,12 +50,16 @@ async def test_upload_endpoint_accepts_explicit_screenplay_work_type_for_text_sc
 
 @pytest.mark.asyncio
 async def test_upload_endpoint_infers_screenplay_from_fountain_extension(client, db):
-    headers, _ = await _register_user(client, f"screenplay-inferred-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, _ = await _register_user(
+        client, f"screenplay-inferred-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
 
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        files={"file": ("pilot.fountain", b"INT. ROOM - DAY\n\nMAYA\nHello there.\n", "text/plain")},
+        files={
+            "file": ("pilot.fountain", b"INT. ROOM - DAY\n\nMAYA\nHello there.\n", "text/plain")
+        },
         data={"title": "Pilot"},
     )
 

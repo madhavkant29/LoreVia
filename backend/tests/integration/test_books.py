@@ -2,8 +2,8 @@ import time
 import uuid
 from io import BytesIO
 
-from docx import Document
 import pytest
+from docx import Document
 from sqlalchemy import select
 
 from app.models.book import Book, Chapter, ChapterMedia
@@ -29,8 +29,17 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 
 @pytest.mark.asyncio
 async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypatch):
-    headers, user_id = await _register_user(client, f"import-async-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Async Import", format="txt", s3_key="async.txt", status="ready", mode="author")
+    headers, user_id = await _register_user(
+        client, f"import-async-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Async Import",
+        format="txt",
+        s3_key="async.txt",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.commit()
 
@@ -47,7 +56,9 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
         await _db.flush()
 
     monkeypatch.setattr("app.api.v1.routes.books._process_chapter", _fake_process_chapter)
-    monkeypatch.setattr("app.api.v1.routes.books.extract_novel_scene_candidates", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "app.api.v1.routes.books.extract_novel_scene_candidates", lambda **_kwargs: []
+    )
 
     async def _noop(*_args, **_kwargs):
         return None
@@ -61,11 +72,13 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
         def __init__(self, task_id: str):
             self.id = task_id
 
-    def _fake_apply_async(*args, **kwargs):
-        dispatched.append({"args": args, "kwargs": kwargs})
+    async def _fake_enqueue(_db, **kwargs):
+        dispatched.append(kwargs)
         return _Result(f"analysis-{len(dispatched)}")
 
-    monkeypatch.setattr("app.api.v1.routes.books.imports.analyse_chapter_task.apply_async", _fake_apply_async)
+    monkeypatch.setattr(
+        "app.api.v1.routes.books.imports.enqueue_analysis_execution", _fake_enqueue
+    )
 
     started_at = time.perf_counter()
     response = await client.post(
@@ -88,13 +101,12 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
     assert payload["analysis_dispatched"] == 1
     assert payload["analysis_tasks"][0]["task_id"] == "analysis-1"
     assert len(dispatched) == 1
-    assert dispatched[0]["kwargs"] == {
-        "args": [payload["analysis_tasks"][0]["chapter_id"], str(book.id)],
-        "kwargs": {"is_reprocessing": False},
-        "queue": "analysis",
-    }
+    assert str(dispatched[0]["chapter_id"]) == payload["analysis_tasks"][0]["chapter_id"]
+    assert dispatched[0]["book_id"] == book.id
 
-    chapter = (await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))).scalar_one()
+    chapter = (
+        await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))
+    ).scalar_one()
     assert chapter.analysis_state["status"] == "queued"
 
 
@@ -115,7 +127,7 @@ async def test_editor_inserted_image_reloads_and_exports_with_novel_docx(client,
 
     for target in (
         "app.core.storage",
-        "app.utils.book_utils",
+        "app.utils.books.manuscript",
         "app.utils.reader_utils",
         "app.services.chapter_recovery_service",
         "app.api.v1.routes.reader.core",
@@ -123,12 +135,18 @@ async def test_editor_inserted_image_reloads_and_exports_with_novel_docx(client,
         monkeypatch.setattr(f"{target}.download_book", _download_book, raising=False)
     monkeypatch.setattr("app.core.storage.upload_text", _upload_text, raising=False)
     monkeypatch.setattr("app.core.storage.upload_binary", _upload_binary, raising=False)
-    monkeypatch.setattr("app.utils.book_utils.upload_text", _upload_text, raising=False)
-    monkeypatch.setattr("app.utils.book_utils.upload_binary", _upload_binary, raising=False)
-    monkeypatch.setattr("app.services.chapter_recovery_service.get_presigned_url", lambda _key: None, raising=False)
-    monkeypatch.setattr("app.utils.reader_utils.get_presigned_url", lambda _key: None, raising=False)
+    monkeypatch.setattr("app.utils.books.manuscript.upload_text", _upload_text, raising=False)
+    monkeypatch.setattr("app.utils.books.manuscript.upload_binary", _upload_binary, raising=False)
+    monkeypatch.setattr(
+        "app.services.chapter_recovery_service.get_presigned_url", lambda _key: None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.reader_utils.get_presigned_url", lambda _key: None, raising=False
+    )
 
-    headers, user_id = await _register_user(client, f"editor-image-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"editor-image-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     book = Book(
         user_id=user_id,
         title="Image Persistence",
@@ -165,8 +183,12 @@ async def test_editor_inserted_image_reloads_and_exports_with_novel_docx(client,
     )
 
     assert response.status_code == 200
-    chapter = (await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))).scalar_one()
-    media = (await db.execute(select(ChapterMedia).where(ChapterMedia.chapter_id == chapter.id))).scalar_one()
+    chapter = (
+        await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))
+    ).scalar_one()
+    media = (
+        await db.execute(select(ChapterMedia).where(ChapterMedia.chapter_id == chapter.id))
+    ).scalar_one()
     assert media.marker.startswith("[[IMAGE:")
     assert media.content_type == "image/png"
 

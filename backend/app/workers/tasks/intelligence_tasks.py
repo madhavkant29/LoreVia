@@ -1,13 +1,19 @@
 """Phase 3 intelligence tasks."""
+
 import uuid
 
 from app.utils.logging.errors import public_error_message
-from app.workers.celery_app import celery_app
 from app.utils.worker_async_utils import run_worker_coro
+from app.workers.celery_app import celery_app
 
 
-@celery_app.task(bind=True, name="intelligence_tasks.generate_wiki",
-                 queue="intelligence", max_retries=2, ignore_result=True)
+@celery_app.task(
+    bind=True,
+    name="intelligence_tasks.generate_wiki",
+    queue="intelligence",
+    max_retries=2,
+    ignore_result=True,
+)
 def generate_wiki_task(self, book_id: str):
     """Generate auto-wiki for all chapters of a book. Phase 3."""
 
@@ -31,8 +37,13 @@ def generate_wiki_task(self, book_id: str):
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True, name="intelligence_tasks.generate_advisor_reply",
-                 queue="intelligence", max_retries=2, ignore_result=True)
+@celery_app.task(
+    bind=True,
+    name="intelligence_tasks.generate_advisor_reply",
+    queue="intelligence",
+    max_retries=2,
+    ignore_result=True,
+)
 def generate_advisor_reply_task(
     self,
     *,
@@ -80,6 +91,7 @@ def generate_advisor_reply_task(
         raise
     except Exception as exc:
         if self.request.retries >= self.max_retries:
+
             async def _mark_failed():
                 from app.core.database import AsyncSessionLocal
                 from app.services.advisor_jobs_service import mark_advisor_job_failed
@@ -96,8 +108,13 @@ def generate_advisor_reply_task(
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True, name="intelligence_tasks.generate_series_advisor_reply",
-                 queue="intelligence", max_retries=2, ignore_result=True)
+@celery_app.task(
+    bind=True,
+    name="intelligence_tasks.generate_series_advisor_reply",
+    queue="intelligence",
+    max_retries=2,
+    ignore_result=True,
+)
 def generate_series_advisor_reply_task(
     self,
     *,
@@ -143,6 +160,7 @@ def generate_series_advisor_reply_task(
         raise
     except Exception as exc:
         if self.request.retries >= self.max_retries:
+
             async def _mark_failed():
                 from app.core.database import AsyncSessionLocal
                 from app.services.advisor_jobs_service import mark_advisor_job_failed
@@ -159,8 +177,13 @@ def generate_series_advisor_reply_task(
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True, name="intelligence_tasks.generate_advisor_suggestions",
-                 queue="intelligence", max_retries=2, ignore_result=True)
+@celery_app.task(
+    bind=True,
+    name="intelligence_tasks.generate_advisor_suggestions",
+    queue="intelligence",
+    max_retries=2,
+    ignore_result=True,
+)
 def generate_advisor_suggestions_task(
     self,
     *,
@@ -212,8 +235,10 @@ def generate_advisor_suggestions_task(
                 relationship_count=payload["meta"]["relationship_count"],
                 world_element_count=payload["meta"]["world_element_count"],
             )
-            from app.models.intelligence import AdvisorSuggestionJob
             from sqlalchemy import update as sa_update
+
+            from app.models.intelligence import AdvisorSuggestionJob
+
             await db.execute(
                 sa_update(AdvisorSuggestionJob)
                 .where(AdvisorSuggestionJob.id == job_uuid)
@@ -230,9 +255,12 @@ def generate_advisor_suggestions_task(
         raise
     except Exception as exc:
         if self.request.retries >= self.max_retries:
+
             async def _mark_failed():
                 from app.core.database import AsyncSessionLocal
-                from app.services.advisor_suggestion_jobs_service import mark_advisor_suggestion_job_failed
+                from app.services.advisor_suggestion_jobs_service import (
+                    mark_advisor_suggestion_job_failed,
+                )
 
                 async with AsyncSessionLocal() as db:
                     await mark_advisor_suggestion_job_failed(

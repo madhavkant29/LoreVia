@@ -1,5 +1,5 @@
-from datetime import UTC, datetime, timedelta
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -29,7 +29,9 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 
 @pytest.mark.asyncio
 async def test_free_users_only_get_short_summaries_after_trial(client, db):
-    headers, user_id = await _register_user(client, f"pricing-free-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"pricing-free-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     user = await db.get(User, user_id)
     assert user is not None
     user.created_at = datetime.now(UTC) - timedelta(days=20)
@@ -84,12 +86,17 @@ async def test_free_users_only_get_short_summaries_after_trial(client, db):
 
     assert short_response.status_code == 200
     assert detailed_response.status_code == 403
-    assert detailed_response.json()["detail"] == "Upgrade to Author to unlock detailed and key-point summaries."
+    assert (
+        detailed_response.json()["detail"]
+        == "Upgrade to Author to unlock detailed and key-point summaries."
+    )
 
 
 @pytest.mark.asyncio
 async def test_reader_users_keep_detailed_summary_access_after_trial_window(client, db):
-    headers, user_id = await _register_user(client, f"pricing-reader-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"pricing-reader-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     user = await db.get(User, user_id)
     assert user is not None
     user.created_at = datetime.now(UTC) - timedelta(days=20)

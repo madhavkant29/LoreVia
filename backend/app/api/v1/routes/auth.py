@@ -1,8 +1,8 @@
 import logging
 import secrets
-from typing import Optional
 import uuid
 from datetime import UTC, datetime
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
@@ -21,9 +21,9 @@ from app.core.config import is_local_mode, settings
 from app.core.database import get_db
 from app.core.redis import (
     begin_password_reset_cooldown,
-    consume_refresh_session,
     consume_email_verification_token,
     consume_password_reset_token,
+    consume_refresh_session,
     mark_user_dashboard_cache_dirty,
     store_email_verification_token,
     store_password_reset_token,
@@ -55,10 +55,9 @@ from app.schemas.auth import (
     VerifyEmailBody,
     VerifyEmailResendBody,
 )
-from app.services.privacy_service import build_user_data_export, request_account_deletion
 from app.services.auth_service import (
-    device_account_limit_message,
     DeviceTrialLimitError,
+    device_account_limit_message,
     link_device_to_user_if_allowed,
 )
 from app.services.email_service import (
@@ -66,18 +65,18 @@ from app.services.email_service import (
     deliver_verification_email,
     send_onboarding_email,
 )
+from app.services.privacy_service import build_user_data_export, request_account_deletion
 from app.services.trial_email_service import schedule_trial_email_events
 from app.utils.auth_cookies import (
-    get_device_cookie,
     REFRESH_TOKEN_COOKIE_NAME,
     clear_auth_cookies,
     get_auth_token,
+    get_device_cookie,
     resolve_device_id,
     resolve_device_id_optional,
     set_auth_cookies,
     set_device_cookie,
 )
-from app.utils.cookie_utils import auth_cookie_secure
 from app.utils.auth_csrf import enforce_cookie_csrf
 from app.utils.auth_utils import (
     current_token_version,
@@ -88,6 +87,7 @@ from app.utils.auth_utils import (
     password_is_valid,
 )
 from app.utils.billing_utils import build_tier_presentation
+from app.utils.cookie_utils import auth_cookie_secure
 from app.utils.logging.errors import public_error_message
 from app.utils.privacy_utils import user_is_deleted
 from app.utils.user_utils import (
@@ -144,7 +144,9 @@ def _user_response_with_cookies(
 async def _build_user_out(user: User, db: AsyncSession | None = None) -> UserOut:
     tier = build_tier_presentation(user)
     created_at = user.created_at or datetime.now(UTC)
-    activity_dates = await get_login_activity_dates_from_table(db, str(user.id)) if db is not None else []
+    activity_dates = (
+        await get_login_activity_dates_from_table(db, str(user.id)) if db is not None else []
+    )
     return UserOut(
         id=user.id,
         email=user.email,
@@ -235,13 +237,17 @@ async def register(
         raise HTTPException(400, str(exc))
     username = (body.username or "").strip()
     if not body.accepted_terms:
-        raise HTTPException(400, "You must accept the Terms, Compliance notice, and EULA to create an account.")
+        raise HTTPException(
+            400, "You must accept the Terms, Compliance notice, and EULA to create an account."
+        )
     _validate_password(body.password, email)
     if (await db.execute(select(User).where(func.lower(User.email) == email))).scalar():
         raise HTTPException(400, "Email already registered")
     if not username:
         raise HTTPException(400, "Username is required")
-    if (await db.execute(select(User).where(func.lower(User.username) == username.lower()))).scalar():
+    if (
+        await db.execute(select(User).where(func.lower(User.username) == username.lower()))
+    ).scalar():
         raise HTTPException(400, "Username already taken")
     user = User(
         email=email,
@@ -306,7 +312,9 @@ async def login(
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(user, db)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+    return _user_response_with_cookies(
+        response, user_out, access_token, refresh_token, device_id=device_id
+    )
 
 
 @router.post("/oauth/supabase", response_model=UserOut)
@@ -348,7 +356,9 @@ async def oauth_supabase(
             "Supabase OAuth verification failed",
             extra={
                 "status_code": verification_response.status_code,
-                "response_text": verification_response.text[:500] if verification_response.text else None,
+                "response_text": verification_response.text[:500]
+                if verification_response.text
+                else None,
             },
         )
         raise HTTPException(401, f"Invalid sign-in token ({verification_response.status_code})")
@@ -371,8 +381,14 @@ async def oauth_supabase(
             await db.execute(select(User).where(User.supabase_auth_id == supabase_auth_id))
         ).scalar_one_or_none()
         if not existing:
-            existing = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar()
-        if existing and existing.supabase_auth_id is not None and existing.supabase_auth_id != supabase_auth_id:
+            existing = (
+                await db.execute(select(User).where(func.lower(User.email) == email))
+            ).scalar()
+        if (
+            existing
+            and existing.supabase_auth_id is not None
+            and existing.supabase_auth_id != supabase_auth_id
+        ):
             log.warning(
                 "supabase_identity_mismatch",
                 extra={
@@ -403,23 +419,27 @@ async def oauth_supabase(
                     )
                     db.add(existing)
                     await db.flush()
-                    
+
                     if device_id is not None:
                         try:
-                            await link_device_to_user_if_allowed(db, existing.id, device_id, strict=True)
+                            await link_device_to_user_if_allowed(
+                                db, existing.id, device_id, strict=True
+                            )
                         except DeviceTrialLimitError as e:
                             await db.rollback()
                             raise HTTPException(429, str(e))
-                    
+
                     await db.commit()
                     await db.refresh(existing)
                     await _schedule_trial_email_events_best_effort(db, existing)
                     await _record_login_activity(db, existing, device_id=device_id)
                     await db.commit()
                     await db.refresh(existing)
-                    
+
                     user_out, access_token, refresh_token = await _mint_token_pair(existing, db)
-                    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+                    return _user_response_with_cookies(
+                        response, user_out, access_token, refresh_token, device_id=device_id
+                    )
                 except Exception:
                     await db.rollback()
                     raise
@@ -461,13 +481,18 @@ async def oauth_supabase(
         await db.commit()
         await db.refresh(existing)
         user_out, access_token, refresh_token = await _mint_token_pair(existing, db)
-        return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+        return _user_response_with_cookies(
+            response, user_out, access_token, refresh_token, device_id=device_id
+        )
     except HTTPException:
         raise
     except Exception:
         log.exception(
             "Supabase OAuth login failed after verification",
-            extra={"email": email, "has_existing_user": bool(existing) if "existing" in locals() else False},
+            extra={
+                "email": email,
+                "has_existing_user": bool(existing) if "existing" in locals() else False,
+            },
         )
         raise HTTPException(500, public_error_message(500))
 
@@ -499,7 +524,9 @@ async def forgot_password(
                 "ok": True,
                 "delivered": delivered,
                 "reset_url": reset_url,
-                "message": "Email delivery failed, so the local reset link is included directly." if not delivered else "Reset email sent.",
+                "message": "Email delivery failed, so the local reset link is included directly."
+                if not delivered
+                else "Reset email sent.",
             }
     return {"ok": True, "delivered": True}
 
@@ -581,7 +608,9 @@ async def session(
         raise HTTPException(403, "Please verify your email before signing in.")
     device_id = get_device_cookie(request)
     user_out, access_token, refresh_token = await _mint_token_pair(user, db)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+    return _user_response_with_cookies(
+        response, user_out, access_token, refresh_token, device_id=device_id
+    )
 
 
 @router.post("/refresh", response_model=UserOut)
@@ -594,7 +623,11 @@ async def refresh(
 ):
     if body is None or not body.refresh_token:
         enforce_cookie_csrf(request)
-    refresh_token = body.refresh_token if body and body.refresh_token else get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
+    refresh_token = (
+        body.refresh_token
+        if body and body.refresh_token
+        else get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
+    )
     if not refresh_token:
         raise HTTPException(401, "Invalid refresh token")
     payload = decode_token(refresh_token)
@@ -625,7 +658,9 @@ async def refresh(
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(user, db)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+    return _user_response_with_cookies(
+        response, user_out, access_token, refresh_token, device_id=device_id
+    )
 
 
 @router.post("/verify-email", response_model=UserOut)
@@ -659,7 +694,9 @@ async def verify_email(
     await db.commit()
     await db.refresh(user)
     user_out, access_token, refresh_token = await _mint_token_pair(user, db)
-    return _user_response_with_cookies(response, user_out, access_token, refresh_token, device_id=device_id)
+    return _user_response_with_cookies(
+        response, user_out, access_token, refresh_token, device_id=device_id
+    )
 
 
 @router.post("/resend-verification")
@@ -840,10 +877,14 @@ async def set_username(
 
     # Check for valid characters (alphanumeric, underscore, hyphen)
     if not all(c.isalnum() or c in "_-" for c in username):
-        raise HTTPException(400, "Username can only contain letters, numbers, underscores, and hyphens")
+        raise HTTPException(
+            400, "Username can only contain letters, numbers, underscores, and hyphens"
+        )
 
     # Check uniqueness
-    existing = (await db.execute(select(User).where(func.lower(User.username) == username.lower()))).scalar()
+    existing = (
+        await db.execute(select(User).where(func.lower(User.username) == username.lower()))
+    ).scalar()
     if existing and existing.id != current_user.id:
         raise HTTPException(400, "Username already taken")
 

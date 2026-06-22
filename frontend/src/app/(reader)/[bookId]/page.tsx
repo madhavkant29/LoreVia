@@ -9,6 +9,7 @@ import { useParams, useRouter } from "next/navigation"
 
 import { ContextualUpgradePrompt } from "@/components/billing/ContextualUpgradePrompt"
 import { CreateFab } from "@/components/overview/CreateFab"
+import { ActivationExperience } from "@/components/reader/ActivationExperience"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
@@ -87,10 +88,14 @@ function getProcessingSummary(book: Book | null) {
   const processing = book?.processing
   if (!processing) return null
 
-  const stage = (processing.stage ?? processing.status ?? "").toString().trim()
-  const completed = typeof processing.chapters_completed === "number" ? processing.chapters_completed : null
-  const total = typeof processing.chapters_total === "number" ? processing.chapters_total : book?.total_chapters
-  const progress = typeof processing.progress_pct === "number" ? processing.progress_pct : book?.progress_pct
+  const normalized = normalizeProcessingStatus(processing, book)
+  const stage = normalized?.label ?? (processing.stage ?? processing.status ?? "").toString().trim()
+  const completed = normalized?.chaptersCompleted ?? null
+  const total = normalized?.chaptersTotal ?? book?.total_chapters
+  const storedProgress = normalized?.progressPct ?? book?.progress_pct
+  const progress = completed !== null && total && completed < total && storedProgress === 100
+    ? Math.round((completed / total) * 100)
+    : storedProgress
   const eta = formatEtaLabel(processing.eta_seconds)
   const chapterLabel =
     processing.last_chapter_number
@@ -504,7 +509,9 @@ export default function BookOverviewPage() {
     if (!book) return
     setProcessingRetrying(true)
     try {
-      const processing = await booksApi.retryProcessing(book.id)
+      const processing = normalizedProcessingStatus?.resumeAvailable
+        ? await booksApi.continueProcessing(book.id)
+        : await booksApi.retryProcessing(book.id)
       queryClient.setQueryData(overviewQueryKey, (current: BookOverviewPayload | undefined) => (
         current ? { ...current, book: { ...current.book, status: "processing", processing } } : current
       ))
@@ -656,6 +663,20 @@ export default function BookOverviewPage() {
               onToggleTheme={toggleTheme}
               onNavigate={navigateWithMemory}
               onContinueReading={continueReading}
+            />
+          ) : revisionIntelligence?.activation
+            && !revisionIntelligence.activation.completed
+            && (!normalizedProcessingStatus || normalizedProcessingStatus.ready) ? (
+            <ActivationExperience
+              bookId={bookId}
+              bookTitle={book?.title ?? "your manuscript"}
+              chapterCount={chapterCount ?? 0}
+              isDark={isDark}
+              revision={revisionIntelligence}
+              onNavigate={navigateWithMemory}
+              onRevisionChange={(nextRevision) => {
+                queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), nextRevision)
+              }}
             />
           ) : (
             <AuthorWorkspaceDashboard

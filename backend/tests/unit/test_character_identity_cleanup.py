@@ -3,7 +3,6 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.models.book import Book
 from app.api.v1.routes.books.characters import (
     add_book_character_alias,
     delete_book_character_alias,
@@ -11,6 +10,7 @@ from app.api.v1.routes.books.characters import (
     list_book_character_aliases,
     undo_character_identity_action,
 )
+from app.models.book import Book
 from app.models.character import (
     Character,
     CharacterAlias,
@@ -25,9 +25,12 @@ from app.models.user import User
 from app.schemas.character import CharacterAliasBody
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
 from app.services.character_identity.repair import CharacterIdentityRepairJob
-from app.services.character_identity.resolver import reconcile_pending_first_name_alias_candidates, resolve_character_mention
+from app.services.character_identity.resolver import (
+    reconcile_pending_first_name_alias_candidates,
+    resolve_character_mention,
+)
 from app.services.character_identity.scoring import score_identity_evidence
-from app.utils.character_utils import score_duplicate_characters
+from app.utils.characters.duplicates import score_duplicate_characters
 
 
 def test_classify_candidate_kind_handles_cleanup_cases():
@@ -65,7 +68,9 @@ def test_identity_scoring_blocks_title_surname_false_positive():
 
 @pytest.mark.asyncio
 async def test_repair_job_soft_merges_exact_duplicates_and_aliases_first_names(db):
-    user = User(email="identity-cleanup@example.com", username="identity-cleanup", password_hash="hash")
+    user = User(
+        email="identity-cleanup@example.com", username="identity-cleanup", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -82,8 +87,12 @@ async def test_repair_job_soft_merges_exact_duplicates_and_aliases_first_names(d
 
     grete_a = Character(book_id=book.id, name="Grete", aliases=[], first_chapter=1, mention_count=5)
     grete_b = Character(book_id=book.id, name="Grete", aliases=[], first_chapter=1, mention_count=1)
-    gregor_full = Character(book_id=book.id, name="Gregor Samsa", aliases=[], first_chapter=1, mention_count=8)
-    gregor_alias = Character(book_id=book.id, name="Gregor", aliases=[], first_chapter=1, mention_count=2)
+    gregor_full = Character(
+        book_id=book.id, name="Gregor Samsa", aliases=[], first_chapter=1, mention_count=8
+    )
+    gregor_alias = Character(
+        book_id=book.id, name="Gregor", aliases=[], first_chapter=1, mention_count=2
+    )
     db.add_all([grete_a, grete_b, gregor_full, gregor_alias])
     await db.flush()
 
@@ -109,7 +118,11 @@ async def test_repair_job_soft_merges_exact_duplicates_and_aliases_first_names(d
 
 @pytest.mark.asyncio
 async def test_repair_job_dismisses_low_confidence_duplicate_suggestions(db):
-    user = User(email="identity-suggestions@example.com", username="identity-suggestions", password_hash="hash")
+    user = User(
+        email="identity-suggestions@example.com",
+        username="identity-suggestions",
+        password_hash="hash",
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -163,7 +176,9 @@ async def test_undo_auto_alias_restores_source_and_blocks_reapplication(db):
     db.add(book)
     await db.flush()
 
-    target = Character(book_id=book.id, name="Gregor Samsa", aliases=["Gregor"], first_chapter=1, mention_count=8)
+    target = Character(
+        book_id=book.id, name="Gregor Samsa", aliases=["Gregor"], first_chapter=1, mention_count=8
+    )
     db.add(target)
     await db.flush()
     source = Character(
@@ -218,7 +233,9 @@ async def test_undo_auto_alias_restores_source_and_blocks_reapplication(db):
     assert target.aliases == []
     assert (
         await db.execute(
-            select(CharacterAlias).where(CharacterAlias.book_id == book.id, CharacterAlias.normalized_alias == "gregor")
+            select(CharacterAlias).where(
+                CharacterAlias.book_id == book.id, CharacterAlias.normalized_alias == "gregor"
+            )
         )
     ).scalar_one_or_none() is None
     constraint = (
@@ -235,7 +252,9 @@ async def test_undo_auto_alias_restores_source_and_blocks_reapplication(db):
 
 @pytest.mark.asyncio
 async def test_alias_routes_manage_alias_records_and_diagnostics_reports_identity_state(db):
-    user = User(email="identity-routes@example.com", username="identity-routes", password_hash="hash")
+    user = User(
+        email="identity-routes@example.com", username="identity-routes", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -250,7 +269,9 @@ async def test_alias_routes_manage_alias_records_and_diagnostics_reports_identit
     db.add(book)
     await db.flush()
 
-    character = Character(book_id=book.id, name="Grete Samsa", aliases=[], first_chapter=1, mention_count=4)
+    character = Character(
+        book_id=book.id, name="Grete Samsa", aliases=[], first_chapter=1, mention_count=4
+    )
     db.add(character)
     await db.flush()
 
@@ -311,7 +332,9 @@ async def test_alias_routes_manage_alias_records_and_diagnostics_reports_identit
     )
     await db.commit()
 
-    diagnostics = await get_character_identity_diagnostics(book_id=book.id, db=db, current_user=user)
+    diagnostics = await get_character_identity_diagnostics(
+        book_id=book.id, db=db, current_user=user
+    )
     assert diagnostics["suppressed_count"] == 1
     assert diagnostics["auto_alias_count"] == 1
     assert diagnostics["hidden_candidate_count"] == 1
@@ -331,14 +354,18 @@ async def test_alias_routes_manage_alias_records_and_diagnostics_reports_identit
     assert character.aliases == []
     assert (
         await db.execute(
-            select(CharacterAlias).where(CharacterAlias.book_id == book.id, CharacterAlias.normalized_alias == "grete")
+            select(CharacterAlias).where(
+                CharacterAlias.book_id == book.id, CharacterAlias.normalized_alias == "grete"
+            )
         )
     ).scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio
 async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
-    user = User(email="identity-resolver@example.com", username="identity-resolver", password_hash="hash")
+    user = User(
+        email="identity-resolver@example.com", username="identity-resolver", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -423,7 +450,9 @@ async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
 
 @pytest.mark.asyncio
 async def test_identity_resolver_does_not_merge_into_rejected_hidden_character(db):
-    user = User(email="identity-hidden@example.com", username="identity-hidden", password_hash="hash")
+    user = User(
+        email="identity-hidden@example.com", username="identity-hidden", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -464,7 +493,9 @@ async def test_identity_resolver_does_not_merge_into_rejected_hidden_character(d
 
 @pytest.mark.asyncio
 async def test_book_scope_alias_reconcile_attaches_pending_candidate_from_another_chapter(db):
-    user = User(email="identity-reconcile@example.com", username="identity-reconcile", password_hash="hash")
+    user = User(
+        email="identity-reconcile@example.com", username="identity-reconcile", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     book = Book(

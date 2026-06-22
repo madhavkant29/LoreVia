@@ -11,6 +11,7 @@ from app.utils.language_utils import (
 
 # ── Tokenizer ──────────────────────────────────────────────────────────────
 
+
 def test_tokenize_english():
     tokens = _tokenize("Hello world, this is a test!")
     assert "hello" in tokens
@@ -35,6 +36,7 @@ def test_tokenize_punctuation_only():
 
 
 # ── Stopword scoring ───────────────────────────────────────────────────────
+
 
 def test_score_stopwords_english():
     tokens = _tokenize("the cat sat on the mat and it was happy")
@@ -84,6 +86,7 @@ def test_score_stopwords_portuguese():
 
 # ── Trigram scoring ────────────────────────────────────────────────────────
 
+
 def test_trigrams_non_empty():
     text = "hello world"
     tris = _trigrams(text)
@@ -117,6 +120,7 @@ def test_score_trigrams_unknown_language():
 
 
 # ── Heading scoring ────────────────────────────────────────────────────────
+
 
 def test_score_headings_french():
     text = "Chapitre 1: SCYLLA\n\nIl était une fois..."
@@ -153,6 +157,7 @@ def test_score_headings_unknown_language():
 
 
 # ── detect_language ────────────────────────────────────────────────────────
+
 
 def test_detect_english():
     text = "It was a dark and stormy night. The rain fell in torrents, except at occasional intervals, when it was checked by a violent gust of wind which swept up the streets of London."
@@ -271,8 +276,10 @@ def test_max_chars_limit():
 
 # ── Data integrity ─────────────────────────────────────────────────────────
 
+
 def test_all_languages_have_stopwords():
     from app.utils.language_utils import ALL_LANGUAGES as LANG_KEYS
+
     for lang in ["en", "fr", "es", "de", "it", "pt"]:
         assert lang in STOPWORDS, f"Missing stopwords for {lang}"
         assert len(STOPWORDS[lang]) >= 50, f"Too few stopwords for {lang}"

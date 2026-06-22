@@ -9,13 +9,13 @@ files = {
 for name, path in files.items():
     with open(path) as f:
         content = f.read()
-    
+
     targets = set()
     for m in re.finditer(r'monkeypatch\.setattr\(\s*(\w+),\s*"([^"]+)"', content):
         targets.add(m.group(2))
     for m in re.finditer(r"monkeypatch\.setattr\(\s*(\w+),\s*'([^']+)'", content):
         targets.add(m.group(2))
-    
+
     print(f"=== {name} monkeypatch targets ({len(targets)}) ===")
     for t in sorted(targets):
         print(f"  {t}")

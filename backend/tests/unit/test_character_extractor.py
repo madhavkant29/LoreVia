@@ -6,14 +6,16 @@ from app.engine.character.extractor import (
     _candidate_names,
     _clean_character_entries,
     _local_mention_verifier,
-    fallback_character_mentions,
     _mention_has_person_context,
+    fallback_character_mentions,
     verify_character_candidate_personhood,
 )
 
 
 def test_clean_character_entries_strips_fragment_prefixes_and_keeps_supported_name():
-    source_text = "Meeting Kunagisa in the hall, Aikawa Junya called to Kunagisa and Kunagisa frowned."
+    source_text = (
+        "Meeting Kunagisa in the hall, Aikawa Junya called to Kunagisa and Kunagisa frowned."
+    )
     characters = [
         {
             "name": "Meeting Kunagisa",
@@ -21,7 +23,9 @@ def test_clean_character_entries_strips_fragment_prefixes_and_keeps_supported_na
             "is_character": True,
             "confidence": 0.92,
             "aliases": [],
-            "traits": {"distinguishing": {"value": "sharp gaze", "confidence": 0.88, "type": "objective"}},
+            "traits": {
+                "distinguishing": {"value": "sharp gaze", "confidence": 0.88, "type": "objective"}
+            },
             "arc_summary": "sharp observer",
         }
     ]
@@ -67,7 +71,10 @@ def test_local_mention_verifier_rejects_interjection_like_help():
     result = _local_mention_verifier("Help, he shouted toward the pier.", "Help")
 
     assert result["confidence_band"] == "reject"
-    assert "interjection_like_usage" in result["reasons"] or "sentence_start_capitalization_only" in result["reasons"]
+    assert (
+        "interjection_like_usage" in result["reasons"]
+        or "sentence_start_capitalization_only" in result["reasons"]
+    )
 
 
 def test_local_mention_verifier_accepts_grounded_single_name_with_action_context():
@@ -77,7 +84,10 @@ def test_local_mention_verifier_accepts_grounded_single_name_with_action_context
     assert result["is_person_like"] is True
 
 
-@pytest.mark.parametrize("noise_name", ["Actually", "Maybe", "Sure", "Wait", "Okay", "However", "Though", "Please", "Thanks"])
+@pytest.mark.parametrize(
+    "noise_name",
+    ["Actually", "Maybe", "Sure", "Wait", "Okay", "However", "Though", "Please", "Thanks"],
+)
 def test_local_mention_verifier_routes_discourse_markers_to_reject_or_review(noise_name: str):
     result = _local_mention_verifier(f"{noise_name}, he said toward the doorway.", noise_name)
 
@@ -107,7 +117,9 @@ def test_local_mention_verifier_uses_sentence_window_for_contextual_ner(monkeypa
         seen_windows.append(window)
         return None
 
-    monkeypatch.setattr("app.engine.character.extractor.contextual_ner_entity_label", _fake_contextual_ner)
+    monkeypatch.setattr(
+        "app.engine.character.extractor.contextual_ner_entity_label", _fake_contextual_ner
+    )
 
     _local_mention_verifier("Gregor woke before dawn and watched the door.", "Gregor")
 
@@ -230,7 +242,9 @@ async def test_fallback_character_mentions_uses_llm_for_review_band(monkeypatch)
             }
         }
 
-    monkeypatch.setattr("app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify)
+    monkeypatch.setattr(
+        "app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify
+    )
 
     recovered = await fallback_character_mentions("Mother paused in the doorway.")
 
@@ -263,7 +277,9 @@ async def test_fallback_character_mentions_rejects_review_candidate_when_llm_rej
             }
         }
 
-    monkeypatch.setattr("app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify)
+    monkeypatch.setattr(
+        "app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify
+    )
 
     recovered = await fallback_character_mentions("Mother paused in the doorway.")
 
@@ -287,7 +303,9 @@ async def test_fallback_character_mentions_drops_unconfirmed_review_candidate(mo
     async def _fake_verify(*_args, **_kwargs):
         return {}
 
-    monkeypatch.setattr("app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify)
+    monkeypatch.setattr(
+        "app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify
+    )
 
     recovered = await fallback_character_mentions("Mother paused in the doorway.")
 
@@ -365,7 +383,9 @@ async def test_verify_character_candidate_personhood_uses_llm_for_review(monkeyp
             }
         }
 
-    monkeypatch.setattr("app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify)
+    monkeypatch.setattr(
+        "app.engine.character.extractor._verify_review_candidates_with_llm", _fake_verify
+    )
 
     result = await verify_character_candidate_personhood("Mother paused in the doorway.", "Mother")
 

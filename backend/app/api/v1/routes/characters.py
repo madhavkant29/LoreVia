@@ -10,7 +10,7 @@ from app.models.book import Book
 from app.models.character import Character, CharacterState
 from app.schemas.character import CharacterOut
 from app.utils.billing_utils import require_author_access
-from app.utils.character_utils import serialize_character_detail
+from app.utils.characters.serialization import serialize_character_detail
 from app.utils.sparse_utils import include_requested
 
 router = APIRouter()
@@ -30,7 +30,9 @@ async def get_character(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
     require_author_access(current_user)
-    return serialize_character_detail(char, skip_analysis_metadata=not include_requested(include, "analysis_metadata"))
+    return serialize_character_detail(
+        char, skip_analysis_metadata=not include_requested(include, "analysis_metadata")
+    )
 
 
 @router.get("/{character_id}/state")
@@ -41,11 +43,16 @@ async def get_character_state(
     current_user=Depends(get_current_user),
 ):
     """Spoiler-free state at chapter N."""
-    state = (await db.execute(
-        select(CharacterState)
-        .where(CharacterState.character_id == character_id, CharacterState.at_chapter <= chapter)
-        .order_by(CharacterState.at_chapter.desc()).limit(1)
-    )).scalar()
+    state = (
+        await db.execute(
+            select(CharacterState)
+            .where(
+                CharacterState.character_id == character_id, CharacterState.at_chapter <= chapter
+            )
+            .order_by(CharacterState.at_chapter.desc())
+            .limit(1)
+        )
+    ).scalar()
 
     if state:
         char = await db.get(Character, character_id)
@@ -55,8 +62,12 @@ async def get_character_state(
         if not book or book.user_id != current_user.id:
             raise HTTPException(404)
         require_author_access(current_user)
-        return {"trait_state": state.trait_snapshot, "at_chapter": state.at_chapter,
-                "arc_note": state.arc_note, "prompt_delta": state.prompt_delta}
+        return {
+            "trait_state": state.trait_snapshot,
+            "at_chapter": state.at_chapter,
+            "arc_note": state.arc_note,
+            "prompt_delta": state.prompt_delta,
+        }
 
     char = await db.get(Character, character_id)
     if not char:

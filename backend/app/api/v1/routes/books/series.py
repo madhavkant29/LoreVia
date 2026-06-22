@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .core import _clean_text, _clean_optional_text
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.book import Book, Series, SeriesBook
@@ -20,14 +19,18 @@ from app.schemas.books import (
     SeriesOut,
 )
 from app.utils.billing_utils import require_author_access
-from app.utils.book_utils import (
-    book_out,
-    build_single_series_out,
-    build_series_bible_payload,
-    build_series_out_list,
+from app.utils.books.notes import (
     get_owned_book,
     get_owned_series,
 )
+from app.utils.books.serialization import (
+    book_out,
+    build_series_out_list,
+    build_single_series_out,
+)
+from app.utils.books.series_bible import build_series_bible_payload
+
+from .core import _clean_optional_text, _clean_text
 
 router = APIRouter()
 
@@ -79,7 +82,9 @@ async def update_book_series(
 
     membership = (
         await db.execute(
-            select(SeriesBook).where(SeriesBook.series_id == series.id, SeriesBook.book_id == book.id)
+            select(SeriesBook).where(
+                SeriesBook.series_id == series.id, SeriesBook.book_id == book.id
+            )
         )
     ).scalar()
     if not membership:
@@ -120,13 +125,17 @@ async def list_series(
     rows = list(rows_result.scalars().all())
     series_ids = [series.id for series in rows]
     membership_rows = (
-        await db.execute(
-            select(SeriesBook, Book)
-            .join(Book, Book.id == SeriesBook.book_id)
-            .where(SeriesBook.series_id.in_(series_ids), Book.user_id == current_user.id)
-            .order_by(SeriesBook.series_id, SeriesBook.position, Book.created_at)
-        )
-    ).all() if series_ids else []
+        (
+            await db.execute(
+                select(SeriesBook, Book)
+                .join(Book, Book.id == SeriesBook.book_id)
+                .where(SeriesBook.series_id.in_(series_ids), Book.user_id == current_user.id)
+                .order_by(SeriesBook.series_id, SeriesBook.position, Book.created_at)
+            )
+        ).all()
+        if series_ids
+        else []
+    )
     items = await build_series_out_list(
         db,
         series_rows=rows,
@@ -166,7 +175,9 @@ async def create_series(
         raise HTTPException(400, "Series name is required")
 
     existing = (
-        await db.execute(select(Series).where(Series.user_id == current_user.id, Series.name == name))
+        await db.execute(
+            select(Series).where(Series.user_id == current_user.id, Series.name == name)
+        )
     ).scalar()
     if existing:
         raise HTTPException(400, "Series already exists")
@@ -175,7 +186,13 @@ async def create_series(
     db.add(series)
     await db.commit()
     await db.refresh(series)
-    return SeriesOut(id=series.id, name=series.name, description=series.description, created_at=series.created_at, books=[])
+    return SeriesOut(
+        id=series.id,
+        name=series.name,
+        description=series.description,
+        created_at=series.created_at,
+        books=[],
+    )
 
 
 @router.post("/series/{series_id}/books/{book_id}", response_model=SeriesOut)
@@ -193,7 +210,11 @@ async def add_book_to_series(
         raise HTTPException(400, "Position must be at least 1")
 
     membership = (
-        await db.execute(select(SeriesBook).where(SeriesBook.series_id == series.id, SeriesBook.book_id == book.id))
+        await db.execute(
+            select(SeriesBook).where(
+                SeriesBook.series_id == series.id, SeriesBook.book_id == book.id
+            )
+        )
     ).scalar()
     if not membership:
         membership = SeriesBook(series_id=series.id, book_id=book.id)
@@ -217,7 +238,11 @@ async def remove_book_from_series(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     membership = (
-        await db.execute(select(SeriesBook).where(SeriesBook.series_id == series.id, SeriesBook.book_id == book.id))
+        await db.execute(
+            select(SeriesBook).where(
+                SeriesBook.series_id == series.id, SeriesBook.book_id == book.id
+            )
+        )
     ).scalar()
     if not membership:
         raise HTTPException(404, "Series membership not found")
@@ -243,22 +268,33 @@ async def set_series_book_status(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     membership = (
-        await db.execute(select(SeriesBook).where(SeriesBook.series_id == series.id, SeriesBook.book_id == book.id))
+        await db.execute(
+            select(SeriesBook).where(
+                SeriesBook.series_id == series.id, SeriesBook.book_id == book.id
+            )
+        )
     ).scalar()
     if not membership:
         raise HTTPException(404, "Series membership not found")
 
     membership.marked_complete = body.marked_complete
     progress = (
-        await db.execute(select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book.id))
+        await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book.id
+            )
+        )
     ).scalar()
     total = book.total_chapters or 0
     if body.marked_complete and total > 0:
         chapters_read = list(range(1, total + 1))
         if progress is None:
             progress = ReadingProgress(
-                user_id=current_user.id, book_id=book.id,
-                current_chapter=total, scroll_pct=1.0, chapters_read=chapters_read,
+                user_id=current_user.id,
+                book_id=book.id,
+                current_chapter=total,
+                scroll_pct=1.0,
+                chapters_read=chapters_read,
             )
             db.add(progress)
         else:

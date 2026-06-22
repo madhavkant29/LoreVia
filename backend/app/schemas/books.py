@@ -7,7 +7,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.beta_reads import BetaReadAssignmentOut
-from app.schemas.reader import ChapterListResponseOut, ReadingProgressOut, SummaryCollectionResponseOut
+from app.schemas.reader import (
+    ChapterListResponseOut,
+    ReadingProgressOut,
+    SummaryCollectionResponseOut,
+)
 
 
 class CollaborationScope(BaseModel):
@@ -121,29 +125,29 @@ class BookOverviewOut(BaseModel):
 
 class ReaderBootstrapOut(BaseModel):
     overview: BookOverviewOut
-    notes: list["BookNoteOut"] = Field(default_factory=list)
+    notes: list[BookNoteOut] = Field(default_factory=list)
     saved_quotes: list[dict[str, Any]] = Field(default_factory=list)
-    stats: "UserStatsOut | None" = None
+    stats: UserStatsOut | None = None
     characters: list[dict[str, Any]] = Field(default_factory=list)
-    chapter_reports: list["ChapterConsistencyReport"] = Field(default_factory=list)
-    prewriting_check: "PreWritingCheckOut | None" = None
-    story_health: "StoryHealthOut | None" = None
-    writer_workspace: "WriterWorkspaceOut | None" = None
-    revision_intelligence: "RevisionIntelligenceOut | None" = None
+    chapter_reports: list[ChapterConsistencyReport] = Field(default_factory=list)
+    prewriting_check: PreWritingCheckOut | None = None
+    story_health: StoryHealthOut | None = None
+    writer_workspace: WriterWorkspaceOut | None = None
+    revision_intelligence: RevisionIntelligenceOut | None = None
 
 
 class ManuscriptBootstrapOut(BaseModel):
     book: BookOut
     characters: list[dict[str, Any]] = Field(default_factory=list)
-    writer_workspace: "WriterWorkspaceOut | None" = None
-    emotional_arc: "EmotionalArcOverviewOut | None" = None
+    writer_workspace: WriterWorkspaceOut | None = None
+    emotional_arc: EmotionalArcOverviewOut | None = None
     synopsis: dict[str, Any] | None = None
-    workspace_tree: "ManuscriptWorkspaceTreeOut | None" = None
-    annotations: list["ManuscriptAnnotationOut"] = Field(default_factory=list)
-    notes: list["BookNoteOut"] = Field(default_factory=list)
-    vault_notes: list["VaultNoteOut"] = Field(default_factory=list)
-    chapter_versions: list["ChapterVersionOut"] = Field(default_factory=list)
-    prewriting_check: "PreWritingCheckOut | None" = None
+    workspace_tree: ManuscriptWorkspaceTreeOut | None = None
+    annotations: list[ManuscriptAnnotationOut] = Field(default_factory=list)
+    notes: list[BookNoteOut] = Field(default_factory=list)
+    vault_notes: list[VaultNoteOut] = Field(default_factory=list)
+    chapter_versions: list[ChapterVersionOut] = Field(default_factory=list)
+    prewriting_check: PreWritingCheckOut | None = None
 
 
 class BookForumMetadataBody(BaseModel):
@@ -490,10 +494,13 @@ class ManuscriptReprocessOut(BaseModel):
     total_words: int = 0
     upload_charge_consumed: bool = False
     charge_kind: Literal["manual_reprocess"] | None = None
+    processed_words_reserved: int = 0
+    processed_words_remaining: int | None = None
 
 
 class ManuscriptReprocessBody(BaseModel):
     confirm_upload_charge: bool = False
+    confirm_processing_words: bool = False
 
 
 class ReprocessMetadataOut(BaseModel):
@@ -708,7 +715,7 @@ class WorkspaceStructureNodeOut(BaseModel):
     kind: str
     chapter_number: int | None = None
     scene_id: str | None = None
-    children: list["WorkspaceStructureNodeOut"] = Field(default_factory=list)
+    children: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
 
 
 class WorkspaceBreadcrumbOut(BaseModel):
@@ -761,11 +768,22 @@ class RevisionBoardItemStateOut(BaseModel):
     assigned_version_id: str | None = None
     task_id: str | None = None
     updated_at: str | None = None
+    decision: str | None = None
+    action: str | None = None
+    reason: str | None = None
+    source_content_versions: dict[int, int] = Field(default_factory=dict)
+    finding_snapshot: dict[str, Any] | None = None
 
 
 class RevisionBoardOut(BaseModel):
     items: list[RevisionBoardItemStateOut] = Field(default_factory=list)
     last_generated_at: str | None = None
+
+
+class ActivationStateOut(BaseModel):
+    completed_at: str | None = None
+    completion_action: str | None = None
+    completed_finding_id: str | None = None
 
 
 class ProcessingPipelineStageOut(BaseModel):
@@ -784,7 +802,6 @@ class ProcessingPipelineOut(BaseModel):
 
 
 class BookProcessingOut(BaseModel):
-
     status: str | None = None
     stage: str | None = None
     current_step_label: str | None = None
@@ -803,6 +820,12 @@ class BookProcessingOut(BaseModel):
     pipeline: ProcessingPipelineOut | None = None
     retry_actions: list[str] = Field(default_factory=list)
     retry_available: bool = False
+    processing_run_id: str | None = None
+    pause_reason: str | None = None
+    resume_available: bool = False
+    resume_blockers: list[dict[str, Any]] = Field(default_factory=list)
+    next_chapter_number: int | None = None
+    next_resume_at: datetime | None = None
 
 
 class WriterWorkspaceOut(BaseModel):
@@ -816,6 +839,7 @@ class WriterWorkspaceOut(BaseModel):
     novel_front_matter: NovelFrontMatterOut = Field(default_factory=NovelFrontMatterOut)
     novel_epub_metadata: NovelEpubMetadataOut = Field(default_factory=NovelEpubMetadataOut)
     revision_board: RevisionBoardOut
+    activation: ActivationStateOut = Field(default_factory=ActivationStateOut)
     editor_preferences: EditorPreferencesOut = Field(default_factory=EditorPreferencesOut)
     reading_themes: ReadingThemesOut = Field(default_factory=ReadingThemesOut)
     typewriter_mode: TypewriterModeOut = Field(default_factory=TypewriterModeOut)
@@ -902,7 +926,7 @@ class WorkspaceStructureNodeBody(BaseModel):
     kind: str
     chapter_number: int | None = None
     scene_id: str | None = None
-    children: list["WorkspaceStructureNodeBody"] = Field(default_factory=list)
+    children: list[WorkspaceStructureNodeBody] = Field(default_factory=list)
 
 
 class ManuscriptFrontMatterBody(BaseModel):
@@ -949,11 +973,22 @@ class RevisionBoardItemStateBody(BaseModel):
     assigned_version_id: str | None = None
     task_id: str | None = None
     updated_at: str | None = None
+    decision: str | None = None
+    action: str | None = None
+    reason: str | None = None
+    source_content_versions: dict[int, int] | None = None
+    finding_snapshot: dict[str, Any] | None = None
 
 
 class RevisionBoardBody(BaseModel):
     items: list[RevisionBoardItemStateBody] | None = None
     last_generated_at: str | None = None
+
+
+class ActivationStateBody(BaseModel):
+    completed_at: str | None = None
+    completion_action: str | None = None
+    completed_finding_id: str | None = None
 
 
 class WriterWorkspaceBody(BaseModel):
@@ -967,6 +1002,7 @@ class WriterWorkspaceBody(BaseModel):
     novel_front_matter: NovelFrontMatterBody | None = None
     novel_epub_metadata: NovelEpubMetadataBody | None = None
     revision_board: RevisionBoardBody | None = None
+    activation: ActivationStateBody | None = None
     editor_preferences: EditorPreferencesBody | None = None
     reading_themes: ReadingThemesBody | None = None
     typewriter_mode: TypewriterModeBody | None = None
@@ -986,6 +1022,13 @@ class NovelSettingsBody(BaseModel):
     epub_metadata: NovelEpubMetadataBody = Field(default_factory=NovelEpubMetadataBody)
 
 
+class RevisionEvidenceOut(BaseModel):
+    chapter_ref: int
+    source_label: str | None = None
+    excerpt: str
+    source_content_version: int
+
+
 class RevisionActionItemOut(BaseModel):
     id: str
     category: str
@@ -998,6 +1041,35 @@ class RevisionActionItemOut(BaseModel):
     status: str = "pending"
     assigned_version_id: str | None = None
     task_id: str | None = None
+    why_flagged: str = ""
+    evidence_strength: Literal["strong", "moderate", "limited"] = "limited"
+    evidence: list[RevisionEvidenceOut] = Field(default_factory=list)
+    is_stale: bool = False
+    decision: str | None = None
+    action: str | None = None
+    reason: str | None = None
+
+
+class RevisionActivationOut(BaseModel):
+    eligible: bool = False
+    completed: bool = False
+    completed_at: str | None = None
+    completion_action: str | None = None
+    completed_finding_id: str | None = None
+
+
+class RevisionFindingDecisionBody(BaseModel):
+    decision: Literal["accepted", "dismissed", "resolved"]
+    action: (
+        Literal[
+            "added_to_revision_plan",
+            "saved_note",
+            "manuscript_edit",
+            "exported_report",
+        ]
+        | None
+    ) = None
+    reason: Literal["intentional", "incorrect", "not_relevant", "other"] | None = None
 
 
 class RevisionGenreCheckOut(BaseModel):
@@ -1064,6 +1136,10 @@ class RevisionIntelligenceOut(BaseModel):
     scene_advice: list[RevisionActionItemOut] = Field(default_factory=list)
     confusion_map: list[RevisionActionItemOut] = Field(default_factory=list)
     voice_alerts: list[RevisionActionItemOut] = Field(default_factory=list)
+    priority_findings: list[RevisionActionItemOut] = Field(default_factory=list)
+    activation: RevisionActivationOut = Field(default_factory=RevisionActivationOut)
+    analysis_complete: bool = False
+    analysis_limitations: list[str] = Field(default_factory=list)
 
 
 class ReadabilityMetricsOut(BaseModel):
@@ -1449,6 +1525,16 @@ class PrivateUserStats(BaseModel):
     upload_limit: int | None = None
     uploads_remaining: int | None = None
     upload_limit_unlimited: bool = False
+    active_analyzed_words: int = 0
+    active_word_limit: int = 0
+    active_words_remaining: int = 0
+    monthly_processed_words: int = 0
+    monthly_processed_word_limit: int = 0
+    monthly_processed_words_remaining: int = 0
+    source_storage_bytes: int = 0
+    source_storage_limit_bytes: int = 0
+    source_storage_remaining_bytes: int = 0
+    allowances_enforced: bool = False
     total_token_consumption: int
     llm_request_count: int = 0
     llm_prompt_tokens: int = 0
@@ -1466,9 +1552,10 @@ class UserStatsOut(BaseModel):
 
 # Screenplay-specific schemas
 
+
 class SceneOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     book_id: uuid.UUID
     chapter_id: uuid.UUID | None = None
@@ -1488,7 +1575,7 @@ class SceneOut(BaseModel):
 
 class DialogueOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     scene_id: uuid.UUID
     character_name: str

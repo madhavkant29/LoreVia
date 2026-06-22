@@ -1,0 +1,113 @@
+"""
+Character utility helpers â€” shared across route modules.
+Covers display filtering, status derivation, relationship summaries,
+and text-sanitization helpers used on character data.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+BLEACH_EMPTY_TAGS: Any = frozenset()
+CHARACTER_CANDIDATE_PENDING = "pending"
+CHARACTER_CANDIDATE_ACCEPTED = "accepted"
+CHARACTER_CANDIDATE_REJECTED = "rejected"
+CHARACTER_CANDIDATE_PROMOTED = "promoted"
+CHARACTER_CANDIDATE_MERGED = "merged"
+CHARACTER_CANDIDATE_SUPPRESSED = "suppressed"
+CHARACTER_ADJUDICATION_CANDIDATE = "candidate"
+CHARACTER_ADJUDICATION_PROMOTED_CHARACTER = "promoted_character"
+CHARACTER_ADJUDICATION_QUARANTINED = "quarantined"
+CHARACTER_ADJUDICATION_REJECTED = "rejected"
+CHARACTER_ADJUDICATION_MERGED_ALIAS = "merged_alias"
+CHARACTER_ADJUDICATION_PLACE = "place"
+CHARACTER_ADJUDICATION_ORGANIZATION = "organization"
+CHARACTER_ADJUDICATION_OBJECT = "object"
+CHARACTER_ADJUDICATION_TITLE_OR_ROLE = "title_or_role"
+CHARACTER_ADJUDICATION_UNKNOWN = "unknown"
+CHARACTER_DUPLICATE_PENDING = "pending"
+CHARACTER_DUPLICATE_ACCEPTED = "accepted"
+CHARACTER_DUPLICATE_DISMISSED = "dismissed"
+CHARACTER_RELATIONSHIP_CANDIDATE_PENDING = "pending"
+CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED = "accepted"
+CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED = "rejected"
+CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED = "resolved"
+CHARACTER_RELATIONSHIP_CANDIDATE_MERGED = "merged"
+CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED = "suppressed"
+CHARACTER_VISIBILITY_VISIBLE = "visible"
+CHARACTER_VISIBILITY_QUARANTINED = "quarantined"
+CHARACTER_VISIBILITY_NOISE = "noise"
+VALID_CHARACTER_VISIBILITY_STATES = {
+    CHARACTER_VISIBILITY_VISIBLE,
+    CHARACTER_VISIBILITY_QUARANTINED,
+    CHARACTER_VISIBILITY_NOISE,
+}
+CHARACTER_APPROVAL_APPROVED = "approved"
+CHARACTER_APPROVAL_PENDING_REVIEW = "pending_review"
+CHARACTER_APPROVAL_REJECTED = "rejected"
+CHARACTER_APPROVAL_PROTECTED = "protected"
+VALID_CHARACTER_APPROVAL_STATES = {
+    CHARACTER_APPROVAL_APPROVED,
+    CHARACTER_APPROVAL_PENDING_REVIEW,
+    CHARACTER_APPROVAL_REJECTED,
+    CHARACTER_APPROVAL_PROTECTED,
+}
+CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW = "manual_review"
+CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO = "deterministic_auto"
+CHARACTER_APPROVAL_SOURCE_BACKFILL_REVIEW = "backfill_review"
+CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT = "legacy_import"
+VALID_CHARACTER_APPROVAL_SOURCES = {
+    CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
+    CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
+    CHARACTER_APPROVAL_SOURCE_BACKFILL_REVIEW,
+    CHARACTER_APPROVAL_SOURCE_LEGACY_IMPORT,
+}
+CHARACTER_TRUST_TIER_VISIBLE = "visible"
+CHARACTER_TRUST_TIER_REVIEW_ONLY = "review_only"
+CHARACTER_TRUST_TIER_REPAIRED_NOISE = "repaired_noise"
+VALID_CHARACTER_TRUST_TIERS = {
+    CHARACTER_TRUST_TIER_VISIBLE,
+    CHARACTER_TRUST_TIER_REVIEW_ONLY,
+    CHARACTER_TRUST_TIER_REPAIRED_NOISE,
+}
+ROLE_ONLY_REFERENCE_WORDS = {
+    "aunt",
+    "brother",
+    "captain",
+    "chief",
+    "chief clerk",
+    "clerk",
+    "doctor",
+    "father",
+    "headmaster",
+    "lady",
+    "lord",
+    "master",
+    "mentor",
+    "mother",
+    "mr",
+    "mrs",
+    "ms",
+    "nurse",
+    "professor",
+    "servant",
+    "sister",
+    "teacher",
+    "uncle",
+}
+FAMILY_ROLE_WORDS = {"aunt", "brother", "father", "mother", "sister", "uncle"}
+
+CHARACTER_DISPOSITION_PROMOTE_UPDATE = "promote/update"
+CHARACTER_DISPOSITION_QUEUE_REVIEW = "queue_review"
+CHARACTER_DISPOSITION_SUPPRESS = "suppress"
+CHARACTER_DISPOSITION_REJECT = "reject"
+
+
+@dataclass(frozen=True)
+class CharacterCandidateDisposition:
+    action: str
+    status: str
+    reason_codes: tuple[str, ...]
+    evidence: dict[str, Any]
+    visible_review_allowed: bool = False

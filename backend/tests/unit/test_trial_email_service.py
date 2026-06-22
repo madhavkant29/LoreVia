@@ -60,7 +60,9 @@ async def test_send_due_trial_emails_is_idempotent_for_sent_events(db, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_send_due_trial_emails_marks_stale_sending_events_failed_without_resending(db, monkeypatch):
+async def test_send_due_trial_emails_marks_stale_sending_events_failed_without_resending(
+    db, monkeypatch
+):
     await db.execute(delete(TrialEmailEvent))
     await db.commit()
 
@@ -107,7 +109,9 @@ async def test_send_due_trial_emails_marks_stale_sending_events_failed_without_r
 
 
 @pytest.mark.asyncio
-async def test_send_due_trial_emails_skips_first_manuscript_nudge_after_user_uploads_book(db, monkeypatch):
+async def test_send_due_trial_emails_skips_first_manuscript_nudge_after_user_uploads_book(
+    db, monkeypatch
+):
     await db.execute(delete(TrialEmailEvent))
     await db.commit()
 

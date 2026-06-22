@@ -78,7 +78,10 @@ def test_record_login_activity_does_not_double_count_same_day():
 
 
 def test_normalize_writing_entry_title_prefers_explicit_title():
-    assert normalize_writing_entry_title("  Epilogue  ", chapter_number=4, fallback="Atlas") == "Epilogue"
+    assert (
+        normalize_writing_entry_title("  Epilogue  ", chapter_number=4, fallback="Atlas")
+        == "Epilogue"
+    )
 
 
 def test_normalize_writing_entry_title_falls_back_to_chapter_number():
@@ -240,7 +243,9 @@ async def test_build_writing_dashboard_stats_returns_cached_payload(monkeypatch)
     monkeypatch.setattr(user_utils_module, "get_writing_dashboard_cache", _fake_get_cache)
     monkeypatch.setattr(user_utils_module, "set_writing_dashboard_cache", _fake_set_cache)
 
-    stats = await build_writing_dashboard_stats(_FakeDB([]), user, now=datetime(2026, 5, 14, 12, 0, tzinfo=UTC))
+    stats = await build_writing_dashboard_stats(
+        _FakeDB([]), user, now=datetime(2026, 5, 14, 12, 0, tzinfo=UTC)
+    )
 
     assert stats == cached_payload
 
@@ -293,7 +298,9 @@ async def test_record_login_activity_row_adds_to_db():
 async def test_record_login_activity_row_stores_ip_hash_and_device_id():
     db = FakeAsyncSession()
     await record_login_activity_row(
-        db, "user-1", date(2026, 5, 29),
+        db,
+        "user-1",
+        date(2026, 5, 29),
         ip_hash="abc123hash",
         device_id="device-xyz",
     )
@@ -305,11 +312,13 @@ async def test_record_login_activity_row_stores_ip_hash_and_device_id():
 @pytest.mark.asyncio
 async def test_get_login_activity_dates_from_table_returns_sorted_dates():
     db = FakeAsyncSession()
-    db.set_query_results([
-        date(2026, 5, 29),
-        date(2026, 5, 27),
-        date(2026, 5, 28),
-    ])
+    db.set_query_results(
+        [
+            date(2026, 5, 29),
+            date(2026, 5, 27),
+            date(2026, 5, 28),
+        ]
+    )
 
     dates = await get_login_activity_dates_from_table(db, "user-1")
     assert dates == [date(2026, 5, 27), date(2026, 5, 28), date(2026, 5, 29)]
@@ -318,11 +327,13 @@ async def test_get_login_activity_dates_from_table_returns_sorted_dates():
 @pytest.mark.asyncio
 async def test_get_login_activity_dates_from_table_deduplicates_dates():
     db = FakeAsyncSession()
-    db.set_query_results([
-        date(2026, 5, 29),
-        date(2026, 5, 29),
-        date(2026, 5, 28),
-    ])
+    db.set_query_results(
+        [
+            date(2026, 5, 29),
+            date(2026, 5, 29),
+            date(2026, 5, 28),
+        ]
+    )
 
     dates = await get_login_activity_dates_from_table(db, "user-1")
     assert dates == [date(2026, 5, 28), date(2026, 5, 29)]

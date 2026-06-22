@@ -15,6 +15,7 @@ log = logging.getLogger("lorevia.embedder")
 def get_client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
+
 MAX_EMBED_BATCH_TOKENS = 250000
 
 
@@ -137,7 +138,9 @@ def build_chunk_embedding_text(
     text: str,
 ) -> str:
     title = (chapter_title or "Untitled").strip() or "Untitled"
-    chapter_label = f"Chapter {chapter_number}: {title}" if chapter_number is not None else f"Chapter: {title}"
+    chapter_label = (
+        f"Chapter {chapter_number}: {title}" if chapter_number is not None else f"Chapter: {title}"
+    )
     body = (text or "").strip()
     return f"{chapter_label}\n\n{body}" if body else chapter_label
 
@@ -165,6 +168,8 @@ def build_character_embedding_text(
             parts.append(f"{key}: {t}")
     if arc_summary:
         parts.append(f"Arc: {arc_summary}")
-    for snippet in [str(item).strip() for item in (evidence_snippets or []) if str(item).strip()][:3]:
+    for snippet in [str(item).strip() for item in (evidence_snippets or []) if str(item).strip()][
+        :3
+    ]:
         parts.append(f"Evidence: {snippet[:220]}")
     return ". ".join(parts)

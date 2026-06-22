@@ -20,7 +20,9 @@ def auth_cookie_path() -> str:
 
 
 def auth_cookie_domain() -> str | None:
-    configured_domain = str(settings.AUTH_COOKIE_DOMAIN or "").strip().lower().lstrip(".").rstrip(".")
+    configured_domain = (
+        str(settings.AUTH_COOKIE_DOMAIN or "").strip().lower().lstrip(".").rstrip(".")
+    )
     if not configured_domain:
         return None
     try:

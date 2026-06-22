@@ -27,13 +27,17 @@ async def list_notifications(
     if sync_revision_digests:
         await sync_revision_digest_notifications(db, current_user.id, limit=min(limit, 6))
     rows = (
-        await db.execute(
-            select(Notification)
-            .where(Notification.user_id == current_user.id)
-            .order_by(Notification.created_at.desc())
-            .limit(limit)
+        (
+            await db.execute(
+                select(Notification)
+                .where(Notification.user_id == current_user.id)
+                .order_by(Notification.created_at.desc())
+                .limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     unread_count = int(
         (
             await db.execute(
@@ -92,10 +96,16 @@ async def mark_all_notifications_read(
     current_user=Depends(get_current_user),
 ):
     rows = (
-        await db.execute(
-            select(Notification).where(Notification.user_id == current_user.id, Notification.read_at.is_(None))
+        (
+            await db.execute(
+                select(Notification).where(
+                    Notification.user_id == current_user.id, Notification.read_at.is_(None)
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     now = datetime.now(UTC)
     for notification in rows:
         notification.read_at = now

@@ -1,4 +1,6 @@
-API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+API_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
 HSTS_POLICY = "max-age=31536000; includeSubDomains; preload"
 PERMISSIONS_POLICY = (
     "accelerometer=(), camera=(), display-capture=(), geolocation=(), "

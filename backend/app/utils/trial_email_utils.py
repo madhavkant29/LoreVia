@@ -16,7 +16,9 @@ TRIAL_EMAIL_TYPES = {
 }
 
 
-def build_trial_email_schedule(started_at: datetime | None, now: datetime | None = None) -> dict[str, datetime]:
+def build_trial_email_schedule(
+    started_at: datetime | None, now: datetime | None = None
+) -> dict[str, datetime]:
     base = started_at or now or datetime.now(UTC)
     base = base if base.tzinfo else base.replace(tzinfo=UTC)
     return {

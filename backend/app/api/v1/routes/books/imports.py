@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import sys
 import uuid
@@ -8,14 +9,17 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, 
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .core import _clean_optional_text, _clean_text, _read_upload_bounded, _validate_cover_magic, log
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import enforce_manuscript_import_rate_limit, rate_limit_upload
-from app.api.deps.subscription import check_upload_limit
 from app.core import storage
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import mark_book_cache_dirty, mark_user_dashboard_cache_dirty
+from app.core.redis import (
+    cache_get,
+    cache_set,
+    mark_book_cache_dirty,
+    mark_user_dashboard_cache_dirty,
+)
 from app.models.book import Book, Chapter, ChapterMedia, Series, SeriesBook
 from app.models.progress import ReadingProgress
 from app.schemas.books import (
@@ -28,51 +32,108 @@ from app.schemas.books import (
     ReadabilityMetricsOut,
     ReadabilityRequestBody,
 )
+from app.services.book_service import create_editor_project
+from app.services.processing_allowance_service import (
+    consume_processing_reservation,
+    ensure_active_word_capacity,
+    ensure_project_writable,
+    ensure_source_storage_capacity,
+    release_processing_reservation,
+    reserve_processing_words,
+    summarize_processing_allowances,
+)
+from app.services.task_execution_service import (
+    dispatch_pending_extraction_tasks,
+    enqueue_analysis_execution,
+    ensure_task_execution,
+    get_or_create_processing_run,
+)
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
-from app.utils.billing_utils import record_book_upload_charge, require_author_access
-from app.utils.book_utils import (
-    SCENE_BREAK_LINE_RE,
-    _append_recent_revision_edit,
-    as_bool,
+from app.utils.billing_utils import require_author_access
+from app.utils.books.chapter_titles import normalize_chapter_title
+from app.utils.books.chapter_versions import snapshot_chapter_version
+from app.utils.books.collaboration_access import (
     assert_editor_project_not_rebuilding,
-    clean_manuscript_html,
-    chapter_media_storage_payload,
-    deserialize_manuscript_content,
-    estimate_readability,
-    extract_novel_scene_candidates,
-    get_owned_book,
+)
+from app.utils.books.continuity import as_bool
+from app.utils.books.imports import (
     next_chapter_number,
-    normalize_book_work_type,
-    normalize_chapter_title,
     normalize_imported_chapters,
     parse_book_upload_for_ingestion,
     parse_screenplay_upload,
+)
+from app.utils.books.manuscript import (
+    chapter_media_storage_payload,
+    clean_manuscript_html,
+    deserialize_manuscript_content,
     persist_editor_chapter_content,
-    refresh_screenplay_scene_rows,
-    replace_chapter_novel_scenes,
-    resolve_owned_series_ids,
+)
+from app.utils.books.normalization import (
+    SCENE_BREAK_LINE_RE,
+    normalize_book_work_type,
     resolve_upload_format_and_work_type,
-    snapshot_chapter_version,
     story_unit_name,
-    sync_chapter_content_from_novel_scenes,
+)
+from app.utils.books.notes import (
+    get_owned_book,
+    resolve_owned_series_ids,
+)
+from app.utils.books.scene_metadata import (
+    extract_novel_scene_candidates,
+    refresh_screenplay_scene_rows,
+)
+from app.utils.books.scene_ordering import replace_chapter_novel_scenes
+from app.utils.books.scene_sync import sync_chapter_content_from_novel_scenes
+from app.utils.books.story_health import estimate_readability
+from app.utils.books.writer_workspace import (
+    _append_recent_revision_edit,
     touch_public_book_updated_at,
 )
-from app.utils.ingestion_utils import build_analysis_chapter_state
-from app.utils.ingestion_utils import load_processing_chapter_payload
+from app.utils.ingestion_utils import build_analysis_chapter_state, load_processing_chapter_payload
 from app.utils.llm_usage_utils import (
     assert_manual_reprocess_token_capacity,
     estimate_manual_reprocess_tokens,
 )
 from app.utils.notification_utils import build_upload_processing_notification
-from app.utils.queue_utils import queue_for_user
 from app.utils.upload_security_utils import validate_document_upload_bytes
 from app.utils.user_utils import add_daily_word_progress, build_writing_activity_entry
 from app.workers.consumers.extraction_consumer import _process_chapter
-from app.workers.tasks.analysis_tasks import analyse_chapter_task
-from app.workers.tasks.extraction_tasks import process_book_task, process_chapter_task
-from app.services.book_service import create_editor_project
+
+from .core import (
+    _clean_optional_text,
+    _clean_text,
+    log,
+)
+from .lifecycle import _read_upload_bounded, _validate_cover_magic
 
 router = APIRouter()
+UPLOAD_PREVIEW_CACHE_TTL_SECONDS = 15 * 60
+
+
+def _upload_preview_cache_key(user_id: uuid.UUID, raw: bytes) -> str:
+    return f"upload-preview:{user_id}:{hashlib.sha256(raw).hexdigest()}"
+
+
+async def _load_or_build_upload_preview(
+    *,
+    user_id: uuid.UUID,
+    raw: bytes,
+    format_name: str,
+    work_type: str,
+) -> dict[str, Any]:
+    key = _upload_preview_cache_key(user_id, raw)
+    cached = await cache_get(key)
+    if isinstance(cached, dict):
+        return cached
+    from app.utils.books.imports import build_import_preview
+
+    preview = await asyncio.to_thread(
+        lambda: build_import_preview(
+            format_name=format_name, work_type=work_type, raw=raw, language=None
+        )
+    )
+    await cache_set(key, preview, UPLOAD_PREVIEW_CACHE_TTL_SECONDS)
+    return preview
 
 
 def _sync_books_package_monkeypatches() -> None:
@@ -145,17 +206,27 @@ async def upload_book_endpoint(
     fmt, resolved_work_type = resolve_upload_format_and_work_type(file.filename, work_type)
 
     selected_series = await resolve_owned_series_ids(db, current_user.id, series_ids)
-    await check_upload_limit(db, current_user, requested_uploads=1)
 
     is_public = False
     raw = await _read_upload_bounded(file, settings.BOOK_UPLOAD_MAX_BYTES, "Book file")
     if not raw:
         raise HTTPException(400, "Uploaded file is empty")
     validate_document_upload_bytes(file.filename, raw, fmt)
+    preview = await _load_or_build_upload_preview(
+        user_id=current_user.id,
+        raw=raw,
+        format_name=fmt,
+        work_type=resolved_work_type,
+    )
+    total_words = int(preview.get("total_words") or 0)
+    await ensure_source_storage_capacity(db, current_user, len(raw))
+    await ensure_active_word_capacity(db, current_user, total_words)
     book_id = uuid.uuid4()
     cover_raw = None
     if not as_bool(auto_extract_cover) and cover_file is not None and cover_file.filename:
-        cover_raw = await _read_upload_bounded(cover_file, settings.COVER_UPLOAD_MAX_BYTES, "Cover image")
+        cover_raw = await _read_upload_bounded(
+            cover_file, settings.COVER_UPLOAD_MAX_BYTES, "Cover image"
+        )
         if cover_raw:
             _validate_cover_magic(cover_raw)
     s3_key = storage.upload_book_bytes(raw, str(current_user.id), file.filename)
@@ -176,6 +247,7 @@ async def upload_book_endpoint(
         format=fmt,
         work_type=resolved_work_type,
         s3_key=s3_key,
+        source_size_bytes=len(raw),
         cover_s3_key=cover_s3_key,
         status="pending",
         is_public=is_public,
@@ -188,6 +260,15 @@ async def upload_book_endpoint(
     )
     db.add(book)
     await db.flush()
+    processing_run = await get_or_create_processing_run(
+        db, user_id=current_user.id, book_id=book.id, chapters_total=0
+    )
+    await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_book",
+        processing_run=processing_run,
+        arguments={"book_id": str(book.id), "processing_run_id": str(processing_run.id)},
+    )
     for index, series in enumerate(selected_series):
         membership = SeriesBook(series_id=series.id, book_id=book.id)
         db.add(membership)
@@ -203,9 +284,14 @@ async def upload_book_endpoint(
     db.add(notification)
     await db.commit()
 
-    process_book_task.apply_async(args=[str(book.id)], queue=queue_for_user(current_user, "extraction"))
-    return {"book_id": str(book.id), "status": "processing",
-            "copyright_warning": False, "visibility": visibility, "mode": mode}
+    await dispatch_pending_extraction_tasks(db)
+    return {
+        "book_id": str(book.id),
+        "status": "processing",
+        "copyright_warning": False,
+        "visibility": visibility,
+        "mode": mode,
+    }
 
 
 @router.post("/upload/preview")
@@ -221,7 +307,9 @@ async def preview_upload_endpoint(
     if not file.filename:
         raise HTTPException(400, "No file")
 
-    raw = await _read_upload_bounded(file, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript preview")
+    raw = await _read_upload_bounded(
+        file, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript preview"
+    )
     fmt, resolved_work_type = resolve_upload_format_and_work_type(
         file.filename,
         normalize_book_work_type(work_type, default="novel"),
@@ -232,14 +320,31 @@ async def preview_upload_endpoint(
         extra={"format": fmt, "work_type": resolved_work_type, "user_id": str(current_user.id)},
     )
 
-    from app.utils.book_utils import build_import_preview
-    preview = await asyncio.to_thread(
-        lambda: build_import_preview(
-            format_name=fmt,
-            work_type=resolved_work_type,
-            raw=raw,
-            language=None,
-        )
+    preview = await _load_or_build_upload_preview(
+        user_id=current_user.id,
+        raw=raw,
+        format_name=fmt,
+        work_type=resolved_work_type,
+    )
+    allowance = await summarize_processing_allowances(db, current_user)
+    total_words = int(preview.get("total_words") or 0)
+    preview.update(
+        {
+            "source_size_bytes": len(raw),
+            "projected_active_words": allowance.active_analyzed_words + total_words,
+            "active_word_limit": allowance.active_word_limit,
+            "projected_monthly_processed_words": allowance.monthly_processed_words + total_words,
+            "monthly_processed_word_limit": allowance.monthly_processed_word_limit,
+            "projected_source_storage_bytes": allowance.source_storage_bytes + len(raw),
+            "source_storage_limit_bytes": allowance.source_storage_limit_bytes,
+            "allowance_allowed": (
+                not allowance.allowances_enforced
+                or (
+                    total_words <= allowance.active_words_remaining
+                    and len(raw) <= allowance.source_storage_remaining_bytes
+                )
+            ),
+        }
     )
     return preview
 
@@ -257,8 +362,6 @@ async def create_empty_project(
     author = _clean_optional_text(body.author)
     genre = _clean_optional_text(body.genre)
     work_type = normalize_book_work_type(body.work_type, default="novel")
-
-    await check_upload_limit(db, current_user, requested_uploads=1)
 
     series_ids = body.series_ids or []
     selected_series = await resolve_owned_series_ids(db, current_user.id, series_ids)
@@ -315,6 +418,7 @@ async def import_manuscript_content(
     _sync_books_package_monkeypatches()
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    ensure_project_writable(book)
     assert_editor_project_not_rebuilding(book)
     if not text and not files:
         raise HTTPException(400, "Provide text or one or more files")
@@ -332,7 +436,10 @@ async def import_manuscript_content(
     resolved_book_work_type = normalize_book_work_type(work_type, default=book.work_type or "novel")
     resolved_import_format: str | None = None
     first_pdf_raw_for_cover: bytes | None = None
-    from app.services.editor_project_service import auto_reprocess_enabled, update_reprocess_metadata
+    from app.services.editor_project_service import (
+        auto_reprocess_enabled,
+        update_reprocess_metadata,
+    )
 
     should_auto_reprocess = auto_reprocess_enabled(book)
 
@@ -342,7 +449,9 @@ async def import_manuscript_content(
 
     if text and text.strip():
         if resolved_book_work_type == "screenplay":
-            screenplay_payload = await parse_screenplay_upload("inline.fountain", text.encode("utf-8"))
+            screenplay_payload = await parse_screenplay_upload(
+                "inline.fountain", text.encode("utf-8")
+            )
             new_jobs = normalize_imported_chapters(
                 screenplay_payload["chapters"],
                 chapter_number=chapter_number,
@@ -362,12 +471,15 @@ async def import_manuscript_content(
         else:
             import_jobs.extend(
                 normalize_imported_chapters(
-                    [{
-                        "title": normalized_title or f"{story_unit_name(book)} {chapter_number or next_number}",
-                        "text": text,
-                        "html": cleaned_html,
-                        "number": chapter_number or next_number,
-                    }],
+                    [
+                        {
+                            "title": normalized_title
+                            or f"{story_unit_name(book)} {chapter_number or next_number}",
+                            "text": text,
+                            "html": cleaned_html,
+                            "number": chapter_number or next_number,
+                        }
+                    ],
                     chapter_number=chapter_number,
                     start_number=chapter_number or next_number,
                     replace_existing=replace_flag,
@@ -378,7 +490,10 @@ async def import_manuscript_content(
 
     manuscript_files = [upload for upload in (files or []) if upload.filename]
     if len(manuscript_files) > settings.MANUSCRIPT_IMPORT_MAX_FILES:
-        raise HTTPException(413, f"Manuscript import accepts at most {settings.MANUSCRIPT_IMPORT_MAX_FILES} files at once.")
+        raise HTTPException(
+            413,
+            f"Manuscript import accepts at most {settings.MANUSCRIPT_IMPORT_MAX_FILES} files at once.",
+        )
 
     if manuscript_files:
         await enforce_manuscript_import_rate_limit(db, current_user.id)
@@ -386,7 +501,9 @@ async def import_manuscript_content(
     for upload in manuscript_files:
         if not upload.filename:
             continue
-        raw = await _read_upload_bounded(upload, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript file")
+        raw = await _read_upload_bounded(
+            upload, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript file"
+        )
         if not raw:
             continue
         total_file_size += len(raw)
@@ -407,19 +524,38 @@ async def import_manuscript_content(
             preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
             preserve_source_chapters=bool(book.preserve_source_chapters),
         )
-        screenplay_payload = parsed_payload.get("screenplay_payload") if upload_work_type == "screenplay" else None
+        screenplay_payload = (
+            parsed_payload.get("screenplay_payload") if upload_work_type == "screenplay" else None
+        )
         parsed = list(cast(list[dict[str, object]], parsed_payload["chapters"]))
         if upload_work_type != "screenplay" and not split_flag:
-            merged_text = "\n\n".join(str(chapter.get("text") or "").strip() for chapter in parsed if chapter.get("text"))
-            merged_html_parts = [str(chapter.get("html") or "").strip() for chapter in parsed if chapter.get("html")]
-            merged_images = [image for chapter in parsed for image in list(chapter.get("images") or [])]
-            parsed = [{
-                "title": normalized_title or (upload.filename.rsplit(".", 1)[0] if "." in upload.filename else upload.filename),
-                "text": merged_text,
-                "html": clean_manuscript_html("\n".join(part for part in merged_html_parts if part)) if merged_html_parts else None,
-                "images": merged_images,
-                "number": 1,
-            }]
+            merged_text = "\n\n".join(
+                str(chapter.get("text") or "").strip() for chapter in parsed if chapter.get("text")
+            )
+            merged_html_parts = [
+                str(chapter.get("html") or "").strip() for chapter in parsed if chapter.get("html")
+            ]
+            merged_images = [
+                image for chapter in parsed for image in list(chapter.get("images") or [])
+            ]
+            parsed = [
+                {
+                    "title": normalized_title
+                    or (
+                        upload.filename.rsplit(".", 1)[0]
+                        if "." in upload.filename
+                        else upload.filename
+                    ),
+                    "text": merged_text,
+                    "html": clean_manuscript_html(
+                        "\n".join(part for part in merged_html_parts if part)
+                    )
+                    if merged_html_parts
+                    else None,
+                    "images": merged_images,
+                    "number": 1,
+                }
+            ]
         base_number = chapter_number if replace_flag and chapter_number else next_number
         new_jobs = normalize_imported_chapters(
             parsed,
@@ -447,6 +583,27 @@ async def import_manuscript_content(
     if not import_jobs:
         raise HTTPException(400, "No importable manuscript content was found")
 
+    imported_word_counts = {
+        int(cast(Any, job["number"])): len(str(job.get("text") or "").split())
+        for job in import_jobs
+    }
+    existing_word_counts: dict[int, int] = {}
+    if replace_flag:
+        rows = (
+            await db.execute(
+                select(Chapter.number, Chapter.word_count).where(
+                    Chapter.book_id == book.id,
+                    Chapter.number.in_(list(imported_word_counts)),
+                )
+            )
+        ).all()
+        existing_word_counts = {int(number): int(word_count or 0) for number, word_count in rows}
+    active_words_added = sum(
+        max(word_count - existing_word_counts.get(number, 0), 0)
+        for number, word_count in imported_word_counts.items()
+    )
+    await ensure_active_word_capacity(db, current_user, active_words_added)
+
     imported_numbers: list[int] = []
     for job in import_jobs:
         job_number = int(cast(Any, job["number"]))
@@ -466,7 +623,11 @@ async def import_manuscript_content(
             ).scalar()
             if existing is not None:
                 current_content_version = int(existing.content_version or 1)
-                if expected_content_version is not None and len(import_jobs) == 1 and job_number == (chapter_number or job_number):
+                if (
+                    expected_content_version is not None
+                    and len(import_jobs) == 1
+                    and job_number == (chapter_number or job_number)
+                ):
                     if current_content_version != expected_content_version:
                         raise HTTPException(
                             409,
@@ -478,15 +639,24 @@ async def import_manuscript_content(
                         )
                 previous_word_count = int(existing.word_count or 0)
                 if existing.s3_key:
-                    existing_payload = deserialize_manuscript_content(await asyncio.to_thread(storage.download_book, existing.s3_key))
+                    existing_payload = deserialize_manuscript_content(
+                        await asyncio.to_thread(storage.download_book, existing.s3_key)
+                    )
                     previous_text = str(existing_payload.get("text") or "")
                 existing_media_rows = (
-                    await db.execute(
-                        select(ChapterMedia)
-                        .where(ChapterMedia.chapter_id == existing.id, ChapterMedia.asset_type == "image")
-                        .order_by(ChapterMedia.sort_order.asc(), ChapterMedia.created_at.asc())
+                    (
+                        await db.execute(
+                            select(ChapterMedia)
+                            .where(
+                                ChapterMedia.chapter_id == existing.id,
+                                ChapterMedia.asset_type == "image",
+                            )
+                            .order_by(ChapterMedia.sort_order.asc(), ChapterMedia.created_at.asc())
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 existing_media_payloads = [
                     chapter_media_storage_payload(media)
                     for media in existing_media_rows
@@ -587,7 +757,10 @@ async def import_manuscript_content(
             replace_scene_numbers=cast(set[int], batch["scene_numbers"]),
         )
 
-    total_chapters = await db.scalar(select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id)) or 0
+    total_chapters = (
+        await db.scalar(select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id))
+        or 0
+    )
     book.total_chapters = total_chapters
     book.mode = "author"
     book.work_type = resolved_book_work_type
@@ -607,7 +780,9 @@ async def import_manuscript_content(
                     content_type,
                 )
         except Exception:
-            log.warning("manuscript_import_cover_extraction_failed book_id=%s", book.id, exc_info=True)
+            log.warning(
+                "manuscript_import_cover_extraction_failed book_id=%s", book.id, exc_info=True
+            )
     book.source_kind = "chapter_wise" if len(import_jobs) == 1 and not files else "batch_upload"
     touch_public_book_updated_at(book)
     if daily_words_added > 0:
@@ -626,8 +801,7 @@ async def import_manuscript_content(
         progress = (
             await db.execute(
                 select(ReadingProgress).where(
-                    ReadingProgress.user_id == current_user.id,
-                    ReadingProgress.book_id == book.id
+                    ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book.id
                 )
             )
         ).scalar()
@@ -652,39 +826,50 @@ async def import_manuscript_content(
     if getattr(book, "is_editor_project", False):
         from app.services.editor_project_service import maybe_auto_reprocess_editor_project
 
-        auto_reprocess_dispatched, _auto_chapters_queued, _auto_total_words = await maybe_auto_reprocess_editor_project(db, book)
+        (
+            auto_reprocess_dispatched,
+            _auto_chapters_queued,
+            _auto_total_words,
+        ) = await maybe_auto_reprocess_editor_project(db, book)
         if auto_reprocess_dispatched:
             await db.refresh(book)
 
     chapter_reports: list[ChapterConsistencyReport] = []
-    chapters_for_analysis: list[tuple[int, str]] = []
-    for number in ([] if getattr(book, "is_editor_project", False) else imported_numbers):
+    chapters_for_analysis: list[tuple[int, Chapter]] = []
+    for number in [] if getattr(book, "is_editor_project", False) else imported_numbers:
         chapter = (
-            await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == number))
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id, Chapter.number == number)
+            )
         ).scalar()
         if chapter is not None:
             chapter.analysis_state = build_analysis_chapter_state(
-                chapter.analysis_state if isinstance(getattr(chapter, "analysis_state", None), dict) else None,
+                chapter.analysis_state
+                if isinstance(getattr(chapter, "analysis_state", None), dict)
+                else None,
                 status="queued",
                 increment_attempt=True,
             )
-            chapters_for_analysis.append((number, str(chapter.id)))
+            chapters_for_analysis.append((number, chapter))
 
     if chapters_for_analysis:
         await db.commit()
 
     analysis_tasks: list[dict[str, str | int]] = []
-    for number, chapter_id in chapters_for_analysis:
-        task_result = analyse_chapter_task.apply_async(
-            args=[chapter_id, str(book.id)],
-            kwargs={"is_reprocessing": False},
-            queue="analysis",
+    for number, chapter in chapters_for_analysis:
+        execution = await enqueue_analysis_execution(
+            db,
+            chapter_id=chapter.id,
+            book_id=book.id,
+            user_id=book.user_id,
+            chapter_number=number,
+            chapters_total=len(chapters_for_analysis),
         )
         analysis_tasks.append(
             {
-                "chapter_id": chapter_id,
+                "chapter_id": str(chapter.id),
                 "chapter_number": number,
-                "task_id": str(getattr(task_result, "id", "")),
+                "task_id": str(execution.id),
             }
         )
 
@@ -727,79 +912,79 @@ async def reprocess_manuscript(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    ensure_project_writable(book)
 
-    if not body.confirm_upload_charge:
-        raise HTTPException(400, "Confirm that reprocessing will consume 1 book upload before continuing.")
+    if not (body.confirm_processing_words or body.confirm_upload_charge):
+        raise HTTPException(
+            400,
+            "Confirm that reprocessing will consume processed-word allowance before continuing.",
+        )
 
     from app.services.editor_project_service import (
+        dispatch_rebuild,
         fail_rebuild_if_active,
         get_rebuild_run_id,
         prepare_rebuild,
-        dispatch_rebuild,
     )
 
     if get_rebuild_run_id(book) is not None:
         raise HTTPException(409, "A rebuild is already in progress for this project")
 
     chapters = (
-        await db.execute(
-            select(Chapter)
-            .where(Chapter.book_id == book.id, Chapter.word_count > 0)
+        (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id, Chapter.word_count > 0)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if not chapters:
         raise HTTPException(400, "Save at least one chapter before reprocessing")
 
-    await check_upload_limit(
+    requested_words = sum(int(chapter.word_count or 0) for chapter in chapters)
+    reservation_source_id = f"manual:{uuid.uuid4().hex}"
+    reservation, allowance = await reserve_processing_words(
         db,
         current_user,
-        requested_uploads=1,
-        context="Manual manuscript reprocessing consumes 1 additional book upload.",
+        book_id=book.id,
+        usage_kind="manual_reprocess",
+        source_id=reservation_source_id,
+        word_count=requested_words,
     )
-
     rebuild_run_id = await prepare_rebuild(db, book, reason="manual_reprocess")
-    chapters_queued, total_words = await dispatch_rebuild(db, book)
     try:
-        await record_book_upload_charge(
-            db,
-            user_id=current_user.id,
-            book_id=book.id,
-            charge_kind="manual_reprocess",
-            source_id=rebuild_run_id,
-            quantity=1,
-            metadata={
-                "chapters_queued": chapters_queued,
-                "total_words": total_words,
-            },
-        )
+        chapters_queued, total_words = await dispatch_rebuild(db, book)
+        await consume_processing_reservation(db, reservation.id)
         await db.commit()
     except Exception as exc:
         log.exception(
-            "manual_reprocess_charge_failed book_id=%s rebuild_run_id=%s",
+            "manual_reprocess_allowance_failed book_id=%s rebuild_run_id=%s",
             book.id,
             rebuild_run_id,
         )
         await db.rollback()
         try:
+            await release_processing_reservation(db, reservation.id)
             await db.refresh(book)
             await fail_rebuild_if_active(
                 db,
                 book,
                 expected_rebuild_run_id=rebuild_run_id,
-                error="Unable to record the manual reprocess upload charge.",
+                error="Unable to finalize the manual reprocess allowance reservation.",
             )
             await db.commit()
         except Exception:
             await db.rollback()
             log.exception(
-                "manual_reprocess_charge_cleanup_failed book_id=%s rebuild_run_id=%s",
+                "manual_reprocess_allowance_cleanup_failed book_id=%s rebuild_run_id=%s",
                 book.id,
                 rebuild_run_id,
             )
         raise HTTPException(
             503,
-            "Unable to record the reprocess upload charge. No rebuild was started.",
+            "Unable to finalize the reprocess allowance reservation. No rebuild was started.",
         ) from exc
 
     return ManuscriptReprocessOut(
@@ -807,12 +992,17 @@ async def reprocess_manuscript(
         status="processing",
         chapters_queued=chapters_queued,
         total_words=total_words,
-        upload_charge_consumed=True,
-        charge_kind="manual_reprocess",
+        upload_charge_consumed=False,
+        charge_kind=None,
+        processed_words_reserved=requested_words,
+        processed_words_remaining=allowance.monthly_processed_words_remaining,
     )
 
 
-@router.post("/{book_id}/manuscript/chapters/{chapter_number}/reprocess", response_model=ManuscriptReprocessOut)
+@router.post(
+    "/{book_id}/manuscript/chapters/{chapter_number}/reprocess",
+    response_model=ManuscriptReprocessOut,
+)
 async def reprocess_manuscript_chapter(
     book_id: uuid.UUID,
     chapter_number: int,
@@ -821,6 +1011,7 @@ async def reprocess_manuscript_chapter(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    ensure_project_writable(book)
 
     from app.services.editor_project_service import (
         get_rebuild_run_id,
@@ -854,6 +1045,14 @@ async def reprocess_manuscript_chapter(
         current_user,
         estimated_tokens=estimated_tokens,
     )
+    reservation, allowance = await reserve_processing_words(
+        db,
+        current_user,
+        book_id=book.id,
+        usage_kind="chapter_reprocess",
+        source_id=f"{book.id}:{chapter_number}:{chapter.content_version}:{uuid.uuid4().hex}",
+        word_count=int(chapter.word_count or 0),
+    )
 
     await purge_manual_chapter_reprocess_content(db, book=book, chapter=chapter)
     chapter.analysis_state = build_analysis_chapter_state(
@@ -866,16 +1065,35 @@ async def reprocess_manuscript_chapter(
         clear_pending_chapters=[chapter_number],
         last_manual_chapter_number=chapter_number,
     )
+    processing_run = await get_or_create_processing_run(
+        db,
+        user_id=current_user.id,
+        book_id=book.id,
+        run_kind="manual_reprocess",
+        chapters_total=1,
+    )
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_chapter",
+        processing_run=processing_run,
+        chapter_id=chapter.id,
+        chapter_number=chapter_number,
+        arguments={
+            "book_id": str(book.id),
+            "chapter_number": chapter_number,
+            "processing_run_id": str(processing_run.id),
+            "processing_reservation_id": str(reservation.id),
+            "manual_reprocess": True,
+        },
+        identity_suffix=reservation.id,
+    )
+    reservation.task_id = str(execution.id)
     await db.commit()
     await db.refresh(book)
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
     await mark_book_cache_dirty(str(book.id))
 
-    process_chapter_task.apply_async(
-        args=[str(book.id), chapter_number],
-        kwargs={"manual_reprocess": True},
-        queue=queue_for_user(current_user, "extraction"),
-    )
+    await dispatch_pending_extraction_tasks(db)
 
     return ManuscriptReprocessOut(
         book_id=str(book.id),
@@ -884,4 +1102,6 @@ async def reprocess_manuscript_chapter(
         total_words=int(chapter.word_count or 0),
         upload_charge_consumed=False,
         charge_kind=None,
+        processed_words_reserved=int(chapter.word_count or 0),
+        processed_words_remaining=allowance.monthly_processed_words_remaining,
     )

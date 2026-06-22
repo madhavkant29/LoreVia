@@ -7,16 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Chapter
 from app.models.character import Character
-from app.utils.character_utils import resolve_character_reference_from_roster
+from app.utils.characters.extraction import resolve_character_reference_from_roster
 
 
 def _clean_name(value: str | None) -> str:
     return " ".join((value or "").split()).strip().lower()
 
 
-def _normalize_major_event(raw_event: dict, *, chapter_number: int, character_ids: list[str], character_names: list[str]) -> dict:
-    title = " ".join(str(raw_event.get("event_title") or raw_event.get("event") or "").split()).strip()
-    description = " ".join(str(raw_event.get("description") or raw_event.get("impact") or "").split()).strip()
+def _normalize_major_event(
+    raw_event: dict, *, chapter_number: int, character_ids: list[str], character_names: list[str]
+) -> dict:
+    title = " ".join(
+        str(raw_event.get("event_title") or raw_event.get("event") or "").split()
+    ).strip()
+    description = " ".join(
+        str(raw_event.get("description") or raw_event.get("impact") or "").split()
+    ).strip()
     importance_raw = raw_event.get("importance")
     if isinstance(importance_raw, int):
         importance = importance_raw
@@ -36,9 +42,15 @@ def _normalize_major_event(raw_event: dict, *, chapter_number: int, character_id
     }
 
 
-def _normalize_character_event(raw_event: dict, *, chapter_number: int, character: Character) -> dict:
-    title = " ".join(str(raw_event.get("event_title") or raw_event.get("event") or "").split()).strip()
-    description = " ".join(str(raw_event.get("description") or raw_event.get("impact") or "").split()).strip()
+def _normalize_character_event(
+    raw_event: dict, *, chapter_number: int, character: Character
+) -> dict:
+    title = " ".join(
+        str(raw_event.get("event_title") or raw_event.get("event") or "").split()
+    ).strip()
+    description = " ".join(
+        str(raw_event.get("description") or raw_event.get("impact") or "").split()
+    ).strip()
     impact_score = raw_event.get("impact_score", raw_event.get("importance", 5))
     try:
         impact_score = int(impact_score)
@@ -55,7 +67,11 @@ def _normalize_character_event(raw_event: dict, *, chapter_number: int, characte
         "description": description or "",
         "impact_score": max(1, min(impact_score, 10)),
         "role": raw_event.get("role") or character.role,
-        "accomplishments": [str(item).strip() for item in (raw_event.get("accomplishments") or []) if str(item).strip()],
+        "accomplishments": [
+            str(item).strip()
+            for item in (raw_event.get("accomplishments") or [])
+            if str(item).strip()
+        ],
         "growth_direction": str(raw_event.get("growth_direction") or "neutral"),
         "growth_magnitude": max(0, min(growth_magnitude, 10)),
         "is_major": bool(raw_event.get("is_major", impact_score >= 7)),
@@ -70,8 +86,10 @@ async def link_summary_events(
     char_changes: list[dict] | None,
 ) -> dict[str, list[dict]]:
     character_rows = (
-        await db.execute(select(Character).where(Character.book_id == chapter.book_id))
-    ).scalars().all()
+        (await db.execute(select(Character).where(Character.book_id == chapter.book_id)))
+        .scalars()
+        .all()
+    )
     by_lookup: dict[str, Character] = {}
     for character in character_rows:
         by_lookup[_clean_name(character.name)] = character
@@ -116,7 +134,9 @@ async def link_summary_events(
         linked_major_events.append(major_event)
 
         for character in matched_characters:
-            event_payload = _normalize_character_event(raw_event, chapter_number=chapter.number, character=character)
+            event_payload = _normalize_character_event(
+                raw_event, chapter_number=chapter.number, character=character
+            )
             _append_unique_character_event(character, event_payload)
             updated_character_events.append(
                 {
@@ -149,8 +169,13 @@ async def link_summary_events(
             continue
         event_payload = _normalize_character_event(
             {
-                "event_title": raw_change.get("event_title") or raw_change.get("change") or f"{character.name} changes",
-                "description": raw_change.get("description") or raw_change.get("change") or raw_change.get("evidence") or "",
+                "event_title": raw_change.get("event_title")
+                or raw_change.get("change")
+                or f"{character.name} changes",
+                "description": raw_change.get("description")
+                or raw_change.get("change")
+                or raw_change.get("evidence")
+                or "",
                 "impact_score": raw_change.get("impact_score") or 5,
                 "role": raw_change.get("role") or character.role,
                 "growth_direction": raw_change.get("growth_direction") or "neutral",
@@ -191,5 +216,10 @@ def _append_unique_character_event(character: Character, event_payload: dict) ->
             character.growth_events = events
             return
     events.append(event_payload)
-    events.sort(key=lambda item: (int(item.get("chapter_number") or 0), str(item.get("event_title") or "").lower()))
+    events.sort(
+        key=lambda item: (
+            int(item.get("chapter_number") or 0),
+            str(item.get("event_title") or "").lower(),
+        )
+    )
     character.growth_events = events

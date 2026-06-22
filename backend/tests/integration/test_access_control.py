@@ -4,12 +4,22 @@ import zipfile
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import fitz
 import pytest
 from sqlalchemy import select
 
 from app.models.book import Book, Chapter, ChapterVersion, Series, SeriesBook
 from app.models.character import Character
 from app.models.user import User
+
+
+def _pdf_bytes(text: str) -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), text)
+    raw = document.write()
+    document.close()
+    return raw
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +41,7 @@ def _mock_storage_uploads(monkeypatch):
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     from app.core.security import create_access_token
+
     username = email.split("@")[0][:32]
     response = await client.post(
         "/api/v1/auth/register",
@@ -45,7 +56,9 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
     assert response.status_code == 201
     token = create_access_token(str(response.json()["id"]))
     assert token
-    me_response = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={token}"})
+    me_response = await client.get(
+        "/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={token}"}
+    )
     assert me_response.status_code == 200
     return {"Cookie": f"lorevia_access_token={token}"}, uuid.UUID(me_response.json()["id"])
 
@@ -180,7 +193,14 @@ async def test_mark_book_read_updates_only_current_user_progress(client, db):
     await db.flush()
 
     for number in range(1, 5):
-        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=number,
+                title=f"Chapter {number}",
+                s3_key=f"chapter-{number}.txt",
+            )
+        )
     await db.commit()
 
     response = await client.post(
@@ -199,7 +219,9 @@ async def test_mark_book_read_updates_only_current_user_progress(client, db):
     assert marked.json()["progress_pct"] == 100.0
 
     owner_progress = await client.get(f"/api/v1/reader/{book.id}/progress", headers=owner_headers)
-    intruder_progress = await client.get(f"/api/v1/reader/{book.id}/progress", headers=intruder_headers)
+    intruder_progress = await client.get(
+        f"/api/v1/reader/{book.id}/progress", headers=intruder_headers
+    )
 
     assert owner_progress.status_code == 200
     assert owner_progress.json()["percent_complete"] == 100.0
@@ -251,7 +273,7 @@ async def test_upload_attaches_book_to_multiple_owned_series(client, db):
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        files={"file": ("attached.pdf", b"%PDF-1.4 test payload", "application/pdf")},
+        files={"file": ("attached.pdf", _pdf_bytes("Attached story"), "application/pdf")},
         data={
             "title": "Attached Book",
             "series_ids": [str(first_series.id), str(second_series.id)],
@@ -266,11 +288,12 @@ async def test_upload_attaches_book_to_multiple_owned_series(client, db):
     assert book.primary_series_id == first_series.id
 
     memberships = (
-        await db.execute(
-            select(SeriesBook).where(SeriesBook.book_id == book_id)
-        )
-    ).scalars().all()
-    assert {membership.series_id for membership in memberships} == {first_series.id, second_series.id}
+        (await db.execute(select(SeriesBook).where(SeriesBook.book_id == book_id))).scalars().all()
+    )
+    assert {membership.series_id for membership in memberships} == {
+        first_series.id,
+        second_series.id,
+    }
 
 
 @pytest.mark.asyncio
@@ -284,7 +307,7 @@ async def test_upload_rejects_foreign_series_ids(client, db):
     response = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        files={"file": ("rejected.pdf", b"%PDF-1.4 test payload", "application/pdf")},
+        files={"file": ("rejected.pdf", _pdf_bytes("Rejected story"), "application/pdf")},
         data={
             "title": "Rejected Book",
             "series_ids": [str(foreign_series.id)],
@@ -293,10 +316,14 @@ async def test_upload_rejects_foreign_series_ids(client, db):
 
     assert response.status_code == 404
     books = (
-        await db.execute(
-            select(Book).where(Book.user_id == user_id, Book.title == "Rejected Book")
+        (
+            await db.execute(
+                select(Book).where(Book.user_id == user_id, Book.title == "Rejected Book")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert books == []
 
 
@@ -333,8 +360,26 @@ async def test_author_can_upload_author_mode_book(client, db):
 
 
 @pytest.mark.asyncio
-async def test_legacy_reader_alias_uploads_are_limited_like_non_author_owned_uploads(client, db):
+async def test_legacy_reader_alias_uploads_are_limited_like_non_author_owned_uploads(
+    client, db, monkeypatch
+):
+    from app.core.config import settings
     from app.core.security import create_access_token
+    from app.utils import billing_utils
+
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(
+        billing_utils,
+        "has_authoring_access",
+        lambda user, now=None: (
+            billing_utils.billing_access_tier(user, now)
+            in billing_utils.AUTHORING_SUBSCRIPTION_TIERS
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.books.imports.require_author_access",
+        billing_utils.require_author_access,
+    )
 
     reader = User(
         email="reader-upload-limit@lorevia.app",
@@ -346,25 +391,26 @@ async def test_legacy_reader_alias_uploads_are_limited_like_non_author_owned_upl
     db.add(reader)
     await db.commit()
     await db.refresh(reader)
+    assert billing_utils.user_can_author(reader) is False
 
     headers = {"Cookie": f"lorevia_access_token={create_access_token(str(reader.id))}"}
     first = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        files={"file": ("first.pdf", b"%PDF-1.4 first payload", "application/pdf")},
+        files={"file": ("first.pdf", _pdf_bytes("First story"), "application/pdf")},
         data={"title": "First Reader Upload"},
     )
     second = await client.post(
         "/api/v1/books/upload",
         headers=headers,
-        files={"file": ("second.pdf", b"%PDF-1.4 second payload", "application/pdf")},
+        files={"file": ("second.pdf", _pdf_bytes("Second story"), "application/pdf")},
         data={"title": "Second Reader Upload"},
     )
 
     assert first.status_code == 403
     assert second.status_code == 403
-    assert "Upgrade to Author for higher owner upload limits." in first.json()["detail"]
-    assert "Upgrade to Author for higher owner upload limits." in second.json()["detail"]
+    assert "requires an Author or Architect plan" in first.json()["detail"]
+    assert "requires an Author or Architect plan" in second.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -387,7 +433,14 @@ async def test_story_scoped_collaboration_limits_shared_book_access(client, db):
     db.add(book)
     await db.flush()
     for number in range(1, 4):
-        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=number,
+                title=f"Chapter {number}",
+                s3_key=f"chapter-{number}.txt",
+            )
+        )
     db.add(Character(book_id=book.id, name="Nora Vale", first_chapter=1, role="mc"))
     await db.commit()
 
@@ -421,13 +474,21 @@ async def test_story_scoped_collaboration_limits_shared_book_access(client, db):
     assert chapters.status_code == 200
     assert [item["number"] for item in chapters.json()["chapters"]] == [1, 2]
 
-    allowed_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/2", headers=collaborator_headers)
-    blocked_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/3", headers=collaborator_headers)
+    allowed_chapter = await client.get(
+        f"/api/v1/reader/{book.id}/chapter/2", headers=collaborator_headers
+    )
+    blocked_chapter = await client.get(
+        f"/api/v1/reader/{book.id}/chapter/3", headers=collaborator_headers
+    )
     assert allowed_chapter.status_code == 200
     assert blocked_chapter.status_code == 403
 
-    characters = await client.get(f"/api/v1/books/{book.id}/characters", headers=collaborator_headers)
-    continuity = await client.get(f"/api/v1/books/{book.id}/chapter-reports", headers=collaborator_headers)
+    characters = await client.get(
+        f"/api/v1/books/{book.id}/characters", headers=collaborator_headers
+    )
+    continuity = await client.get(
+        f"/api/v1/books/{book.id}/chapter-reports", headers=collaborator_headers
+    )
     assert characters.status_code == 403
     assert continuity.status_code == 403
 
@@ -452,7 +513,14 @@ async def test_collaboration_permissions_gate_comments_and_manuscript_tools(clie
     db.add(book)
     await db.flush()
     for number in range(1, 4):
-        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=number,
+                title=f"Chapter {number}",
+                s3_key=f"chapter-{number}.txt",
+            )
+        )
     await db.commit()
 
     create = await client.post(
@@ -502,8 +570,12 @@ async def test_collaboration_permissions_gate_comments_and_manuscript_tools(clie
             "body": "This should be out of scope.",
         },
     )
-    writer_workspace = await client.get(f"/api/v1/books/{book.id}/writer-workspace", headers=collaborator_headers)
-    manuscript_tree = await client.get(f"/api/v1/books/{book.id}/workspace/tree", headers=collaborator_headers)
+    writer_workspace = await client.get(
+        f"/api/v1/books/{book.id}/writer-workspace", headers=collaborator_headers
+    )
+    manuscript_tree = await client.get(
+        f"/api/v1/books/{book.id}/workspace/tree", headers=collaborator_headers
+    )
 
     assert note.status_code == 200
     assert blocked_note.status_code == 403
@@ -531,7 +603,14 @@ async def test_beta_reader_collaboration_can_read_and_leave_feedback_notes(clien
     db.add(book)
     await db.flush()
     for number in range(1, 3):
-        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=number,
+                title=f"Chapter {number}",
+                s3_key=f"chapter-{number}.txt",
+            )
+        )
     await db.commit()
 
     create = await client.post(
@@ -568,7 +647,9 @@ async def test_beta_reader_collaboration_can_read_and_leave_feedback_notes(clien
 
 
 @pytest.mark.asyncio
-async def test_collaboration_manuscript_export_respects_selected_chapter_scope(client, db, monkeypatch):
+async def test_collaboration_manuscript_export_respects_selected_chapter_scope(
+    client, db, monkeypatch
+):
     owner_headers, owner_id = await _register_user(client, "owner-export-scope@lorevia.app")
     collaborator_headers, _ = await _register_user(client, "export-scope@lorevia.app")
     owner = await db.get(User, owner_id)
@@ -587,12 +668,21 @@ async def test_collaboration_manuscript_export_respects_selected_chapter_scope(c
     db.add(book)
     await db.flush()
     for number in range(1, 4):
-        db.add(Chapter(book_id=book.id, number=number, title=f"Chapter {number}", s3_key=f"chapter-{number}.txt"))
+        db.add(
+            Chapter(
+                book_id=book.id,
+                number=number,
+                title=f"Chapter {number}",
+                s3_key=f"chapter-{number}.txt",
+            )
+        )
     await db.commit()
 
     captured: dict[str, object] = {}
 
-    def _fake_manuscript_docx(*, title, chapters, scenes, preset, front_matter, font_family, include_toc, **kwargs):
+    def _fake_manuscript_docx(
+        *, title, chapters, scenes, preset, front_matter, font_family, include_toc, **kwargs
+    ):
         captured["title"] = title
         captured["chapters"] = chapters
         captured["font_family"] = font_family
@@ -644,7 +734,9 @@ async def test_collaboration_manuscript_export_respects_selected_chapter_scope(c
 
 
 @pytest.mark.asyncio
-async def test_collaboration_restore_rejects_out_of_scope_version_before_mutation(client, db, monkeypatch):
+async def test_collaboration_restore_rejects_out_of_scope_version_before_mutation(
+    client, db, monkeypatch
+):
     owner_headers, owner_id = await _register_user(client, "owner-restore-scope@lorevia.app")
     collaborator_headers, _ = await _register_user(client, "restore-scope@lorevia.app")
     owner = await db.get(User, owner_id)

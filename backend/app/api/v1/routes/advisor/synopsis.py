@@ -46,7 +46,6 @@ from app.schemas.advisor import (
     SynopsisResponse,
     VoiceConsistencyRequest,
 )
-from app.utils.billing_utils import require_author_access
 from app.utils.advisor_utils import (
     EDITORIAL_SYSTEM,
     EDITORIAL_USER,
@@ -68,9 +67,14 @@ from app.utils.advisor_utils import (
     normalize_synopsis_result,
     normalize_voice_consistency_result,
 )
-from app.utils.book_utils import detect_chapter_continuity_flags
+from app.utils.billing_utils import require_author_access
+from app.utils.books.continuity import detect_chapter_continuity_flags
 from app.utils.export_utils import export_filename_base
-from app.utils.intelligence_utils import compute_voice_metrics, extract_dialogue_samples_by_character, score_voice_match
+from app.utils.intelligence_utils import (
+    compute_voice_metrics,
+    extract_dialogue_samples_by_character,
+    score_voice_match,
+)
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.logging.errors import public_error_message
 
@@ -78,6 +82,7 @@ router = APIRouter()
 
 
 # ─── Editorial Review ─────────────────────────────────────────────────────────
+
 
 @router.post("/{book_id}/advisor/editorial-review")
 async def editorial_review(
@@ -121,18 +126,21 @@ async def editorial_review(
             usage_user_id=current_user.id,
             usage_feature="advisor_editorial_search",
         )
-        passages_block = "\n\n".join(
-            f"Ch. {h['chapter_num']} – {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
-            for h in hits
-        ) or "No closely matching passages found."
+        passages_block = (
+            "\n\n".join(
+                f"Ch. {h['chapter_num']} – {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
+                for h in hits
+            )
+            or "No closely matching passages found."
+        )
 
         # 2. Build story context
         story_ctx = await build_story_context(db, book_id, total_ch)
 
         chapter_hint = (
             f"This passage will appear in Chapter {body.chapter_num}."
-            if body.chapter_num else
-            "Chapter number not specified."
+            if body.chapter_num
+            else "Chapter number not specified."
         )
 
         system_msg = EDITORIAL_SYSTEM.format(
@@ -235,8 +243,8 @@ async def prose_tighten(
     try:
         chapter_hint = (
             f"This selection is from Chapter {body.chapter_num}."
-            if body.chapter_num else
-            "Chapter number not specified."
+            if body.chapter_num
+            else "Chapter number not specified."
         )
         response = await create_tracked_chat_completion(
             client=client,
@@ -255,11 +263,15 @@ async def prose_tighten(
                 },
                 {
                     "role": "user",
-                    "content": PROSE_TIGHTEN_USER.format(chapter_hint=chapter_hint, text=body.text[:3500]),
+                    "content": PROSE_TIGHTEN_USER.format(
+                        chapter_hint=chapter_hint, text=body.text[:3500]
+                    ),
                 },
             ],
         )
-        normalized = normalize_prose_tighten_result(response.choices[0].message.content or "{}", body.text)
+        normalized = normalize_prose_tighten_result(
+            response.choices[0].message.content or "{}", body.text
+        )
         response_payload = {**normalized, "cached": False}
         await set_prose_tighten_cache(str(book.id), cache_key, response_payload)
         return ProseTightenResponse(**response_payload)
@@ -350,9 +362,13 @@ async def inline_continuity_check(
         for item in review_payload.get("retrieved_passages", [])[:4]
     ]
     overall_verdict = review_payload["review"].get("overall_verdict") or (
-        "No hard continuity contradiction surfaced in this inline pass, but keep pressure-testing setup, memory, and scene-to-scene logic before you lock the scene." if not issues else "Inline continuity pass found issues worth checking before you lock the scene."
+        "No hard continuity contradiction surfaced in this inline pass, but keep pressure-testing setup, memory, and scene-to-scene logic before you lock the scene."
+        if not issues
+        else "Inline continuity pass found issues worth checking before you lock the scene."
     )
-    return InlineContinuityResponse(issues=issues, memory_bank=memory_bank, overall_verdict=overall_verdict)
+    return InlineContinuityResponse(
+        issues=issues, memory_bank=memory_bank, overall_verdict=overall_verdict
+    )
 
 
 @router.post("/{book_id}/advisor/inline-continuity-stream")
@@ -457,7 +473,9 @@ async def manuscript_synopsis(
                 },
             ],
         )
-        normalized = normalize_synopsis_result(response.choices[0].message.content or "{}", spoiler_level)
+        normalized = normalize_synopsis_result(
+            response.choices[0].message.content or "{}", spoiler_level
+        )
         normalized["coverage_chapters"] = [int(item) for item in coverage]
         normalized["cached"] = False
         await set_synopsis_cache(str(book_id), spoiler_level, content_hash, normalized)
@@ -530,30 +548,39 @@ async def voice_consistency_review(
             usage_user_id=current_user.id,
             usage_feature="advisor_voice_consistency_search",
         )
-        passages_block = "\n\n".join(
-            f"Ch. {h['chapter_num']} - {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
-            for h in hits
-        ) or "No closely matching passages found."
+        passages_block = (
+            "\n\n".join(
+                f"Ch. {h['chapter_num']} - {h.get('chapter_title') or 'Untitled'}:\n{h['text'][:320]}"
+                for h in hits
+            )
+            or "No closely matching passages found."
+        )
 
         story_ctx = await build_story_context(db, book_id, total_ch)
         character_rows = (
-            await db.execute(
-                select(
-                    Character.id,
-                    Character.name,
-                    Character.aliases,
-                    Character.role,
-                    Character.first_chapter,
-                    Character.arc_summary,
-                    Character.personality_tags,
-                    Character.motivations,
-                    Character.fears,
-                    Character.trait_state,
+            (
+                await db.execute(
+                    select(
+                        Character.id,
+                        Character.name,
+                        Character.aliases,
+                        Character.role,
+                        Character.first_chapter,
+                        Character.arc_summary,
+                        Character.personality_tags,
+                        Character.motivations,
+                        Character.fears,
+                        Character.trait_state,
+                    )
+                    .where(Character.book_id == book_id)
+                    .order_by(
+                        Character.mention_count.desc(), Character.first_chapter, Character.name
+                    )
                 )
-                .where(Character.book_id == book_id)
-                .order_by(Character.mention_count.desc(), Character.first_chapter, Character.name)
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         character_payloads = [dict(row) for row in character_rows]
         selected_character = None
         if body.character_id is not None:
@@ -567,14 +594,20 @@ async def voice_consistency_review(
         else:
             relevant_characters = identify_character_mentions(body.text, character_payloads)
         all_voice_profiles = (
-            await db.execute(
-                select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book_id)
+            (
+                await db.execute(
+                    select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         profiles_by_character_id = {profile.character_id: profile for profile in all_voice_profiles}
         attributed_dialogue = extract_dialogue_samples_by_character(body.text, character_payloads)
         warnings: list[str] = []
-        if len(relevant_characters) == 1 and not attributed_dialogue.get(relevant_characters[0]["name"]):
+        if len(relevant_characters) == 1 and not attributed_dialogue.get(
+            relevant_characters[0]["name"]
+        ):
             attributed_dialogue[relevant_characters[0]["name"]] = [body.text[:4000]]
             if body.character_id is not None:
                 warnings.append(
@@ -584,8 +617,8 @@ async def voice_consistency_review(
         character_context = build_character_voice_context(relevant_characters)
         chapter_hint = (
             f"This passage will appear in Chapter {body.chapter_num}."
-            if body.chapter_num else
-            "Chapter number not specified."
+            if body.chapter_num
+            else "Chapter number not specified."
         )
 
         system_msg = VOICE_CONSISTENCY_SYSTEM.format(
@@ -667,7 +700,11 @@ async def voice_consistency_review(
                 if candidate_score > closest_other_score:
                     closest_other_score = candidate_score
                     closest_other_character = next(
-                        (row["name"] for row in character_rows if str(row["id"]) == str(candidate_profile.character_id)),
+                        (
+                            row["name"]
+                            for row in character_rows
+                            if str(row["id"]) == str(candidate_profile.character_id)
+                        ),
                         None,
                     )
             character_matches.append(
@@ -678,7 +715,9 @@ async def voice_consistency_review(
                     "sample_dialogue_count": int(sample_metrics.get("sample_dialogue_count") or 0),
                     "strongest_signals": signals,
                     "closest_other_character": closest_other_character,
-                    "closest_other_score": closest_other_score if closest_other_score >= 0 else None,
+                    "closest_other_score": closest_other_score
+                    if closest_other_score >= 0
+                    else None,
                 }
             )
 
@@ -734,6 +773,7 @@ async def voice_consistency_review_stream(
 
 # ─── Continuity report download ───────────────────────────────────────────────
 
+
 @router.get("/{book_id}/advisor/continuity-report")
 async def continuity_report(
     book_id: uuid.UUID,
@@ -757,10 +797,14 @@ async def continuity_report(
         current_user=current_user,
         _=_,
     )
-    suggestions_payload = await _suggestions_advisor_suggestions(book_id=book_id, db=db, current_user=current_user)
+    suggestions_payload = await _suggestions_advisor_suggestions(
+        book_id=book_id, db=db, current_user=current_user
+    )
     open_threads = [
-        item for item in suggestions_payload.get("suggestions", [])
-        if item.get("type") in {"dropped_thread", "future_direction", "unresolved_clue", "arc_opportunity"}
+        item
+        for item in suggestions_payload.get("suggestions", [])
+        if item.get("type")
+        in {"dropped_thread", "future_direction", "unresolved_clue", "arc_opportunity"}
     ][:8]
 
     markdown = build_continuity_report_markdown(
@@ -776,12 +820,16 @@ async def continuity_report(
         return Response(
             content=markdown.encode("utf-8"),
             media_type="text/markdown; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename_base}-continuity-report.md"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename_base}-continuity-report.md"'
+            },
         )
 
     raw = build_continuity_report_pdf(markdown, title=book.title, chapter_num=chapter_num)
     return Response(
         content=raw,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename_base}-continuity-report.pdf"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename_base}-continuity-report.pdf"'
+        },
     )

@@ -9,22 +9,76 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.embeddings.embedder import embed_character
 from app.models.character import Character
-from app.utils.character_utils import has_conflicting_title_identity, has_shared_surname, name_similarity
+from app.utils.characters.identity import (
+    has_conflicting_title_identity,
+    has_shared_surname,
+)
+from app.utils.characters.similarity import name_similarity
 
 log = logging.getLogger(__name__)
 
 ALIAS_STOPWORDS = {
-    "after", "and", "are", "around", "association", "but", "considering", "creation",
-    "faculty", "for", "from", "having", "his", "however", "just", "lady", "leaving",
-    "let", "looking", "lord", "lords", "maybe", "miss", "now", "once", "regardless",
-    "seeing", "she", "sure", "taking", "thanks", "that", "the", "they", "thinking",
-    "this", "though", "unfortunately", "using", "very", "war", "well", "what", "when",
-    "with", "yes", "you",
+    "after",
+    "and",
+    "are",
+    "around",
+    "association",
+    "but",
+    "considering",
+    "creation",
+    "faculty",
+    "for",
+    "from",
+    "having",
+    "his",
+    "however",
+    "just",
+    "lady",
+    "leaving",
+    "let",
+    "looking",
+    "lord",
+    "lords",
+    "maybe",
+    "miss",
+    "now",
+    "once",
+    "regardless",
+    "seeing",
+    "she",
+    "sure",
+    "taking",
+    "thanks",
+    "that",
+    "the",
+    "they",
+    "thinking",
+    "this",
+    "though",
+    "unfortunately",
+    "using",
+    "very",
+    "war",
+    "well",
+    "what",
+    "when",
+    "with",
+    "yes",
+    "you",
 }
 ALIAS_EXACT_BLOCKLIST = {
-    "Clock Tower", "Far East", "Fourth Holy Grail", "Great Ritual", "Mage's Association",
-    "Magic Circuits", "Magic Crest", "Modern Magecraft", "Mystic Codes", "Source Crest",
-    "The Twin Towers", "United States",
+    "Clock Tower",
+    "Far East",
+    "Fourth Holy Grail",
+    "Great Ritual",
+    "Mage's Association",
+    "Magic Circuits",
+    "Magic Crest",
+    "Modern Magecraft",
+    "Mystic Codes",
+    "Source Crest",
+    "The Twin Towers",
+    "United States",
 }
 ALIAS_SUFFIX_BLOCKLIST = (
     " Association",
@@ -84,7 +138,11 @@ def is_valid_alias(alias: str | None) -> bool:
 
 def _meaningful_tokens(name: str | None) -> list[str]:
     stopwords = {"mr", "mrs", "ms", "miss", "dr", "sir", "lady", "lord", "the"}
-    return [token for token in _strip_honorific_suffixes(name).split() if token and token not in stopwords]
+    return [
+        token
+        for token in _strip_honorific_suffixes(name).split()
+        if token and token not in stopwords
+    ]
 
 
 def _honorific_prefix(name: str | None) -> str:
@@ -236,10 +294,14 @@ def names_equivalent(
             ):
                 return False
             return True
-        if len(left_base_tokens) == len(right_base_tokens) == 2 and left_base_tokens == list(reversed(right_base_tokens)):
+        if len(left_base_tokens) == len(right_base_tokens) == 2 and left_base_tokens == list(
+            reversed(right_base_tokens)
+        ):
             return True
 
-    if (left_norm.startswith(right_norm) or right_norm.startswith(left_norm)) and min(len(left_tokens), len(right_tokens)) >= 2:
+    if (left_norm.startswith(right_norm) or right_norm.startswith(left_norm)) and min(
+        len(left_tokens), len(right_tokens)
+    ) >= 2:
         return True
 
     if left_tokens and right_tokens and left_tokens[0] == right_tokens[0]:

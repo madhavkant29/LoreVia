@@ -44,13 +44,18 @@ LoreVia2/
 
 ### 2. Helper / Utility Functions
 
-- Every helper function must live in `backend/app/utils/`.
+- Pure helpers live in `backend/app/utils/`; multi-step workflows and transactional
+  orchestration live in `backend/app/services/`.
+- Large domains may use packages such as `utils/books/`, `services/characters/`,
+  or `services/public/`. Prefer focused modules near 500 lines over expanding a
+  domain-level `*_utils.py` god module.
   - `character_utils.py` — character display, status, relationship text, text cleaning
   - `book_utils.py`      — DB query wrappers, cover, progress, chapter numbers, manuscript parsing
   - `export_utils.py`    — Character card and bible renderers (Markdown / PDF / DOCX)
   - `reader_utils.py`    — Timeline/graph filters, media serialization, summary normalization
   - `advisor_utils.py`   — LLM prompts, intent classification, story context, report builders
-  - Add to the matching file above; create a new `*_utils.py` only for a new, distinct domain.
+  - Existing files remain valid homes for small changes. When a file is already
+    oversized, add to or create the matching domain package instead.
 - Route files **import and call** these helpers — they do not redefine them.
 - **No `as _name` import aliases.** Import with the public name directly.
 - **No shim/wrapper functions** that do nothing but call the real function.

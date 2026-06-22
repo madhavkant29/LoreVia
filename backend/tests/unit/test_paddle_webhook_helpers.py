@@ -28,20 +28,43 @@ from app.services import paddle_webhook_service as service
         ("unknown", "", "", "pending"),
     ],
 )
-def test_next_subscription_status_covers_provider_lifecycle(event_type, incoming, current, expected):
-    assert service._next_subscription_status(
-        event_type=event_type,
-        incoming_status=incoming,
-        current_status=current,
-    ) == expected
+def test_next_subscription_status_covers_provider_lifecycle(
+    event_type, incoming, current, expected
+):
+    assert (
+        service._next_subscription_status(
+            event_type=event_type,
+            incoming_status=incoming,
+            current_status=current,
+        )
+        == expected
+    )
 
 
 def test_paddle_identifier_and_normalization_helpers_cover_nested_and_empty_values():
-    assert service._subscription_id_from_data(event_type="subscription.updated", data={"id": " sub-1 "}) == "sub-1"
-    assert service._subscription_id_from_data(event_type="transaction.completed", data={"subscription": {"id": "sub-2"}}) == "sub-2"
+    assert (
+        service._subscription_id_from_data(
+            event_type="subscription.updated", data={"id": " sub-1 "}
+        )
+        == "sub-1"
+    )
+    assert (
+        service._subscription_id_from_data(
+            event_type="transaction.completed", data={"subscription": {"id": "sub-2"}}
+        )
+        == "sub-2"
+    )
     assert service._customer_id_from_data({"customer": {"id": "customer-1"}}) == "customer-1"
-    assert service._transaction_id_from_data(event_type="transaction.completed", data={"id": "txn-1"}) == "txn-1"
-    assert service._transaction_id_from_data(event_type="subscription.updated", data={"transaction": {"id": "txn-2"}}) == "txn-2"
+    assert (
+        service._transaction_id_from_data(event_type="transaction.completed", data={"id": "txn-1"})
+        == "txn-1"
+    )
+    assert (
+        service._transaction_id_from_data(
+            event_type="subscription.updated", data={"transaction": {"id": "txn-2"}}
+        )
+        == "txn-2"
+    )
     assert service._normalized_status(" Active ") == "active"
     assert service._string_or_none("  ") is None
     assert service._string_or_none(42) == "42"
@@ -51,20 +74,102 @@ def test_paddle_identifier_and_normalization_helpers_cover_nested_and_empty_valu
 
 def test_tier_and_metrics_helpers_preserve_or_change_access_by_event(monkeypatch):
     monkeypatch.setattr(service, "tier_from_plan_code", lambda plan, price: "architect")
-    monkeypatch.setattr(service, "subscription_service_is_active", lambda event, status: status in {"active", "trialing"})
+    monkeypatch.setattr(
+        service,
+        "subscription_service_is_active",
+        lambda event, status: status in {"active", "trialing"},
+    )
 
-    assert service._tier_after_event(event_type="subscription.paused", status="paused", plan="pro", price_id="p", current_tier="author") == "free"
-    assert service._tier_after_event(event_type="subscription.canceled", status="canceled", plan="pro", price_id="p", current_tier="author") == "free"
-    assert service._tier_after_event(event_type="subscription.canceled", status="active", plan="pro", price_id="p", current_tier="author") == "author"
-    assert service._tier_after_event(event_type="transaction.past_due", status="past_due", plan="pro", price_id="p", current_tier="author") == "author"
-    assert service._tier_after_event(event_type="subscription.activated", status="active", plan="pro", price_id="p", current_tier="free") == "architect"
-    assert service._tier_after_event(event_type="subscription.created", status="pending", plan="pro", price_id="p", current_tier="free") == "free"
+    assert (
+        service._tier_after_event(
+            event_type="subscription.paused",
+            status="paused",
+            plan="pro",
+            price_id="p",
+            current_tier="author",
+        )
+        == "free"
+    )
+    assert (
+        service._tier_after_event(
+            event_type="subscription.canceled",
+            status="canceled",
+            plan="pro",
+            price_id="p",
+            current_tier="author",
+        )
+        == "free"
+    )
+    assert (
+        service._tier_after_event(
+            event_type="subscription.canceled",
+            status="active",
+            plan="pro",
+            price_id="p",
+            current_tier="author",
+        )
+        == "author"
+    )
+    assert (
+        service._tier_after_event(
+            event_type="transaction.past_due",
+            status="past_due",
+            plan="pro",
+            price_id="p",
+            current_tier="author",
+        )
+        == "author"
+    )
+    assert (
+        service._tier_after_event(
+            event_type="subscription.activated",
+            status="active",
+            plan="pro",
+            price_id="p",
+            current_tier="free",
+        )
+        == "architect"
+    )
+    assert (
+        service._tier_after_event(
+            event_type="subscription.created",
+            status="pending",
+            plan="pro",
+            price_id="p",
+            current_tier="free",
+        )
+        == "free"
+    )
 
-    monkeypatch.setattr(service, "subscription_event_type_for_metrics", lambda event, status: "subscription_activated")
-    assert service._metrics_event_type(event_type="subscription.canceled", previous_status="active", status="pending") is None
-    assert service._metrics_event_type(event_type="subscription.activated", previous_status="active", status="active") is None
-    assert service._metrics_event_type(event_type="subscription.activated", previous_status="pending", status="pending") is None
-    assert service._metrics_event_type(event_type="subscription.activated", previous_status="pending", status="active") == "subscription_activated"
+    monkeypatch.setattr(
+        service,
+        "subscription_event_type_for_metrics",
+        lambda event, status: "subscription_activated",
+    )
+    assert (
+        service._metrics_event_type(
+            event_type="subscription.canceled", previous_status="active", status="pending"
+        )
+        is None
+    )
+    assert (
+        service._metrics_event_type(
+            event_type="subscription.activated", previous_status="active", status="active"
+        )
+        is None
+    )
+    assert (
+        service._metrics_event_type(
+            event_type="subscription.activated", previous_status="pending", status="pending"
+        )
+        is None
+    )
+    assert (
+        service._metrics_event_type(
+            event_type="subscription.activated", previous_status="pending", status="active"
+        )
+        == "subscription_activated"
+    )
 
 
 class FakeResult:
@@ -119,7 +224,12 @@ async def test_refund_follow_up_resolves_only_approved_adjustment_cancellation()
         transaction_id="txn-2",
     )
     assert untouched.status == service.REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED
-    assert service._review_has_approved_adjustment(SimpleNamespace(provider_response_json={"adjustment_updated": "bad"})) is False
+    assert (
+        service._review_has_approved_adjustment(
+            SimpleNamespace(provider_response_json={"adjustment_updated": "bad"})
+        )
+        is False
+    )
 
     await service._resolve_refund_follow_up_if_completed_cancellation(
         FakeDb(review),

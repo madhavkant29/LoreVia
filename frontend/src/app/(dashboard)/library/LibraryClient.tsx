@@ -529,7 +529,13 @@ export function LibraryClient() {
   async function handleRetryProcessing(bookId: string) {
     setBusyBookId(bookId)
     try {
-      await booksApi.retryProcessing(bookId)
+      const targetBook = books.find((book) => book.id === bookId)
+      const processingStatus = normalizeProcessingStatus(targetBook?.processing, targetBook)
+      if (processingStatus?.resumeAvailable) {
+        await booksApi.continueProcessing(bookId)
+      } else {
+        await booksApi.retryProcessing(bookId)
+      }
       await refetch()
     } finally {
       setBusyBookId(null)

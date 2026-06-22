@@ -6,6 +6,7 @@ Dry-run by default:
 Apply after explicit confirmation:
     python scripts/backfill_character_bible_noise.py --apply --confirm-apply REPAIR_CHARACTER_BIBLE_BACKFILL
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,13 +31,32 @@ BACKFILL_VERSION = 2
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backfill noisy character-bible records across books.")
-    parser.add_argument("--apply", action="store_true", help="Apply the repair backfill instead of printing a dry run.")
-    parser.add_argument("--confirm-apply", type=str, default="", help=f"Required confirmation token for apply mode: {CONFIRM_TOKEN}")
-    parser.add_argument("--limit", type=int, default=0, help="Optional max number of books to inspect.")
-    parser.add_argument("--book-id", type=uuid.UUID, default=None, help="Optional single book override.")
-    parser.add_argument("--force", action="store_true", help="Re-run books already marked as backfilled.")
-    parser.add_argument("--output-json", type=str, default=None, help="Optional path to write the report JSON.")
+    parser = argparse.ArgumentParser(
+        description="Backfill noisy character-bible records across books."
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the repair backfill instead of printing a dry run.",
+    )
+    parser.add_argument(
+        "--confirm-apply",
+        type=str,
+        default="",
+        help=f"Required confirmation token for apply mode: {CONFIRM_TOKEN}",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Optional max number of books to inspect."
+    )
+    parser.add_argument(
+        "--book-id", type=uuid.UUID, default=None, help="Optional single book override."
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Re-run books already marked as backfilled."
+    )
+    parser.add_argument(
+        "--output-json", type=str, default=None, help="Optional path to write the report JSON."
+    )
     return parser.parse_args()
 
 
@@ -67,29 +87,34 @@ def _mark_backfill_state(book: Book, *, status: str, payload: dict[str, Any]) ->
 
 async def _iter_target_books(*, book_id: uuid.UUID | None, limit: int, force: bool) -> list[Book]:
     async with AsyncSessionLocal() as session:
-        stmt = select(Book).where(
-            or_(
-                exists(select(Character.id).where(Character.book_id == Book.id)),
-                exists(
-                    select(CharacterCandidate.id).where(
-                        CharacterCandidate.book_id == Book.id,
-                        CharacterCandidate.status == "pending",
-                    )
-                ),
-                exists(
-                    select(CharacterRelationshipCandidate.id).where(
-                        CharacterRelationshipCandidate.book_id == Book.id,
-                        CharacterRelationshipCandidate.status == "pending",
-                    )
-                ),
+        stmt = (
+            select(Book)
+            .where(
+                or_(
+                    exists(select(Character.id).where(Character.book_id == Book.id)),
+                    exists(
+                        select(CharacterCandidate.id).where(
+                            CharacterCandidate.book_id == Book.id,
+                            CharacterCandidate.status == "pending",
+                        )
+                    ),
+                    exists(
+                        select(CharacterRelationshipCandidate.id).where(
+                            CharacterRelationshipCandidate.book_id == Book.id,
+                            CharacterRelationshipCandidate.status == "pending",
+                        )
+                    ),
+                )
             )
-        ).order_by(Book.created_at.asc())
+            .order_by(Book.created_at.asc())
+        )
         if book_id is not None:
             stmt = stmt.where(Book.id == book_id)
         rows = list((await session.execute(stmt)).scalars().all())
         if not force:
             rows = [
-                row for row in rows
+                row
+                for row in rows
                 if int(_backfill_state(row).get("version") or 0) < BACKFILL_VERSION
             ]
         if limit > 0:
@@ -97,7 +122,9 @@ async def _iter_target_books(*, book_id: uuid.UUID | None, limit: int, force: bo
         return rows
 
 
-async def _run_backfill(*, apply: bool, book_id: uuid.UUID | None, limit: int, force: bool) -> dict[str, Any]:
+async def _run_backfill(
+    *, apply: bool, book_id: uuid.UUID | None, limit: int, force: bool
+) -> dict[str, Any]:
     books = await _iter_target_books(book_id=book_id, limit=limit, force=force)
     report: dict[str, Any] = {
         "apply": apply,
@@ -124,12 +151,24 @@ async def _run_backfill(*, apply: bool, book_id: uuid.UUID | None, limit: int, f
                     payload={
                         "demoted_character_ids": result.get("demoted_character_ids", []),
                         "merged_pairs": result.get("merged_pairs", []),
-                        "pending_character_candidates_suppressed": result.get("pending_character_candidates_suppressed", 0),
-                        "pending_character_candidates_kept": result.get("pending_character_candidates_kept", 0),
-                        "pending_relationship_candidates_suppressed": result.get("pending_relationship_candidates_suppressed", 0),
-                        "pending_relationship_candidates_kept": result.get("pending_relationship_candidates_kept", 0),
-                        "suppressed_character_candidate_ids": result.get("suppressed_character_candidate_ids", []),
-                        "suppressed_relationship_candidate_ids": result.get("suppressed_relationship_candidate_ids", []),
+                        "pending_character_candidates_suppressed": result.get(
+                            "pending_character_candidates_suppressed", 0
+                        ),
+                        "pending_character_candidates_kept": result.get(
+                            "pending_character_candidates_kept", 0
+                        ),
+                        "pending_relationship_candidates_suppressed": result.get(
+                            "pending_relationship_candidates_suppressed", 0
+                        ),
+                        "pending_relationship_candidates_kept": result.get(
+                            "pending_relationship_candidates_kept", 0
+                        ),
+                        "suppressed_character_candidate_ids": result.get(
+                            "suppressed_character_candidate_ids", []
+                        ),
+                        "suppressed_relationship_candidate_ids": result.get(
+                            "suppressed_relationship_candidate_ids", []
+                        ),
                     },
                 )
                 await session.commit()

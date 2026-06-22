@@ -10,7 +10,9 @@ import redis.asyncio as aioredis
 
 from app.core.config import settings
 
-_redis_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, aioredis.Redis] = weakref.WeakKeyDictionary()
+_redis_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, aioredis.Redis] = (
+    weakref.WeakKeyDictionary()
+)
 log = logging.getLogger("lorevia.redis")
 
 ADVISOR_CACHE_TTL_SECONDS = 10 * 60
@@ -128,7 +130,9 @@ async def _cache_get_json_best_effort(key: str) -> object | None:
         try:
             await r.delete(key)
         except Exception:
-            log.warning("redis_cache_delete_invalid_payload_failed", extra={"cache_key": key}, exc_info=True)
+            log.warning(
+                "redis_cache_delete_invalid_payload_failed", extra={"cache_key": key}, exc_info=True
+            )
         return None
 
 
@@ -181,7 +185,9 @@ async def remember_webhook_event(event_id: str, ttl_seconds: int = 7 * 24 * 3600
 
 async def consume_billing_confirmation_token(token_id: str, ttl_seconds: int) -> bool:
     r = await get_redis()
-    return bool(await r.set(key_billing_confirmation_token(token_id), "1", ex=max(1, ttl_seconds), nx=True))
+    return bool(
+        await r.set(key_billing_confirmation_token(token_id), "1", ex=max(1, ttl_seconds), nx=True)
+    )
 
 
 async def store_password_reset_token(token: str, user_id: str, ttl_seconds: int) -> None:
@@ -232,7 +238,9 @@ async def consume_email_verification_token(token: str) -> str | None:
     return value
 
 
-async def store_email_preferences_token(token: str, payload: dict[str, str], ttl_seconds: int) -> None:
+async def store_email_preferences_token(
+    token: str, payload: dict[str, str], ttl_seconds: int
+) -> None:
     r = await get_redis()
     await r.setex(key_email_preferences_token(token), ttl_seconds, json.dumps(payload))
 
@@ -250,7 +258,9 @@ async def get_email_preferences_token_payload(token: str) -> dict[str, str] | No
     return payload if isinstance(payload, dict) else None
 
 
-async def store_email_unsubscribe_token(token: str, payload: dict[str, str], ttl_seconds: int) -> None:
+async def store_email_unsubscribe_token(
+    token: str, payload: dict[str, str], ttl_seconds: int
+) -> None:
     r = await get_redis()
     await r.setex(key_email_unsubscribe_token(token), ttl_seconds, json.dumps(payload))
 
@@ -272,6 +282,7 @@ async def consume_email_unsubscribe_token(token: str) -> dict[str, str] | None:
 # ── Key builders — single source of truth ────────────────────────────────────
 def key_character_profile(character_id: str) -> str:
     return f"character:profile:{character_id}"
+
 
 def key_chapter_summary(chapter_id: str, mode: str) -> str:
     return f"chapter:summary:{chapter_id}:{mode}"
@@ -320,7 +331,6 @@ async def delete_key_if_value(key: str, expected_value: str) -> bool:
 
 
 async def cache_delete_if_owner(key: str, owner_token: str) -> bool:
-    r = await get_redis()
     serialized = json.dumps(owner_token, default=str)
     if await delete_key_if_value(key, serialized):
         return True
@@ -334,18 +344,23 @@ def key_cron_lock(task_name: str) -> str:
 def key_chapter_recovery_inflight(chapter_id: str) -> str:
     return f"chapter_recovery:inflight:{chapter_id}"
 
+
 def key_relationship_graph(book_id: str, chapter: int) -> str:
     return f"relationship:graph:{book_id}:{chapter}"
+
 
 def key_search_results(book_id: str, query: str, chapter: int) -> str:
     q_hash = hashlib.md5(query.encode()).hexdigest()[:8]
     return f"book:search:{book_id}:{q_hash}:{chapter}"
 
+
 def key_memory_recall(user_id: str, book_id: str) -> str:
     return f"recall:{user_id}:{book_id}"
 
+
 def key_book_status(book_id: str) -> str:
     return f"book:status:{book_id}"
+
 
 def key_ratelimit(user_id: str, action: str) -> str:
     return f"ratelimit:{user_id}:{action}"
@@ -480,15 +495,21 @@ def key_reader_progress_cache_version(book_id: str, user_id: str) -> str:
     return f"cache_version:reader_progress:{book_id}:{user_id}"
 
 
-def key_reader_events_cache(book_id: str, user_id: str, visible_chapter: int, book_version: int, progress_version: int) -> str:
+def key_reader_events_cache(
+    book_id: str, user_id: str, visible_chapter: int, book_version: int, progress_version: int
+) -> str:
     return f"reader_events:{book_id}:{user_id}:chapter:{visible_chapter}:bookv:{book_version}:readv:{progress_version}"
 
 
-def key_reader_timeline_cache(book_id: str, user_id: str, book_version: int, progress_version: int) -> str:
+def key_reader_timeline_cache(
+    book_id: str, user_id: str, book_version: int, progress_version: int
+) -> str:
     return f"reader_timeline:{book_id}:{user_id}:bookv:{book_version}:readv:{progress_version}"
 
 
-def key_relationship_evolution_cache(book_id: str, user_id: str, chapter: int, book_version: int, progress_version: int) -> str:
+def key_relationship_evolution_cache(
+    book_id: str, user_id: str, chapter: int, book_version: int, progress_version: int
+) -> str:
     return f"reader_relationship_evolution:{book_id}:{user_id}:chapter:{chapter}:bookv:{book_version}:readv:{progress_version}"
 
 
@@ -575,11 +596,15 @@ def key_synopsis_cache(book_id: str, spoiler_level: str, content_hash: str) -> s
 
 
 async def get_synopsis_cache(book_id: str, spoiler_level: str, content_hash: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_synopsis_cache(book_id, spoiler_level, content_hash))
+    payload = await _cache_get_json_best_effort(
+        key_synopsis_cache(book_id, spoiler_level, content_hash)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_synopsis_cache(book_id: str, spoiler_level: str, content_hash: str, payload: object) -> None:
+async def set_synopsis_cache(
+    book_id: str, spoiler_level: str, content_hash: str, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_synopsis_cache(book_id, spoiler_level, content_hash),
         payload,
@@ -588,11 +613,15 @@ async def set_synopsis_cache(book_id: str, spoiler_level: str, content_hash: str
 
 
 async def get_series_advisor_response_cache(series_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_series_advisor_response_cache(series_id, cache_key))
+    payload = await _cache_get_json_best_effort(
+        key_series_advisor_response_cache(series_id, cache_key)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_series_advisor_response_cache(series_id: str, cache_key: str, payload: object) -> None:
+async def set_series_advisor_response_cache(
+    series_id: str, cache_key: str, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_series_advisor_response_cache(series_id, cache_key),
         payload,
@@ -601,11 +630,15 @@ async def set_series_advisor_response_cache(series_id: str, cache_key: str, payl
 
 
 async def get_series_continuity_cache(series_id: str, book_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_series_continuity_cache(series_id, book_id, cache_key))
+    payload = await _cache_get_json_best_effort(
+        key_series_continuity_cache(series_id, book_id, cache_key)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_series_continuity_cache(series_id: str, book_id: str, cache_key: str, payload: object) -> None:
+async def set_series_continuity_cache(
+    series_id: str, book_id: str, cache_key: str, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_series_continuity_cache(series_id, book_id, cache_key),
         payload,
@@ -692,12 +725,18 @@ async def set_series_story_context_cache(series_key: str, version: int, payload:
     )
 
 
-async def get_book_overview_cache(book_id: str, viewer_id: str, access_key: str, version: int) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_book_overview_cache(book_id, viewer_id, access_key, version))
+async def get_book_overview_cache(
+    book_id: str, viewer_id: str, access_key: str, version: int
+) -> dict | None:
+    payload = await _cache_get_json_best_effort(
+        key_book_overview_cache(book_id, viewer_id, access_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_book_overview_cache(book_id: str, viewer_id: str, access_key: str, version: int, payload: object) -> None:
+async def set_book_overview_cache(
+    book_id: str, viewer_id: str, access_key: str, version: int, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_book_overview_cache(book_id, viewer_id, access_key, version),
         payload,
@@ -705,12 +744,18 @@ async def set_book_overview_cache(book_id: str, viewer_id: str, access_key: str,
     )
 
 
-async def get_writer_workspace_cache(book_id: str, viewer_id: str, access_key: str, version: int) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_writer_workspace_cache(book_id, viewer_id, access_key, version))
+async def get_writer_workspace_cache(
+    book_id: str, viewer_id: str, access_key: str, version: int
+) -> dict | None:
+    payload = await _cache_get_json_best_effort(
+        key_writer_workspace_cache(book_id, viewer_id, access_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_writer_workspace_cache(book_id: str, viewer_id: str, access_key: str, version: int, payload: object) -> None:
+async def set_writer_workspace_cache(
+    book_id: str, viewer_id: str, access_key: str, version: int, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_writer_workspace_cache(book_id, viewer_id, access_key, version),
         payload,
@@ -719,11 +764,15 @@ async def set_writer_workspace_cache(book_id: str, viewer_id: str, access_key: s
 
 
 async def get_writing_dashboard_cache(user_id: str, version: int, day_marker: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_writing_dashboard_cache(user_id, version, day_marker))
+    payload = await _cache_get_json_best_effort(
+        key_writing_dashboard_cache(user_id, version, day_marker)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_writing_dashboard_cache(user_id: str, version: int, day_marker: str, payload: object) -> None:
+async def set_writing_dashboard_cache(
+    user_id: str, version: int, day_marker: str, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_writing_dashboard_cache(user_id, version, day_marker),
         payload,
@@ -731,14 +780,23 @@ async def set_writing_dashboard_cache(user_id: str, version: int, day_marker: st
     )
 
 
-async def get_reader_events_cache(book_id: str, user_id: str, visible_chapter: int, book_version: int, progress_version: int) -> dict | None:
+async def get_reader_events_cache(
+    book_id: str, user_id: str, visible_chapter: int, book_version: int, progress_version: int
+) -> dict | None:
     payload = await _cache_get_json_best_effort(
         key_reader_events_cache(book_id, user_id, visible_chapter, book_version, progress_version)
     )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_reader_events_cache(book_id: str, user_id: str, visible_chapter: int, book_version: int, progress_version: int, payload: object) -> None:
+async def set_reader_events_cache(
+    book_id: str,
+    user_id: str,
+    visible_chapter: int,
+    book_version: int,
+    progress_version: int,
+    payload: object,
+) -> None:
     await _cache_set_json_best_effort(
         key_reader_events_cache(book_id, user_id, visible_chapter, book_version, progress_version),
         payload,
@@ -746,14 +804,18 @@ async def set_reader_events_cache(book_id: str, user_id: str, visible_chapter: i
     )
 
 
-async def get_reader_timeline_cache(book_id: str, user_id: str, book_version: int, progress_version: int) -> dict | None:
+async def get_reader_timeline_cache(
+    book_id: str, user_id: str, book_version: int, progress_version: int
+) -> dict | None:
     payload = await _cache_get_json_best_effort(
         key_reader_timeline_cache(book_id, user_id, book_version, progress_version)
     )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_reader_timeline_cache(book_id: str, user_id: str, book_version: int, progress_version: int, payload: object) -> None:
+async def set_reader_timeline_cache(
+    book_id: str, user_id: str, book_version: int, progress_version: int, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_reader_timeline_cache(book_id, user_id, book_version, progress_version),
         payload,
@@ -761,14 +823,23 @@ async def set_reader_timeline_cache(book_id: str, user_id: str, book_version: in
     )
 
 
-async def get_relationship_evolution_cache(book_id: str, user_id: str, chapter: int, book_version: int, progress_version: int) -> dict | None:
+async def get_relationship_evolution_cache(
+    book_id: str, user_id: str, chapter: int, book_version: int, progress_version: int
+) -> dict | None:
     payload = await _cache_get_json_best_effort(
         key_relationship_evolution_cache(book_id, user_id, chapter, book_version, progress_version)
     )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_relationship_evolution_cache(book_id: str, user_id: str, chapter: int, book_version: int, progress_version: int, payload: object) -> None:
+async def set_relationship_evolution_cache(
+    book_id: str,
+    user_id: str,
+    chapter: int,
+    book_version: int,
+    progress_version: int,
+    payload: object,
+) -> None:
     await _cache_set_json_best_effort(
         key_relationship_evolution_cache(book_id, user_id, chapter, book_version, progress_version),
         payload,
@@ -781,7 +852,9 @@ async def get_public_user_profile_cache(user_id: str, username: str, version: in
     return payload if isinstance(payload, dict) else None
 
 
-async def set_public_user_profile_cache(user_id: str, username: str, version: int, payload: object) -> None:
+async def set_public_user_profile_cache(
+    user_id: str, username: str, version: int, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_public_user_profile(user_id, username, version),
         payload,
@@ -818,7 +891,9 @@ def key_public_forum_cache_version() -> str:
     return "public:forum:version"
 
 
-def key_public_forum_posts(version: int, q: str, page: int, page_size: int, thread_type: str | None = None) -> str:
+def key_public_forum_posts(
+    version: int, q: str, page: int, page_size: int, thread_type: str | None = None
+) -> str:
     query_hash = hashlib.md5(q.strip().lower().encode("utf-8")).hexdigest()[:10]
     thread_type_key = (thread_type or "all").strip().lower()
     return f"public:forum:posts:v{version}:{thread_type_key}:{query_hash}:{page}:{page_size}"
@@ -837,7 +912,9 @@ def key_embedding_cache(*, feature: str, model: str, text: str) -> str:
 
 
 async def get_embedding_cache(*, feature: str, model: str, text: str) -> list[float] | None:
-    payload = await _cache_get_json_best_effort(key_embedding_cache(feature=feature, model=model, text=text))
+    payload = await _cache_get_json_best_effort(
+        key_embedding_cache(feature=feature, model=model, text=text)
+    )
     if isinstance(payload, list) and all(isinstance(v, (int, float)) for v in payload):
         return [float(v) for v in payload]
     return None
@@ -859,11 +936,15 @@ def key_cross_book_intelligence(books_hash: str, snapshot_hash: str) -> str:
 
 
 async def get_cross_book_intelligence_cache(books_hash: str, snapshot_hash: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_cross_book_intelligence(books_hash, snapshot_hash))
+    payload = await _cache_get_json_best_effort(
+        key_cross_book_intelligence(books_hash, snapshot_hash)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_cross_book_intelligence_cache(books_hash: str, snapshot_hash: str, payload: object) -> None:
+async def set_cross_book_intelligence_cache(
+    books_hash: str, snapshot_hash: str, payload: object
+) -> None:
     await _cache_set_json_best_effort(
         key_cross_book_intelligence(books_hash, snapshot_hash),
         payload,

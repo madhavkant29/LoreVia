@@ -6,7 +6,18 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
+from fastapi import HTTPException
 
+from app.core.config import settings
+from app.core.redis import (
+    key_public_book_detail,
+    key_public_books,
+    key_public_chapter,
+    key_public_forum_cache_version,
+)
+from app.models.book import BookForumComment
+from app.models.intelligence import Notification
+from app.models.user import User
 from app.schemas.public import (
     PublicAuthorAnalyticsOut,
     PublicForumCommentCreateBody,
@@ -16,6 +27,18 @@ from app.schemas.public import (
     PublicUserProfileOut,
 )
 from app.utils import public_utils
+from app.utils.public import (
+    forum_engagement,
+    forum_foundation,
+    forum_posts,
+    moderation,
+    profiles,
+    ranking_constants,
+    ranking_core,
+    ranking_service,
+    requests,
+    serialization,
+)
 
 
 class _Result:
@@ -80,7 +103,7 @@ class _Upload:
     async def read(self, size: int = -1):
         if size < 0:
             size = len(self._raw) - self._offset
-        chunk = self._raw[self._offset:self._offset + size]
+        chunk = self._raw[self._offset : self._offset + size]
         self._offset += len(chunk)
         return chunk
 
@@ -122,11 +145,11 @@ async def test_get_public_user_profile_returns_cached_payload(monkeypatch):
     async def _cached_profile(*_args, **_kwargs):
         return _profile_payload(user_id, "Writer").model_dump(mode="json")
 
-    monkeypatch.setattr(public_utils, "_user_has_public_profile_presence", _presence)
-    monkeypatch.setattr(public_utils, "get_public_profile_cache_version", _cache_version)
-    monkeypatch.setattr(public_utils, "get_public_user_profile_cache", _cached_profile)
+    monkeypatch.setattr(profiles, "_user_has_public_profile_presence", _presence)
+    monkeypatch.setattr(profiles, "get_public_profile_cache_version", _cache_version)
+    monkeypatch.setattr(profiles, "get_public_user_profile_cache", _cached_profile)
 
-    payload = await public_utils.get_public_user_profile(
+    payload = await profiles.get_public_user_profile(
         _FakeDB(execute_values=[_Result(scalar=user)]),
         username="writer",
     )
@@ -156,13 +179,13 @@ async def test_get_public_user_profile_caches_built_payload(monkeypatch):
     async def _build_profile(*_args, **_kwargs):
         return _profile_payload(user_id, "Writer")
 
-    monkeypatch.setattr(public_utils, "_user_has_public_profile_presence", _presence)
-    monkeypatch.setattr(public_utils, "get_public_profile_cache_version", _cache_version)
-    monkeypatch.setattr(public_utils, "get_public_user_profile_cache", _cache_miss)
-    monkeypatch.setattr(public_utils, "set_public_user_profile_cache", _set_cache)
-    monkeypatch.setattr(public_utils, "build_public_user_profile_out", _build_profile)
+    monkeypatch.setattr(profiles, "_user_has_public_profile_presence", _presence)
+    monkeypatch.setattr(profiles, "get_public_profile_cache_version", _cache_version)
+    monkeypatch.setattr(profiles, "get_public_user_profile_cache", _cache_miss)
+    monkeypatch.setattr(profiles, "set_public_user_profile_cache", _set_cache)
+    monkeypatch.setattr(profiles, "build_public_user_profile_out", _build_profile)
 
-    payload = await public_utils.get_public_user_profile(
+    payload = await profiles.get_public_user_profile(
         _FakeDB(execute_values=[_Result(scalar=user)]),
         username=" Writer ",
     )
@@ -213,7 +236,7 @@ def test_nest_public_forum_comments_builds_reply_tree():
         updated_at="2026-05-22T10:05:00Z",
     )
 
-    nested = public_utils._nest_public_forum_comments([root, reply])
+    nested = forum_engagement._nest_public_forum_comments([root, reply])
 
     assert len(nested) == 1
     assert nested[0].id == parent_id
@@ -260,15 +283,18 @@ async def test_react_to_public_forum_comment_adds_switches_and_clears_reactions(
     async def no_cache(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(public_utils, "_get_visible_forum_post", visible)
-    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
-    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
+    monkeypatch.setattr(forum_engagement, "_get_visible_forum_post", visible)
+    monkeypatch.setattr(forum_engagement, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(forum_engagement, "_invalidate_public_profile_cache_for_users", no_cache)
 
     db = _FakeDB(
         execute_values=[_Result(scalar=None)],
-        get_values={(public_utils.BookForumComment, comment_id): comment, (public_utils.User, author_id): author},
+        get_values={
+            (BookForumComment, comment_id): comment,
+            (User, author_id): author,
+        },
     )
-    payload = await public_utils.react_to_public_forum_comment(
+    payload = await forum_engagement.react_to_public_forum_comment(
         db,
         comment_id=comment_id,
         current_user=viewer,
@@ -281,9 +307,12 @@ async def test_react_to_public_forum_comment_adds_switches_and_clears_reactions(
     existing = SimpleNamespace(reaction="like")
     db = _FakeDB(
         execute_values=[_Result(scalar=existing)],
-        get_values={(public_utils.BookForumComment, comment_id): comment, (public_utils.User, author_id): author},
+        get_values={
+            (BookForumComment, comment_id): comment,
+            (User, author_id): author,
+        },
     )
-    cleared = await public_utils.react_to_public_forum_comment(
+    cleared = await forum_engagement.react_to_public_forum_comment(
         db,
         comment_id=comment_id,
         current_user=viewer,
@@ -316,30 +345,36 @@ async def test_react_to_public_forum_post_updates_counts_and_handles_noop(monkey
         return post, None
 
     async def detail(*_args, **_kwargs):
-        return SimpleNamespace(reaction="like", like_count=post.like_count, dislike_count=post.dislike_count)
+        return SimpleNamespace(
+            reaction="like", like_count=post.like_count, dislike_count=post.dislike_count
+        )
 
     async def no_cache(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(public_utils, "_get_visible_forum_post", visible)
-    monkeypatch.setattr(public_utils, "get_public_forum_post_detail", detail)
-    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
-    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
+    monkeypatch.setattr(forum_engagement, "_get_visible_forum_post", visible)
+    monkeypatch.setattr(forum_engagement, "get_public_forum_post_detail", detail)
+    monkeypatch.setattr(forum_engagement, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(forum_engagement, "_invalidate_public_profile_cache_for_users", no_cache)
 
     db = _FakeDB(
         execute_values=[_Result(scalar=None)],
-        get_values={(public_utils.User, author_id): author},
+        get_values={(User, author_id): author},
     )
-    result = await public_utils.react_to_public_forum_post(db, post_id=post_id, current_user=viewer, reaction="like")
+    result = await forum_engagement.react_to_public_forum_post(
+        db, post_id=post_id, current_user=viewer, reaction="like"
+    )
     assert result.like_count == 1
     assert post.like_count == 1 and len(db.added) == 1
 
     existing = SimpleNamespace(reaction="like")
     noop_db = _FakeDB(
         execute_values=[_Result(scalar=existing)],
-        get_values={(public_utils.User, author_id): author},
+        get_values={(User, author_id): author},
     )
-    await public_utils.react_to_public_forum_post(noop_db, post_id=post_id, current_user=viewer, reaction="like")
+    await forum_engagement.react_to_public_forum_post(
+        noop_db, post_id=post_id, current_user=viewer, reaction="like"
+    )
     assert noop_db.commits == 0
 
 
@@ -358,13 +393,13 @@ async def test_create_and_update_general_forum_posts_execute_runtime_lifecycle(m
     async def no_cache(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(public_utils, "enforce_daily_general_forum_post_limit", enforce_limit)
-    monkeypatch.setattr(public_utils, "get_public_forum_post_detail", detail)
-    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
-    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
+    monkeypatch.setattr(forum_posts, "enforce_daily_general_forum_post_limit", enforce_limit)
+    monkeypatch.setattr(forum_posts, "get_public_forum_post_detail", detail)
+    monkeypatch.setattr(forum_posts, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(forum_posts, "_invalidate_public_profile_cache_for_users", no_cache)
     db = _FakeDB()
 
-    created = await public_utils.create_public_forum_post(
+    created = await forum_posts.create_public_forum_post(
         db,
         current_user=user,
         body=PublicForumPostCreateBody(
@@ -396,9 +431,9 @@ async def test_create_and_update_general_forum_posts_execute_runtime_lifecycle(m
     async def delete_key(key, *, context):
         deleted_keys.append((key, context))
 
-    monkeypatch.setattr(public_utils, "_get_forum_post", get_post)
-    monkeypatch.setattr(public_utils, "delete_storage_key_best_effort", delete_key)
-    updated = await public_utils.update_public_forum_post(
+    monkeypatch.setattr(forum_posts, "_get_forum_post", get_post)
+    monkeypatch.setattr(forum_posts, "delete_storage_key_best_effort", delete_key)
+    updated = await forum_posts.update_public_forum_post(
         db,
         post_id=post.id,
         current_user=user,
@@ -444,24 +479,29 @@ async def test_create_forum_reply_notifies_post_and_parent_authors(monkeypatch):
     async def no_cache(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(public_utils, "_get_visible_forum_post", visible)
-    monkeypatch.setattr(public_utils, "_invalidate_public_forum_cache", no_cache)
-    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", no_cache)
-    db = _FakeDB(get_values={(public_utils.BookForumComment, parent.id): parent})
+    monkeypatch.setattr(forum_engagement, "_get_visible_forum_post", visible)
+    monkeypatch.setattr(forum_engagement, "_invalidate_public_forum_cache", no_cache)
+    monkeypatch.setattr(forum_engagement, "_invalidate_public_profile_cache_for_users", no_cache)
+    db = _FakeDB(get_values={(BookForumComment, parent.id): parent})
 
-    payload = await public_utils.create_public_forum_comment(
+    payload = await forum_engagement.create_public_forum_comment(
         db,
         post_id=post_id,
         current_user=current_user,
-        body=PublicForumCommentCreateBody(body="This reply identifies the missing clue.", parent_comment_id=parent.id),
+        body=PublicForumCommentCreateBody(
+            body="This reply identifies the missing clue.", parent_comment_id=parent.id
+        ),
     )
 
-    comment = next(item for item in db.added if isinstance(item, public_utils.BookForumComment))
-    notifications = [item for item in db.added if isinstance(item, public_utils.Notification)]
+    comment = next(item for item in db.added if isinstance(item, BookForumComment))
+    notifications = [item for item in db.added if isinstance(item, Notification)]
     assert comment.parent_comment_id == parent.id
     assert payload.can_edit is True
     assert payload.author_username == "replying-reader"
-    assert {notification.user_id for notification in notifications} == {post_author_id, parent_author_id}
+    assert {notification.user_id for notification in notifications} == {
+        post_author_id,
+        parent_author_id,
+    }
     assert db.flush_called is True and db.commits == 1
 
 
@@ -478,9 +518,9 @@ async def test_store_public_forum_image_validates_and_uploads_png(monkeypatch):
         captured["content_type"] = content_type
         return key
 
-    monkeypatch.setattr(public_utils, "upload_binary", _upload_binary)
+    monkeypatch.setattr(requests, "upload_binary", _upload_binary)
 
-    storage_key, content_type, filename = await public_utils.store_public_forum_image(
+    storage_key, content_type, filename = await requests.store_public_forum_image(
         upload,
         owner_user_id=owner_user_id,
         target_kind="post",
@@ -498,8 +538,8 @@ async def test_store_public_forum_image_validates_and_uploads_png(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_store_public_forum_image_rejects_non_image_upload():
-    with pytest.raises(public_utils.HTTPException) as exc:
-        await public_utils.store_public_forum_image(
+    with pytest.raises(HTTPException) as exc:
+        await requests.store_public_forum_image(
             _Upload(b"not an image", "notes.txt"),
             owner_user_id=uuid.uuid4(),
             target_kind="comment",
@@ -510,27 +550,33 @@ async def test_store_public_forum_image_rejects_non_image_upload():
 
 
 def test_public_forum_image_url_uses_presigned_url_when_available(monkeypatch):
-    monkeypatch.setattr(public_utils, "get_presigned_url", lambda key: f"https://assets.example/{key}")
+    monkeypatch.setattr(requests, "get_presigned_url", lambda key: f"https://assets.example/{key}")
 
-    assert public_utils.public_forum_image_url(
-        storage_key="public-forum/image.png",
-        owner_user_id=uuid.uuid4(),
-        target_kind="post",
-        target_id=uuid.uuid4(),
-    ) == "https://assets.example/public-forum/image.png"
+    assert (
+        requests.public_forum_image_url(
+            storage_key="public-forum/image.png",
+            owner_user_id=uuid.uuid4(),
+            target_kind="post",
+            target_id=uuid.uuid4(),
+        )
+        == "https://assets.example/public-forum/image.png"
+    )
 
 
 def test_public_ranking_normalizers_accept_supported_values():
-    assert public_utils.normalize_public_ranking_key(" Top_Rated ") == "top_rated"
-    assert public_utils.normalize_public_ranking_window(" Monthly ") == "monthly"
+    assert ranking_core.normalize_public_ranking_key(" Top_Rated ") == "top_rated"
+    assert ranking_core.normalize_public_ranking_window(" Monthly ") == "monthly"
 
 
 def test_public_ranking_label_is_human_readable():
-    assert public_utils.public_ranking_label(ranking_key="most_popular", time_window="weekly") == "Most popular this week"
+    assert (
+        ranking_core.public_ranking_label(ranking_key="most_popular", time_window="weekly")
+        == "Most popular this week"
+    )
 
 
 def test_validate_public_content_report_target_accepts_matching_public_slug():
-    app_host = (urlparse(public_utils.settings.APP_URL).hostname or "getlorevia.com").strip().lower()
+    app_host = (urlparse(settings.APP_URL).hostname or "getlorevia.com").strip().lower()
     book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -541,14 +587,17 @@ def test_validate_public_content_report_target_accepts_matching_public_slug():
         public_slug="sky-harbor",
     )
 
-    assert public_utils.validate_public_content_report_target(
-        book,
-        f" https://{app_host}/public/books/sky-harbor ",
-    ) == f"https://{app_host}/public/books/sky-harbor"
+    assert (
+        moderation.validate_public_content_report_target(
+            book,
+            f" https://{app_host}/public/books/sky-harbor ",
+        )
+        == f"https://{app_host}/public/books/sky-harbor"
+    )
 
 
 def test_validate_public_content_report_target_accepts_reported_book_until_hidden():
-    app_host = (urlparse(public_utils.settings.APP_URL).hostname or "getlorevia.com").strip().lower()
+    app_host = (urlparse(settings.APP_URL).hostname or "getlorevia.com").strip().lower()
     book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -559,16 +608,19 @@ def test_validate_public_content_report_target_accepts_reported_book_until_hidde
         public_slug="storm-chamber",
     )
 
-    assert public_utils.can_view_public_book(book) is True
-    assert public_utils.public_visibility_notice(book) is None
-    assert public_utils.validate_public_content_report_target(
-        book,
-        f"https://{app_host}/public/books/storm-chamber",
-    ) == f"https://{app_host}/public/books/storm-chamber"
+    assert serialization.can_view_public_book(book) is True
+    assert serialization.public_visibility_notice(book) is None
+    assert (
+        moderation.validate_public_content_report_target(
+            book,
+            f"https://{app_host}/public/books/storm-chamber",
+        )
+        == f"https://{app_host}/public/books/storm-chamber"
+    )
 
 
 def test_validate_public_content_report_target_uses_configured_app_host(monkeypatch):
-    monkeypatch.setattr(public_utils.settings, "APP_URL", "https://stories.lorevia.test", raising=False)
+    monkeypatch.setattr(settings, "APP_URL", "https://stories.lorevia.test", raising=False)
     book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -579,14 +631,20 @@ def test_validate_public_content_report_target_uses_configured_app_host(monkeypa
         public_slug="ember-run",
     )
 
-    assert public_utils.validate_public_content_report_target(
-        book,
-        "https://stories.lorevia.test/public/books/ember-run",
-    ) == "https://stories.lorevia.test/public/books/ember-run"
-    assert public_utils.validate_public_content_report_target(
-        book,
-        "https://www.stories.lorevia.test/public/books/ember-run",
-    ) == "https://www.stories.lorevia.test/public/books/ember-run"
+    assert (
+        moderation.validate_public_content_report_target(
+            book,
+            "https://stories.lorevia.test/public/books/ember-run",
+        )
+        == "https://stories.lorevia.test/public/books/ember-run"
+    )
+    assert (
+        moderation.validate_public_content_report_target(
+            book,
+            "https://www.stories.lorevia.test/public/books/ember-run",
+        )
+        == "https://www.stories.lorevia.test/public/books/ember-run"
+    )
 
 
 @pytest.mark.parametrize(
@@ -632,17 +690,19 @@ def test_validate_public_content_report_target_uses_configured_app_host(monkeypa
         ),
     ],
 )
-def test_validate_public_content_report_target_rejects_invalid_targets(book, reported_content_url, status_code):
-    with pytest.raises(public_utils.HTTPException) as exc:
-        public_utils.validate_public_content_report_target(book, reported_content_url)
+def test_validate_public_content_report_target_rejects_invalid_targets(
+    book, reported_content_url, status_code
+):
+    with pytest.raises(HTTPException) as exc:
+        moderation.validate_public_content_report_target(book, reported_content_url)
 
     assert exc.value.status_code == status_code
 
 
 @pytest.mark.asyncio
 async def test_ensure_public_content_report_not_duplicate_rejects_recent_reporter_ip():
-    with pytest.raises(public_utils.HTTPException) as exc:
-        await public_utils.ensure_public_content_report_not_duplicate(
+    with pytest.raises(HTTPException) as exc:
+        await moderation.ensure_public_content_report_not_duplicate(
             _FakeDB(execute_values=[_Result(scalar=uuid.uuid4())]),
             book_id=uuid.uuid4(),
             report_type=public_utils.REPORT_TYPE_COPYRIGHT,
@@ -654,11 +714,11 @@ async def test_ensure_public_content_report_not_duplicate_rejects_recent_reporte
 
 @pytest.mark.asyncio
 async def test_copyright_report_requires_temporary_hold_after_three_distinct_reporters():
-    assert await public_utils.copyright_report_requires_temporary_hold(
+    assert await moderation.copyright_report_requires_temporary_hold(
         _FakeDB(execute_values=[_Result(scalar=3)]),
         book_id=uuid.uuid4(),
     )
-    assert not await public_utils.copyright_report_requires_temporary_hold(
+    assert not await moderation.copyright_report_requires_temporary_hold(
         _FakeDB(execute_values=[_Result(scalar=2)]),
         book_id=uuid.uuid4(),
     )
@@ -680,28 +740,30 @@ async def test_invalidate_public_book_caches_clears_detail_chapters_profile_and_
     async def _cache_set_version_marker(key):
         forum_versions.append(key)
 
-    monkeypatch.setattr(public_utils, "cache_del", _cache_del)
-    monkeypatch.setattr(public_utils, "mark_public_profile_cache_dirty", _mark_profile_dirty)
-    monkeypatch.setattr(public_utils, "cache_set_version_marker", _cache_set_version_marker)
+    monkeypatch.setattr(moderation, "cache_del", _cache_del)
+    monkeypatch.setattr(moderation, "mark_public_profile_cache_dirty", _mark_profile_dirty)
+    monkeypatch.setattr(moderation, "cache_set_version_marker", _cache_set_version_marker)
 
-    await public_utils.invalidate_public_book_caches(book)
+    await moderation.invalidate_public_book_caches(book)
 
     assert deleted_keys == [
-        public_utils.key_public_books(),
-        public_utils.key_public_book_detail(str(book.id)),
-        public_utils.key_public_chapter(str(book.id), 1),
-        public_utils.key_public_chapter(str(book.id), 2),
+        key_public_books(),
+        key_public_book_detail(str(book.id)),
+        key_public_chapter(str(book.id), 1),
+        key_public_chapter(str(book.id), 2),
     ]
     assert invalidated_profiles == [str(book.user_id)]
-    assert forum_versions == [public_utils.key_public_forum_cache_version()]
+    assert forum_versions == [key_public_forum_cache_version()]
 
 
 def test_recently_updated_ranking_uses_public_content_timestamp_not_forum_activity():
     old_update = datetime.now(UTC) - timedelta(days=10)
     recent_forum_activity = datetime.now(UTC)
-    book = SimpleNamespace(public_updated_at=old_update, published_at=old_update, created_at=old_update)
+    book = SimpleNamespace(
+        public_updated_at=old_update, published_at=old_update, created_at=old_update
+    )
 
-    score, primary_timestamp = public_utils._compute_public_ranking_score(
+    score, primary_timestamp = ranking_core._compute_public_ranking_score(
         surface="beta_novels",
         ranking_key="recently_updated",
         book=book,
@@ -724,7 +786,7 @@ def test_top_rated_score_weights_average_and_rating_volume():
         created_at=latest_rating_at - timedelta(days=20),
     )
 
-    score, primary_timestamp = public_utils._compute_public_ranking_score(
+    score, primary_timestamp = ranking_core._compute_public_ranking_score(
         surface="beta_novels",
         ranking_key="top_rated",
         book=book,
@@ -753,7 +815,7 @@ def test_structural_ranking_requires_recent_public_activity_inside_window():
         created_at=old_update,
     )
 
-    score, primary_timestamp = public_utils._compute_public_ranking_score(
+    score, primary_timestamp = ranking_core._compute_public_ranking_score(
         surface="creator_uploads",
         ranking_key="most_complex",
         book=book,
@@ -776,7 +838,7 @@ def test_recently_released_ranking_filters_books_outside_window():
         created_at=published_at,
     )
 
-    score, primary_timestamp = public_utils._compute_public_ranking_score(
+    score, primary_timestamp = ranking_core._compute_public_ranking_score(
         surface="creator_uploads",
         ranking_key="recently_released",
         book=book,
@@ -792,7 +854,9 @@ def test_recently_released_ranking_filters_books_outside_window():
 
 
 @pytest.mark.asyncio
-async def test_rebuild_public_rankings_uses_timestamp_then_title_tie_breakers_and_invalidates_profiles(monkeypatch):
+async def test_rebuild_public_rankings_uses_timestamp_then_title_tie_breakers_and_invalidates_profiles(
+    monkeypatch,
+):
     newer_timestamp = datetime(2026, 5, 24, 12, 0, tzinfo=UTC)
     shared_timestamp = datetime(2026, 5, 20, 12, 0, tzinfo=UTC)
     author_a = uuid.uuid4()
@@ -846,16 +910,43 @@ async def test_rebuild_public_rankings_uses_timestamp_then_title_tie_breakers_an
 
     async def _book_forum_activity_by_window(*_args, **_kwargs):
         return {
-            book_newer.id: {"latest_activity_at": newer_timestamp, "discussion_interest_count": 0, "discussion_comment_count": 0, "open_discussion_count": 0},
-            book_alpha.id: {"latest_activity_at": shared_timestamp, "discussion_interest_count": 0, "discussion_comment_count": 0, "open_discussion_count": 0},
-            book_omega.id: {"latest_activity_at": shared_timestamp, "discussion_interest_count": 0, "discussion_comment_count": 0, "open_discussion_count": 0},
+            book_newer.id: {
+                "latest_activity_at": newer_timestamp,
+                "discussion_interest_count": 0,
+                "discussion_comment_count": 0,
+                "open_discussion_count": 0,
+            },
+            book_alpha.id: {
+                "latest_activity_at": shared_timestamp,
+                "discussion_interest_count": 0,
+                "discussion_comment_count": 0,
+                "open_discussion_count": 0,
+            },
+            book_omega.id: {
+                "latest_activity_at": shared_timestamp,
+                "discussion_interest_count": 0,
+                "discussion_comment_count": 0,
+                "open_discussion_count": 0,
+            },
         }
 
     async def _public_book_view_counts_by_window(*_args, **_kwargs):
         return {
-            book_newer.id: {"book_view_count": 0, "chapter_view_count": 0, "unique_reader_count": 0},
-            book_alpha.id: {"book_view_count": 0, "chapter_view_count": 0, "unique_reader_count": 0},
-            book_omega.id: {"book_view_count": 0, "chapter_view_count": 0, "unique_reader_count": 0},
+            book_newer.id: {
+                "book_view_count": 0,
+                "chapter_view_count": 0,
+                "unique_reader_count": 0,
+            },
+            book_alpha.id: {
+                "book_view_count": 0,
+                "chapter_view_count": 0,
+                "unique_reader_count": 0,
+            },
+            book_omega.id: {
+                "book_view_count": 0,
+                "chapter_view_count": 0,
+                "unique_reader_count": 0,
+            },
         }
 
     async def _cache_del(*_args, **_kwargs):
@@ -867,21 +958,43 @@ async def test_rebuild_public_rankings_uses_timestamp_then_title_tie_breakers_an
     async def _invalidate_public_profile_cache_for_users(*user_ids):
         invalidated_user_ids.extend([user_id for user_id in user_ids if user_id is not None])
 
-    monkeypatch.setattr(public_utils, "list_visible_creator_public_books", _list_visible_creator_public_books)
-    monkeypatch.setattr(public_utils, "_list_open_beta_ranking_books", _list_open_beta_ranking_books)
-    monkeypatch.setattr(public_utils, "_visible_character_count_map", _visible_character_count_map)
-    monkeypatch.setattr(public_utils, "_build_public_book_craft_profile", _build_public_book_craft_profile)
-    monkeypatch.setattr(public_utils, "_book_rating_stats_by_window", _book_rating_stats_by_window)
-    monkeypatch.setattr(public_utils, "_book_forum_activity_by_window", _book_forum_activity_by_window)
-    monkeypatch.setattr(public_utils, "_public_book_view_counts_by_window", _public_book_view_counts_by_window)
-    monkeypatch.setattr(public_utils, "cache_del", _cache_del)
-    monkeypatch.setattr(public_utils, "cache_set_version_marker", _cache_set_version_marker)
-    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", _invalidate_public_profile_cache_for_users)
-    monkeypatch.setattr(public_utils, "VALID_PUBLIC_RANKING_WINDOWS", ["monthly"])
-    monkeypatch.setattr(public_utils, "VALID_PUBLIC_RANKING_KEYS", ["most_popular"])
+    monkeypatch.setattr(
+        ranking_service, "list_visible_creator_public_books", _list_visible_creator_public_books
+    )
+    monkeypatch.setattr(
+        ranking_service, "_list_open_beta_ranking_books", _list_open_beta_ranking_books
+    )
+    monkeypatch.setattr(
+        ranking_service, "_visible_character_count_map", _visible_character_count_map
+    )
+    monkeypatch.setattr(
+        ranking_service, "_build_public_book_craft_profile", _build_public_book_craft_profile
+    )
+    monkeypatch.setattr(
+        ranking_service, "_book_rating_stats_by_window", _book_rating_stats_by_window
+    )
+    monkeypatch.setattr(
+        ranking_service, "_book_forum_activity_by_window", _book_forum_activity_by_window
+    )
+    monkeypatch.setattr(
+        ranking_service,
+        "_public_book_view_counts_by_window",
+        _public_book_view_counts_by_window,
+    )
+    monkeypatch.setattr(ranking_service, "cache_del", _cache_del)
+    monkeypatch.setattr(ranking_service, "cache_set_version_marker", _cache_set_version_marker)
+    monkeypatch.setattr(
+        ranking_service,
+        "_invalidate_public_profile_cache_for_users",
+        _invalidate_public_profile_cache_for_users,
+    )
+    monkeypatch.setattr(ranking_service, "VALID_PUBLIC_RANKING_WINDOWS", ["monthly"])
+    monkeypatch.setattr(ranking_service, "VALID_PUBLIC_RANKING_KEYS", ["most_popular"])
 
     db = _FakeDB()
-    result = await public_utils.rebuild_public_book_rankings_snapshot(db, snapshot_at=datetime(2026, 5, 24, 18, 0, tzinfo=UTC))
+    result = await ranking_service.rebuild_public_book_rankings_snapshot(
+        db, snapshot_at=datetime(2026, 5, 24, 18, 0, tzinfo=UTC)
+    )
 
     ranking_rows = [row for row in db.added if getattr(row, "surface", None) == "creator_uploads"]
 
@@ -914,10 +1027,10 @@ async def test_list_public_forum_interests_for_author_uses_joined_user_rows(monk
     async def _fake_get_forum_post(*_args, **_kwargs):
         return post
 
-    monkeypatch.setattr(public_utils, "_get_forum_post", _fake_get_forum_post)
-    monkeypatch.setattr(public_utils, "_is_general_forum_post", lambda _post: False)
+    monkeypatch.setattr(forum_engagement, "_get_forum_post", _fake_get_forum_post)
+    monkeypatch.setattr(forum_engagement, "_is_general_forum_post", lambda _post: False)
 
-    items = await public_utils.list_public_forum_interests_for_author(
+    items = await forum_engagement.list_public_forum_interests_for_author(
         _FakeDB(execute_values=[_Result(all_rows=[(interest, interested_user)])]),
         post_id=post_id,
         author_user_id=author_user_id,
@@ -981,35 +1094,43 @@ async def test_rebuild_public_rankings_scores_every_surface_and_ranking_key(monk
         }
 
     async def view_stats(_db, *, book_ids, window_start):
-        return {book_id: {"book_view_count": 10, "chapter_view_count": 20, "unique_reader_count": 7}}
+        return {
+            book_id: {"book_view_count": 10, "chapter_view_count": 20, "unique_reader_count": 7}
+        }
 
     async def noop(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(public_utils, "list_visible_creator_public_books", visible_books)
-    monkeypatch.setattr(public_utils, "_list_open_beta_ranking_books", beta_books)
-    monkeypatch.setattr(public_utils, "_visible_character_count_map", character_counts)
-    monkeypatch.setattr(public_utils, "_build_public_book_craft_profile", craft_profile)
-    monkeypatch.setattr(public_utils, "_book_rating_stats_by_window", rating_stats)
-    monkeypatch.setattr(public_utils, "_book_forum_activity_by_window", forum_stats)
-    monkeypatch.setattr(public_utils, "_public_book_view_counts_by_window", view_stats)
-    monkeypatch.setattr(public_utils, "cache_del", noop)
-    monkeypatch.setattr(public_utils, "cache_set_version_marker", noop)
-    monkeypatch.setattr(public_utils, "_invalidate_public_profile_cache_for_users", noop)
-    monkeypatch.setattr(public_utils, "VALID_PUBLIC_RANKING_WINDOWS", ["weekly", "all_time"])
+    monkeypatch.setattr(ranking_service, "list_visible_creator_public_books", visible_books)
+    monkeypatch.setattr(ranking_service, "_list_open_beta_ranking_books", beta_books)
+    monkeypatch.setattr(ranking_service, "_visible_character_count_map", character_counts)
+    monkeypatch.setattr(ranking_service, "_build_public_book_craft_profile", craft_profile)
+    monkeypatch.setattr(ranking_service, "_book_rating_stats_by_window", rating_stats)
+    monkeypatch.setattr(ranking_service, "_book_forum_activity_by_window", forum_stats)
+    monkeypatch.setattr(ranking_service, "_public_book_view_counts_by_window", view_stats)
+    monkeypatch.setattr(ranking_service, "cache_del", noop)
+    monkeypatch.setattr(ranking_service, "cache_set_version_marker", noop)
+    monkeypatch.setattr(ranking_service, "_invalidate_public_profile_cache_for_users", noop)
+    monkeypatch.setattr(ranking_service, "VALID_PUBLIC_RANKING_WINDOWS", ["weekly", "all_time"])
 
     db = _FakeDB()
-    result = await public_utils.rebuild_public_book_rankings_snapshot(db, snapshot_at=now)
+    result = await ranking_service.rebuild_public_book_rankings_snapshot(db, snapshot_at=now)
     ranking_rows = [item for item in db.added if hasattr(item, "ranking_key")]
 
-    expected = 2 * len(public_utils.VALID_PUBLIC_RANKING_WINDOWS) * len(public_utils.VALID_PUBLIC_RANKING_KEYS)
+    expected = (
+        2
+        * len(ranking_service.VALID_PUBLIC_RANKING_WINDOWS)
+        * len(ranking_service.VALID_PUBLIC_RANKING_KEYS)
+    )
     assert result == {"snapshot_rows": expected, "book_count": 1}
     assert len(ranking_rows) == expected
     assert {row.surface for row in ranking_rows} == {
-        public_utils.PUBLIC_RANKING_SURFACE_UPLOADS,
-        public_utils.PUBLIC_RANKING_SURFACE_BETA,
+        ranking_constants.PUBLIC_RANKING_SURFACE_UPLOADS,
+        ranking_constants.PUBLIC_RANKING_SURFACE_BETA,
     }
-    assert {row.ranking_key for row in ranking_rows} == set(public_utils.VALID_PUBLIC_RANKING_KEYS)
+    assert {row.ranking_key for row in ranking_rows} == set(
+        ranking_service.VALID_PUBLIC_RANKING_KEYS
+    )
     assert all(row.rank_position == 1 for row in ranking_rows)
 
 
@@ -1019,7 +1140,7 @@ async def test_public_ranking_window_aggregators_count_views_ratings_and_forum_a
     post_id = uuid.uuid4()
     now = datetime.now(UTC)
 
-    view_payload = await public_utils._public_book_view_counts_by_window(
+    view_payload = await ranking_core._public_book_view_counts_by_window(
         _FakeDB(
             execute_values=[
                 _Result(
@@ -1040,7 +1161,7 @@ async def test_public_ranking_window_aggregators_count_views_ratings_and_forum_a
         "unique_reader_count": 2,
     }
 
-    rating_payload = await public_utils._book_rating_stats_by_window(
+    rating_payload = await ranking_core._book_rating_stats_by_window(
         _FakeDB(
             execute_values=[
                 _Result(
@@ -1061,10 +1182,12 @@ async def test_public_ranking_window_aggregators_count_views_ratings_and_forum_a
     assert rating_payload[book_id]["neutral_rating_count"] == 1
     assert rating_payload[book_id]["negative_rating_count"] == 1
 
-    forum_payload = await public_utils._book_forum_activity_by_window(
+    forum_payload = await ranking_core._book_forum_activity_by_window(
         _FakeDB(
             execute_values=[
-                _Result(all_rows=[(post_id, book_id, public_utils.FORUM_POST_OPEN, now, now, now)]),
+                _Result(
+                    all_rows=[(post_id, book_id, forum_foundation.FORUM_POST_OPEN, now, now, now)]
+                ),
                 _Result(all_rows=[(post_id, 4)]),
                 _Result(all_rows=[(post_id, 3)]),
             ]

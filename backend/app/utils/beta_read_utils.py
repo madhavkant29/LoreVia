@@ -13,13 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.beta_read import (
     BetaReadAssignment,
-    BetaReadFeedbackKind,
     BetaReadAssignmentState,
     BetaReadFeedbackItem,
+    BetaReadFeedbackKind,
     BetaReadQuestion,
     BetaReadScopeKind,
 )
-from app.models.book import Book, BookCollaborator, BookNote, Chapter, ManuscriptAnnotation, NovelScene
+from app.models.book import (
+    Book,
+    BookCollaborator,
+    BookNote,
+    Chapter,
+    ManuscriptAnnotation,
+    NovelScene,
+)
 from app.models.intelligence import Notification
 from app.models.progress import ReadingProgress
 from app.models.user import User
@@ -33,8 +40,12 @@ from app.schemas.beta_reads import (
     BetaReadJobRunOut,
     BetaReadQuestionOut,
 )
-from app.schemas.books import ChapterBetaFeedbackOut, CollaboratorActivityItemOut, CollaboratorActivityOut
-from app.utils.book_utils import (
+from app.schemas.books import (
+    ChapterBetaFeedbackOut,
+    CollaboratorActivityItemOut,
+    CollaboratorActivityOut,
+)
+from app.utils.books.collaboration import (
     apply_collaboration_permissions,
     apply_collaboration_scope,
     normalize_collaboration_email,
@@ -170,11 +181,16 @@ def validate_beta_read_scope(
         return normalized_kind, None, None, None
 
     if chapter_start is None or chapter_end is None:
-        raise HTTPException(400, "chapter_start and chapter_end are required for chapter-range and section beta reads.")
+        raise HTTPException(
+            400,
+            "chapter_start and chapter_end are required for chapter-range and section beta reads.",
+        )
     if chapter_start < 1 or chapter_end < 1 or chapter_end < chapter_start:
         raise HTTPException(400, "Invalid beta read chapter range.")
     if total_chapters and chapter_end > total_chapters:
-        raise HTTPException(400, f"Chapter range cannot exceed the book's {total_chapters} chapters.")
+        raise HTTPException(
+            400, f"Chapter range cannot exceed the book's {total_chapters} chapters."
+        )
     if normalized_kind == BetaReadScopeKind.SECTION.value:
         cleaned_section_label = " ".join(str(section_label or "").split()).strip()
         if not cleaned_section_label:
@@ -231,7 +247,11 @@ def normalize_author_feedback_item_status(status: str) -> str:
 def beta_feedback_item_author_metadata(item: BetaReadFeedbackItem) -> dict[str, Any]:
     metadata = dict(item.metadata_json or {})
     status = normalize_author_feedback_item_status(metadata.get("author_status") or "open")
-    task_id = str(metadata.get("author_task_id")).strip() or None if metadata.get("author_task_id") is not None else None
+    task_id = (
+        str(metadata.get("author_task_id")).strip() or None
+        if metadata.get("author_task_id") is not None
+        else None
+    )
     updated_at_raw = metadata.get("author_updated_at")
     updated_at = None
     if isinstance(updated_at_raw, str):
@@ -293,19 +313,41 @@ def beta_submission_snapshot(assignment: BetaReadAssignment) -> dict[str, Any]:
     return snapshot
 
 
-def apply_beta_submission_snapshot(assignment: BetaReadAssignment, snapshot: dict[str, Any]) -> None:
+def apply_beta_submission_snapshot(
+    assignment: BetaReadAssignment, snapshot: dict[str, Any]
+) -> None:
     assignment.submission_metadata = dict(snapshot)
-    assignment.submitted_progress_pct = float(snapshot["progress_pct"]) if snapshot.get("progress_pct") is not None else None
-    assignment.submitted_chapters_total = int(snapshot["chapters_total"]) if snapshot.get("chapters_total") is not None else None
-    assignment.submitted_chapters_read_count = int(snapshot["chapters_read_count"]) if snapshot.get("chapters_read_count") is not None else None
-    assignment.submitted_comment_count = int(snapshot["comment_count"]) if snapshot.get("comment_count") is not None else None
-    assignment.submitted_feedback_item_count = int(snapshot["feedback_item_count"]) if snapshot.get("feedback_item_count") is not None else None
-    assignment.submitted_answer_count = int(snapshot["answer_count"]) if snapshot.get("answer_count") is not None else None
+    assignment.submitted_progress_pct = (
+        float(snapshot["progress_pct"]) if snapshot.get("progress_pct") is not None else None
+    )
+    assignment.submitted_chapters_total = (
+        int(snapshot["chapters_total"]) if snapshot.get("chapters_total") is not None else None
+    )
+    assignment.submitted_chapters_read_count = (
+        int(snapshot["chapters_read_count"])
+        if snapshot.get("chapters_read_count") is not None
+        else None
+    )
+    assignment.submitted_comment_count = (
+        int(snapshot["comment_count"]) if snapshot.get("comment_count") is not None else None
+    )
+    assignment.submitted_feedback_item_count = (
+        int(snapshot["feedback_item_count"])
+        if snapshot.get("feedback_item_count") is not None
+        else None
+    )
+    assignment.submitted_answer_count = (
+        int(snapshot["answer_count"]) if snapshot.get("answer_count") is not None else None
+    )
     assignment.submitted_rating_sentiment = (
-        str(snapshot["rating_sentiment"]).strip() or None if snapshot.get("rating_sentiment") is not None else None
+        str(snapshot["rating_sentiment"]).strip() or None
+        if snapshot.get("rating_sentiment") is not None
+        else None
     )
     assignment.submitted_before_deadline = (
-        bool(snapshot["submitted_before_deadline"]) if snapshot.get("submitted_before_deadline") is not None else None
+        bool(snapshot["submitted_before_deadline"])
+        if snapshot.get("submitted_before_deadline") is not None
+        else None
     )
     assignment.late_feedback = bool(snapshot.get("late_feedback", False))
 
@@ -316,14 +358,18 @@ async def book_beta_rating_summary(
     book_id: uuid.UUID,
 ) -> dict[str, Any]:
     rating_values = (
-        await db.execute(
-            select(BetaReadAssignment.final_rating).where(
-                BetaReadAssignment.book_id == book_id,
-                BetaReadAssignment.state.in_(list(RATED_ASSIGNMENT_STATES)),
-                BetaReadAssignment.final_rating.is_not(None),
+        (
+            await db.execute(
+                select(BetaReadAssignment.final_rating).where(
+                    BetaReadAssignment.book_id == book_id,
+                    BetaReadAssignment.state.in_(list(RATED_ASSIGNMENT_STATES)),
+                    BetaReadAssignment.final_rating.is_not(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     ratings = [float(value) for value in rating_values if value is not None]
     if not ratings:
         return {
@@ -353,7 +399,9 @@ def submission_is_late(assignment: BetaReadAssignment, now: datetime | None = No
 def assert_valid_beta_transition(current_state: str, next_state: str) -> None:
     allowed = VALID_STATE_TRANSITIONS.get(current_state, set())
     if next_state not in allowed:
-        raise HTTPException(409, f"Cannot transition beta read from {current_state} to {next_state}.")
+        raise HTTPException(
+            409, f"Cannot transition beta read from {current_state} to {next_state}."
+        )
 
 
 def set_beta_assignment_state(
@@ -385,7 +433,10 @@ def set_beta_assignment_state(
 
 def beta_view_bucket(assignment: BetaReadAssignment, *, now: datetime | None = None) -> str:
     current = ensure_timezone(now)
-    if assignment.state in ACTIVE_READER_STATES and ensure_timezone(assignment.expires_at) < current:
+    if (
+        assignment.state in ACTIVE_READER_STATES
+        and ensure_timezone(assignment.expires_at) < current
+    ):
         return "missed"
     if assignment.state == BetaReadAssignmentState.COMPLETED.value:
         return "completed"
@@ -398,7 +449,10 @@ def beta_view_bucket(assignment: BetaReadAssignment, *, now: datetime | None = N
         return "missed"
     if assignment.state == BetaReadAssignmentState.SUBMITTED.value:
         return "completed"
-    if assignment.state == BetaReadAssignmentState.ACTIVE.value and ensure_timezone(assignment.starts_at) > current:
+    if (
+        assignment.state == BetaReadAssignmentState.ACTIVE.value
+        and ensure_timezone(assignment.starts_at) > current
+    ):
         return "scheduled"
     return "active"
 
@@ -407,7 +461,9 @@ def beta_status_label(assignment: BetaReadAssignment, *, now: datetime | None = 
     if assignment.state in ACTIVE_READER_STATES and submission_is_late(assignment, now):
         return "Expired"
     if assignment.state == BetaReadAssignmentState.ACTIVE.value:
-        return "Scheduled" if beta_view_bucket(assignment, now=now) == "scheduled" else "Not started"
+        return (
+            "Scheduled" if beta_view_bucket(assignment, now=now) == "scheduled" else "Not started"
+        )
     if assignment.state == BetaReadAssignmentState.IN_PROGRESS.value:
         return "In progress"
     if assignment.state == BetaReadAssignmentState.READY_TO_SUBMIT.value:
@@ -476,13 +532,17 @@ def _reader_match_clause(current_user: User):
 async def sync_reader_identity_for_beta_reads(db: AsyncSession, current_user: User) -> None:
     email = normalize_collaboration_email(current_user.email)
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment).where(
-                BetaReadAssignment.reader_user_id.is_(None),
-                BetaReadAssignment.reader_email == email,
+        (
+            await db.execute(
+                select(BetaReadAssignment).where(
+                    BetaReadAssignment.reader_user_id.is_(None),
+                    BetaReadAssignment.reader_email == email,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     changed = False
     for assignment in assignments:
         assignment.reader_user_id = current_user.id
@@ -536,12 +596,16 @@ async def list_beta_read_questions(
     assignment_id: uuid.UUID,
 ) -> list[BetaReadQuestion]:
     return (
-        await db.execute(
-            select(BetaReadQuestion)
-            .where(BetaReadQuestion.assignment_id == assignment_id)
-            .order_by(BetaReadQuestion.created_at.asc())
+        (
+            await db.execute(
+                select(BetaReadQuestion)
+                .where(BetaReadQuestion.assignment_id == assignment_id)
+                .order_by(BetaReadQuestion.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 async def beta_feedback_summary(
@@ -585,7 +649,11 @@ async def _serialize_beta_read_questions(
             .group_by(BetaReadFeedbackItem.question_id)
         )
     ).all()
-    answer_counts = {str(question_id): int(count or 0) for question_id, count in answer_rows if question_id is not None}
+    answer_counts = {
+        str(question_id): int(count or 0)
+        for question_id, count in answer_rows
+        if question_id is not None
+    }
     return [
         BetaReadQuestionOut(
             id=str(question.id),
@@ -603,12 +671,16 @@ async def _serialize_beta_read_feedback_items(
     assignment_id: uuid.UUID,
 ) -> list[BetaReadFeedbackItemOut]:
     items = (
-        await db.execute(
-            select(BetaReadFeedbackItem)
-            .where(BetaReadFeedbackItem.assignment_id == assignment_id)
-            .order_by(BetaReadFeedbackItem.created_at.asc())
+        (
+            await db.execute(
+                select(BetaReadFeedbackItem)
+                .where(BetaReadFeedbackItem.assignment_id == assignment_id)
+                .order_by(BetaReadFeedbackItem.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not items:
         return []
 
@@ -617,14 +689,22 @@ async def _serialize_beta_read_feedback_items(
     questions = {}
     if question_ids:
         question_rows = (
-            await db.execute(select(BetaReadQuestion).where(BetaReadQuestion.id.in_(list(question_ids))))
-        ).scalars().all()
+            (
+                await db.execute(
+                    select(BetaReadQuestion).where(BetaReadQuestion.id.in_(list(question_ids)))
+                )
+            )
+            .scalars()
+            .all()
+        )
         questions = {question.id: question for question in question_rows}
     scenes = {}
     if scene_ids:
         scene_rows = (
-            await db.execute(select(NovelScene).where(NovelScene.id.in_(list(scene_ids))))
-        ).scalars().all()
+            (await db.execute(select(NovelScene).where(NovelScene.id.in_(list(scene_ids)))))
+            .scalars()
+            .all()
+        )
         scenes = {scene.id: scene for scene in scene_rows}
 
     serialized_items: list[BetaReadFeedbackItemOut] = []
@@ -638,7 +718,9 @@ async def _serialize_beta_read_feedback_items(
                 scene_id=str(item.scene_id) if item.scene_id else None,
                 scene_title=scenes.get(item.scene_id).title if item.scene_id in scenes else None,
                 question_id=str(item.question_id) if item.question_id else None,
-                question_prompt=questions.get(item.question_id).prompt if item.question_id in questions else None,
+                question_prompt=questions.get(item.question_id).prompt
+                if item.question_id in questions
+                else None,
                 reaction=item.reaction,
                 anchor_text=item.anchor_text,
                 body=item.body,
@@ -658,7 +740,9 @@ def _beta_feedback_reader_display_name(
     reader: User | None,
     collaborator: BookCollaborator | None,
 ) -> str:
-    collaborator_name = str(collaborator.display_name or "").strip() if collaborator is not None else ""
+    collaborator_name = (
+        str(collaborator.display_name or "").strip() if collaborator is not None else ""
+    )
     if collaborator_name:
         return collaborator_name
     username = str(reader.username or "").strip() if reader is not None else ""
@@ -720,25 +804,47 @@ async def list_chapter_beta_feedback(
         if assignment.collaborator_id is not None
     }
     readers = (
-        await db.execute(select(User).where(User.id.in_(list(reader_ids))))
-    ).scalars().all() if reader_ids else []
+        (await db.execute(select(User).where(User.id.in_(list(reader_ids))))).scalars().all()
+        if reader_ids
+        else []
+    )
     collaborators = (
-        await db.execute(select(BookCollaborator).where(BookCollaborator.id.in_(list(collaborator_ids))))
-    ).scalars().all() if collaborator_ids else []
+        (
+            await db.execute(
+                select(BookCollaborator).where(BookCollaborator.id.in_(list(collaborator_ids)))
+            )
+        )
+        .scalars()
+        .all()
+        if collaborator_ids
+        else []
+    )
     readers_by_id = {reader.id: reader for reader in readers}
     collaborators_by_id = {entry.id: entry for entry in collaborators}
 
     payload: list[ChapterBetaFeedbackOut] = []
     for item, assignment in rows:
         author_metadata = beta_feedback_item_author_metadata(item)
-        reader = readers_by_id.get(assignment.reader_user_id) if assignment.reader_user_id is not None else None
-        collaborator_row = collaborators_by_id.get(assignment.collaborator_id) if assignment.collaborator_id is not None else None
+        reader = (
+            readers_by_id.get(assignment.reader_user_id)
+            if assignment.reader_user_id is not None
+            else None
+        )
+        collaborator_row = (
+            collaborators_by_id.get(assignment.collaborator_id)
+            if assignment.collaborator_id is not None
+            else None
+        )
         payload.append(
             ChapterBetaFeedbackOut(
                 id=str(item.id),
                 assignment_id=str(assignment.id),
-                collaborator_id=str(assignment.collaborator_id) if assignment.collaborator_id else None,
-                reader_user_id=str(assignment.reader_user_id) if assignment.reader_user_id else None,
+                collaborator_id=str(assignment.collaborator_id)
+                if assignment.collaborator_id
+                else None,
+                reader_user_id=str(assignment.reader_user_id)
+                if assignment.reader_user_id
+                else None,
                 reader_email=assignment.reader_email,
                 reader_display_name=_beta_feedback_reader_display_name(
                     assignment=assignment,
@@ -769,60 +875,96 @@ async def get_book_collaborator_activity(
         raise HTTPException(404, "Collaborator not found.")
 
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment)
-            .where(
-                BetaReadAssignment.book_id == book.id,
-                or_(
-                    BetaReadAssignment.collaborator_id == collaborator.id,
-                    BetaReadAssignment.reader_email == collaborator.email,
-                ),
+        (
+            await db.execute(
+                select(BetaReadAssignment)
+                .where(
+                    BetaReadAssignment.book_id == book.id,
+                    or_(
+                        BetaReadAssignment.collaborator_id == collaborator.id,
+                        BetaReadAssignment.reader_email == collaborator.email,
+                    ),
+                )
+                .order_by(BetaReadAssignment.created_at.desc())
             )
-            .order_by(BetaReadAssignment.created_at.desc())
         )
-    ).scalars().all()
-    context = await load_beta_assignment_render_context(db, assignments=assignments) if assignments else None
-    assignment_payload = [
-        _build_beta_read_assignment_out_from_context(assignment, context=context)
-        for assignment in assignments
-    ] if context is not None else []
+        .scalars()
+        .all()
+    )
+    context = (
+        await load_beta_assignment_render_context(db, assignments=assignments)
+        if assignments
+        else None
+    )
+    assignment_payload = (
+        [
+            _build_beta_read_assignment_out_from_context(assignment, context=context)
+            for assignment in assignments
+        ]
+        if context is not None
+        else []
+    )
 
     assignment_ids = [assignment.id for assignment in assignments]
     feedback_rows = (
-        await db.execute(
-            select(BetaReadFeedbackItem, BetaReadAssignment)
-            .join(BetaReadAssignment, BetaReadAssignment.id == BetaReadFeedbackItem.assignment_id)
-            .where(BetaReadFeedbackItem.assignment_id.in_(assignment_ids))
-            .order_by(BetaReadFeedbackItem.created_at.desc())
-        )
-    ).all() if assignment_ids else []
-    annotations = (
-        await db.execute(
-            select(ManuscriptAnnotation)
-            .where(
-                ManuscriptAnnotation.book_id == book.id,
-                ManuscriptAnnotation.user_id == collaborator.invited_user_id,
+        (
+            await db.execute(
+                select(BetaReadFeedbackItem, BetaReadAssignment)
+                .join(
+                    BetaReadAssignment, BetaReadAssignment.id == BetaReadFeedbackItem.assignment_id
+                )
+                .where(BetaReadFeedbackItem.assignment_id.in_(assignment_ids))
+                .order_by(BetaReadFeedbackItem.created_at.desc())
             )
-            .order_by(ManuscriptAnnotation.created_at.desc())
+        ).all()
+        if assignment_ids
+        else []
+    )
+    annotations = (
+        (
+            await db.execute(
+                select(ManuscriptAnnotation)
+                .where(
+                    ManuscriptAnnotation.book_id == book.id,
+                    ManuscriptAnnotation.user_id == collaborator.invited_user_id,
+                )
+                .order_by(ManuscriptAnnotation.created_at.desc())
+            )
         )
-    ).scalars().all() if collaborator.invited_user_id is not None else []
+        .scalars()
+        .all()
+        if collaborator.invited_user_id is not None
+        else []
+    )
 
     chapter_numbers = {
         int(number)
         for number in [
-            *[item.chapter_number for item, _assignment in feedback_rows if item.chapter_number is not None],
-            *[annotation.chapter_number for annotation in annotations if annotation.chapter_number is not None],
+            *[
+                item.chapter_number
+                for item, _assignment in feedback_rows
+                if item.chapter_number is not None
+            ],
+            *[
+                annotation.chapter_number
+                for annotation in annotations
+                if annotation.chapter_number is not None
+            ],
         ]
         if number is not None
     }
     chapter_rows = (
-        await db.execute(
-            select(Chapter.number, Chapter.title).where(
-                Chapter.book_id == book.id,
-                Chapter.number.in_(sorted(chapter_numbers)),
+        (
+            await db.execute(
+                select(Chapter.number, Chapter.title).where(
+                    Chapter.book_id == book.id,
+                    Chapter.number.in_(sorted(chapter_numbers)),
+                )
             )
-        )
-    ).all() if chapter_numbers else []
+        ).all()
+        if chapter_numbers
+        else []
+    )
     chapter_titles = {int(number): title for number, title in chapter_rows}
 
     items: list[CollaboratorActivityItemOut] = []
@@ -872,7 +1014,9 @@ async def get_book_collaborator_activity(
                 title=_beta_feedback_activity_title(feedback_item),
                 body=feedback_item.body or feedback_item.anchor_text or feedback_item.reaction,
                 chapter_number=feedback_item.chapter_number,
-                chapter_title=chapter_titles.get(int(feedback_item.chapter_number)) if feedback_item.chapter_number is not None else None,
+                chapter_title=chapter_titles.get(int(feedback_item.chapter_number))
+                if feedback_item.chapter_number is not None
+                else None,
                 assignment_id=str(assignment.id),
                 feedback_item_id=str(feedback_item.id),
                 created_at=feedback_item.created_at,
@@ -887,7 +1031,9 @@ async def get_book_collaborator_activity(
                 title="Left a manuscript annotation",
                 body=annotation.comment,
                 chapter_number=annotation.chapter_number,
-                chapter_title=chapter_titles.get(int(annotation.chapter_number)) if annotation.chapter_number is not None else None,
+                chapter_title=chapter_titles.get(int(annotation.chapter_number))
+                if annotation.chapter_number is not None
+                else None,
                 annotation_id=str(annotation.id),
                 created_at=annotation.created_at,
             )
@@ -929,7 +1075,9 @@ async def _upsert_beta_read_collaborator(
 
     scope = normalize_collaboration_scope(
         {
-            "chapter_start": chapter_start if scope_kind != BetaReadScopeKind.FULL_BOOK.value else None,
+            "chapter_start": chapter_start
+            if scope_kind != BetaReadScopeKind.FULL_BOOK.value
+            else None,
             "chapter_end": chapter_end if scope_kind != BetaReadScopeKind.FULL_BOOK.value else None,
             "character_bible": False,
             "continuity_report": False,
@@ -963,7 +1111,9 @@ async def _upsert_beta_read_collaborator(
     return collaborator
 
 
-def sync_beta_read_access(assignment: BetaReadAssignment, collaborator: BookCollaborator | None) -> None:
+def sync_beta_read_access(
+    assignment: BetaReadAssignment, collaborator: BookCollaborator | None
+) -> None:
     if collaborator is None:
         return
     if assignment.state in {
@@ -985,7 +1135,10 @@ def sync_beta_read_access(assignment: BetaReadAssignment, collaborator: BookColl
     ):
         collaborator.invite_status = "revoked"
         return
-    if assignment.state == BetaReadAssignmentState.EXPIRED.value and not settings.BETA_READ_KEEP_READ_ONLY_AFTER_EXPIRY:
+    if (
+        assignment.state == BetaReadAssignmentState.EXPIRED.value
+        and not settings.BETA_READ_KEEP_READ_ONLY_AFTER_EXPIRY
+    ):
         collaborator.invite_status = "revoked"
 
 
@@ -996,7 +1149,10 @@ async def expire_beta_assignment_if_due(
     now: datetime | None = None,
 ) -> bool:
     current = ensure_timezone(now)
-    if assignment.state not in ACTIVE_READER_STATES or ensure_timezone(assignment.expires_at) >= current:
+    if (
+        assignment.state not in ACTIVE_READER_STATES
+        or ensure_timezone(assignment.expires_at) >= current
+    ):
         return False
 
     set_beta_assignment_state(assignment, BetaReadAssignmentState.EXPIRED.value, now=current)
@@ -1007,7 +1163,11 @@ async def expire_beta_assignment_if_due(
         missed_reason="deadline_expired",
     )
     penalty_applied = False
-    collaborator = await db.get(BookCollaborator, assignment.collaborator_id) if assignment.collaborator_id else None
+    collaborator = (
+        await db.get(BookCollaborator, assignment.collaborator_id)
+        if assignment.collaborator_id
+        else None
+    )
     sync_beta_read_access(assignment, collaborator)
     reader = await db.get(User, assignment.reader_user_id) if assignment.reader_user_id else None
     if reader is not None:
@@ -1024,7 +1184,8 @@ async def expire_beta_assignment_if_due(
             body="This beta read expired before completion, so no points were awarded.",
             data={
                 "assignment_id": str(assignment.id),
-                "counted_toward_missed_streak": assignment.counted_toward_missed_streak or penalty_applied,
+                "counted_toward_missed_streak": assignment.counted_toward_missed_streak
+                or penalty_applied,
                 "penalty_status": reader.beta_read_penalty_status,
             },
             idempotency_key=make_notification_idempotency_key(
@@ -1041,7 +1202,10 @@ async def expire_beta_assignment_if_due(
                 kind="beta_read_penalty_warning",
                 title="Beta read warning",
                 body=warning,
-                data={"assignment_id": str(assignment.id), "penalty_status": reader.beta_read_penalty_status},
+                data={
+                    "assignment_id": str(assignment.id),
+                    "penalty_status": reader.beta_read_penalty_status,
+                },
                 idempotency_key=make_notification_idempotency_key(
                     "beta_read_penalty_warning",
                     assignment.id,
@@ -1086,7 +1250,9 @@ async def create_beta_read_assignment(
             select(BetaReadAssignment.id).where(
                 BetaReadAssignment.book_id == book.id,
                 BetaReadAssignment.reader_email == reader_email,
-                BetaReadAssignment.state.not_in(list(TERMINAL_STATES | {BetaReadAssignmentState.EXPIRED.value})),
+                BetaReadAssignment.state.not_in(
+                    list(TERMINAL_STATES | {BetaReadAssignmentState.EXPIRED.value})
+                ),
             )
         )
     ).first()
@@ -1103,7 +1269,10 @@ async def create_beta_read_assignment(
     ).scalar_one_or_none()
     if reader_user is not None and settings.BETA_READ_PENALTY_ENABLED:
         penalty_type = str(settings.BETA_READ_PENALTY_TYPE or "warning").strip().lower()
-        if penalty_type == "temporary_beta_read_ban" and reader_user.beta_read_penalty_status == PENALTY_STATUS_PENALTY_REQUIRED:
+        if (
+            penalty_type == "temporary_beta_read_ban"
+            and reader_user.beta_read_penalty_status == PENALTY_STATUS_PENALTY_REQUIRED
+        ):
             raise HTTPException(409, "This reader is temporarily restricted from new beta reads.")
 
     collaborator = await _upsert_beta_read_collaborator(
@@ -1210,7 +1379,9 @@ async def _assignment_progress_snapshot(
     question_count = int(
         (
             await db.execute(
-                select(func.count(BetaReadQuestion.id)).where(BetaReadQuestion.assignment_id == assignment.id)
+                select(func.count(BetaReadQuestion.id)).where(
+                    BetaReadQuestion.assignment_id == assignment.id
+                )
             )
         ).scalar_one()
         or 0
@@ -1357,31 +1528,51 @@ async def load_beta_assignment_render_context(
 
     assignment_ids = [assignment.id for assignment in assignment_list]
     book_ids = list({assignment.book_id for assignment in assignment_list})
-    reader_ids = list({assignment.reader_user_id for assignment in assignment_list if assignment.reader_user_id is not None})
+    reader_ids = list(
+        {
+            assignment.reader_user_id
+            for assignment in assignment_list
+            if assignment.reader_user_id is not None
+        }
+    )
 
     books = (
-        await db.execute(select(Book).where(Book.id.in_(book_ids)))
-    ).scalars().all() if book_ids else []
+        (await db.execute(select(Book).where(Book.id.in_(book_ids)))).scalars().all()
+        if book_ids
+        else []
+    )
     readers = (
-        await db.execute(select(User).where(User.id.in_(reader_ids)))
-    ).scalars().all() if reader_ids else []
+        (await db.execute(select(User).where(User.id.in_(reader_ids)))).scalars().all()
+        if reader_ids
+        else []
+    )
     progress_rows = (
-        await db.execute(
-            select(ReadingProgress).where(
-                ReadingProgress.book_id.in_(book_ids),
-                ReadingProgress.user_id.in_(reader_ids),
+        (
+            await db.execute(
+                select(ReadingProgress).where(
+                    ReadingProgress.book_id.in_(book_ids),
+                    ReadingProgress.user_id.in_(reader_ids),
+                )
             )
         )
-    ).scalars().all() if book_ids and reader_ids else []
+        .scalars()
+        .all()
+        if book_ids and reader_ids
+        else []
+    )
     rating_rows = (
-        await db.execute(
-            select(BetaReadAssignment.book_id, BetaReadAssignment.final_rating).where(
-                BetaReadAssignment.book_id.in_(book_ids),
-                BetaReadAssignment.state.in_(list(RATED_ASSIGNMENT_STATES)),
-                BetaReadAssignment.final_rating.is_not(None),
+        (
+            await db.execute(
+                select(BetaReadAssignment.book_id, BetaReadAssignment.final_rating).where(
+                    BetaReadAssignment.book_id.in_(book_ids),
+                    BetaReadAssignment.state.in_(list(RATED_ASSIGNMENT_STATES)),
+                    BetaReadAssignment.final_rating.is_not(None),
+                )
             )
-        )
-    ).all() if book_ids else []
+        ).all()
+        if book_ids
+        else []
+    )
     question_count_rows = (
         await db.execute(
             select(BetaReadQuestion.assignment_id, func.count(BetaReadQuestion.id))
@@ -1407,13 +1598,17 @@ async def load_beta_assignment_render_context(
         )
     ).all()
     note_rows = (
-        await db.execute(
-            select(BookNote.book_id, BookNote.user_id, BookNote.chapter_number).where(
-                BookNote.book_id.in_(book_ids),
-                BookNote.user_id.in_(reader_ids),
+        (
+            await db.execute(
+                select(BookNote.book_id, BookNote.user_id, BookNote.chapter_number).where(
+                    BookNote.book_id.in_(book_ids),
+                    BookNote.user_id.in_(reader_ids),
+                )
             )
-        )
-    ).all() if book_ids and reader_ids else []
+        ).all()
+        if book_ids and reader_ids
+        else []
+    )
     chapter_comment_rows = (
         await db.execute(
             select(
@@ -1435,9 +1630,15 @@ async def load_beta_assignment_render_context(
         book_id: {
             "average_rating": round(sum(ratings) / len(ratings), 2),
             "rating_count": len(ratings),
-            "positive_rating_count": sum(1 for rating in ratings if beta_read_rating_sentiment(rating) == "positive"),
-            "neutral_rating_count": sum(1 for rating in ratings if beta_read_rating_sentiment(rating) == "neutral"),
-            "negative_rating_count": sum(1 for rating in ratings if beta_read_rating_sentiment(rating) == "negative"),
+            "positive_rating_count": sum(
+                1 for rating in ratings if beta_read_rating_sentiment(rating) == "positive"
+            ),
+            "neutral_rating_count": sum(
+                1 for rating in ratings if beta_read_rating_sentiment(rating) == "neutral"
+            ),
+            "negative_rating_count": sum(
+                1 for rating in ratings if beta_read_rating_sentiment(rating) == "negative"
+            ),
         }
         for book_id, ratings in ratings_by_book_id.items()
     }
@@ -1458,9 +1659,13 @@ async def load_beta_assignment_render_context(
             chapter_comment_count_by_assignment_id[assignment.id] = 0
             continue
         book = books_by_id.get(assignment.book_id)
-        start, end = assignment_scope_bounds(assignment, int((book.total_chapters if book is not None else 0) or 0))
+        start, end = assignment_scope_bounds(
+            assignment, int((book.total_chapters if book is not None else 0) or 0)
+        )
         note_comment_count = 0
-        for chapter_number in note_rows_by_pair.get((assignment.book_id, assignment.reader_user_id), []):
+        for chapter_number in note_rows_by_pair.get(
+            (assignment.book_id, assignment.reader_user_id), []
+        ):
             if assignment.scope_kind == BetaReadScopeKind.FULL_BOOK.value:
                 note_comment_count += 1
             elif chapter_number is None or start <= int(chapter_number) <= end:
@@ -1478,11 +1683,19 @@ async def load_beta_assignment_render_context(
     return BetaAssignmentRenderContext(
         books_by_id=books_by_id,
         readers_by_id={reader.id: reader for reader in readers},
-        progress_by_pair={(progress.book_id, progress.user_id): progress for progress in progress_rows},
+        progress_by_pair={
+            (progress.book_id, progress.user_id): progress for progress in progress_rows
+        },
         rating_summary_by_book_id=rating_summary_by_book_id,
-        question_count_by_assignment_id={assignment_id: int(count or 0) for assignment_id, count in question_count_rows},
-        feedback_count_by_assignment_id={assignment_id: int(count or 0) for assignment_id, count in feedback_count_rows},
-        answer_count_by_assignment_id={assignment_id: int(count or 0) for assignment_id, count in answer_count_rows},
+        question_count_by_assignment_id={
+            assignment_id: int(count or 0) for assignment_id, count in question_count_rows
+        },
+        feedback_count_by_assignment_id={
+            assignment_id: int(count or 0) for assignment_id, count in feedback_count_rows
+        },
+        answer_count_by_assignment_id={
+            assignment_id: int(count or 0) for assignment_id, count in answer_count_rows
+        },
         note_comment_count_by_assignment_id=note_comment_count_by_assignment_id,
         chapter_comment_count_by_assignment_id=chapter_comment_count_by_assignment_id,
     )
@@ -1498,14 +1711,19 @@ async def sync_beta_assignment_progress(
     current = ensure_timezone(now)
     snapshot = await _assignment_progress_snapshot(db, assignment=assignment, progress=progress)
     if assignment.state == BetaReadAssignmentState.ACTIVE.value and (
-        assignment.first_opened_at is not None or float(snapshot["progress_pct"]) > 0
+        assignment.first_opened_at is not None
+        or float(snapshot["progress_pct"]) > 0
         or int(snapshot["comment_count"]) > 0
         or int(snapshot["feedback_item_count"]) > 0
     ):
-        set_beta_assignment_state(assignment, BetaReadAssignmentState.IN_PROGRESS.value, now=current)
+        set_beta_assignment_state(
+            assignment, BetaReadAssignmentState.IN_PROGRESS.value, now=current
+        )
     requirements_met = _requirements_met(assignment, snapshot)
     if assignment.state == BetaReadAssignmentState.IN_PROGRESS.value and requirements_met:
-        set_beta_assignment_state(assignment, BetaReadAssignmentState.READY_TO_SUBMIT.value, now=current)
+        set_beta_assignment_state(
+            assignment, BetaReadAssignmentState.READY_TO_SUBMIT.value, now=current
+        )
     return snapshot
 
 
@@ -1526,14 +1744,18 @@ async def sync_beta_assignments_for_reader_book(
         )
     ).scalar_one_or_none()
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment).where(
-                BetaReadAssignment.book_id == book_id,
-                _reader_match_clause(current_user),
-                BetaReadAssignment.state.in_(list(ACTIVE_READER_STATES)),
+        (
+            await db.execute(
+                select(BetaReadAssignment).where(
+                    BetaReadAssignment.book_id == book_id,
+                    _reader_match_clause(current_user),
+                    BetaReadAssignment.state.in_(list(ACTIVE_READER_STATES)),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for assignment in assignments:
         await sync_beta_assignment_progress(db, assignment=assignment, progress=progress, now=now)
     if assignments:
@@ -1640,7 +1862,9 @@ async def add_beta_read_feedback_item(
     anchor_text = _clean_optional_feedback_text(body.anchor_text, max_length=500)
     reaction = _clean_optional_feedback_text(body.reaction, max_length=64)
     scene = await _resolve_feedback_scene(db, assignment=assignment, scene_id=body.scene_id)
-    question = await _resolve_feedback_question(db, assignment=assignment, question_id=body.question_id)
+    question = await _resolve_feedback_question(
+        db, assignment=assignment, question_id=body.question_id
+    )
 
     book = await db.get(Book, assignment.book_id)
     if book is None:
@@ -1742,7 +1966,9 @@ async def update_beta_read_feedback_item_author_state(
     metadata["author_updated_at"] = utc_now().isoformat()
     if normalized_status == "task_created":
         if not cleaned_task_id:
-            raise HTTPException(400, "author_task_id is required when marking feedback as task_created.")
+            raise HTTPException(
+                400, "author_task_id is required when marking feedback as task_created."
+            )
         metadata["author_task_id"] = cleaned_task_id
     else:
         metadata["author_task_id"] = cleaned_task_id or None
@@ -1809,8 +2035,14 @@ def _build_beta_read_assignment_out_from_context(
     )
     requirements_met = _requirements_met(assignment, snapshot)
     effective_user = resolved_reader or current_user
-    consecutive_missed = int(effective_user.consecutive_missed_beta_reads or 0) if effective_user is not None else 0
-    penalty_status = str(effective_user.beta_read_penalty_status or PENALTY_STATUS_NONE) if effective_user is not None else PENALTY_STATUS_NONE
+    consecutive_missed = (
+        int(effective_user.consecutive_missed_beta_reads or 0) if effective_user is not None else 0
+    )
+    penalty_status = (
+        str(effective_user.beta_read_penalty_status or PENALTY_STATUS_NONE)
+        if effective_user is not None
+        else PENALTY_STATUS_NONE
+    )
     bucket = beta_view_bucket(assignment, now=now)
     primary_action = beta_primary_action(assignment, now=now)
     if assignment.state == BetaReadAssignmentState.READY_TO_SUBMIT.value and not requirements_met:
@@ -1867,9 +2099,15 @@ def _build_beta_read_assignment_out_from_context(
         is_overdue=submission_is_late(assignment, now),
         consecutive_missed_beta_reads=consecutive_missed,
         penalty_status=penalty_status,
-        penalty_warning=penalty_warning_for_user(effective_user) if effective_user is not None else None,
-        final_rating=float(assignment.final_rating) if assignment.final_rating is not None else None,
-        rating_sentiment=beta_read_rating_sentiment(float(assignment.final_rating)) if assignment.final_rating is not None else None,
+        penalty_warning=penalty_warning_for_user(effective_user)
+        if effective_user is not None
+        else None,
+        final_rating=float(assignment.final_rating)
+        if assignment.final_rating is not None
+        else None,
+        rating_sentiment=beta_read_rating_sentiment(float(assignment.final_rating))
+        if assignment.final_rating is not None
+        else None,
         book_average_rating=rating_summary["average_rating"],
         book_rating_count=rating_summary["rating_count"],
     )
@@ -1906,12 +2144,19 @@ async def list_reader_beta_read_assignments(
     await sync_reader_identity_for_beta_reads(db, current_user)
     now = utc_now()
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment)
-            .where(_reader_match_clause(current_user), BetaReadAssignment.state.in_(list(READER_VISIBLE_STATES)))
-            .order_by(BetaReadAssignment.expires_at.asc(), BetaReadAssignment.created_at.desc())
+        (
+            await db.execute(
+                select(BetaReadAssignment)
+                .where(
+                    _reader_match_clause(current_user),
+                    BetaReadAssignment.state.in_(list(READER_VISIBLE_STATES)),
+                )
+                .order_by(BetaReadAssignment.expires_at.asc(), BetaReadAssignment.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     changed = False
     for assignment in assignments:
         changed = await expire_beta_assignment_if_due(db, assignment=assignment, now=now) or changed
@@ -1941,22 +2186,30 @@ async def list_book_beta_read_assignments(
 ) -> list[BetaReadAssignmentOut]:
     now = utc_now()
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment)
-            .where(
-                BetaReadAssignment.book_id == book.id,
-                BetaReadAssignment.author_user_id == author_user_id,
+        (
+            await db.execute(
+                select(BetaReadAssignment)
+                .where(
+                    BetaReadAssignment.book_id == book.id,
+                    BetaReadAssignment.author_user_id == author_user_id,
+                )
+                .order_by(BetaReadAssignment.created_at.desc())
             )
-            .order_by(BetaReadAssignment.created_at.desc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     changed = False
     for assignment in assignments:
         changed = await expire_beta_assignment_if_due(db, assignment=assignment, now=now) or changed
     context = await load_beta_assignment_render_context(db, assignments=assignments)
     items: list[BetaReadAssignmentOut] = []
     for assignment in assignments:
-        reader_user = context.readers_by_id.get(assignment.reader_user_id) if assignment.reader_user_id else None
+        reader_user = (
+            context.readers_by_id.get(assignment.reader_user_id)
+            if assignment.reader_user_id
+            else None
+        )
         items.append(
             _build_beta_read_assignment_out_from_context(
                 assignment,
@@ -2006,10 +2259,10 @@ def apply_missed_beta_read_penalty(user: User, *, now: datetime | None = None) -
     current = ensure_timezone(now)
     user.consecutive_missed_beta_reads = int(user.consecutive_missed_beta_reads or 0) + 1
     threshold = max(int(settings.BETA_READ_MISSED_PENALTY_THRESHOLD), 1)
-    if user.consecutive_missed_beta_reads <= 1:
+    if user.consecutive_missed_beta_reads <= max(threshold - 2, 1):
         user.beta_read_penalty_status = PENALTY_STATUS_WARNING
         return
-    if user.consecutive_missed_beta_reads == 2:
+    if user.consecutive_missed_beta_reads < threshold:
         user.beta_read_penalty_status = PENALTY_STATUS_STRONG_WARNING
         return
 
@@ -2038,7 +2291,10 @@ async def submit_beta_read_feedback(
     expired_now = await expire_beta_assignment_if_due(db, assignment=assignment, now=now)
     if expired_now and not settings.BETA_READ_ALLOW_LATE_FEEDBACK:
         await db.commit()
-        raise HTTPException(409, "This beta read has already expired. Late feedback is no longer accepted for completion.")
+        raise HTTPException(
+            409,
+            "This beta read has already expired. Late feedback is no longer accepted for completion.",
+        )
     await sync_beta_assignment_progress(db, assignment=assignment, now=now)
     if expired_now:
         assignment.final_feedback = final_feedback.strip()
@@ -2060,9 +2316,13 @@ async def submit_beta_read_feedback(
         set_beta_assignment_state(assignment, BetaReadAssignmentState.IN_PROGRESS.value, now=now)
     snapshot = await sync_beta_assignment_progress(db, assignment=assignment, now=now)
     if assignment.state != BetaReadAssignmentState.READY_TO_SUBMIT.value:
-        raise HTTPException(409, "Finish the required reading and comments before submitting feedback.")
+        raise HTTPException(
+            409, "Finish the required reading and comments before submitting feedback."
+        )
     if not _requirements_met(assignment, snapshot):
-        raise HTTPException(409, "Finish the required reading and comments before submitting feedback.")
+        raise HTTPException(
+            409, "Finish the required reading and comments before submitting feedback."
+        )
     set_beta_assignment_state(assignment, BetaReadAssignmentState.SUBMITTED.value, now=now)
     assignment.final_feedback = final_feedback.strip()
     assignment.final_rating = normalized_rating
@@ -2111,7 +2371,11 @@ async def revoke_beta_read_assignment(
         now=utc_now(),
         revoked_reason=reason or "revoked_by_author",
     )
-    collaborator = await db.get(BookCollaborator, assignment.collaborator_id) if assignment.collaborator_id else None
+    collaborator = (
+        await db.get(BookCollaborator, assignment.collaborator_id)
+        if assignment.collaborator_id
+        else None
+    )
     sync_beta_read_access(assignment, collaborator)
     if assignment.reader_user_id is not None:
         db.add(
@@ -2135,17 +2399,23 @@ async def award_submitted_beta_reads(
     limit: int = 100,
 ) -> int:
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment)
-            .where(BetaReadAssignment.state == BetaReadAssignmentState.SUBMITTED.value)
-            .order_by(BetaReadAssignment.submitted_at.asc())
-            .limit(limit)
-            .with_for_update(skip_locked=True)
+        (
+            await db.execute(
+                select(BetaReadAssignment)
+                .where(BetaReadAssignment.state == BetaReadAssignmentState.SUBMITTED.value)
+                .order_by(BetaReadAssignment.submitted_at.asc())
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     completed = 0
     for assignment in assignments:
-        reader = await db.get(User, assignment.reader_user_id) if assignment.reader_user_id else None
+        reader = (
+            await db.get(User, assignment.reader_user_id) if assignment.reader_user_id else None
+        )
         if reader is None:
             continue
         snapshot = beta_submission_snapshot(assignment)
@@ -2153,7 +2423,8 @@ async def award_submitted_beta_reads(
         requirements_met = (
             float(snapshot.get("progress_pct") or 0) >= float(assignment.required_progress_pct)
             and int(snapshot.get("comment_count") or 0) >= int(assignment.required_comment_count)
-            and int(snapshot.get("feedback_item_count") or 0) >= int(assignment.required_feedback_item_count)
+            and int(snapshot.get("feedback_item_count") or 0)
+            >= int(assignment.required_feedback_item_count)
             and assignment.final_rating is not None
             and (
                 not assignment.require_final_feedback
@@ -2167,12 +2438,18 @@ async def award_submitted_beta_reads(
                 now=utc_now(),
                 disqualified_reason="deadline_or_requirement_failed",
             )
-            collaborator = await db.get(BookCollaborator, assignment.collaborator_id) if assignment.collaborator_id else None
+            collaborator = (
+                await db.get(BookCollaborator, assignment.collaborator_id)
+                if assignment.collaborator_id
+                else None
+            )
             sync_beta_read_access(assignment, collaborator)
             continue
 
         completed_at = utc_now()
-        set_beta_assignment_state(assignment, BetaReadAssignmentState.COMPLETED.value, now=completed_at)
+        set_beta_assignment_state(
+            assignment, BetaReadAssignmentState.COMPLETED.value, now=completed_at
+        )
         reset_missed_beta_read_penalty(reader)
         await create_notification_once(
             db,
@@ -2198,17 +2475,21 @@ async def expire_due_beta_reads(
 ) -> tuple[int, int]:
     now = utc_now()
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment)
-            .where(
-                BetaReadAssignment.state.in_(list(ACTIVE_READER_STATES)),
-                BetaReadAssignment.expires_at < now,
+        (
+            await db.execute(
+                select(BetaReadAssignment)
+                .where(
+                    BetaReadAssignment.state.in_(list(ACTIVE_READER_STATES)),
+                    BetaReadAssignment.expires_at < now,
+                )
+                .order_by(BetaReadAssignment.expires_at.asc())
+                .limit(limit)
+                .with_for_update(skip_locked=True)
             )
-            .order_by(BetaReadAssignment.expires_at.asc())
-            .limit(limit)
-            .with_for_update(skip_locked=True)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     expired_count = 0
     missed_count = 0
     for assignment in assignments:
@@ -2225,14 +2506,18 @@ async def send_beta_read_reminders(
 ) -> int:
     now = utc_now()
     assignments = (
-        await db.execute(
-            select(BetaReadAssignment)
-            .where(BetaReadAssignment.state.in_(list(ACTIVE_READER_STATES)))
-            .order_by(BetaReadAssignment.expires_at.asc())
-            .limit(limit)
-            .with_for_update(skip_locked=True)
+        (
+            await db.execute(
+                select(BetaReadAssignment)
+                .where(BetaReadAssignment.state.in_(list(ACTIVE_READER_STATES)))
+                .order_by(BetaReadAssignment.expires_at.asc())
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     sent = 0
     for assignment in assignments:
         if assignment.reader_user_id is None:

@@ -44,7 +44,9 @@ async def search_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return UserSearchResponse(items=await search_users_for_social(db, current_user_id=current_user.id, query=q))
+    return UserSearchResponse(
+        items=await search_users_for_social(db, current_user_id=current_user.id, query=q)
+    )
 
 
 @router.get("/relationships", response_model=SocialRelationshipListOut)
@@ -61,7 +63,9 @@ async def send_friend_request(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    request = await create_friend_request(db, current_user=current_user, target_user_id=body.target_user_id)
+    request = await create_friend_request(
+        db, current_user=current_user, target_user_id=body.target_user_id
+    )
     return FriendRequestOut(
         id=request.id,
         requester_user_id=request.requester_user_id,
@@ -80,7 +84,9 @@ async def accept_friend_request(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    request = await respond_to_friend_request(db, request_id=request_id, current_user=current_user, action="accept")
+    request = await respond_to_friend_request(
+        db, request_id=request_id, current_user=current_user, action="accept"
+    )
     return FriendRequestOut(
         id=request.id,
         requester_user_id=request.requester_user_id,
@@ -99,7 +105,9 @@ async def decline_friend_request(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    request = await respond_to_friend_request(db, request_id=request_id, current_user=current_user, action="decline")
+    request = await respond_to_friend_request(
+        db, request_id=request_id, current_user=current_user, action="decline"
+    )
     return FriendRequestOut(
         id=request.id,
         requester_user_id=request.requester_user_id,
@@ -118,7 +126,9 @@ async def cancel_friend_request(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    request = await cancel_outgoing_friend_request(db, request_id=request_id, current_user=current_user)
+    request = await cancel_outgoing_friend_request(
+        db, request_id=request_id, current_user=current_user
+    )
     return FriendRequestOut(
         id=request.id,
         requester_user_id=request.requester_user_id,
@@ -137,7 +147,9 @@ async def list_conversations(
     current_user: User = Depends(get_current_user),
 ):
     items = await list_conversation_summaries(db, current_user=current_user)
-    return DirectConversationListOut(items=items, unread_count=sum(item.unread_count for item in items))
+    return DirectConversationListOut(
+        items=items, unread_count=sum(item.unread_count for item in items)
+    )
 
 
 @router.get("/conversations/unread-count", response_model=UnreadCountOut)
@@ -145,7 +157,9 @@ async def get_unread_conversation_count(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return UnreadCountOut(unread_count=await count_unread_direct_messages(db, current_user=current_user))
+    return UnreadCountOut(
+        unread_count=await count_unread_direct_messages(db, current_user=current_user)
+    )
 
 
 @router.post("/conversations/direct", response_model=DirectConversationListOut)
@@ -154,8 +168,12 @@ async def create_or_get_direct_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    conversation = await get_or_create_direct_conversation(db, current_user=current_user, target_user_id=body.target_user_id)
-    summary = await build_conversation_summary(db, current_user=current_user, conversation=conversation)
+    conversation = await get_or_create_direct_conversation(
+        db, current_user=current_user, target_user_id=body.target_user_id
+    )
+    summary = await build_conversation_summary(
+        db, current_user=current_user, conversation=conversation
+    )
     return DirectConversationListOut(items=[summary], unread_count=summary.unread_count)
 
 
@@ -166,7 +184,9 @@ async def get_messages(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    items = await list_conversation_messages(db, current_user=current_user, conversation_id=conversation_id, limit=limit)
+    items = await list_conversation_messages(
+        db, current_user=current_user, conversation_id=conversation_id, limit=limit
+    )
     return DirectMessageListOut(
         items=[
             DirectMessageOut(
@@ -183,14 +203,18 @@ async def get_messages(
     )
 
 
-@router.post("/conversations/{conversation_id}/messages", response_model=DirectMessageOut, status_code=201)
+@router.post(
+    "/conversations/{conversation_id}/messages", response_model=DirectMessageOut, status_code=201
+)
 async def post_message(
     conversation_id: uuid.UUID,
     body: DirectMessageCreateBody,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    item = await send_direct_message(db, current_user=current_user, conversation_id=conversation_id, body=body.body)
+    item = await send_direct_message(
+        db, current_user=current_user, conversation_id=conversation_id, body=body.body
+    )
     return DirectMessageOut(
         id=item.id,
         conversation_id=item.conversation_id,

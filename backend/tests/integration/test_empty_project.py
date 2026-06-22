@@ -26,13 +26,6 @@ async def _register_author(client, email: str, monkeypatch) -> tuple[dict[str, s
         lambda *_args, **_kwargs: None,
     )
 
-    async def _fake_check_upload_limit(*_args, **_kwargs):
-        return None
-
-    monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.check_upload_limit",
-        _fake_check_upload_limit,
-    )
     return headers, user_id
 
 

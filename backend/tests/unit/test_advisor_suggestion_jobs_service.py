@@ -1,8 +1,8 @@
 """Runtime coverage for persisted advisor suggestion jobs."""
 
+import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
-import uuid
 
 import pytest
 
@@ -78,7 +78,10 @@ async def test_create_get_and_serialize_advisor_suggestion_job():
     db.stored = created
     assert await jobs.get_advisor_suggestion_job(db, job_id=created.id) is created
     assert jobs.serialize_advisor_suggestion_job(created) == {
-        "job_id": str(created.id), "status": "queued", "result": None, "error": None
+        "job_id": str(created.id),
+        "status": "queued",
+        "result": None,
+        "error": None,
     }
 
 
@@ -94,7 +97,9 @@ async def test_job_state_transitions_commit_and_refresh(operation):
         assert job.error_code is None and job.error_detail is None
     elif operation == "complete":
         payload = {"suggestions": [{"title": "Clarify the gate"}]}
-        result = await jobs.mark_advisor_suggestion_job_complete(db, job_id=job.id, result_payload=payload)
+        result = await jobs.mark_advisor_suggestion_job_complete(
+            db, job_id=job.id, result_payload=payload
+        )
         assert job.status == "complete" and job.result_json == payload
         assert job.error_code is None and job.error_detail is None
     else:
@@ -122,9 +127,13 @@ async def test_job_state_transitions_return_none_for_missing_jobs(operation):
     if operation == "running":
         result = await jobs.mark_advisor_suggestion_job_running(db, job_id=job_id)
     elif operation == "complete":
-        result = await jobs.mark_advisor_suggestion_job_complete(db, job_id=job_id, result_payload={})
+        result = await jobs.mark_advisor_suggestion_job_complete(
+            db, job_id=job_id, result_payload={}
+        )
     else:
-        result = await jobs.mark_advisor_suggestion_job_failed(db, job_id=job_id, error_code="missing")
+        result = await jobs.mark_advisor_suggestion_job_failed(
+            db, job_id=job_id, error_code="missing"
+        )
     assert result is None
     assert db.commits == 0
 

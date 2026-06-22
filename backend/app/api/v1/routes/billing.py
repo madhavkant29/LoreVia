@@ -48,12 +48,16 @@ async def start_checkout(
         }
 
     existing = (
-        await db.execute(
-            select(Subscription)
-            .where(Subscription.user_id == current_user.id)
-            .order_by(Subscription.created_at.desc())
+        (
+            await db.execute(
+                select(Subscription)
+                .where(Subscription.user_id == current_user.id)
+                .order_by(Subscription.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if not existing:
         existing = Subscription(
@@ -76,7 +80,9 @@ async def start_checkout(
             existing_customer_id=existing.paddle_customer_id,
         )
     except Exception:
-        log.exception("paddle_checkout_failed", extra={"user_id": str(current_user.id), "plan": plan})
+        log.exception(
+            "paddle_checkout_failed", extra={"user_id": str(current_user.id), "plan": plan}
+        )
         raise HTTPException(502, "Unable to start Paddle checkout.")
 
     existing.paddle_customer_id = customer_id
@@ -162,7 +168,8 @@ async def get_checkout_confirmation(
         invoice_number=summary.invoice_number,
         invoice_pdf_url=summary.invoice_pdf_url,
         subscription_id=summary.subscription_id or subscription.paddle_sub_id,
-        customer_email=summary.customer_email or (current_user.email if current_user is not None else None),
+        customer_email=summary.customer_email
+        or (current_user.email if current_user is not None else None),
     )
 
 
@@ -179,12 +186,19 @@ async def open_portal(
         }
 
     subscription = (
-        await db.execute(
-            select(Subscription)
-            .where(Subscription.user_id == current_user.id, Subscription.paddle_customer_id.is_not(None))
-            .order_by(Subscription.created_at.desc())
+        (
+            await db.execute(
+                select(Subscription)
+                .where(
+                    Subscription.user_id == current_user.id,
+                    Subscription.paddle_customer_id.is_not(None),
+                )
+                .order_by(Subscription.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if not subscription or not subscription.paddle_customer_id:
         raise HTTPException(404, "No billing account found")

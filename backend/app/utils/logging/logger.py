@@ -2,8 +2,8 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from app.utils.request_context import get_request_id
 from app.utils.logging.errors import scrub_sensitive_data
+from app.utils.request_context import get_request_id
 
 _STANDARD_RECORD_FIELDS = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
 
@@ -58,7 +58,13 @@ def configure_logging(level: int = logging.INFO) -> None:
     root.addHandler(handler)
     root.setLevel(level)
 
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi", "sqlalchemy.engine"):
+    for logger_name in (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "fastapi",
+        "sqlalchemy.engine",
+    ):
         named_logger = logging.getLogger(logger_name)
         named_logger.handlers.clear()
         named_logger.propagate = True

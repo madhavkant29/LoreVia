@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 from app.models.user import User
 
-
 ACCOUNT_DELETE_CONFIRMATION = "DELETE MY ACCOUNT"
 BOOK_DELETE_CONFIRMATION = "DELETE BOOK"
 USER_DELETION_STATUS_ACTIVE = "active"

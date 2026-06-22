@@ -8,8 +8,12 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, Request, Response
 
 from app.core.config import settings
-from app.utils.cookie_utils import auth_cookie_secure, delete_cookie, get_request_cookie_values, set_cookie
-
+from app.utils.cookie_utils import (
+    auth_cookie_secure,
+    delete_cookie,
+    get_request_cookie_values,
+    set_cookie,
+)
 
 ADMIN_CSRF_COOKIE_NAME = "lorevia_admin_csrf"
 ADMIN_CSRF_HEADER_NAME = "x-admin-csrf-token"
@@ -45,7 +49,9 @@ def validate_admin_csrf_token(request: Request) -> None:
     cookie_tokens = get_request_cookie_values(request, ADMIN_CSRF_COOKIE_NAME)
     if not header_token:
         raise HTTPException(403, "Invalid admin CSRF token.")
-    if not any(_admin_csrf_token_matches(header_token, cookie_token) for cookie_token in cookie_tokens):
+    if not any(
+        _admin_csrf_token_matches(header_token, cookie_token) for cookie_token in cookie_tokens
+    ):
         raise HTTPException(403, "Invalid admin CSRF token.")
 
     _validate_same_origin_admin_request(request)

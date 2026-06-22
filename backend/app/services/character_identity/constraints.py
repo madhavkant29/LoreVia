@@ -9,7 +9,9 @@ from app.models.character import CharacterDuplicateSuggestion, CharacterIdentity
 from app.services.character_identity.merge import record_identity_action
 
 
-def canonical_constraint_pair(left_id: uuid.UUID, right_id: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
+def canonical_constraint_pair(
+    left_id: uuid.UUID, right_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID]:
     return (left_id, right_id) if str(left_id) < str(right_id) else (right_id, left_id)
 
 
@@ -71,22 +73,26 @@ async def add_identity_constraint(
 
     if constraint_type in {"not_same_character", "blocked_merge"}:
         suggestions = (
-            await db.execute(
-                select(CharacterDuplicateSuggestion).where(
-                    CharacterDuplicateSuggestion.book_id == book_id,
-                    or_(
-                        (
-                            (CharacterDuplicateSuggestion.primary_character_id == left_id)
-                            & (CharacterDuplicateSuggestion.secondary_character_id == right_id)
+            (
+                await db.execute(
+                    select(CharacterDuplicateSuggestion).where(
+                        CharacterDuplicateSuggestion.book_id == book_id,
+                        or_(
+                            (
+                                (CharacterDuplicateSuggestion.primary_character_id == left_id)
+                                & (CharacterDuplicateSuggestion.secondary_character_id == right_id)
+                            ),
+                            (
+                                (CharacterDuplicateSuggestion.primary_character_id == right_id)
+                                & (CharacterDuplicateSuggestion.secondary_character_id == left_id)
+                            ),
                         ),
-                        (
-                            (CharacterDuplicateSuggestion.primary_character_id == right_id)
-                            & (CharacterDuplicateSuggestion.secondary_character_id == left_id)
-                        ),
-                    ),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for suggestion in suggestions:
             if suggestion.status == "pending":
                 suggestion.status = "dismissed"
@@ -109,7 +115,9 @@ async def has_blocking_identity_constraint(
                 CharacterIdentityConstraint.book_id == book_id,
                 CharacterIdentityConstraint.left_character_id == left_id,
                 CharacterIdentityConstraint.right_character_id == right_id,
-                CharacterIdentityConstraint.constraint_type.in_(("not_same_character", "blocked_merge")),
+                CharacterIdentityConstraint.constraint_type.in_(
+                    ("not_same_character", "blocked_merge")
+                ),
             )
         )
     ).scalar_one_or_none()

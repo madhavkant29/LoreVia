@@ -2,6 +2,7 @@
 Chapter summary generation - 3 modes.
 Generated once, cached in Redis + stored in DB forever.
 """
+
 import json
 import re
 import uuid
@@ -91,7 +92,13 @@ async def generate_summary(
             return _normalize_summary_payload(data, fallback=content)
         except json.JSONDecodeError:
             pass
-    return {"content": content, "key_events": None, "char_changes": None, "clues": None, "themes": None}
+    return {
+        "content": content,
+        "key_events": None,
+        "char_changes": None,
+        "clues": None,
+        "themes": None,
+    }
 
 
 def derive_summary_modes_from_detailed(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -104,7 +111,9 @@ def derive_summary_modes_from_detailed(payload: dict[str, Any]) -> dict[str, dic
     key_points: list[str] = []
     for index, item in enumerate(key_events[:5], start=1):
         title = " ".join(str(item.get("event_title") or item.get("event") or "").split()).strip()
-        description = " ".join(str(item.get("description") or item.get("impact") or "").split()).strip()
+        description = " ".join(
+            str(item.get("description") or item.get("impact") or "").split()
+        ).strip()
         sentence = description or title
         if title and description and not description.lower().startswith(title.lower()):
             sentence = f"{title}: {description}"
@@ -114,7 +123,11 @@ def derive_summary_modes_from_detailed(payload: dict[str, Any]) -> dict[str, dic
 
     if not key_points:
         fallback_sentences = _split_sentences(detailed_content)[:5]
-        key_points = [f"{index}. {sentence.rstrip('. ')}." for index, sentence in enumerate(fallback_sentences, start=1) if sentence]
+        key_points = [
+            f"{index}. {sentence.rstrip('. ')}."
+            for index, sentence in enumerate(fallback_sentences, start=1)
+            if sentence
+        ]
 
     return {
         "short": {
@@ -161,7 +174,16 @@ def _normalize_summary_payload(data: dict, fallback: str) -> dict:
                 }
             )
         elif isinstance(item, str) and item.strip():
-            key_events.append({"event_title": item.strip(), "event": item.strip(), "description": "", "importance": 5, "impact": "", "involved_characters": []})
+            key_events.append(
+                {
+                    "event_title": item.strip(),
+                    "event": item.strip(),
+                    "description": "",
+                    "importance": 5,
+                    "impact": "",
+                    "involved_characters": [],
+                }
+            )
 
     char_changes = []
     for item in data.get("char_changes") or []:
@@ -194,5 +216,7 @@ def _normalize_summary_payload(data: dict, fallback: str) -> dict:
 def _split_sentences(content: str) -> list[str]:
     if not content:
         return []
-    segments = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", content) if segment.strip()]
+    segments = [
+        segment.strip() for segment in re.split(r"(?<=[.!?])\s+", content) if segment.strip()
+    ]
     return segments

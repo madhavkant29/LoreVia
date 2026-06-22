@@ -2,6 +2,7 @@
 Shared pagination helpers — limit / offset validation and response
 construction for list endpoints.
 """
+
 from collections.abc import Sequence
 from typing import TypeVar
 
@@ -27,7 +28,7 @@ def build_paginated_response[T](
         limit=limit,
         offset=offset,
         has_more=(offset + limit) < total,
-)
+    )
 
 
 async def validate_pagination(limit: int, offset: int) -> None:

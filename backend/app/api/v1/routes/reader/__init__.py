@@ -2,11 +2,14 @@
 Reader routes — the core intelligence surface.
 Smart tap, summaries, relationship graph, memory recall, progress.
 """
+
 from fastapi import APIRouter
 
 # ── Routers ─────────────────────────────────────────────────────────────────
 from app.api.v1.routes.reader.core import (
     get_chapter_media_public,
+)
+from app.api.v1.routes.reader.core import (
     router as core_router,
 )
 from app.api.v1.routes.reader.graph import router as graph_router
@@ -38,18 +41,18 @@ from app.api.v1.routes.reader.core import (  # noqa: E402, F401
     thematic_search,
 )
 
+# ── reader.graph ────────────────────────────────────────────────────────────
+from app.api.v1.routes.reader.graph import (  # noqa: E402, F401
+    get_relationship_evolution,
+    get_relationships,
+)
+
 # ── reader.progress ─────────────────────────────────────────────────────────
 from app.api.v1.routes.reader.progress import (  # noqa: E402, F401
     get_progress,
     mark_book_read,
     update_chapter_read_status,
     update_progress,
-)
-
-# ── reader.graph ────────────────────────────────────────────────────────────
-from app.api.v1.routes.reader.graph import (  # noqa: E402, F401
-    get_relationship_evolution,
-    get_relationships,
 )
 
 # ── reader.timeline ─────────────────────────────────────────────────────────
@@ -63,6 +66,49 @@ from app.api.v1.routes.reader.timeline import (  # noqa: E402, F401
     memory_recall,
     save_plot_thread_note,
 )
+
+# ── app.core ────────────────────────────────────────────────────────────────
+from app.core.config import is_local_mode  # noqa: E402, F401
+from app.core.redis import (  # noqa: E402, F401
+    cache_get,
+    cache_set,
+    get_book_cache_version,
+    get_reader_events_cache,
+    get_reader_progress_cache_version,
+    get_reader_timeline_cache,
+    get_relationship_evolution_cache,
+    key_memory_recall,
+    mark_reader_progress_cache_dirty,
+    set_reader_events_cache,
+    set_reader_timeline_cache,
+    set_relationship_evolution_cache,
+)
+from app.core.security import decode_token  # noqa: E402, F401
+from app.core.storage import download_book  # noqa: E402, F401
+
+# ── engine ──────────────────────────────────────────────────────────────────
+from app.engine.analysis.recall import generate_recall  # noqa: E402, F401
+from app.engine.character.consolidator import consolidate_characters  # noqa: E402, F401
+from app.engine.search.semantic import (  # noqa: E402, F401
+    build_search_result,
+    find_context_for_tap,
+    semantic_search,
+)
+
+# ── services ────────────────────────────────────────────────────────────────
+from app.services.chapter_recovery_service import resolve_reader_chapter_payload  # noqa: E402, F401
+from app.services.summary_service import get_or_generate_summary  # noqa: E402, F401
+
+# ── utils ───────────────────────────────────────────────────────────────────
+from app.utils.beta_read_utils import sync_beta_assignments_for_reader_book  # noqa: E402, F401
+from app.utils.billing_utils import summary_mode_allowed  # noqa: E402, F401
+from app.utils.books.collaboration_access import (
+    collaboration_allows_chapter,
+    get_book_with_collaboration_access,
+)
+from app.utils.characters.manual import backfill_character_first_chapters_for_chapter_text
+from app.utils.characters.serialization import serialize_reader_character
+from app.utils.queue_utils import queue_for_user  # noqa: E402, F401
 
 # ── reader_utils ────────────────────────────────────────────────────────────
 from app.utils.reader_utils import (  # noqa: E402, F401
@@ -87,51 +133,6 @@ from app.utils.reader_utils import (  # noqa: E402, F401
     timeline_visible_chapter_set,
     update_plot_thread_note,
 )
-
-# ── services ────────────────────────────────────────────────────────────────
-from app.services.chapter_recovery_service import resolve_reader_chapter_payload  # noqa: E402, F401
-from app.services.summary_service import get_or_generate_summary  # noqa: E402, F401
-
-# ── engine ──────────────────────────────────────────────────────────────────
-from app.engine.analysis.recall import generate_recall  # noqa: E402, F401
-from app.engine.character.consolidator import consolidate_characters  # noqa: E402, F401
-from app.engine.search.semantic import (  # noqa: E402, F401
-    build_search_result,
-    find_context_for_tap,
-    semantic_search,
-)
-
-# ── app.core ────────────────────────────────────────────────────────────────
-from app.core.config import is_local_mode  # noqa: E402, F401
-from app.core.security import decode_token  # noqa: E402, F401
-from app.core.storage import download_book  # noqa: E402, F401
-from app.core.redis import (  # noqa: E402, F401
-    cache_get,
-    cache_set,
-    get_book_cache_version,
-    get_reader_events_cache,
-    get_reader_progress_cache_version,
-    get_reader_timeline_cache,
-    get_relationship_evolution_cache,
-    key_memory_recall,
-    mark_reader_progress_cache_dirty,
-    set_reader_events_cache,
-    set_reader_timeline_cache,
-    set_relationship_evolution_cache,
-)
-
-# ── utils ───────────────────────────────────────────────────────────────────
-from app.utils.beta_read_utils import sync_beta_assignments_for_reader_book  # noqa: E402, F401
-from app.utils.billing_utils import summary_mode_allowed  # noqa: E402, F401
-from app.utils.book_utils import (  # noqa: E402, F401
-    collaboration_allows_chapter,
-    get_book_with_collaboration_access,
-)
-from app.utils.character_utils import (  # noqa: E402, F401
-    backfill_character_first_chapters_for_chapter_text,
-    serialize_reader_character,
-)
-from app.utils.queue_utils import queue_for_user  # noqa: E402, F401
 from app.utils.tag_utils import (  # noqa: E402, F401
     get_custom_tags_for_entity,
     list_custom_tags_for_entity_ids,

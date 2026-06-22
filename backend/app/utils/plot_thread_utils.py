@@ -176,8 +176,15 @@ def derive_plot_thread_risk(
     if resolved_status == "possibly_abandoned":
         return "Reader expectation may still be active because this thread has been quiet for several chapters."
     if resolved_status == "paused":
-        return "The thread is resting off-page; readers may need a reminder before it matters again."
-    if introduced_at is not None and current_chapter is not None and current_chapter - introduced_at >= 4 and weight >= 7:
+        return (
+            "The thread is resting off-page; readers may need a reminder before it matters again."
+        )
+    if (
+        introduced_at is not None
+        and current_chapter is not None
+        and current_chapter - introduced_at >= 4
+        and weight >= 7
+    ):
         return "Reader may strongly expect closure because this thread has stayed active for a long stretch."
     if resolved_status in {"introduced", "developing", "unknown"}:
         return f"'{title}' is still open, so readers may expect resolution or reinforcement."

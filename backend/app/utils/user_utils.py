@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +56,9 @@ def record_login_activity(user: User, *, now: datetime | None = None) -> None:
     else:
         user.login_streak_days = 1
 
-    user.longest_login_streak_days = max(int(user.longest_login_streak_days or 0), int(user.login_streak_days or 0))
+    user.longest_login_streak_days = max(
+        int(user.longest_login_streak_days or 0), int(user.login_streak_days or 0)
+    )
 
 
 def add_daily_word_progress(user: User, words_added: int, *, now: datetime | None = None) -> int:
@@ -122,7 +125,9 @@ def build_writing_activity_entry(
         return None
 
     current = now.astimezone(UTC) if now is not None else datetime.now(UTC)
-    normalized_title = normalize_writing_entry_title(title, chapter_number=chapter_number, fallback=book.title)
+    normalized_title = normalize_writing_entry_title(
+        title, chapter_number=chapter_number, fallback=book.title
+    )
 
     return UserWritingActivity(
         user_id=user.id,
@@ -135,7 +140,9 @@ def build_writing_activity_entry(
     )
 
 
-def normalize_writing_entry_title(title: str | None, *, chapter_number: int | None = None, fallback: str | None = None) -> str:
+def normalize_writing_entry_title(
+    title: str | None, *, chapter_number: int | None = None, fallback: str | None = None
+) -> str:
     cleaned = (title or "").strip()
     if cleaned:
         return cleaned
@@ -193,7 +200,11 @@ async def build_writing_dashboard_stats(
         if words_added <= 0:
             continue
 
-        activity_day = activity.activity_date if isinstance(activity.activity_date, date) else activity.created_at.date()
+        activity_day = (
+            activity.activity_date
+            if isinstance(activity.activity_date, date)
+            else activity.created_at.date()
+        )
         daily_totals[activity_day] += words_added
 
         if activity.created_at >= rolling_last_24_hours:
@@ -211,7 +222,9 @@ async def build_writing_dashboard_stats(
         entry_key = (
             str(activity.book_id) if activity.book_id else None,
             activity.chapter_number,
-            normalize_writing_entry_title(activity.entry_title, chapter_number=activity.chapter_number),
+            normalize_writing_entry_title(
+                activity.entry_title, chapter_number=activity.chapter_number
+            ),
         )
         if entry_key not in today_entries:
             today_entries[entry_key] = {
@@ -290,7 +303,9 @@ def _sum_daily_totals(
     return total
 
 
-def _writing_period_payload(words: int, *, target_words: int | None = None) -> dict[str, int | None]:
+def _writing_period_payload(
+    words: int, *, target_words: int | None = None
+) -> dict[str, int | None]:
     progress_pct = None
     if target_words and target_words > 0:
         progress_pct = min(100, int(round((max(words, 0) / target_words) * 100)))

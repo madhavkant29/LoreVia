@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.core.redis
 from app.api.deps.auth import (
     admin_step_up_active,
     mark_admin_step_up,
@@ -18,9 +19,10 @@ from app.api.deps.auth import (
 )
 from app.core.database import get_db
 from app.core.redis import cache_del, key_public_book_detail, key_public_books
-import app.core.redis
+from app.core.security import verify_password
 from app.models.book import Book
 from app.models.moderation import ContentReport
+from app.models.operations import SupportIncident
 from app.models.user import AdminAuditEvent, AdminPrincipal, User, UserRateLimitOverride
 from app.schemas.admin import (
     AdminAuditEventOut,
@@ -31,6 +33,7 @@ from app.schemas.admin import (
     AdminRestoreBookBody,
     AdminSessionOut,
     AdminStepUpBody,
+    AdminTaskActionBody,
     ContentReportAdminOut,
     CreatorStrikeCreateBody,
     CreatorStrikeOut,
@@ -41,6 +44,8 @@ from app.schemas.admin import (
     RefundReviewDecisionBody,
     RefundReviewOut,
     SubscriptionMetricsOut,
+    SupportIncidentCreateBody,
+    SupportIncidentResolveBody,
     UpdateUserTierBody,
 )
 from app.schemas.billing import BillingStatusOut
@@ -61,14 +66,20 @@ from app.services.admin_service import (
     revoke_admin_principal,
     serialize_pending_public_shares,
 )
-from app.utils.rate_limit_utils import invalidate_rate_limit_override_cache
+from app.services.operations_admin_service import (
+    contribution_margin,
+    dismiss_terminal_execution,
+    list_task_executions,
+    operations_metrics,
+    quality_metrics,
+    retry_terminal_execution,
+)
 from app.services.refund_service import (
     approve_refund_review,
     create_refund_review_request,
     deny_refund_review,
     list_refund_reviews,
 )
-from app.core.security import verify_password
 from app.utils.admin_security import set_admin_csrf_cookie
 from app.utils.billing_utils import (
     VALID_USER_TIERS,
@@ -76,22 +87,29 @@ from app.utils.billing_utils import (
     build_subscription_metrics_summary,
     normalize_tier,
 )
+from app.utils.public.content import (
+    append_public_demo_book_chapter,
+    create_public_demo_book,
+)
+from app.utils.public.moderation import (
+    add_moderation_action,
+)
+from app.utils.public.serialization import (
+    get_public_share_status,
+)
 from app.utils.public_utils import (
     MODERATION_STATUS_CLEAN,
     MODERATION_STATUS_HIDDEN,
     MODERATION_STATUS_REMOVED,
-    PUBLIC_STATUS_HIDDEN,
-    PUBLIC_STATUS_PUBLISHED,
-    PUBLIC_STATUS_REMOVED,
     PUBLIC_SHARE_STATUS_APPROVED,
     PUBLIC_SHARE_STATUS_NOT_REQUESTED,
     PUBLIC_SHARE_STATUS_PENDING,
+    PUBLIC_STATUS_HIDDEN,
+    PUBLIC_STATUS_PUBLISHED,
+    PUBLIC_STATUS_REMOVED,
     USER_PUBLIC_SHARE_SOURCE_KIND,
-    add_moderation_action,
-    append_public_demo_book_chapter,
-    get_public_share_status,
-    create_public_demo_book,
 )
+from app.utils.rate_limit_utils import invalidate_rate_limit_override_cache
 from app.utils.redis_utils import maybe_await
 
 router = APIRouter()
@@ -335,7 +353,9 @@ async def list_admin_audit_events(
                 .offset(offset)
                 .limit(limit)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     await record_admin_read(
         db=db,
@@ -456,11 +476,16 @@ async def review_public_share(
         raise HTTPException(409, "This manuscript is not available for public sharing.")
 
     current_status = get_public_share_status(book)
-    if str(book.source_kind or "").strip().lower() != USER_PUBLIC_SHARE_SOURCE_KIND and current_status == PUBLIC_SHARE_STATUS_NOT_REQUESTED:
+    if (
+        str(book.source_kind or "").strip().lower() != USER_PUBLIC_SHARE_SOURCE_KIND
+        and current_status == PUBLIC_SHARE_STATUS_NOT_REQUESTED
+    ):
         raise HTTPException(409, "This manuscript is not in the author public-share workflow.")
     if body.approved:
         if current_status == PUBLIC_SHARE_STATUS_NOT_REQUESTED:
-            raise HTTPException(409, "This manuscript does not have a pending public-share request.")
+            raise HTTPException(
+                409, "This manuscript does not have a pending public-share request."
+            )
         book.public_share_status = PUBLIC_SHARE_STATUS_APPROVED
         book.public_share_approved_at = datetime.now(UTC)
         book.public_share_approved_by_user_id = admin_user.id
@@ -699,6 +724,205 @@ async def queue_depth(
     return payload
 
 
+@router.get("/task-executions")
+async def admin_task_executions(
+    request: Request,
+    status: str | None = Query(default="failed_terminal"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_super_admin),
+):
+    payload = await list_task_executions(db, status=status, limit=limit, offset=offset)
+    await record_admin_read(
+        db=db,
+        request=request,
+        admin_user=admin_user,
+        action_type="task_execution_list_viewed",
+        reason="Viewed durable task executions.",
+    )
+    return payload
+
+
+@router.post("/task-executions/{execution_id}/retry")
+async def admin_retry_task_execution(
+    request: Request,
+    execution_id: uuid.UUID,
+    body: AdminTaskActionBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_super_admin),
+):
+    try:
+        execution = await retry_terminal_execution(db, execution_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=execution.user_id,
+        target_book_id=execution.book_id,
+        action_type="task_execution_retried",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"execution_id": str(execution.id)},
+    )
+    await db.commit()
+    return {"id": str(execution.id), "status": execution.status}
+
+
+@router.post("/task-executions/{execution_id}/dismiss")
+async def admin_dismiss_task_execution(
+    request: Request,
+    execution_id: uuid.UUID,
+    body: AdminTaskActionBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_super_admin),
+):
+    try:
+        execution = await dismiss_terminal_execution(
+            db, execution_id, admin_user_id=admin_user.id, reason=body.reason
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await record_admin_audit_event(
+        db,
+        actor_user_id=admin_user.id,
+        target_user_id=execution.user_id,
+        target_book_id=execution.book_id,
+        action_type="task_execution_dismissed",
+        result="allowed",
+        reason=body.reason,
+        request=request,
+        scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"execution_id": str(execution.id)},
+    )
+    await db.commit()
+    return {"id": str(execution.id), "status": execution.status}
+
+
+@router.get("/operations-metrics")
+async def admin_operations_metrics(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_super_admin),
+):
+    payload = await operations_metrics(db)
+    await record_admin_read(
+        db=db, request=request, admin_user=admin_user,
+        action_type="operations_metrics_viewed", reason="Viewed processing operations metrics."
+    )
+    return payload
+
+
+@router.get("/ai-quality")
+async def admin_ai_quality(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_super_admin),
+):
+    payload = await quality_metrics(db)
+    await record_admin_read(
+        db=db, request=request, admin_user=admin_user,
+        action_type="ai_quality_viewed", reason="Viewed AI quality metrics."
+    )
+    return payload
+
+
+@router.get("/contribution-margin")
+async def admin_contribution_margin(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_super_admin),
+):
+    payload = await contribution_margin(db)
+    await record_admin_read(
+        db=db, request=request, admin_user=admin_user,
+        action_type="contribution_margin_viewed", reason="Viewed contribution-margin estimates."
+    )
+    return payload
+
+
+@router.get("/support-incidents")
+async def admin_support_incidents(
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_super_admin),
+):
+    rows = (
+        await db.execute(select(SupportIncident).order_by(SupportIncident.created_at.desc()).limit(200))
+    ).scalars().all()
+    return [
+        {
+            "id": str(row.id), "user_id": str(row.user_id) if row.user_id else None,
+            "book_id": str(row.book_id) if row.book_id else None, "category": row.category,
+            "feature": row.feature, "severity": row.severity, "status": row.status,
+            "summary": row.summary, "resolution": row.resolution, "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
+@router.post("/support-incidents")
+async def admin_create_support_incident(
+    request: Request,
+    body: SupportIncidentCreateBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_super_admin),
+):
+    incident = SupportIncident(
+        user_id=body.user_id, book_id=body.book_id, task_execution_id=body.task_execution_id,
+        category=body.category, feature=body.feature, severity=body.severity,
+        summary=body.summary, created_by_user_id=admin_user.id,
+    )
+    db.add(incident)
+    await db.flush()
+    await record_admin_audit_event(
+        db, actor_user_id=admin_user.id, target_user_id=body.user_id,
+        target_book_id=body.book_id, action_type="support_incident_created", result="allowed",
+        reason=body.summary, request=request, scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"incident_id": str(incident.id), "category": body.category},
+    )
+    await db.commit()
+    return {"id": str(incident.id), "status": incident.status}
+
+
+@router.post("/support-incidents/{incident_id}/resolve")
+async def admin_resolve_support_incident(
+    request: Request,
+    incident_id: uuid.UUID,
+    body: SupportIncidentResolveBody,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin_csrf),
+    __: None = Depends(require_admin_step_up),
+    admin_user: User = Depends(require_super_admin),
+):
+    incident = await db.get(SupportIncident, incident_id)
+    if incident is None:
+        raise HTTPException(404, "Support incident not found")
+    incident.status = "resolved"
+    incident.resolution = body.resolution
+    incident.resolved_at = datetime.now(UTC)
+    await record_admin_audit_event(
+        db, actor_user_id=admin_user.id, target_user_id=incident.user_id,
+        target_book_id=incident.book_id, action_type="support_incident_resolved", result="allowed",
+        reason=body.resolution, request=request, scopes_snapshot=_admin_scopes_from_request(request),
+        metadata={"incident_id": str(incident.id)},
+    )
+    await db.commit()
+    return {"id": str(incident.id), "status": incident.status}
+
+
 @router.get("/rate-limits/{user_id}")
 async def get_rate_limit_override(
     request: Request,
@@ -710,10 +934,14 @@ async def get_rate_limit_override(
     if not user:
         raise HTTPException(404, "User not found")
     override = (
-        await db.execute(
-            select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
+        (
+            await db.execute(
+                select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     payload = {
         "user_id": str(user_id),
         "email": user.email,
@@ -748,10 +976,14 @@ async def upsert_rate_limit_override(
     if not user:
         raise HTTPException(404, "User not found")
     override = (
-        await db.execute(
-            select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
+        (
+            await db.execute(
+                select(UserRateLimitOverride).where(UserRateLimitOverride.user_id == user_id)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if not override:
         override = UserRateLimitOverride(user_id=user_id)
         db.add(override)
@@ -787,9 +1019,13 @@ async def update_user_tier(
 ):
     tier = normalize_tier(body.tier)
     if tier == "admin":
-        raise HTTPException(400, "Admin access is managed through admin principals, not user tiers.")
+        raise HTTPException(
+            400, "Admin access is managed through admin principals, not user tiers."
+        )
     if tier not in VALID_USER_TIERS:
-        raise HTTPException(400, f"Invalid tier. Must be one of: {', '.join(sorted(VALID_USER_TIERS))}")
+        raise HTTPException(
+            400, f"Invalid tier. Must be one of: {', '.join(sorted(VALID_USER_TIERS))}"
+        )
 
     user = await db.get(User, user_id)
     if not user:
@@ -820,15 +1056,24 @@ async def list_content_reports(
     admin_user: User = Depends(require_moderation_admin),
 ):
     reports = (
-        await db.execute(
-            select(ContentReport).order_by(ContentReport.created_at.desc()).offset(offset).limit(limit)
+        (
+            await db.execute(
+                select(ContentReport)
+                .order_by(ContentReport.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     payload = [
         ContentReportAdminOut(
             id=str(report.id),
             reported_book_id=str(report.reported_book_id),
-            reported_author_user_id=str(report.reported_author_user_id) if report.reported_author_user_id else None,
+            reported_author_user_id=str(report.reported_author_user_id)
+            if report.reported_author_user_id
+            else None,
             reporter_user_id=str(report.reporter_user_id) if report.reporter_user_id else None,
             reporter_email=report.reporter_email,
             report_type=report.report_type,

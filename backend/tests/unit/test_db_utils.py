@@ -1,8 +1,11 @@
+import pytest
 from sqlalchemy.exc import OperationalError
 
-import pytest
-
-from app.utils.db_utils import execute_read_with_retry, is_retryable_read_db_error, run_read_with_retry
+from app.utils.db_utils import (
+    execute_read_with_retry,
+    is_retryable_read_db_error,
+    run_read_with_retry,
+)
 
 
 class FakeReadSession:

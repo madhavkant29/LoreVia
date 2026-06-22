@@ -114,6 +114,30 @@ describe("UX primitives", () => {
     expect(onRetry).toHaveBeenCalled()
   })
 
+  it("labels allowance-paused processing as continuable", () => {
+    const rendered = render(
+      <ProcessingStatusStrip
+        status={{
+          stage: "queued",
+          label: "Processing paused",
+          detail: "Monthly allowance reached",
+          progressPct: 50,
+          chaptersCompleted: 1,
+          chaptersTotal: 3,
+          lastError: null,
+          retryAvailable: true,
+          resumeAvailable: true,
+          partialReady: true,
+          ready: false,
+          failed: false,
+        }}
+        onRetry={() => undefined}
+      />
+    )
+
+    expect(rendered.querySelector("button")?.textContent).toContain("Continue processing")
+  })
+
   it("renders standardized save state copy", () => {
     const rendered = render(<SaveStatePill state="offline_draft" />)
     expect(rendered.textContent).toContain("Offline draft")

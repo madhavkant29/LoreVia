@@ -18,6 +18,11 @@ import type {
   AdminScope,
   AdminSession,
   AdminSubscriptionMetrics,
+  AdminTaskExecution,
+  AdminOperationsMetrics,
+  AdminAiQualityMetrics,
+  AdminContributionMargin,
+  AdminSupportIncident,
 } from "@/types/admin"
 
 const SCOPE_OPTIONS: AdminScope[] = ["moderation_admin", "billing_admin", "super_admin"]
@@ -59,6 +64,11 @@ export default function AdminPage() {
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
   const [queueDepth, setQueueDepth] = useState<AdminQueueDepth | null>(null)
   const [subscriptionMetrics, setSubscriptionMetrics] = useState<AdminSubscriptionMetrics | null>(null)
+  const [taskExecutions, setTaskExecutions] = useState<AdminTaskExecution[]>([])
+  const [operations, setOperations] = useState<AdminOperationsMetrics | null>(null)
+  const [quality, setQuality] = useState<AdminAiQualityMetrics | null>(null)
+  const [margin, setMargin] = useState<AdminContributionMargin | null>(null)
+  const [incidents, setIncidents] = useState<AdminSupportIncident[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -77,6 +87,11 @@ export default function AdminPage() {
     if (hasScope(currentSession, "super_admin")) {
       tasks.push(adminApi.metrics().then(setMetrics))
       tasks.push(adminApi.queueDepth().then(setQueueDepth))
+      tasks.push(adminApi.taskExecutions().then(setTaskExecutions))
+      tasks.push(adminApi.operationsMetrics().then(setOperations))
+      tasks.push(adminApi.aiQuality().then(setQuality))
+      tasks.push(adminApi.contributionMargin().then(setMargin))
+      tasks.push(adminApi.supportIncidents().then(setIncidents))
     }
     if (currentSession.is_owner) {
       tasks.push(adminApi.access().then(setPrincipals))
@@ -166,6 +181,21 @@ export default function AdminPage() {
             onSave={(userId, override) =>
               runAction(() => adminApi.setRateLimit(userId, override), "Rate limit overrides updated.")
             }
+          />
+        ) : null}
+
+        {hasScope(session, "super_admin") ? (
+          <ReliabilityPanel
+            operations={operations}
+            quality={quality}
+            margin={margin}
+            executions={taskExecutions}
+            incidents={incidents}
+            disabled={isPending || session.requires_step_up}
+            onRetry={(id, reason) => runAction(() => adminApi.retryTaskExecution(id, reason), "Task queued for retry.")}
+            onDismiss={(id, reason) => runAction(() => adminApi.dismissTaskExecution(id, reason), "Task failure dismissed.")}
+            onIncident={(body) => runAction(() => adminApi.createSupportIncident(body), "Support incident recorded.")}
+            onResolve={(id, resolution) => runAction(() => adminApi.resolveSupportIncident(id, resolution), "Support incident resolved.")}
           />
         ) : null}
 
@@ -993,6 +1023,91 @@ function PlatformMetricsPanel({ metrics }: { metrics: AdminMetrics | null }) {
         <AdminMetric label="Chunks Indexed" value={metrics.chunks_indexed.toLocaleString()} />
         <AdminMetric label="Summaries Cached" value={metrics.summaries_cached.toLocaleString()} />
         <AdminMetric label="Redis Memory" value={`${metrics.redis_memory_mb} MB`} />
+      </div>
+    </section>
+  )
+}
+
+function ReliabilityPanel({
+  operations,
+  quality,
+  margin,
+  executions,
+  incidents,
+  disabled,
+  onRetry,
+  onDismiss,
+  onIncident,
+  onResolve,
+}: {
+  operations: AdminOperationsMetrics | null
+  quality: AdminAiQualityMetrics | null
+  margin: AdminContributionMargin | null
+  executions: AdminTaskExecution[]
+  incidents: AdminSupportIncident[]
+  disabled: boolean
+  onRetry: (id: string, reason: string) => void
+  onDismiss: (id: string, reason: string) => void
+  onIncident: (body: { user_id?: string; book_id?: string; category: string; feature?: string; severity: string; summary: string }) => void
+  onResolve: (id: string, resolution: string) => void
+}) {
+  const [taskReason, setTaskReason] = useState("Reviewed by operator")
+  const [incident, setIncident] = useState({ user_id: "", book_id: "", category: "ai_accuracy", feature: "extraction", severity: "medium", summary: "" })
+  const money = (value?: number) => `$${Number(value ?? 0).toFixed(2)}`
+  return (
+    <section className="space-y-6 rounded-lg border border-[#d9dfd6] bg-white p-5">
+      <div>
+        <h2 className="text-xl font-semibold">Reliability and Unit Economics</h2>
+        <p className="mt-1 text-sm text-[#617065]">Durable jobs, review-confirmed quality, support load, and estimated contribution margin.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <AdminMetric label="Terminal failures" value={String(operations?.terminal_failures ?? 0)} />
+        <AdminMetric label="Queue depth" value={String(operations?.queue_depth ?? 0)} />
+        <AdminMetric label="Retries" value={String(operations?.retry_count ?? 0)} />
+        <AdminMetric label="Oldest job" value={`${operations?.oldest_job_age_seconds ?? 0}s`} />
+        <AdminMetric label="Paused runs" value={String(operations?.paused_runs ?? 0)} />
+        <AdminMetric label="Contribution" value={money(margin?.contribution_margin)} />
+        <AdminMetric label="Reviewed AI" value={String(quality?.reviewed ?? 0)} />
+        <AdminMetric label="Accepted" value={String(quality?.accepted ?? 0)} />
+        <AdminMetric label="Character corrections" value={String(quality?.character_corrections_after_promotion ?? 0)} />
+        <AdminMetric label="Relationship corrections" value={String(quality?.relationship_corrections ?? 0)} />
+        <AdminMetric label="LLM cost" value={money(margin?.llm_cost)} />
+        <AdminMetric label="Recognized revenue" value={money(margin?.recognized_net_revenue)} />
+      </div>
+      {margin?.allocation_basis ? <p className="text-xs text-[#617065]">Allocation basis: {margin.allocation_basis}</p> : null}
+      <div>
+        <label className="grid gap-1 text-sm font-medium">Operator reason
+          <input className="rounded-md border border-[#cdd5cc] px-3 py-2" value={taskReason} onChange={(event) => setTaskReason(event.target.value)} />
+        </label>
+        <div className="mt-3 space-y-2">
+          {executions.map((execution) => (
+            <div key={execution.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#e3e7e1] p-3 text-sm">
+              <div><strong>{execution.task_name}</strong> · chapter {execution.chapter_number ?? "—"}<p className="text-[#7a5047]">{execution.error_category}: {execution.error_detail}</p></div>
+              <div className="flex gap-2">
+                <button disabled={disabled || !taskReason.trim()} className="rounded border px-3 py-1 disabled:opacity-50" onClick={() => onRetry(execution.id, taskReason)}>Retry</button>
+                <button disabled={disabled || !taskReason.trim()} className="rounded border border-[#e8c4c0] px-3 py-1 text-[#a2382b] disabled:opacity-50" onClick={() => onDismiss(execution.id, taskReason)}>Dismiss</button>
+              </div>
+            </div>
+          ))}
+          {executions.length === 0 ? <p className="text-sm text-[#617065]">No terminal pipeline failures.</p> : null}
+        </div>
+      </div>
+      <form className="grid gap-3 md:grid-cols-2" onSubmit={(event) => { event.preventDefault(); onIncident({ ...incident, user_id: incident.user_id || undefined, book_id: incident.book_id || undefined }); setIncident((current) => ({ ...current, summary: "" })) }}>
+        <h3 className="md:col-span-2 font-semibold">Record support incident</h3>
+        {(["user_id", "book_id", "category", "feature", "summary"] as const).map((field) => (
+          <label key={field} className={`grid gap-1 text-sm ${field === "summary" ? "md:col-span-2" : ""}`}>{field.replace("_", " ")}
+            <input required={field === "category" || field === "summary"} className="rounded-md border border-[#cdd5cc] px-3 py-2" value={incident[field]} onChange={(event) => setIncident((current) => ({ ...current, [field]: event.target.value }))} />
+          </label>
+        ))}
+        <button disabled={disabled || !incident.summary.trim()} className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Record incident</button>
+      </form>
+      <div className="space-y-2">
+        {incidents.slice(0, 20).map((item) => (
+          <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-[#e3e7e1] p-3 text-sm">
+            <span><strong>{item.category}</strong> · {item.summary} <StatusBadge tone={item.status === "resolved" ? "success" : "warning"}>{item.status}</StatusBadge></span>
+            {item.status !== "resolved" ? <button disabled={disabled} className="rounded border px-3 py-1" onClick={() => onResolve(item.id, "Resolved by operator")}>Resolve</button> : null}
+          </div>
+        ))}
       </div>
     </section>
   )

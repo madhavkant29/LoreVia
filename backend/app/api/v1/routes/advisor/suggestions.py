@@ -17,7 +17,6 @@ from app.schemas.advisor import (
     AdvisorSuggestionScanResponse,
     AdvisorSuggestionsResponse,
 )
-from app.utils.billing_utils import require_author_access
 from app.services.advisor_suggestion_jobs_service import (
     create_advisor_suggestion_job,
     mark_advisor_suggestion_job_failed,
@@ -27,6 +26,7 @@ from app.utils.advisor_utils import (
     build_advisor_suggestions_payload,
     make_advisor_suggestions_cache_key,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.logging.errors import public_error_message
 from app.workers.tasks.intelligence_tasks import generate_advisor_suggestions_task
 
@@ -34,6 +34,7 @@ router = APIRouter()
 
 
 # ─── Proactive suggestions scan ──────────────────────────────────────────────
+
 
 @router.get("/{book_id}/advisor/suggestions", response_model=AdvisorSuggestionsResponse)
 async def advisor_suggestions(
@@ -98,7 +99,7 @@ async def advisor_suggestions_scan(
                 "total_chapters": total_ch,
             },
         )
-    except Exception as exc:
+    except Exception:
         await mark_advisor_suggestion_job_failed(
             db,
             job_id=job.id,

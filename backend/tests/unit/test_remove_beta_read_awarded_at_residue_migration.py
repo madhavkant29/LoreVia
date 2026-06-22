@@ -27,10 +27,14 @@ class _FakeInspector:
         return list(self._state["tables"])
 
     def get_columns(self, table_name):
-        return [{"name": column_name} for column_name in self._state["columns"].get(table_name, set())]
+        return [
+            {"name": column_name} for column_name in self._state["columns"].get(table_name, set())
+        ]
 
     def get_indexes(self, table_name):
-        return [{"name": index_name} for index_name in self._state["indexes"].get(table_name, set())]
+        return [
+            {"name": index_name} for index_name in self._state["indexes"].get(table_name, set())
+        ]
 
 
 class _FakeOp:
@@ -75,7 +79,10 @@ def test_upgrade_drops_awarded_at_index_and_column(monkeypatch) -> None:
 
     migration.upgrade()
 
-    assert ("beta_read_assignments", "ix_beta_read_assignments_awarded_at") in fake_op.dropped_indexes
+    assert (
+        "beta_read_assignments",
+        "ix_beta_read_assignments_awarded_at",
+    ) in fake_op.dropped_indexes
     assert ("beta_read_assignments", "awarded_at") in fake_op.dropped_columns
     assert "awarded_at" not in state["columns"]["beta_read_assignments"]
     assert "ix_beta_read_assignments_awarded_at" not in state["indexes"]["beta_read_assignments"]
@@ -96,6 +103,10 @@ def test_downgrade_restores_awarded_at_index_and_column(monkeypatch) -> None:
     migration.downgrade()
 
     assert ("beta_read_assignments", "awarded_at") in fake_op.added_columns
-    assert ("beta_read_assignments", "ix_beta_read_assignments_awarded_at", ["awarded_at"]) in fake_op.added_indexes
+    assert (
+        "beta_read_assignments",
+        "ix_beta_read_assignments_awarded_at",
+        ["awarded_at"],
+    ) in fake_op.added_indexes
     assert "awarded_at" in state["columns"]["beta_read_assignments"]
     assert "ix_beta_read_assignments_awarded_at" in state["indexes"]["beta_read_assignments"]

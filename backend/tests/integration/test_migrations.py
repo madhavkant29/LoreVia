@@ -13,7 +13,6 @@ from sqlalchemy import create_engine
 
 import tests.conftest as _conftest
 
-
 MIGRATION_FILE = "20260529_add_missing_fk_indexes.py"
 
 EXPECTED_INDEXES: list[tuple[str, str]] = [

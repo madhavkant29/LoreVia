@@ -21,7 +21,10 @@ def _upload(name: str, raw: bytes) -> UploadFile:
 def _minimal_docx_bytes() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("word/document.xml", "<w:document><w:body><w:p><w:r><w:t>hello</w:t></w:r></w:p></w:body></w:document>")
+        archive.writestr(
+            "word/document.xml",
+            "<w:document><w:body><w:p><w:r><w:t>hello</w:t></w:r></w:p></w:body></w:document>",
+        )
     return buffer.getvalue()
 
 
@@ -65,7 +68,9 @@ def test_validate_cover_magic_accepts_supported_images():
         ("story.txt", b"chapter one", "txt"),
     ],
 )
-def test_validate_document_upload_bytes_accepts_expected_content(filename: str, raw: bytes, format_name: str):
+def test_validate_document_upload_bytes_accepts_expected_content(
+    filename: str, raw: bytes, format_name: str
+):
     validate_document_upload_bytes(filename, raw, format_name)
 
 
@@ -101,7 +106,11 @@ def test_validate_zip_archive_safety_rejects_zip_bomb_characteristics():
 
 
 def test_validate_document_upload_bytes_applies_archive_safety_to_docx(monkeypatch):
-    monkeypatch.setattr("app.utils.upload_security_utils.settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO", 2, raising=False)
+    monkeypatch.setattr(
+        "app.utils.upload_security_utils.settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO",
+        2,
+        raising=False,
+    )
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("word/document.xml", b"A" * 5000)

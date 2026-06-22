@@ -2,18 +2,20 @@ import pytest
 from fastapi import HTTPException
 
 from app.schemas.books import CollaborationScope
-from app.utils.book_utils import (
+from app.utils.books.collaboration import (
     build_book_access_context,
-    collaboration_allows_chapter,
-    collaboration_can_comment,
-    collaboration_can_edit,
-    collaboration_can_export,
-    collaboration_can_copy_manuscript,
-    collaboration_has_resource,
     normalize_collaboration_email,
     normalize_collaboration_permissions,
     normalize_collaboration_role,
     normalize_collaboration_scope,
+)
+from app.utils.books.collaboration_access import (
+    collaboration_allows_chapter,
+    collaboration_can_comment,
+    collaboration_can_copy_manuscript,
+    collaboration_can_edit,
+    collaboration_can_export,
+    collaboration_has_resource,
 )
 
 
@@ -121,7 +123,13 @@ def test_collaboration_permission_helpers_gate_edit_comment_export_and_resources
 
 def test_collaboration_helpers_prefer_normalized_columns_when_present():
     collaborator = _Collaborator(
-        {"chapter_start": 1, "chapter_end": 10, "character_bible": False, "continuity_report": False, "reader_confusion_report": False},
+        {
+            "chapter_start": 1,
+            "chapter_end": 10,
+            "character_bible": False,
+            "continuity_report": False,
+            "reader_confusion_report": False,
+        },
         role="beta_reader",
         permissions={"can_comment": False, "can_view_selected_chapters_only": False},
         scope_chapter_start=3,
@@ -177,13 +185,21 @@ def test_normalizers_clean_email_and_reject_unknown_role():
 def test_access_context_forces_reader_shell_for_reader_roles():
     owner_book = type("BookStub", (), {"mode": "author", "user_id": "owner"})()
     collaborator = _Collaborator(
-        {"chapter_start": 2, "chapter_end": 4, "character_bible": False, "continuity_report": False, "reader_confusion_report": False},
+        {
+            "chapter_start": 2,
+            "chapter_end": 4,
+            "character_bible": False,
+            "continuity_report": False,
+            "reader_confusion_report": False,
+        },
         role="beta_reader",
         permissions={"can_comment": True, "can_edit_manuscript": False},
     )
 
     owner_access = build_book_access_context(owner_book, user_id="owner", collaborator=None)
-    collaborator_access = build_book_access_context(owner_book, user_id="reader", collaborator=collaborator)
+    collaborator_access = build_book_access_context(
+        owner_book, user_id="reader", collaborator=collaborator
+    )
 
     assert owner_access.workspace_shell == "author"
     assert owner_access.access_class == "owner"

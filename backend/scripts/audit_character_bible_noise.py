@@ -6,6 +6,7 @@ Run in dry-run mode by default:
 To delete only the obvious noise records after review:
     python scripts/audit_character_bible_noise.py --apply-delete --confirm-delete DELETE_NOISE
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,8 @@ from sqlalchemy.orm import selectinload
 from app.core.database import AsyncSessionLocal
 from app.engine.character.entity_filters import character_persistence_decision
 from app.models.character import Character
-from app.utils.character_utils import get_graph_visibility_override, normalize_character_name
+from app.utils.characters.graph import get_graph_visibility_override
+from app.utils.characters.identity import normalize_character_name
 from app.utils.logging import get_logger
 
 log = get_logger("lorevia.audit.character_bible_noise")
@@ -120,7 +122,9 @@ async def build_noise_report(book_id: uuid.UUID | None = None, db=None) -> dict:
                 selectinload(Character.relationships_as_b),
                 selectinload(Character.voice_profile),
             )
-            .order_by(Character.book_id.asc(), Character.first_chapter.asc(), Character.created_at.asc())
+            .order_by(
+                Character.book_id.asc(), Character.first_chapter.asc(), Character.created_at.asc()
+            )
         )
         if book_id is not None:
             stmt = stmt.where(Character.book_id == book_id)
@@ -169,7 +173,9 @@ async def apply_noise_cleanup(book_id: uuid.UUID | None = None) -> dict:
                 selectinload(Character.relationships_as_b),
                 selectinload(Character.voice_profile),
             )
-            .order_by(Character.book_id.asc(), Character.first_chapter.asc(), Character.created_at.asc())
+            .order_by(
+                Character.book_id.asc(), Character.first_chapter.asc(), Character.created_at.asc()
+            )
         )
         if book_id is not None:
             stmt = stmt.where(Character.book_id == book_id)
@@ -188,9 +194,15 @@ async def apply_noise_cleanup(book_id: uuid.UUID | None = None) -> dict:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Audit and optionally clean noisy character records.")
-    parser.add_argument("--book-id", type=uuid.UUID, default=None, help="Limit the audit to a single book ID.")
-    parser.add_argument("--apply-delete", action="store_true", help="Delete obvious noise records after review.")
+    parser = argparse.ArgumentParser(
+        description="Audit and optionally clean noisy character records."
+    )
+    parser.add_argument(
+        "--book-id", type=uuid.UUID, default=None, help="Limit the audit to a single book ID."
+    )
+    parser.add_argument(
+        "--apply-delete", action="store_true", help="Delete obvious noise records after review."
+    )
     parser.add_argument(
         "--confirm-delete",
         type=str,

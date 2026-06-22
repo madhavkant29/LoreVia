@@ -1,6 +1,7 @@
 """
 Helper functions for grounded intelligence answers and citations.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -172,7 +173,9 @@ async def build_prior_series_context(db: AsyncSession, book: Book, user_id: uuid
 
     ordered_books = [row[0] for row in series_rows]
     try:
-        current_index = next(index for index, item in enumerate(ordered_books) if item.id == book.id)
+        current_index = next(
+            index for index, item in enumerate(ordered_books) if item.id == book.id
+        )
     except StopIteration:
         return []
 
@@ -288,13 +291,42 @@ def flatten_key_events(key_events: object) -> str:
 
 
 VOICE_FORMALITY_WORDS = {
-    "indeed", "perhaps", "therefore", "however", "certainly", "shall", "must", "rather", "precisely", "quite",
+    "indeed",
+    "perhaps",
+    "therefore",
+    "however",
+    "certainly",
+    "shall",
+    "must",
+    "rather",
+    "precisely",
+    "quite",
 }
 VOICE_CONTRACTION_WORDS = {
-    "don't", "can't", "won't", "i'm", "it's", "you're", "we're", "they're", "didn't", "isn't", "wasn't",
+    "don't",
+    "can't",
+    "won't",
+    "i'm",
+    "it's",
+    "you're",
+    "we're",
+    "they're",
+    "didn't",
+    "isn't",
+    "wasn't",
 }
 VOICE_EMOTION_WORDS = {
-    "love", "hate", "fear", "angry", "furious", "joy", "grief", "sorry", "please", "damn", "hell",
+    "love",
+    "hate",
+    "fear",
+    "angry",
+    "furious",
+    "joy",
+    "grief",
+    "sorry",
+    "please",
+    "damn",
+    "hell",
 }
 QUOTE_RE = re.compile(r"[\"“](.+?)[\"”]", re.DOTALL)
 
@@ -302,14 +334,19 @@ QUOTE_RE = re.compile(r"[\"“](.+?)[\"”]", re.DOTALL)
 def build_character_name_candidates(character_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for row in character_rows:
-        names = [str(row.get("name") or "").strip(), *[str(alias).strip() for alias in (row.get("aliases") or []) if str(alias).strip()]]
+        names = [
+            str(row.get("name") or "").strip(),
+            *[str(alias).strip() for alias in (row.get("aliases") or []) if str(alias).strip()],
+        ]
         names = [name for name in names if name]
         if names:
             candidates.append({**row, "name_candidates": list(dict.fromkeys(names))})
     return candidates
 
 
-def extract_dialogue_samples_by_character(text: str, character_rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+def extract_dialogue_samples_by_character(
+    text: str, character_rows: list[dict[str, Any]]
+) -> dict[str, list[str]]:
     normalized_text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     candidates = build_character_name_candidates(character_rows)
     collected: dict[str, list[str]] = {}
@@ -317,9 +354,13 @@ def extract_dialogue_samples_by_character(text: str, character_rows: list[dict[s
         quote = " ".join(match.group(1).split()).strip()
         if not quote:
             continue
-        window = normalized_text[max(0, match.start() - 160): min(len(normalized_text), match.end() + 160)].casefold()
-        prefix_window = normalized_text[max(0, match.start() - 120): match.start()].casefold()
-        suffix_window = normalized_text[match.end(): min(len(normalized_text), match.end() + 120)].casefold()
+        window = normalized_text[
+            max(0, match.start() - 160) : min(len(normalized_text), match.end() + 160)
+        ].casefold()
+        prefix_window = normalized_text[max(0, match.start() - 120) : match.start()].casefold()
+        suffix_window = normalized_text[
+            match.end() : min(len(normalized_text), match.end() + 120)
+        ].casefold()
         best_name = None
         best_score = 0
         for row in candidates:
@@ -332,11 +373,15 @@ def extract_dialogue_samples_by_character(text: str, character_rows: list[dict[s
                 if prefix_idx >= 0:
                     distance = len(prefix_window) - prefix_idx
                     score += max(0, 320 - distance)
-                    nearest_distance = distance if nearest_distance is None else min(nearest_distance, distance)
+                    nearest_distance = (
+                        distance if nearest_distance is None else min(nearest_distance, distance)
+                    )
                 if suffix_idx >= 0:
                     distance = suffix_idx + 1
                     score += max(0, 90 - distance)
-                    nearest_distance = distance if nearest_distance is None else min(nearest_distance, distance)
+                    nearest_distance = (
+                        distance if nearest_distance is None else min(nearest_distance, distance)
+                    )
                 if f" {folded} " in f" {window} ":
                     score += max(1, len(candidate.split()))
             if nearest_distance is not None:
@@ -350,7 +395,11 @@ def extract_dialogue_samples_by_character(text: str, character_rows: list[dict[s
 
 
 def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
-    cleaned = [" ".join(dialogue.split()).strip() for dialogue in dialogues if " ".join(dialogue.split()).strip()]
+    cleaned = [
+        " ".join(dialogue.split()).strip()
+        for dialogue in dialogues
+        if " ".join(dialogue.split()).strip()
+    ]
     if not cleaned:
         return {
             "sample_dialogue_count": 0,
@@ -370,7 +419,12 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
             "signature_phrases": [],
         }
     words = re.findall(r"[A-Za-z0-9']+", " ".join(cleaned))
-    sentences = [part.strip() for dialogue in cleaned for part in re.split(r"[.!?]+", dialogue) if part.strip()]
+    sentences = [
+        part.strip()
+        for dialogue in cleaned
+        for part in re.split(r"[.!?]+", dialogue)
+        if part.strip()
+    ]
     lower_words = [word.lower() for word in words]
     total_words = max(1, len(words))
     unique_words = {word.lower() for word in words}
@@ -382,7 +436,12 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
     uppercase_rate = sum(1 for word in words if word.isupper() and len(word) > 1)
     formal_rate = sum(1 for word in lower_words if word in VOICE_FORMALITY_WORDS)
     emotional_rate = sum(1 for word in lower_words if word in VOICE_EMOTION_WORDS)
-    avg_sentence_length = int(round(sum(len(re.findall(r"[A-Za-z0-9']+", sentence)) for sentence in sentences) / max(1, len(sentences))))
+    avg_sentence_length = int(
+        round(
+            sum(len(re.findall(r"[A-Za-z0-9']+", sentence)) for sentence in sentences)
+            / max(1, len(sentences))
+        )
+    )
     avg_word_length = int(round((sum(len(word) for word in words) / total_words) * 100))
     lexical_complexity = int(round((len(unique_words) / total_words) * 1000))
     dominant_markers = {
@@ -397,7 +456,11 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
     for dialogue in cleaned:
         for phrase in re.findall(r"\b[a-z']+\s+[a-z']+\b", dialogue.lower()):
             phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
-    signature_phrases = [phrase for phrase, count in sorted(phrase_counts.items(), key=lambda item: (-item[1], item[0])) if count > 1][:5]
+    signature_phrases = [
+        phrase
+        for phrase, count in sorted(phrase_counts.items(), key=lambda item: (-item[1], item[0]))
+        if count > 1
+    ][:5]
     return {
         "sample_dialogue_count": len(cleaned),
         "sample_word_count": total_words,
@@ -417,7 +480,9 @@ def compute_voice_metrics(dialogues: list[str]) -> dict[str, Any]:
     }
 
 
-def merge_voice_profile_metrics(existing: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+def merge_voice_profile_metrics(
+    existing: dict[str, Any] | None, incoming: dict[str, Any]
+) -> dict[str, Any]:
     current = existing if isinstance(existing, dict) else {}
     old_count = int(current.get("sample_dialogue_count") or 0)
     new_count = int(incoming.get("sample_dialogue_count") or 0)
@@ -442,18 +507,30 @@ def merge_voice_profile_metrics(existing: dict[str, Any] | None, incoming: dict[
         new_value = int(incoming.get(key) or 0)
         merged[key] = int(round(((old_value * old_count) + (new_value * new_count)) / total_count))
     merged["sample_dialogue_count"] = total_count
-    merged["sample_word_count"] = int(current.get("sample_word_count") or 0) + int(incoming.get("sample_word_count") or 0)
-    merged["dominant_markers"] = incoming.get("dominant_markers") or current.get("dominant_markers") or {}
+    merged["sample_word_count"] = int(current.get("sample_word_count") or 0) + int(
+        incoming.get("sample_word_count") or 0
+    )
+    merged["dominant_markers"] = (
+        incoming.get("dominant_markers") or current.get("dominant_markers") or {}
+    )
     seen_phrases: list[str] = []
-    for phrase in [*(current.get("signature_phrases") or []), *(incoming.get("signature_phrases") or [])]:
+    for phrase in [
+        *(current.get("signature_phrases") or []),
+        *(incoming.get("signature_phrases") or []),
+    ]:
         if phrase and phrase not in seen_phrases:
             seen_phrases.append(phrase)
     merged["signature_phrases"] = seen_phrases[:6]
     return merged
 
 
-def score_voice_match(profile: dict[str, Any], sample_metrics: dict[str, Any]) -> tuple[int, list[str]]:
-    if int(profile.get("sample_dialogue_count") or 0) <= 0 or int(sample_metrics.get("sample_dialogue_count") or 0) <= 0:
+def score_voice_match(
+    profile: dict[str, Any], sample_metrics: dict[str, Any]
+) -> tuple[int, list[str]]:
+    if (
+        int(profile.get("sample_dialogue_count") or 0) <= 0
+        or int(sample_metrics.get("sample_dialogue_count") or 0) <= 0
+    ):
         return 0, ["Not enough dialogue was attributed to score this voice yet."]
     checks = [
         ("avg_sentence_length", "sentence length"),
@@ -493,15 +570,17 @@ async def compute_cross_book_snapshot_hash(
     parts: list[str] = []
     for bid in sorted(book_ids, key=str):
         char_result = await db.execute(
-            select(func.count(), func.max(Character.created_at))
-            .where(Character.book_id == bid, Character.embedding.is_not(None))
+            select(func.count(), func.max(Character.created_at)).where(
+                Character.book_id == bid, Character.embedding.is_not(None)
+            )
         )
         char_count, char_max_ts = char_result.one()
         parts.append(f"char:{char_count}:{char_max_ts}")
 
         wiki_result = await db.execute(
-            select(func.count(), func.max(WikiEntry.created_at))
-            .where(WikiEntry.book_id == bid, WikiEntry.embedding.is_not(None))
+            select(func.count(), func.max(WikiEntry.created_at)).where(
+                WikiEntry.book_id == bid, WikiEntry.embedding.is_not(None)
+            )
         )
         wiki_count, wiki_max_ts = wiki_result.one()
         parts.append(f"wiki:{wiki_count}:{wiki_max_ts}")

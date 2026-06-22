@@ -18,6 +18,7 @@ from app.services.refund_service import (
     REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED,
     apply_adjustment_webhook,
 )
+from app.services.revenue_ledger_service import record_completed_transaction_revenue
 from app.utils.billing_utils import (
     SUPPORTED_PADDLE_WEBHOOK_EVENTS,
     coerce_user_id,
@@ -30,7 +31,6 @@ from app.utils.billing_utils import (
     tier_from_plan_code,
 )
 from app.utils.logging.errors import public_error_message, redact_sensitive_text
-
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,9 @@ async def _process_claimed_webhook(
             elif email_kind == SUBSCRIPTION_CANCELLATION_EMAIL:
                 await send_subscription_cancellation(email_address, plan_tier)
         except Exception:
-            logger.exception("Failed to send subscription lifecycle email for Paddle event %s", event_id)
+            logger.exception(
+                "Failed to send subscription lifecycle email for Paddle event %s", event_id
+            )
 
     return {"received": True}
 
@@ -242,11 +244,7 @@ async def _apply_subscription_change(
         current_tier=previous_user_tier or "free",
     )
     if next_tier is not None:
-        await db.execute(
-            update(User)
-            .where(User.id == subscription.user_id)
-            .values(tier=next_tier)
-        )
+        await db.execute(update(User).where(User.id == subscription.user_id).values(tier=next_tier))
 
     metrics_event_type = _metrics_event_type(
         event_type=event_type,
@@ -264,6 +262,15 @@ async def _apply_subscription_change(
             paddle_customer_id=subscription.paddle_customer_id,
             paddle_sub_id=subscription.paddle_sub_id,
             metadata={"webhook_event_type": event_type},
+        )
+    if event_type == "transaction.completed":
+        await record_completed_transaction_revenue(
+            db,
+            source_event_id=event_id,
+            user_id=subscription.user_id,
+            plan=plan_to_store,
+            transaction_id=transaction_id,
+            data=data,
         )
 
     await _resolve_refund_follow_up_if_completed_cancellation(
@@ -296,13 +303,17 @@ async def _apply_subscription_change(
         return (
             SUBSCRIPTION_CANCELLATION_EMAIL,
             user.email,
-            tier_from_plan_code(plan_to_store, plan_price_id) or previous_user_tier or plan_to_store,
+            tier_from_plan_code(plan_to_store, plan_price_id)
+            or previous_user_tier
+            or plan_to_store,
         )
 
     return None
 
 
-async def _resolve_subscription_context(db, *, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+async def _resolve_subscription_context(
+    db, *, event_type: str, data: dict[str, Any]
+) -> dict[str, Any]:
     custom_data = data.get("custom_data") or {}
     user_id = coerce_user_id(custom_data.get("user_id"))
     customer_id = _customer_id_from_data(data)
@@ -365,60 +376,80 @@ async def _find_subscription(
     if user_id is not None:
         if subscription_id:
             subscription = (
-                await db.execute(
-                    select(Subscription)
-                    .where(
-                        Subscription.user_id == user_id,
-                        Subscription.paddle_sub_id == subscription_id,
+                (
+                    await db.execute(
+                        select(Subscription)
+                        .where(
+                            Subscription.user_id == user_id,
+                            Subscription.paddle_sub_id == subscription_id,
+                        )
+                        .order_by(Subscription.created_at.desc())
                     )
-                    .order_by(Subscription.created_at.desc())
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if subscription is not None:
                 return subscription
 
         if customer_id:
             subscription = (
-                await db.execute(
-                    select(Subscription)
-                    .where(
-                        Subscription.user_id == user_id,
-                        Subscription.paddle_customer_id == customer_id,
+                (
+                    await db.execute(
+                        select(Subscription)
+                        .where(
+                            Subscription.user_id == user_id,
+                            Subscription.paddle_customer_id == customer_id,
+                        )
+                        .order_by(Subscription.created_at.desc())
                     )
-                    .order_by(Subscription.created_at.desc())
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if subscription is not None:
                 return subscription
 
         subscription = (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.user_id == user_id)
-                .order_by(Subscription.created_at.desc())
+            (
+                await db.execute(
+                    select(Subscription)
+                    .where(Subscription.user_id == user_id)
+                    .order_by(Subscription.created_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         return subscription
 
     if subscription_id:
         subscription = (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.paddle_sub_id == subscription_id)
-                .order_by(Subscription.created_at.desc())
+            (
+                await db.execute(
+                    select(Subscription)
+                    .where(Subscription.paddle_sub_id == subscription_id)
+                    .order_by(Subscription.created_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if subscription is not None:
             return subscription
 
     if customer_id:
         return (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.paddle_customer_id == customer_id)
-                .order_by(Subscription.created_at.desc())
+            (
+                await db.execute(
+                    select(Subscription)
+                    .where(Subscription.paddle_customer_id == customer_id)
+                    .order_by(Subscription.created_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     return None
 
@@ -436,10 +467,14 @@ async def _mark_webhook_failed(*, event_id: str, error_message: str) -> None:
 
 async def _get_webhook_event(db, event_id: str) -> PaddleWebhookEvent | None:
     return (
-        await db.execute(
-            select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == event_id)
+        (
+            await db.execute(
+                select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == event_id)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
 
 def _subscription_id_from_data(*, event_type: str, data: dict[str, Any]) -> str | None:
@@ -503,7 +538,12 @@ def _tier_after_event(
         return "free"
     if event_type == "subscription.canceled":
         return "free" if status in CANCELED_STATUSES else current_tier
-    if event_type in {"subscription.past_due", "transaction.past_due", "transaction.payment_failed", "transaction.updated"}:
+    if event_type in {
+        "subscription.past_due",
+        "transaction.past_due",
+        "transaction.payment_failed",
+        "transaction.updated",
+    }:
         return current_tier
     if subscription_service_is_active(event_type, status):
         return tier_from_plan_code(plan, price_id)
@@ -544,16 +584,24 @@ async def _resolve_refund_follow_up_if_completed_cancellation(
     status: str,
     transaction_id: str | None,
 ) -> None:
-    if event_type != "subscription.canceled" or status not in CANCELED_STATUSES or not transaction_id:
+    if (
+        event_type != "subscription.canceled"
+        or status not in CANCELED_STATUSES
+        or not transaction_id
+    ):
         return
 
     review = (
-        await db.execute(
-            select(RefundReview)
-            .where(RefundReview.paddle_transaction_id == transaction_id)
-            .order_by(RefundReview.created_at.desc())
+        (
+            await db.execute(
+                select(RefundReview)
+                .where(RefundReview.paddle_transaction_id == transaction_id)
+                .order_by(RefundReview.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if review is None or review.status != REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED:
         return
     if not review.paddle_adjustment_id or not _review_has_approved_adjustment(review):

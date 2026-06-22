@@ -1,21 +1,24 @@
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import uuid
 import pytest
 from fastapi import HTTPException
 
 from app.engine.analysis.summariser import derive_summary_modes_from_detailed
 from app.models.book import Book
+from app.utils.books.manuscript import (
+    serialize_manuscript_content,
+)
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
-    build_ingestion_progress_state,
     build_chapter_dispatch_plan,
+    build_ingestion_progress_state,
     extract_queue_wait_ms,
-    is_llm_usage_limit_error,
     is_book_hidden,
+    is_llm_usage_limit_error,
     is_retryable_processing_error,
     load_analysis_chapter_payload,
     load_processing_chapter_payload,
@@ -26,7 +29,6 @@ from app.utils.ingestion_utils import (
     regroup_prose_chapters_for_reading,
     update_book_processing_state,
 )
-from app.utils.book_utils import serialize_manuscript_content
 
 
 def test_build_chapter_dispatch_plan_staggers_non_eager_chapters():
@@ -172,8 +174,14 @@ def test_merge_processing_pipeline_normalizes_postgres_text_timestamps():
 
 
 def test_processing_state_for_completed_extraction_stays_processing_until_analysis_finishes():
-    assert processing_state_for_completed_extraction(analysis_complete=False) == ("processing", "analysis")
-    assert processing_state_for_completed_extraction(analysis_complete=True) == ("ready", "complete")
+    assert processing_state_for_completed_extraction(analysis_complete=False) == (
+        "processing",
+        "analysis",
+    )
+    assert processing_state_for_completed_extraction(analysis_complete=True) == (
+        "ready",
+        "complete",
+    )
 
 
 def test_llm_usage_limit_error_detects_token_window_429():
@@ -192,7 +200,9 @@ def test_llm_usage_limit_error_ignores_other_429_errors():
 @pytest.mark.asyncio
 async def test_is_book_hidden_detects_hidden_books():
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=SimpleNamespace(first=lambda: (datetime.now(UTC), "active", None)))
+    db.execute = AsyncMock(
+        return_value=SimpleNamespace(first=lambda: (datetime.now(UTC), "active", None))
+    )
 
     assert await is_book_hidden(db, uuid.uuid4()) is True
 
@@ -281,7 +291,11 @@ async def test_load_staged_chapter_payload_uses_existing_chapter_key(monkeypatch
         chapter_s3_key="chapters/custom/chapter-7.txt",
     )
 
-    assert payload == {"format": "rich_text_v1", "text": "Chapter body", "html": "<p>Chapter body</p>"}
+    assert payload == {
+        "format": "rich_text_v1",
+        "text": "Chapter body",
+        "html": "<p>Chapter body</p>",
+    }
     assert calls == ["chapters/custom/chapter-7.txt"]
 
 
@@ -304,7 +318,11 @@ async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monke
         chapter_s3_key="missing-key",
     )
 
-    assert payload == {"format": "rich_text_v1", "text": "Recovered chapter", "html": "<p>Recovered chapter</p>"}
+    assert payload == {
+        "format": "rich_text_v1",
+        "text": "Recovered chapter",
+        "html": "<p>Recovered chapter</p>",
+    }
     assert calls == ["missing-key", f"chapters/{book_id}/3.txt"]
 
 
@@ -391,8 +409,14 @@ def test_derive_summary_modes_from_detailed_prefers_key_events():
     payload = {
         "content": "Aoi confronts Ren in the archive. They uncover a sealed ledger. The chapter ends with a pact.",
         "key_events": [
-            {"event_title": "Archive confrontation", "description": "Aoi corners Ren over the missing ledger."},
-            {"event_title": "Ledger discovery", "description": "They find the sealed ledger behind a false wall."},
+            {
+                "event_title": "Archive confrontation",
+                "description": "Aoi corners Ren over the missing ledger.",
+            },
+            {
+                "event_title": "Ledger discovery",
+                "description": "They find the sealed ledger behind a false wall.",
+            },
         ],
         "char_changes": [],
         "clues": [],
@@ -402,8 +426,14 @@ def test_derive_summary_modes_from_detailed_prefers_key_events():
     derived = derive_summary_modes_from_detailed(payload)
 
     assert "Aoi confronts Ren" in derived["short"]["content"]
-    assert "1. Archive confrontation: Aoi corners Ren over the missing ledger." in derived["key_points"]["content"]
-    assert "2. Ledger discovery: They find the sealed ledger behind a false wall." in derived["key_points"]["content"]
+    assert (
+        "1. Archive confrontation: Aoi corners Ren over the missing ledger."
+        in derived["key_points"]["content"]
+    )
+    assert (
+        "2. Ledger discovery: They find the sealed ledger behind a false wall."
+        in derived["key_points"]["content"]
+    )
 
 
 def test_apply_chapter_number_strategy_preserves_clean_contiguous_numbers():

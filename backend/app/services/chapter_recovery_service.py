@@ -10,14 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.redis import cache_del, cache_set_if_absent, key_chapter_recovery_inflight
 from app.core.storage import download_book, get_presigned_url, upload_binary, upload_text
 from app.models.book import Book, Chapter, ChapterMedia, NovelScene
-from app.utils.book_utils import (
-    build_workspace_chapter_text_from_scenes,
-    chapter_body_needs_scene_workspace_fallback,
+from app.utils.advisor_utils import invalidate_advisor_caches_for_book
+from app.utils.books.manuscript import (
     deserialize_manuscript_content,
     manuscript_text_to_html,
     serialize_manuscript_content,
 )
-from app.utils.advisor_utils import invalidate_advisor_caches_for_book
+from app.utils.books.scene_metadata import (
+    build_workspace_chapter_text_from_scenes,
+    chapter_body_needs_scene_workspace_fallback,
+)
 from app.utils.ingestion_utils import (
     CHAPTER_RECOVERY_INFLIGHT_TTL_SECONDS,
     build_analysis_chapter_state,
@@ -62,7 +64,11 @@ async def queue_chapter_repair_if_needed(
     reason: str = "source_integrity_mismatch",
 ) -> bool:
     analysis_state = chapter.analysis_state if isinstance(chapter.analysis_state, dict) else {}
-    source_integrity = analysis_state.get("source_integrity") if isinstance(analysis_state.get("source_integrity"), dict) else {}
+    source_integrity = (
+        analysis_state.get("source_integrity")
+        if isinstance(analysis_state.get("source_integrity"), dict)
+        else {}
+    )
     if str(source_integrity.get("recovery_status") or "").strip() == "queued":
         return False
 
@@ -109,7 +115,14 @@ async def repair_chapter_payload_from_source(
         if not fallback:
             chapter.analysis_state = build_analysis_chapter_state(
                 chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
-                status=str(((chapter.analysis_state or {}) if isinstance(chapter.analysis_state, dict) else {}).get("status") or "pending"),
+                status=str(
+                    (
+                        (chapter.analysis_state or {})
+                        if isinstance(chapter.analysis_state, dict)
+                        else {}
+                    ).get("status")
+                    or "pending"
+                ),
                 source_integrity=build_source_integrity_state(
                     text_present=bool(str(download_stored_text_or_empty(chapter) or "").strip()),
                     media_marker_count=0,
@@ -125,7 +138,14 @@ async def repair_chapter_payload_from_source(
         if not repaired_text:
             chapter.analysis_state = build_analysis_chapter_state(
                 chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
-                status=str(((chapter.analysis_state or {}) if isinstance(chapter.analysis_state, dict) else {}).get("status") or "pending"),
+                status=str(
+                    (
+                        (chapter.analysis_state or {})
+                        if isinstance(chapter.analysis_state, dict)
+                        else {}
+                    ).get("status")
+                    or "pending"
+                ),
                 source_integrity=build_source_integrity_state(
                     text_present=False,
                     media_marker_count=0,
@@ -145,14 +165,23 @@ async def repair_chapter_payload_from_source(
             chapter.s3_key,
             serialize_manuscript_content(repaired_text, repaired_html),
         )
-        await _sync_repaired_chapter_media(db, book=book, chapter=chapter, images=fallback.get("images") or [])
+        await _sync_repaired_chapter_media(
+            db, book=book, chapter=chapter, images=fallback.get("images") or []
+        )
         if not chapter.title and fallback.get("title"):
             chapter.title = str(fallback.get("title") or "").strip() or chapter.title
 
         repaired_media_count = len(fallback.get("images") or [])
         chapter.analysis_state = build_analysis_chapter_state(
             chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
-            status=str(((chapter.analysis_state or {}) if isinstance(chapter.analysis_state, dict) else {}).get("status") or "pending"),
+            status=str(
+                (
+                    (chapter.analysis_state or {})
+                    if isinstance(chapter.analysis_state, dict)
+                    else {}
+                ).get("status")
+                or "pending"
+            ),
             source_integrity=build_source_integrity_state(
                 text_present=True,
                 media_marker_count=len(extract_media_markers(repaired_text)),
@@ -253,14 +282,20 @@ async def resolve_reader_chapter_payload(
         chapter_title=chapter.title,
     ):
         manual_scenes = (
-            await db.execute(
-                select(NovelScene).where(
-                    NovelScene.book_id == book.id,
-                    NovelScene.chapter_number == chapter_num,
-                    NovelScene.status != "archived",
-                ).order_by(NovelScene.sort_order.asc(), NovelScene.created_at.asc())
+            (
+                await db.execute(
+                    select(NovelScene)
+                    .where(
+                        NovelScene.book_id == book.id,
+                        NovelScene.chapter_number == chapter_num,
+                        NovelScene.status != "archived",
+                    )
+                    .order_by(NovelScene.sort_order.asc(), NovelScene.created_at.asc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         compiled_text = build_workspace_chapter_text_from_scenes(list(manual_scenes))
         if compiled_text:
             stored_text_content = compiled_text

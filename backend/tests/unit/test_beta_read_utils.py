@@ -166,8 +166,6 @@ def test_normalize_beta_read_rating_requires_half_steps():
         beta_read_utils.normalize_beta_read_rating(4.3)
 
 
-
-
 def test_beta_feedback_item_author_metadata_defaults_to_open():
     item = SimpleNamespace(metadata_json={})
 
@@ -194,12 +192,20 @@ async def test_load_beta_assignment_render_context_aggregates_counts_ratings_and
     no_reader_id = uuid.uuid4()
     assignments = [
         SimpleNamespace(
-            id=assignment_id, book_id=book_id, reader_user_id=reader_id,
-            scope_kind=BetaReadScopeKind.CHAPTER_RANGE.value, chapter_start=2, chapter_end=4,
+            id=assignment_id,
+            book_id=book_id,
+            reader_user_id=reader_id,
+            scope_kind=BetaReadScopeKind.CHAPTER_RANGE.value,
+            chapter_start=2,
+            chapter_end=4,
         ),
         SimpleNamespace(
-            id=full_assignment_id, book_id=book_id, reader_user_id=None,
-            scope_kind=BetaReadScopeKind.FULL_BOOK.value, chapter_start=None, chapter_end=None,
+            id=full_assignment_id,
+            book_id=book_id,
+            reader_user_id=None,
+            scope_kind=BetaReadScopeKind.FULL_BOOK.value,
+            chapter_start=None,
+            chapter_end=None,
         ),
     ]
     book = SimpleNamespace(id=book_id, total_chapters=8)
@@ -233,7 +239,11 @@ async def test_load_beta_assignment_render_context_aggregates_counts_ratings_and
     assert context.answer_count_by_assignment_id[assignment_id] == 1
     assert context.note_comment_count_by_assignment_id[assignment_id] == 2
     assert context.chapter_comment_count_by_assignment_id[assignment_id] == 2
-    assert context.note_comment_count_by_assignment_id[no_reader_id] if no_reader_id in context.note_comment_count_by_assignment_id else 0 == 0
+    assert (
+        context.note_comment_count_by_assignment_id[no_reader_id]
+        if no_reader_id in context.note_comment_count_by_assignment_id
+        else 0 == 0
+    )
     assert context.note_comment_count_by_assignment_id[full_assignment_id] == 0
 
     empty = await beta_read_utils.load_beta_assignment_render_context(_SequenceDB(), assignments=[])
@@ -247,23 +257,40 @@ async def test_serialize_feedback_items_resolves_question_scene_and_author_metad
     scene_id = uuid.uuid4()
     now = datetime.now(UTC)
     item = SimpleNamespace(
-        id=uuid.uuid4(), question_id=question_id, scene_id=scene_id,
-        kind=BetaReadFeedbackKind.ANSWER.value, chapter_number=2,
-        reaction=None, anchor_text="the gate", body="It was clear.",
-        metadata_json={"author_status": "resolved", "author_task_id": "task-1", "author_updated_at": now.isoformat()},
-        created_at=now, updated_at=now,
+        id=uuid.uuid4(),
+        question_id=question_id,
+        scene_id=scene_id,
+        kind=BetaReadFeedbackKind.ANSWER.value,
+        chapter_number=2,
+        reaction=None,
+        anchor_text="the gate",
+        body="It was clear.",
+        metadata_json={
+            "author_status": "resolved",
+            "author_task_id": "task-1",
+            "author_updated_at": now.isoformat(),
+        },
+        created_at=now,
+        updated_at=now,
     )
     question = SimpleNamespace(id=question_id, prompt="Was the gate clear?")
     scene = SimpleNamespace(id=scene_id, title="Gate opens")
     db = _SequenceDB([item], [question], [scene])
 
-    result = await beta_read_utils._serialize_beta_read_feedback_items(db, assignment_id=assignment_id)
+    result = await beta_read_utils._serialize_beta_read_feedback_items(
+        db, assignment_id=assignment_id
+    )
     assert len(result) == 1
     assert result[0].question_prompt == "Was the gate clear?"
     assert result[0].scene_title == "Gate opens"
     assert result[0].author_status == "resolved"
 
-    assert await beta_read_utils._serialize_beta_read_feedback_items(_SequenceDB([]), assignment_id=assignment_id) == []
+    assert (
+        await beta_read_utils._serialize_beta_read_feedback_items(
+            _SequenceDB([]), assignment_id=assignment_id
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -282,34 +309,77 @@ async def test_book_beta_rating_summary_and_reader_display_helpers():
     assert empty["rating_count"] == 0 and empty["average_rating"] is None
 
     assignment = SimpleNamespace(reader_email="fallback@example.test")
-    assert beta_read_utils._beta_feedback_reader_display_name(
-        assignment=assignment, reader=SimpleNamespace(username="mira", email="mira@example.test"), collaborator=None
-    ) == "mira"
-    assert beta_read_utils._beta_feedback_reader_display_name(
-        assignment=assignment, reader=None, collaborator=SimpleNamespace(display_name="Editor")
-    ) == "Editor"
-    assert beta_read_utils._beta_feedback_reader_display_name(assignment=assignment, reader=None, collaborator=None) == "fallback@example.test"
+    assert (
+        beta_read_utils._beta_feedback_reader_display_name(
+            assignment=assignment,
+            reader=SimpleNamespace(username="mira", email="mira@example.test"),
+            collaborator=None,
+        )
+        == "mira"
+    )
+    assert (
+        beta_read_utils._beta_feedback_reader_display_name(
+            assignment=assignment, reader=None, collaborator=SimpleNamespace(display_name="Editor")
+        )
+        == "Editor"
+    )
+    assert (
+        beta_read_utils._beta_feedback_reader_display_name(
+            assignment=assignment, reader=None, collaborator=None
+        )
+        == "fallback@example.test"
+    )
 
-    assert beta_read_utils._beta_feedback_activity_title(SimpleNamespace(kind=BetaReadFeedbackKind.CHAPTER_COMMENT.value)) == "Left a chapter comment"
-    assert beta_read_utils._beta_feedback_activity_title(SimpleNamespace(kind=BetaReadFeedbackKind.SCENE_REACTION.value)) == "Left a scene reaction"
-    assert beta_read_utils._beta_feedback_activity_title(SimpleNamespace(kind=BetaReadFeedbackKind.ANSWER.value)) == "Answered an author question"
-    assert beta_read_utils._beta_feedback_activity_title(SimpleNamespace(kind=BetaReadFeedbackKind.FAVORITE.value)) == "Marked a favorite moment"
-    assert beta_read_utils._beta_feedback_activity_title(SimpleNamespace(kind="other")) == "Added beta feedback"
+    assert (
+        beta_read_utils._beta_feedback_activity_title(
+            SimpleNamespace(kind=BetaReadFeedbackKind.CHAPTER_COMMENT.value)
+        )
+        == "Left a chapter comment"
+    )
+    assert (
+        beta_read_utils._beta_feedback_activity_title(
+            SimpleNamespace(kind=BetaReadFeedbackKind.SCENE_REACTION.value)
+        )
+        == "Left a scene reaction"
+    )
+    assert (
+        beta_read_utils._beta_feedback_activity_title(
+            SimpleNamespace(kind=BetaReadFeedbackKind.ANSWER.value)
+        )
+        == "Answered an author question"
+    )
+    assert (
+        beta_read_utils._beta_feedback_activity_title(
+            SimpleNamespace(kind=BetaReadFeedbackKind.FAVORITE.value)
+        )
+        == "Marked a favorite moment"
+    )
+    assert (
+        beta_read_utils._beta_feedback_activity_title(SimpleNamespace(kind="other"))
+        == "Added beta feedback"
+    )
 
 
 @pytest.mark.asyncio
 async def test_start_beta_read_transitions_once_and_notifies_author(monkeypatch):
     async def not_expired(*_args, **_kwargs):
         return False
+
     monkeypatch.setattr(beta_read_utils, "expire_beta_assignment_if_due", not_expired)
     now = datetime.now(UTC)
     assignment = SimpleNamespace(
-        id=uuid.uuid4(), book_id=uuid.uuid4(), author_user_id=uuid.uuid4(),
-        state=BetaReadAssignmentState.ACTIVE.value, starts_at=now - timedelta(days=1),
-        first_opened_at=None, state_changed_at=None,
+        id=uuid.uuid4(),
+        book_id=uuid.uuid4(),
+        author_user_id=uuid.uuid4(),
+        state=BetaReadAssignmentState.ACTIVE.value,
+        starts_at=now - timedelta(days=1),
+        first_opened_at=None,
+        state_changed_at=None,
     )
     db = _SequenceDB()
-    result = await beta_read_utils.start_beta_read(db, assignment=assignment, current_user=SimpleNamespace(id=uuid.uuid4()))
+    result = await beta_read_utils.start_beta_read(
+        db, assignment=assignment, current_user=SimpleNamespace(id=uuid.uuid4())
+    )
     assert result is assignment
     assert assignment.state == BetaReadAssignmentState.IN_PROGRESS.value
     assert assignment.first_opened_at is not None
@@ -319,34 +389,68 @@ async def test_start_beta_read_transitions_once_and_notifies_author(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_award_submitted_beta_reads_completes_qualified_and_disqualifies_late(monkeypatch):
-    reader_good = SimpleNamespace(id=uuid.uuid4(), consecutive_missed_beta_reads=2, beta_read_penalty_status="warning", beta_read_penalty_until=None)
+    reader_good = SimpleNamespace(
+        id=uuid.uuid4(),
+        consecutive_missed_beta_reads=2,
+        beta_read_penalty_status="warning",
+        beta_read_penalty_until=None,
+    )
     reader_bad = SimpleNamespace(id=uuid.uuid4())
     base = {
-        "book_id": uuid.uuid4(), "author_user_id": uuid.uuid4(), "state": BetaReadAssignmentState.SUBMITTED.value,
-        "required_progress_pct": 100, "required_comment_count": 1, "required_feedback_item_count": 1,
-        "require_final_feedback": True, "final_rating": 4.5, "final_feedback": "Useful feedback",
-        "collaborator_id": None, "state_changed_at": None, "disqualified_at": None, "disqualified_reason": None,
-        "submitted_progress_pct": None, "submitted_chapters_total": None,
-        "submitted_chapters_read_count": None, "submitted_comment_count": None,
-        "submitted_feedback_item_count": None, "submitted_answer_count": None,
-        "submitted_rating_sentiment": None, "submitted_before_deadline": None,
+        "book_id": uuid.uuid4(),
+        "author_user_id": uuid.uuid4(),
+        "state": BetaReadAssignmentState.SUBMITTED.value,
+        "required_progress_pct": 100,
+        "required_comment_count": 1,
+        "required_feedback_item_count": 1,
+        "require_final_feedback": True,
+        "final_rating": 4.5,
+        "final_feedback": "Useful feedback",
+        "collaborator_id": None,
+        "state_changed_at": None,
+        "disqualified_at": None,
+        "disqualified_reason": None,
+        "submitted_progress_pct": None,
+        "submitted_chapters_total": None,
+        "submitted_chapters_read_count": None,
+        "submitted_comment_count": None,
+        "submitted_feedback_item_count": None,
+        "submitted_answer_count": None,
+        "submitted_rating_sentiment": None,
+        "submitted_before_deadline": None,
         "late_feedback": False,
     }
     good = SimpleNamespace(
-        id=uuid.uuid4(), reader_user_id=reader_good.id,
-        submission_metadata={"progress_pct": 100, "comment_count": 2, "feedback_item_count": 1, "submitted_before_deadline": True},
+        id=uuid.uuid4(),
+        reader_user_id=reader_good.id,
+        submission_metadata={
+            "progress_pct": 100,
+            "comment_count": 2,
+            "feedback_item_count": 1,
+            "submitted_before_deadline": True,
+        },
         **base,
     )
     bad = SimpleNamespace(
-        id=uuid.uuid4(), reader_user_id=reader_bad.id,
-        submission_metadata={"progress_pct": 100, "comment_count": 2, "feedback_item_count": 1, "submitted_before_deadline": False},
+        id=uuid.uuid4(),
+        reader_user_id=reader_bad.id,
+        submission_metadata={
+            "progress_pct": 100,
+            "comment_count": 2,
+            "feedback_item_count": 1,
+            "submitted_before_deadline": False,
+        },
         **base,
     )
     notifications = []
+
     async def notify(*_args, **kwargs):
         notifications.append(kwargs)
+
     monkeypatch.setattr(beta_read_utils, "create_notification_once", notify)
-    db = _SequenceDB([good, bad], get_values={reader_good.id: reader_good, reader_bad.id: reader_bad})
+    db = _SequenceDB(
+        [good, bad], get_values={reader_good.id: reader_good, reader_bad.id: reader_bad}
+    )
     assert await beta_read_utils.award_submitted_beta_reads(db) == 1
     assert good.state == BetaReadAssignmentState.COMPLETED.value
     assert bad.state == BetaReadAssignmentState.DISQUALIFIED.value

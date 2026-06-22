@@ -887,6 +887,7 @@ describe("books api", () => {
 
   it("covers remaining book mutations and workspace payload mapping", async () => {
     await booksApi.retryProcessing("book-1")
+    await booksApi.continueProcessing("book-1")
     await booksApi.updateCollaborator("book-1", "collab-1", {
       displayName: "Editor",
       role: "editor",
@@ -905,6 +906,7 @@ describe("books api", () => {
     await booksApi.getReadability("book-1", "A short sentence.")
 
     expect(postMock).toHaveBeenCalledWith("/books/book-1/processing/retry")
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/processing/continue")
     expect(putMock).toHaveBeenCalledWith("/books/book-1/collaborators/collab-1", expect.objectContaining({
       display_name: "Editor",
       invite_status: "revoked",

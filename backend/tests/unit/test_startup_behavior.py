@@ -1,9 +1,10 @@
-import pytest
-from starlette.responses import Response
 from types import SimpleNamespace
 
+import pytest
+from starlette.responses import Response
+
 from app.core import events
-from app.main import _LazyMountedApp, _cors_failure_headers, _lazy_api_app, ready
+from app.main import _cors_failure_headers, _lazy_api_app, _LazyMountedApp, ready
 
 
 def test_api_app_is_not_built_at_import_time() -> None:
@@ -89,11 +90,7 @@ async def test_ready_checks_database_and_redis(monkeypatch) -> None:
         async def execute(self, statement):
             nonlocal db_checked
             self._execute_call_count += 1
-            expected = (
-                "SELECT 1"
-                if self._execute_call_count == 1
-                else "SELECT '[0,0,0]'::vector"
-            )
+            expected = "SELECT 1" if self._execute_call_count == 1 else "SELECT '[0,0,0]'::vector"
             assert str(statement) == expected
             db_checked = True
 
@@ -115,7 +112,9 @@ async def test_ready_checks_database_and_redis(monkeypatch) -> None:
 
     monkeypatch.setattr("app.core.database.engine", _FakeEngine())
     monkeypatch.setattr("app.core.redis.get_redis", _fake_get_redis)
-    monkeypatch.setattr("app.utils.schema_utils.assert_core_runtime_schema_compatible", _fake_schema_check)
+    monkeypatch.setattr(
+        "app.utils.schema_utils.assert_core_runtime_schema_compatible", _fake_schema_check
+    )
 
     result = await ready()
 

@@ -44,7 +44,9 @@ async def _seed_duplicate_device_links() -> tuple[str, str]:
     device_hash = "device-hash-duplicate-001"
 
     async with _conftest.engine_test.connect() as conn:
-        await conn.execute(sa.text(f"ALTER TABLE device_trials DROP CONSTRAINT IF EXISTS {CONSTRAINT_NAME}"))
+        await conn.execute(
+            sa.text(f"ALTER TABLE device_trials DROP CONSTRAINT IF EXISTS {CONSTRAINT_NAME}")
+        )
         await conn.execute(
             sa.text(
                 """
@@ -110,7 +112,9 @@ async def _constraint_exists() -> bool:
 
 
 @pytest.mark.asyncio
-async def test_upgrade_deduplicates_device_trial_links_and_adds_constraint(setup_engine, setup_db, monkeypatch) -> None:
+async def test_upgrade_deduplicates_device_trial_links_and_adds_constraint(
+    setup_engine, setup_db, monkeypatch
+) -> None:
     migration = _load_migration_module()
     user_id, device_hash = await _seed_duplicate_device_links()
 

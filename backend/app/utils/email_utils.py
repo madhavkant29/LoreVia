@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import (
     consume_email_unsubscribe_token,
-    get_redis,
     get_email_preferences_token_payload,
+    get_redis,
     key_ratelimit,
     store_email_preferences_token,
     store_email_unsubscribe_token,
@@ -61,7 +61,9 @@ async def get_email_preference_by_user_id(db: AsyncSession, user_id: str) -> Ema
 async def get_email_preference_by_email(db: AsyncSession, email: str) -> EmailPreference | None:
     normalized = normalize_email(email)
     return (
-        await db.execute(select(EmailPreference).where(func.lower(EmailPreference.email) == normalized))
+        await db.execute(
+            select(EmailPreference).where(func.lower(EmailPreference.email) == normalized)
+        )
     ).scalar_one_or_none()
 
 
@@ -179,7 +181,9 @@ async def track_usage_limit_friction_and_maybe_send(
 
     current = datetime.now(UTC)
     day_bucket = current.strftime("%Y%m%d")
-    midnight_tomorrow = current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
+    midnight_tomorrow = (
+        current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
+    )
     bucket_ttl = max(int(midnight_tomorrow - current.timestamp()), 1)
     hit_key = key_ratelimit(str(user.id), f"upgrade_offer_hits:{action}:{day_bucket}")
     sent_key = key_ratelimit(str(user.id), f"upgrade_offer_sent:{action}")

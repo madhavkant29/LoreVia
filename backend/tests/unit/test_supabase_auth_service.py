@@ -7,8 +7,12 @@ from app.services.supabase_auth_service import delete_supabase_auth_user
 
 @pytest.mark.asyncio
 async def test_delete_supabase_auth_user_requires_configuration(monkeypatch):
-    monkeypatch.setattr("app.services.supabase_auth_service.settings.SUPABASE_URL", None, raising=False)
-    monkeypatch.setattr("app.services.supabase_auth_service.settings.SUPABASE_SERVICE_KEY", None, raising=False)
+    monkeypatch.setattr(
+        "app.services.supabase_auth_service.settings.SUPABASE_URL", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.supabase_auth_service.settings.SUPABASE_SERVICE_KEY", None, raising=False
+    )
 
     result = await delete_supabase_auth_user(uuid.UUID("00000000-0000-0000-0000-000000000123"))
 
@@ -37,9 +41,20 @@ async def test_delete_supabase_auth_user_success(monkeypatch):
             captured["headers"] = headers
             return FakeResponse()
 
-    monkeypatch.setattr("app.services.supabase_auth_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.supabase_auth_service.settings.SUPABASE_URL", "https://example.supabase.co", raising=False)
-    monkeypatch.setattr("app.services.supabase_auth_service.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.services.supabase_auth_service.httpx.AsyncClient",
+        lambda timeout=20.0: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        "app.services.supabase_auth_service.settings.SUPABASE_URL",
+        "https://example.supabase.co",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.supabase_auth_service.settings.SUPABASE_SERVICE_KEY",
+        "service-key",
+        raising=False,
+    )
 
     result = await delete_supabase_auth_user("sb-user-1")
 

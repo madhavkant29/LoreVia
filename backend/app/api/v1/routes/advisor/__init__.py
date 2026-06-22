@@ -8,57 +8,56 @@ Also provides:
                           characters, unused setups, future directions (DB-only)
 - /advisor/message      — conversational turn
 """
+
 from fastapi import APIRouter
 from openai import AsyncOpenAI
 
-from app.api.v1.routes.advisor.chat import router as chat_router
-from app.api.v1.routes.advisor.suggestions import router as suggestions_router
-from app.api.v1.routes.advisor.synopsis import router as synopsis_router
-from app.api.v1.routes.advisor.jobs import router as jobs_router
-
 from app.api.v1.routes.advisor.chat import (
-    _safe_prompt_str,
-    _best_issue_snippet,
-    _parse_advisor_job_id,
     _advisor_sse,
     _advisor_stream_response,
+    _best_issue_snippet,
     _enqueue_book_advisor_task,
-    advisor_message,
-    advisor_message_stream,
+    _parse_advisor_job_id,
+    _safe_prompt_str,
     advisor_greeting,
-    whats_the_word,
-    whats_the_word_stream,
+    advisor_message,
     advisor_message_async,
     advisor_message_async_status,
+    advisor_message_stream,
+    whats_the_word,
+    whats_the_word_stream,
 )
+from app.api.v1.routes.advisor.chat import router as chat_router
+from app.api.v1.routes.advisor.jobs import (
+    SeriesContinuityRequest,
+    _enqueue_series_advisor_task,
+    series_advisor_message,
+    series_advisor_message_status,
+    series_advisor_message_stream,
+    series_continuity_check,
+    series_continuity_check_stream,
+)
+from app.api.v1.routes.advisor.jobs import router as jobs_router
 from app.api.v1.routes.advisor.suggestions import (
     advisor_suggestions,
-    advisor_suggestions_scan,
     advisor_suggestions_job_status,
+    advisor_suggestions_scan,
 )
+from app.api.v1.routes.advisor.suggestions import router as suggestions_router
 from app.api.v1.routes.advisor.synopsis import (
+    continuity_report,
     editorial_review,
     editorial_review_stream,
-    prose_tighten,
-    prose_tighten_stream,
     inline_continuity_check,
     inline_continuity_check_stream,
     manuscript_synopsis,
     manuscript_synopsis_stream,
+    prose_tighten,
+    prose_tighten_stream,
     voice_consistency_review,
     voice_consistency_review_stream,
-    continuity_report,
 )
-from app.api.v1.routes.advisor.jobs import (
-    _enqueue_series_advisor_task,
-    SeriesContinuityRequest,
-    series_advisor_message,
-    series_advisor_message_stream,
-    series_advisor_message_status,
-    series_continuity_check,
-    series_continuity_check_stream,
-)
-
+from app.api.v1.routes.advisor.synopsis import router as synopsis_router
 from app.core.config import settings
 from app.core.redis import (
     get_advisor_response_cache,
@@ -110,7 +109,7 @@ from app.utils.advisor_utils import (
     stream_advisor_reply_payload,
     stream_series_advisor_reply_payload,
 )
-from app.utils.book_utils import detect_chapter_continuity_flags
+from app.utils.books.continuity import detect_chapter_continuity_flags
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
     extract_dialogue_samples_by_character,
@@ -121,8 +120,8 @@ from app.utils.llm_usage_utils import (
 )
 from app.workers.tasks.intelligence_tasks import (
     generate_advisor_reply_task,
-    generate_series_advisor_reply_task,
     generate_advisor_suggestions_task,
+    generate_series_advisor_reply_task,
 )
 
 router = APIRouter()
@@ -153,7 +152,9 @@ class _PatchPropagatingModule(ModuleType):
         for target_module in _PATCH_TARGET_MODULES:
             if hasattr(target_module, name):
                 setattr(target_module, name, value)
-            if name == "advisor_suggestions" and hasattr(target_module, "_suggestions_advisor_suggestions"):
+            if name == "advisor_suggestions" and hasattr(
+                target_module, "_suggestions_advisor_suggestions"
+            ):
                 setattr(target_module, "_suggestions_advisor_suggestions", value)
 
 

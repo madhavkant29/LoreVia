@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
 
@@ -7,13 +8,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import enforce_world_building_upload_rate_limit, rate_limit_world_building_ai
-from app.api.deps.subscription import check_upload_limit
+from app.api.deps.rate_limit import (
+    enforce_world_building_upload_rate_limit,
+    rate_limit_world_building_ai,
+)
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.storage import download_book
 from app.models.book import Book, Series
-from app.models.intelligence import WikiEntry, WorldBuildingDocument, WorldCanonicalIdentity, WorldElement, WorldNote
+from app.models.intelligence import (
+    WikiEntry,
+    WorldBuildingDocument,
+    WorldCanonicalIdentity,
+    WorldElement,
+    WorldNote,
+)
 from app.schemas.world_building import (
     CanonOverrideBody,
     CanonOverrideOut,
@@ -23,9 +32,9 @@ from app.schemas.world_building import (
     SuggestionAcceptance,
     WikiEntryOut,
     WikiGenerationResponse,
+    WorldBuildingBootstrapOut,
     WorldBuildingDocumentDetailOut,
     WorldBuildingDocumentOut,
-    WorldBuildingBootstrapOut,
     WorldBuildingDocumentUpdateBody,
     WorldElementOut,
     WorldNoteBody,
@@ -34,6 +43,22 @@ from app.schemas.world_building import (
     WorldQueryRequest,
     WorldQueryResponse,
 )
+from app.services.processing_allowance_service import (
+    ensure_active_word_capacity,
+    ensure_project_writable,
+    ensure_source_storage_capacity,
+)
+from app.utils.billing_utils import require_author_access
+from app.utils.books.manuscript import (
+    serialize_manuscript_content,
+)
+from app.utils.storage_utils import delete_storage_keys_best_effort
+from app.utils.tag_utils import (
+    ENTITY_TYPE_WORLD_NOTE,
+    get_custom_tags_for_entity,
+    list_custom_tags_for_entity_ids,
+)
+from app.utils.upload_security_utils import read_upload_bounded
 from app.utils.world_building_utils import (
     build_world_logic_response,
     classify_world_intent,
@@ -43,8 +68,8 @@ from app.utils.world_building_utils import (
     detect_series_world_analysis,
     detect_world_gaps,
     extract_world_elements,
-    get_world_building_document,
     generate_wiki_from_manuscript,
+    get_world_building_document,
     list_extracted_world_elements,
     list_world_building_documents,
     load_world_building_document_payload,
@@ -53,10 +78,6 @@ from app.utils.world_building_utils import (
     save_world_note,
     update_world_building_document,
 )
-from app.utils.tag_utils import ENTITY_TYPE_WORLD_NOTE, get_custom_tags_for_entity, list_custom_tags_for_entity_ids
-from app.utils.upload_security_utils import read_upload_bounded
-from app.utils.billing_utils import require_author_access, worldbuilding_upload_cost_for_book
-from app.utils.storage_utils import delete_storage_keys_best_effort
 
 router = APIRouter()
 
@@ -100,7 +121,9 @@ def _serialize_canon_override(identity: WorldCanonicalIdentity) -> CanonOverride
     )
 
 
-def _serialize_document(document: WorldBuildingDocument, payload: dict[str, str | None] | None = None) -> WorldBuildingDocumentOut | WorldBuildingDocumentDetailOut:
+def _serialize_document(
+    document: WorldBuildingDocument, payload: dict[str, str | None] | None = None
+) -> WorldBuildingDocumentOut | WorldBuildingDocumentDetailOut:
     base = {
         "id": str(document.id),
         "book_id": str(document.book_id),
@@ -142,15 +165,21 @@ async def get_world_building_bootstrap(
     selected_document = None
     if document_id is not None:
         document = await get_world_building_document(db, book, document_id)
-        selected_document = _serialize_document(document, await load_world_building_document_payload(document))
+        selected_document = _serialize_document(
+            document, await load_world_building_document_payload(document)
+        )
 
     notes = (
-        await db.execute(
-            select(WorldNote)
-            .where(WorldNote.book_id == book.id, WorldNote.note_type != "canon_override")
-            .order_by(WorldNote.created_at.desc())
+        (
+            await db.execute(
+                select(WorldNote)
+                .where(WorldNote.book_id == book.id, WorldNote.note_type != "canon_override")
+                .order_by(WorldNote.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     tags_by_note = await list_custom_tags_for_entity_ids(
         db,
         entity_type=ENTITY_TYPE_WORLD_NOTE,
@@ -158,18 +187,35 @@ async def get_world_building_bootstrap(
         book_id=book.id,
     )
     canon_overrides = (
-        await db.execute(
-            select(WorldCanonicalIdentity)
-            .where(WorldCanonicalIdentity.book_id == book.id)
-            .order_by(WorldCanonicalIdentity.updated_at.desc(), WorldCanonicalIdentity.created_at.desc())
+        (
+            await db.execute(
+                select(WorldCanonicalIdentity)
+                .where(WorldCanonicalIdentity.book_id == book.id)
+                .order_by(
+                    WorldCanonicalIdentity.updated_at.desc(),
+                    WorldCanonicalIdentity.created_at.desc(),
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     wiki_rows = (
-        await db.execute(
-            select(WikiEntry).where(WikiEntry.book_id == book.id).order_by(WikiEntry.entry_type.asc(), WikiEntry.name.asc())
+        (
+            await db.execute(
+                select(WikiEntry)
+                .where(WikiEntry.book_id == book.id)
+                .order_by(WikiEntry.entry_type.asc(), WikiEntry.name.asc())
+            )
         )
-    ).scalars().all()
-    gap_analysis = GapAnalysisResponse(**(await detect_world_gaps(db, book))) if focus == "gap" and documents else None
+        .scalars()
+        .all()
+    )
+    gap_analysis = (
+        GapAnalysisResponse(**(await detect_world_gaps(db, book)))
+        if focus == "gap" and documents
+        else None
+    )
     return WorldBuildingBootstrapOut(
         documents=[_serialize_document(document) for document in documents],
         selected_document=selected_document,
@@ -220,54 +266,62 @@ async def upload_world_documents(
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    ensure_project_writable(book)
     upload_files = [upload for upload in (files or []) if upload.filename]
 
     if upload_files:
         await enforce_world_building_upload_rate_limit(db, current_user.id)
     if len(upload_files) > settings.WORLD_BUILDING_UPLOAD_MAX_FILES:
-        raise HTTPException(413, f"World-building upload accepts at most {settings.WORLD_BUILDING_UPLOAD_MAX_FILES} files at once.")
+        raise HTTPException(
+            413,
+            f"World-building upload accepts at most {settings.WORLD_BUILDING_UPLOAD_MAX_FILES} files at once.",
+        )
 
-    worldbuilding_upload_cost = await worldbuilding_upload_cost_for_book(db, book)
     current_documents = await list_world_building_documents(db, book)
     replace_flag = (replace_existing or "").strip().lower() in {"1", "true", "yes", "on"}
-    released_uploads = len(current_documents) * worldbuilding_upload_cost if replace_flag else 0
-    estimated_document_count = len(upload_files) + (1 if (text or html) else 0)
-    await check_upload_limit(
-        db,
-        current_user,
-        requested_uploads=estimated_document_count * worldbuilding_upload_cost,
-        released_uploads=released_uploads,
-        context="World-building upload quota is checked before document parsing.",
-    )
 
     raw_files: list[tuple[str, bytes]] = []
     total_file_size = 0
     for upload in upload_files:
-        raw = await read_upload_bounded(upload, settings.WORLD_BUILDING_UPLOAD_MAX_BYTES, "World-building file")
+        raw = await read_upload_bounded(
+            upload, settings.WORLD_BUILDING_UPLOAD_MAX_BYTES, "World-building file"
+        )
         if raw:
             total_file_size += len(raw)
             if total_file_size > settings.WORLD_BUILDING_UPLOAD_MAX_TOTAL_BYTES:
-                raise HTTPException(413, "World-building upload exceeds the maximum aggregate upload size.")
+                raise HTTPException(
+                    413, "World-building upload exceeds the maximum aggregate upload size."
+                )
             raw_files.append((upload.filename, raw))
-    prepared = await prepare_world_building_uploads(files=raw_files, text=text, html=html, title=title)
-    requested_uploads = len(prepared) * worldbuilding_upload_cost
+    prepared = await prepare_world_building_uploads(
+        files=raw_files, text=text, html=html, title=title
+    )
+    requested_words = sum(len(str(item.get("text") or "").split()) for item in prepared)
+    requested_storage = sum(
+        len(
+            serialize_manuscript_content(str(item.get("text") or ""), item.get("html")).encode(
+                "utf-8"
+            )
+        )
+        for item in prepared
+    )
+    released_words = (
+        sum(int(document.word_count or 0) for document in current_documents) if replace_flag else 0
+    )
+    released_storage = (
+        sum(int(document.source_size_bytes or 0) for document in current_documents)
+        if replace_flag
+        else 0
+    )
+    await ensure_active_word_capacity(db, current_user, max(requested_words - released_words, 0))
+    await ensure_source_storage_capacity(
+        db, current_user, requested_storage, released_bytes=released_storage
+    )
     replaced_document_keys: list[str] = []
     if replace_flag:
         replaced_document_keys = [
-            document.s3_key
-            for document in current_documents
-            if document.s3_key
+            document.s3_key for document in current_documents if document.s3_key
         ]
-    await check_upload_limit(
-        db,
-        current_user,
-        requested_uploads=requested_uploads,
-        released_uploads=released_uploads,
-        context=(
-            f"This worldbuilding upload counts as {requested_uploads} upload"
-            f"{'' if requested_uploads == 1 else 's'} for this book."
-        ),
-    )
     documents = await create_world_building_documents(
         db,
         book=book,
@@ -282,7 +336,10 @@ async def upload_world_documents(
     return [_serialize_document(document) for document in documents]
 
 
-@router.get("/{book_id}/world-building/documents/{document_id}", response_model=WorldBuildingDocumentDetailOut)
+@router.get(
+    "/{book_id}/world-building/documents/{document_id}",
+    response_model=WorldBuildingDocumentDetailOut,
+)
 async def get_world_document(
     book_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -291,12 +348,16 @@ async def get_world_document(
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    ensure_project_writable(book)
     document = await get_world_building_document(db, book, document_id)
     payload = await load_world_building_document_payload(document)
     return _serialize_document(document, payload)
 
 
-@router.patch("/{book_id}/world-building/documents/{document_id}", response_model=WorldBuildingDocumentDetailOut)
+@router.patch(
+    "/{book_id}/world-building/documents/{document_id}",
+    response_model=WorldBuildingDocumentDetailOut,
+)
 async def patch_world_document(
     book_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -306,6 +367,7 @@ async def patch_world_document(
 ):
     book = await _get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
+    ensure_project_writable(book)
     document = await get_world_building_document(db, book, document_id)
     previous_s3_key = document.s3_key
     updated = await update_world_building_document(
@@ -372,7 +434,9 @@ async def analyze_world_building(
                     status="open",
                     linked_integration_id=item.get("id"),
                     context_label=item.get("world_document_title"),
-                    suggested_fix="\n".join(str(suggestion) for suggestion in (item.get("suggestions") or [])[:2]),
+                    suggested_fix="\n".join(
+                        str(suggestion) for suggestion in (item.get("suggestions") or [])[:2]
+                    ),
                 )
                 await db.refresh(note)
         await db.commit()
@@ -387,12 +451,16 @@ async def analyze_world_building(
                 user_id=current_user.id,
                 book_id=book.id,
                 world_element_id=None,
-                world_document_id=uuid.UUID(item["world_document_id"]) if item.get("world_document_id") else None,
+                world_document_id=uuid.UUID(item["world_document_id"])
+                if item.get("world_document_id")
+                else None,
                 note_type="world_gap",
                 chapter_number=item.get("story_chapter_number"),
                 title=item.get("title"),
                 body=item.get("description") or "",
-                priority="critical" if priority_value >= 8 else ("high" if priority_value >= 6 else "medium"),
+                priority="critical"
+                if priority_value >= 8
+                else ("high" if priority_value >= 6 else "medium"),
                 status="open",
                 linked_gap_id=item.get("id"),
                 context_label=item.get("world_document_title"),
@@ -448,10 +516,16 @@ async def list_auto_wiki(
     book = await _get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     rows = (
-        await db.execute(
-            select(WikiEntry).where(WikiEntry.book_id == book.id).order_by(WikiEntry.entry_type.asc(), WikiEntry.name.asc())
+        (
+            await db.execute(
+                select(WikiEntry)
+                .where(WikiEntry.book_id == book.id)
+                .order_by(WikiEntry.entry_type.asc(), WikiEntry.name.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         WikiEntryOut(
             id=str(item.id),
@@ -565,12 +639,19 @@ async def list_canon_overrides(
     book = await _get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     overrides = (
-        await db.execute(
-            select(WorldCanonicalIdentity)
-            .where(WorldCanonicalIdentity.book_id == book.id)
-            .order_by(WorldCanonicalIdentity.updated_at.desc(), WorldCanonicalIdentity.created_at.desc())
+        (
+            await db.execute(
+                select(WorldCanonicalIdentity)
+                .where(WorldCanonicalIdentity.book_id == book.id)
+                .order_by(
+                    WorldCanonicalIdentity.updated_at.desc(),
+                    WorldCanonicalIdentity.created_at.desc(),
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [_serialize_canon_override(identity) for identity in overrides]
 
 
@@ -606,12 +687,16 @@ async def list_world_notes(
     book = await _get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     notes = (
-        await db.execute(
-            select(WorldNote)
-            .where(WorldNote.book_id == book.id, WorldNote.note_type != "canon_override")
-            .order_by(WorldNote.created_at.desc())
+        (
+            await db.execute(
+                select(WorldNote)
+                .where(WorldNote.book_id == book.id, WorldNote.note_type != "canon_override")
+                .order_by(WorldNote.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     tags_by_note = await list_custom_tags_for_entity_ids(
         db,
         entity_type=ENTITY_TYPE_WORLD_NOTE,
@@ -709,7 +794,9 @@ async def update_world_note_status(
     )
 
 
-@router.get("/{book_id}/world-building/notes/by-chapter/{chapter_number}", response_model=list[WorldNoteOut])
+@router.get(
+    "/{book_id}/world-building/notes/by-chapter/{chapter_number}", response_model=list[WorldNoteOut]
+)
 async def get_world_notes_by_chapter(
     book_id: uuid.UUID,
     chapter_number: int,
@@ -719,16 +806,20 @@ async def get_world_notes_by_chapter(
     book = await _get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     notes = (
-        await db.execute(
-            select(WorldNote)
-            .where(
-                WorldNote.book_id == book.id,
-                WorldNote.chapter_number == chapter_number,
-                WorldNote.note_type != "canon_override",
+        (
+            await db.execute(
+                select(WorldNote)
+                .where(
+                    WorldNote.book_id == book.id,
+                    WorldNote.chapter_number == chapter_number,
+                    WorldNote.note_type != "canon_override",
+                )
+                .order_by(WorldNote.created_at.desc())
             )
-            .order_by(WorldNote.created_at.desc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     tags_by_note = await list_custom_tags_for_entity_ids(
         db,
         entity_type=ENTITY_TYPE_WORLD_NOTE,

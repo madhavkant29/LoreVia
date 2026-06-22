@@ -59,7 +59,9 @@ def _resolve_celery_redis_settings() -> tuple[str, dict, str | None, dict]:
     return broker_url, broker_ssl_options, backend_url, backend_ssl_options
 
 
-redis_url, redis_ssl_options, result_backend_url, result_backend_ssl_options = _resolve_celery_redis_settings()
+redis_url, redis_ssl_options, result_backend_url, result_backend_ssl_options = (
+    _resolve_celery_redis_settings()
+)
 
 
 if settings.SENTRY_DSN and not settings.DEBUG:
@@ -73,7 +75,16 @@ if settings.SENTRY_DSN and not settings.DEBUG:
 
 
 class RequestContextTask(Task):
-    def apply_async(self, args=None, kwargs=None, task_id=None, producer=None, link=None, link_error=None, **options):
+    def apply_async(
+        self,
+        args=None,
+        kwargs=None,
+        task_id=None,
+        producer=None,
+        link=None,
+        link_error=None,
+        **options,
+    ):
         headers = dict(options.get("headers") or {})
         if "request_id" not in headers:
             request_id = get_request_id()
@@ -124,8 +135,8 @@ celery_app.conf.update(
     },
     task_routes={
         "extraction_tasks.*": {"queue": "extraction"},
-        "analysis_tasks.*":   {"queue": "analysis"},
-        "embedding_tasks.*":  {"queue": "embedding"},
+        "analysis_tasks.*": {"queue": "analysis"},
+        "embedding_tasks.*": {"queue": "embedding"},
         "intelligence_tasks.*": {"queue": "intelligence"},
         "maintenance_tasks.*": {"queue": "intelligence"},
     },
@@ -162,6 +173,16 @@ celery_app.conf.update(
     },
     result_expires=settings.CELERY_RESULT_EXPIRES_SECONDS if result_backend_url else None,
     beat_schedule={
+        "maintenance-release-stale-processing-reservations-every-15-minutes": {
+            "task": "maintenance_tasks.release_stale_processing_reservations",
+            "schedule": crontab(minute="*/15"),
+            "kwargs": {"limit": 500},
+        },
+        "maintenance-durable-task-dispatch-every-minute": {
+            "task": "maintenance_tasks.maintain_task_executions",
+            "schedule": crontab(),
+            "kwargs": {"limit": 500},
+        },
         "maintenance-send-due-trial-emails-hourly": {
             "task": "maintenance_tasks.send_due_trial_emails",
             "schedule": crontab(minute=0),

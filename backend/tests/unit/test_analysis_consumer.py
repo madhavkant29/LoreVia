@@ -10,7 +10,10 @@ from app.models.intelligence import PlotThread
 from app.models.user import User
 from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS
 from app.workers.consumers import analysis_consumer
-from app.workers.consumers.analysis_consumer import _refresh_book_analysis_pipeline, _upsert_plot_threads
+from app.workers.consumers.analysis_consumer import (
+    _refresh_book_analysis_pipeline,
+    _upsert_plot_threads,
+)
 
 
 class FakeResult:
@@ -73,7 +76,7 @@ class FakeSessionContext:
 
 
 def test_inflight_lock_ttl_exceeds_hard_limit():
-    ANALYSIS_HARD_LIMIT = 15 * 60        # celery_app.py task_annotations time_limit
+    ANALYSIS_HARD_LIMIT = 15 * 60  # celery_app.py task_annotations time_limit
     MINIMUM_TTL = ANALYSIS_HARD_LIMIT + 300
     assert ANALYSIS_INFLIGHT_TTL_SECONDS >= MINIMUM_TTL
 
@@ -84,11 +87,19 @@ async def test_upsert_plot_threads_resolves_related_characters_to_canonical_name
     db.add(user)
     await db.flush()
 
-    book = Book(user_id=user.id, title="Plot Analysis", format="pdf", s3_key="plot-analysis.pdf", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Plot Analysis",
+        format="pdf",
+        s3_key="plot-analysis.pdf",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
 
-    chapter = Chapter(id=uuid.uuid4(), book_id=book.id, number=4, title="Door", s3_key="chapter-4.txt")
+    chapter = Chapter(
+        id=uuid.uuid4(), book_id=book.id, number=4, title="Door", s3_key="chapter-4.txt"
+    )
     grete = Character(book_id=book.id, name="Grete", aliases=[], first_chapter=1, mention_count=3)
     gregor = Character(book_id=book.id, name="Gregor", aliases=[], first_chapter=1, mention_count=3)
     db.add_all([chapter, grete, gregor])
@@ -110,7 +121,9 @@ async def test_upsert_plot_threads_resolves_related_characters_to_canonical_name
     )
     await db.commit()
 
-    thread = (await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))).scalar_one()
+    thread = (
+        await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))
+    ).scalar_one()
 
     assert thread.character_ids == ["Grete", "Gregor"]
 
@@ -120,7 +133,9 @@ async def test_analyse_chapter_handles_missing_stale_and_inflight_work(monkeypat
     chapter_id = str(uuid.uuid4())
 
     async def run(fake_db):
-        monkeypatch.setattr(analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(fake_db))
+        monkeypatch.setattr(
+            analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(fake_db)
+        )
         return await analysis_consumer.analyse_chapter(chapter_id, "chapter text")
 
     assert await run(FakeAnalysisDb()) == {"error": "chapter not found"}
@@ -129,25 +144,47 @@ async def test_analyse_chapter_handles_missing_stale_and_inflight_work(monkeypat
     assert await run(FakeAnalysisDb(chapter=chapter)) == {"error": "book not found"}
 
     book = SimpleNamespace(id=chapter.book_id, is_editor_project=False)
-    monkeypatch.setattr("app.services.editor_project_service.get_rebuild_run_id", lambda value: "active-run")
-    monkeypatch.setattr(analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(FakeAnalysisDb(chapter=chapter, book=book)))
+    monkeypatch.setattr(
+        "app.services.editor_project_service.get_rebuild_run_id", lambda value: "active-run"
+    )
+    monkeypatch.setattr(
+        analysis_consumer,
+        "AsyncSessionLocal",
+        lambda: FakeSessionContext(FakeAnalysisDb(chapter=chapter, book=book)),
+    )
     monkeypatch.setattr(analysis_consumer, "cache_set_if_absent", lambda *args, **kwargs: None)
-    result = await analysis_consumer.analyse_chapter(chapter_id, "chapter text", rebuild_run_id="stale-run")
+    result = await analysis_consumer.analyse_chapter(
+        chapter_id, "chapter text", rebuild_run_id="stale-run"
+    )
     assert result == {"error": "stale_rebuild_run"}
 
     book.is_editor_project = True
-    monkeypatch.setattr("app.services.editor_project_service.get_rebuild_run_id", lambda value: None)
-    monkeypatch.setattr(analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(FakeAnalysisDb(chapter=chapter, book=book)))
-    assert await analysis_consumer.analyse_chapter(chapter_id, "chapter text") == {"error": "stale_editor_project_run"}
+    monkeypatch.setattr(
+        "app.services.editor_project_service.get_rebuild_run_id", lambda value: None
+    )
+    monkeypatch.setattr(
+        analysis_consumer,
+        "AsyncSessionLocal",
+        lambda: FakeSessionContext(FakeAnalysisDb(chapter=chapter, book=book)),
+    )
+    assert await analysis_consumer.analyse_chapter(chapter_id, "chapter text") == {
+        "error": "stale_editor_project_run"
+    }
 
     book.is_editor_project = False
-    monkeypatch.setattr(analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(FakeAnalysisDb(chapter=chapter, book=book)))
+    monkeypatch.setattr(
+        analysis_consumer,
+        "AsyncSessionLocal",
+        lambda: FakeSessionContext(FakeAnalysisDb(chapter=chapter, book=book)),
+    )
 
     async def lock_busy(*args, **kwargs):
         return False
 
     monkeypatch.setattr(analysis_consumer, "cache_set_if_absent", lock_busy)
-    assert await analysis_consumer.analyse_chapter(chapter_id, "chapter text") == {"skipped": "analysis_inflight"}
+    assert await analysis_consumer.analyse_chapter(chapter_id, "chapter text") == {
+        "skipped": "analysis_inflight"
+    }
 
 
 @pytest.mark.asyncio
@@ -181,7 +218,9 @@ async def test_analyse_chapter_generates_all_summary_modes_and_cleans_queue_keys
         ],
     )
     monkeypatch.setattr(analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(db))
-    monkeypatch.setattr("app.services.editor_project_service.get_rebuild_run_id", lambda value: None)
+    monkeypatch.setattr(
+        "app.services.editor_project_service.get_rebuild_run_id", lambda value: None
+    )
     monkeypatch.setattr(analysis_consumer.settings, "OPENAI_API_KEY", "")
 
     async def async_true(*args, **kwargs):
@@ -227,7 +266,9 @@ async def test_analyse_chapter_generates_all_summary_modes_and_cleans_queue_keys
     )
     monkeypatch.setattr("app.utils.advisor_utils.invalidate_advisor_caches_for_book", async_none)
 
-    result = await analysis_consumer.analyse_chapter(str(chapter.id), "Mara turns the key.", "Chapter 1")
+    result = await analysis_consumer.analyse_chapter(
+        str(chapter.id), "Mara turns the key.", "Chapter 1"
+    )
 
     assert result == {
         "chapter_id": str(chapter.id),
@@ -261,7 +302,9 @@ async def _ready_stats(analysis_complete):
         (2, 0, [(1, None), (2, None)], "pending"),
     ],
 )
-async def test_refresh_book_analysis_pipeline_calculates_runtime_status(total, completed, rows, expected):
+async def test_refresh_book_analysis_pipeline_calculates_runtime_status(
+    total, completed, rows, expected
+):
     book = SimpleNamespace(id=uuid.uuid4(), writer_workspace={})
     db = FakeAnalysisDb(
         results=[

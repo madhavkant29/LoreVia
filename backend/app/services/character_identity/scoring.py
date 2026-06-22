@@ -4,8 +4,13 @@ from dataclasses import dataclass
 
 from app.models.character import Character
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
-from app.services.character_identity.normalization import first_name_token, name_tokens, normalize_name
-from app.utils.character_utils import has_conflicting_title_identity, name_similarity
+from app.services.character_identity.normalization import (
+    first_name_token,
+    name_tokens,
+    normalize_name,
+)
+from app.utils.characters.identity import has_conflicting_title_identity
+from app.utils.characters.similarity import name_similarity
 
 
 @dataclass(frozen=True)
@@ -31,7 +36,9 @@ def score_identity_evidence(
         int(evidence.get("mention_count") or 0),
         int(getattr(character, "mention_count", 0) or 0) if character is not None else 0,
     )
-    chapter_count = len({int(value) for value in evidence.get("chapter_numbers", []) if str(value).isdigit()})
+    chapter_count = len(
+        {int(value) for value in evidence.get("chapter_numbers", []) if str(value).isdigit()}
+    )
     has_profile = bool(
         character
         and (
@@ -47,7 +54,12 @@ def score_identity_evidence(
     if has_profile:
         promotion += 0.18
         reasons.append("profile_evidence")
-    if kind in {CandidateKind.FRAGMENT, CandidateKind.PRONOUN, CandidateKind.OBJECT_OR_PLACE, CandidateKind.GROUP_DESCRIPTOR}:
+    if kind in {
+        CandidateKind.FRAGMENT,
+        CandidateKind.PRONOUN,
+        CandidateKind.OBJECT_OR_PLACE,
+        CandidateKind.GROUP_DESCRIPTOR,
+    }:
         promotion = min(promotion, 0.2)
 
     merge = 0.0
@@ -70,10 +82,18 @@ def score_identity_evidence(
                     reasons.append("high_name_similarity")
             left_tokens = name_tokens(left)
             right_tokens = name_tokens(right)
-            if len(left_tokens) == 1 and len(right_tokens) >= 2 and left_tokens[0] == right_tokens[0]:
+            if (
+                len(left_tokens) == 1
+                and len(right_tokens) >= 2
+                and left_tokens[0] == right_tokens[0]
+            ):
                 alias = 0.9
                 reasons.append("single_token_first_name_alias")
-            elif len(right_tokens) == 1 and len(left_tokens) >= 2 and right_tokens[0] == left_tokens[0]:
+            elif (
+                len(right_tokens) == 1
+                and len(left_tokens) >= 2
+                and right_tokens[0] == left_tokens[0]
+            ):
                 alias = 0.9
                 reasons.append("single_token_first_name_alias")
             if left_norm in {normalize_name(value) for value in target.aliases or []}:
@@ -86,7 +106,12 @@ def score_identity_evidence(
         alias = 0.5
 
     fake = 0.0
-    if kind in {CandidateKind.FRAGMENT, CandidateKind.PRONOUN, CandidateKind.OBJECT_OR_PLACE, CandidateKind.GROUP_DESCRIPTOR}:
+    if kind in {
+        CandidateKind.FRAGMENT,
+        CandidateKind.PRONOUN,
+        CandidateKind.OBJECT_OR_PLACE,
+        CandidateKind.GROUP_DESCRIPTOR,
+    }:
         fake = 0.95
     elif kind == CandidateKind.ROLE_DESCRIPTOR:
         fake = 0.75 if mention_count >= 3 else 0.88

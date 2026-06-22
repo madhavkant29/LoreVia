@@ -52,7 +52,9 @@ def test_generate_wiki_task_loads_book_generates_and_commits(monkeypatch):
 
     monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
     monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
-    monkeypatch.setattr("app.utils.world_building_utils.generate_wiki_from_manuscript", fake_generate_wiki)
+    monkeypatch.setattr(
+        "app.utils.world_building_utils.generate_wiki_from_manuscript", fake_generate_wiki
+    )
 
     assert intelligence_tasks.generate_wiki_task.run(str(book.id)) is None
     assert generated == [(db, book)]
@@ -61,7 +63,9 @@ def test_generate_wiki_task_loads_book_generates_and_commits(monkeypatch):
 
 def test_generate_wiki_task_raises_value_error_when_book_missing(monkeypatch):
     monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
-    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(_Db(value=None)))
+    monkeypatch.setattr(
+        "app.core.database.AsyncSessionLocal", lambda: _SessionFactory(_Db(value=None))
+    )
 
     with pytest.raises(ValueError, match="wiki_book_not_found"):
         intelligence_tasks.generate_wiki_task.run(str(uuid.uuid4()))
@@ -93,7 +97,9 @@ def test_generate_advisor_reply_task_marks_running_and_complete(monkeypatch):
     monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
     monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_running", mark_running)
     monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_failed", mark_failed)
-    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_complete", mark_complete)
+    monkeypatch.setattr(
+        "app.services.advisor_jobs_service.mark_advisor_job_complete", mark_complete
+    )
     monkeypatch.setattr("app.utils.advisor_utils.build_advisor_reply_payload", build_payload)
 
     result = intelligence_tasks.generate_advisor_reply_task.run(
@@ -164,7 +170,9 @@ def test_generate_series_advisor_reply_task_marks_complete(monkeypatch):
     monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
     monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_running", mark_running)
     monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_failed", mark_failed)
-    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_complete", mark_complete)
+    monkeypatch.setattr(
+        "app.services.advisor_jobs_service.mark_advisor_job_complete", mark_complete
+    )
     monkeypatch.setattr("app.utils.advisor_utils.build_series_advisor_reply_payload", build_payload)
 
     assert intelligence_tasks.generate_series_advisor_reply_task.run(
@@ -268,4 +276,3 @@ def test_update_character_embedding_task_filters_low_confidence_traits(monkeypat
     assert embedded == [("Mira", {"eyes": {"value": "green", "confidence": 0.8}})]
     assert len(db.executed) == 1
     assert db.commits == 1
-

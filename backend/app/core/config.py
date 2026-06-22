@@ -2,8 +2,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 _ORIGINAL_ENV_KEYS = frozenset(os.environ.keys())
 
@@ -60,11 +60,11 @@ class Settings(BaseSettings):
     CELERY_TASK_IGNORE_RESULT: bool = False
     CELERY_RESULT_EXPIRES_SECONDS: int = 3600
     CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS: int = 7200
-    REDIS_TTL_CHARACTER_PROFILE: int = 3600      # 1 hr
-    REDIS_TTL_SUMMARY: int = 604800              # 7 days
-    REDIS_TTL_GRAPH: int = 3600                  # 1 hr
-    REDIS_TTL_SEARCH: int = 3600                 # 1 hr
-    REDIS_TTL_RECALL: int = 86400                # 24 hrs
+    REDIS_TTL_CHARACTER_PROFILE: int = 3600  # 1 hr
+    REDIS_TTL_SUMMARY: int = 604800  # 7 days
+    REDIS_TTL_GRAPH: int = 3600  # 1 hr
+    REDIS_TTL_SEARCH: int = 3600  # 1 hr
+    REDIS_TTL_RECALL: int = 86400  # 24 hrs
     REDIS_TTL_SESSION: int = 86400
 
     # Storage (Cloudflare R2 — PDFs/EPUBs only)
@@ -75,12 +75,12 @@ class Settings(BaseSettings):
 
     # AI — two models, cost discipline
     OPENAI_API_KEY: str
-    OPENAI_EXTRACT_MODEL: str = "gpt-4o-mini"    # extraction, summaries
-    OPENAI_INTEL_MODEL: str = "gpt-4o-mini"           # chat, predictions #revert to gpt-4o-mini for now, gpt-4o is too costly and not significantly better for our use case
+    OPENAI_EXTRACT_MODEL: str = "gpt-4o-mini"  # extraction, summaries
+    OPENAI_INTEL_MODEL: str = "gpt-4o-mini"  # chat, predictions #revert to gpt-4o-mini for now, gpt-4o is too costly and not significantly better for our use case
     OPENAI_EMBED_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBED_DIM: int = 1536
-    OPENAI_ENCODING_MODEL: str = "gpt-4o-mini"   # tiktoken encoding for token counting
-    ANTHROPIC_API_KEY: str | None = None         # fallback
+    OPENAI_ENCODING_MODEL: str = "gpt-4o-mini"  # tiktoken encoding for token counting
+    ANTHROPIC_API_KEY: str | None = None  # fallback
     GEMINI_API_KEY: str | None = None
     GEMINI_EXTRACT_MODEL: str = "gemini-1.5-flash"
     GEMINI_INTEL_MODEL: str = "gemini-1.5-flash"
@@ -152,6 +152,18 @@ class Settings(BaseSettings):
     EXTRACTION_BATCH_MAX_CHUNKS: int = 6
     EXTRACTION_EMBED_BATCH_SIZE: int = 24
     EXTRACTION_EMBED_CONCURRENCY: int = 2
+    PROCESSING_PIPELINE_VERSION: str = "2026-06"
+    EXTRACTION_WORKER_CONCURRENCY: int = Field(default=2, ge=1, le=64)
+    ANALYSIS_WORKER_CONCURRENCY: int = Field(default=1, ge=1, le=64)
+    EMBEDDING_WORKER_CONCURRENCY: int = Field(default=1, ge=1, le=64)
+    INTELLIGENCE_WORKER_CONCURRENCY: int = Field(default=1, ge=1, le=64)
+    LLM_CHAT_RPM_LIMIT: int = 60
+    LLM_CHAT_TPM_LIMIT: int = 500_000
+    LLM_EMBEDDING_RPM_LIMIT: int = 120
+    LLM_EMBEDDING_TPM_LIMIT: int = 1_000_000
+    LLM_MAX_CONCURRENT_CALLS_PER_USER: int = 2
+    MONTHLY_WORKER_INFRA_COST_USD: float = 19.99
+    STORAGE_COST_PER_GB_MONTH_USD: float = 0.015
     DEDUP_SIMILARITY_THRESHOLD: float = 0.88
     INGESTION_CHAPTER_UPLOAD_CONCURRENCY: int = 4
     INGESTION_CHAPTER_DISPATCH_WINDOW: int = 3
@@ -225,6 +237,13 @@ class Settings(BaseSettings):
     ARCHITECT_MANUAL_REPROCESS_TOKENS_5H: int = 500000
     ARCHITECT_MANUAL_REPROCESS_TOKENS_WEEK: int = 2500000
     ARCHITECT_MANUAL_REPROCESS_TOKENS_MONTH: int = 9000000
+    PROCESSING_ALLOWANCES_MODE: str = "enforce"
+    AUTHOR_ACTIVE_WORD_LIMIT: int = 2_000_000
+    ARCHITECT_ACTIVE_WORD_LIMIT: int = 8_000_000
+    AUTHOR_MONTHLY_PROCESSED_WORD_LIMIT: int = 1_000_000
+    ARCHITECT_MONTHLY_PROCESSED_WORD_LIMIT: int = 4_000_000
+    AUTHOR_SOURCE_STORAGE_LIMIT_BYTES: int = 5 * 1024 * 1024 * 1024
+    ARCHITECT_SOURCE_STORAGE_LIMIT_BYTES: int = 25 * 1024 * 1024 * 1024
     FREE_CONTINUITY_PER_DAY: int = 0
     FREE_CONTINUITY_PER_MINUTE: int = 0
     AUTHOR_CONTINUITY_PER_MINUTE: int = 20
@@ -233,7 +252,7 @@ class Settings(BaseSettings):
     DEVICE_TRIAL_MAX_ACCOUNTS: int = 2
 
     # Cloudflare Tunnel
-    CLOUDFLARE_TUNNEL_TOKEN: str | None = None   # Option 1 security
+    CLOUDFLARE_TUNNEL_TOKEN: str | None = None  # Option 1 security
 
     model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
 

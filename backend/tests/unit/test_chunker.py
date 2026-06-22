@@ -25,7 +25,9 @@ def test_single_chunk_for_short_text():
 
 
 def test_large_paragraph_respects_abbreviations_when_splitting():
-    text = "Dr. Hargrove stayed silent. Mr. Vale answered slowly. The corridor remained still. " * 40
+    text = (
+        "Dr. Hargrove stayed silent. Mr. Vale answered slowly. The corridor remained still. " * 40
+    )
     chunks = chunk_text(text, max_tokens=120, overlap=20)
     assert all("Dr." in chunk or "Mr." in chunk or "corridor" in chunk for chunk in chunks)
 

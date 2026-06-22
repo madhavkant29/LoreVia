@@ -157,7 +157,7 @@ verify_runtime_schema
 
 enable_systemd_unit
 
-${COMPOSE} up -d redis nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
+${COMPOSE} up -d redis nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
 
 for attempt in $(seq 1 20); do
   if ${COMPOSE} exec -T nginx wget -qO- http://127.0.0.1/nginx-health >/dev/null 2>&1 && \

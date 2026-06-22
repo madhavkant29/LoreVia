@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -28,7 +28,9 @@ async def _create_user(db, *, email: str, tier: str) -> User:
     return user
 
 
-async def _create_public_book(db, *, author_id: uuid.UUID, title: str, is_public: bool = True) -> Book:
+async def _create_public_book(
+    db, *, author_id: uuid.UUID, title: str, is_public: bool = True
+) -> Book:
     book = Book(
         user_id=author_id,
         title=title,
@@ -50,24 +52,26 @@ async def _create_public_book(db, *, author_id: uuid.UUID, title: str, is_public
     db.add(book)
     await db.commit()
     await db.refresh(book)
-    db.add_all([
-        Chapter(
-            book_id=book.id,
-            number=1,
-            title=f"{title} Opening",
-            s3_key=f"chapters/{title.lower().replace(' ', '-')}-1.txt",
-            word_count=1200,
-            processed=True,
-        ),
-        Chapter(
-            book_id=book.id,
-            number=2,
-            title=f"{title} Next",
-            s3_key=f"chapters/{title.lower().replace(' ', '-')}-2.txt",
-            word_count=900,
-            processed=True,
-        ),
-    ])
+    db.add_all(
+        [
+            Chapter(
+                book_id=book.id,
+                number=1,
+                title=f"{title} Opening",
+                s3_key=f"chapters/{title.lower().replace(' ', '-')}-1.txt",
+                word_count=1200,
+                processed=True,
+            ),
+            Chapter(
+                book_id=book.id,
+                number=2,
+                title=f"{title} Next",
+                s3_key=f"chapters/{title.lower().replace(' ', '-')}-2.txt",
+                word_count=900,
+                processed=True,
+            ),
+        ]
+    )
     await db.commit()
     return book
 
@@ -133,7 +137,9 @@ async def test_public_analytics_endpoint_tracks_views_and_surfaces_aggregates(cl
 @pytest.mark.asyncio
 async def test_public_analytics_endpoint_rejects_unpublished_books(client, db):
     author = await _create_user(db, email="private-analytics-author@lorevia.test", tier="author")
-    private_book = await _create_public_book(db, author_id=author.id, title="Private Draft", is_public=False)
+    private_book = await _create_public_book(
+        db, author_id=author.id, title="Private Draft", is_public=False
+    )
 
     response = await client.post(
         f"/api/v1/public/books/{private_book.id}/analytics/view",

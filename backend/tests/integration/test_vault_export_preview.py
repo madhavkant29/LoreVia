@@ -7,7 +7,7 @@ import zipfile
 import pytest
 
 from app.core.security import create_access_token
-from app.models.book import Book, Chapter, NoteSeriesLink, NovelScene, VaultNote, Series
+from app.models.book import Book, Chapter, NoteSeriesLink, NovelScene, Series, VaultNote
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
 from app.models.user import User
@@ -189,8 +189,14 @@ async def test_vault_bible_preview_returns_folder_manifest(client, db):
     assert payload["root_folder"] == "LoreVia Export - Preview-Story"
     assert any(file["path"].endswith("Characters/Aria.md") for file in payload["files"])
     assert any(file["path"].endswith("Major Events/Aria arrives.md") for file in payload["files"])
-    assert any(file["path"].endswith("Reading Log/Chapter 1 - Arrival.md") for file in payload["files"])
-    assert any("[[Blaire]]" in file["content"] for file in payload["files"] if file["path"].endswith("Characters/Aria.md"))
+    assert any(
+        file["path"].endswith("Reading Log/Chapter 1 - Arrival.md") for file in payload["files"]
+    )
+    assert any(
+        "[[Blaire]]" in file["content"]
+        for file in payload["files"]
+        if file["path"].endswith("Characters/Aria.md")
+    )
 
 
 @pytest.mark.asyncio
@@ -213,7 +219,9 @@ async def test_vault_bible_notes_save_is_visible_in_preview_and_notes_list(clien
     )
     assert preview_before.status_code == 200
     baseline = preview_before.json()
-    target_path = next(file["path"] for file in baseline["files"] if file["path"].endswith("Characters/Aria.md"))
+    target_path = next(
+        file["path"] for file in baseline["files"] if file["path"].endswith("Characters/Aria.md")
+    )
 
     save_response = await client.put(
         f"/api/v1/books/{book.id}/export/character-bible/notes",
@@ -287,7 +295,9 @@ async def test_user_vault_notes_crud_graph_and_export(client, db):
     assert relations["links"][0]["target_note_path"] == "Characters/Blaire.md"
     assert relations["tags"] == []
 
-    export_response = await client.get(f"/api/v1/books/{book.id}/notes/vault/export", headers=headers)
+    export_response = await client.get(
+        f"/api/v1/books/{book.id}/notes/vault/export", headers=headers
+    )
     assert export_response.status_code == 200
     with zipfile.ZipFile(io.BytesIO(export_response.content)) as archive:
         assert sorted(archive.namelist()) == ["Characters/Aria.md", "Characters/Blaire.md"]

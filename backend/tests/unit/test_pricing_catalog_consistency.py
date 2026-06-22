@@ -4,8 +4,8 @@ import json
 
 from app.utils.billing_utils import (
     PLAN_DISPLAY_NAMES,
-    PLAN_PRICES_USD,
     PLAN_PRICE_ID_ENV_KEYS,
+    PLAN_PRICES_USD,
     SHARED_PRICING_CATALOG_PATH,
     VALID_PAID_PLAN_CODES,
 )
@@ -29,8 +29,7 @@ def test_shared_pricing_catalog_matches_backend_constants():
 
     assert [tier["name"] for tier in paid_tiers] == ["Author", "Architect"]
     assert (
-        {tier["monthly_code"] for tier in paid_tiers}
-        | {tier["annual_code"] for tier in paid_tiers}
+        {tier["monthly_code"] for tier in paid_tiers} | {tier["annual_code"] for tier in paid_tiers}
     ) <= VALID_PAID_PLAN_CODES
 
     for tier in paid_tiers:
@@ -54,4 +53,6 @@ def test_shared_pricing_catalog_tracks_price_id_env_keys():
     assert "reader_monthly" not in plans
     assert "reader_annual" not in plans
     assert PLAN_PRICE_ID_ENV_KEYS["author_monthly"] == plans["author_monthly"]["price_id_env_keys"]
-    assert PLAN_PRICE_ID_ENV_KEYS["architect_annual"] == plans["architect_annual"]["price_id_env_keys"]
+    assert (
+        PLAN_PRICE_ID_ENV_KEYS["architect_annual"] == plans["architect_annual"]["price_id_env_keys"]
+    )

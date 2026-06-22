@@ -74,7 +74,9 @@ async def test_embed_text_cache_miss_calls_openai_and_writes_cache(monkeypatch):
     mock_client = MagicMock()
     mock_client.close = AsyncMock()
     mock_client.embeddings = MagicMock()
-    mock_client.embeddings.create = AsyncMock(return_value=_stub_embedding_response(expected_vector))
+    mock_client.embeddings.create = AsyncMock(
+        return_value=_stub_embedding_response(expected_vector)
+    )
 
     from app.engine.embeddings.embedder import embed_text
 
@@ -106,7 +108,9 @@ async def test_embed_text_different_features_use_separate_cache(monkeypatch):
     vector_search = [0.1, 0.2]
     vector_character = [0.3, 0.4]
 
-    responses = iter([_stub_embedding_response(vector_search), _stub_embedding_response(vector_character)])
+    responses = iter(
+        [_stub_embedding_response(vector_search), _stub_embedding_response(vector_character)]
+    )
     call_count = 0
 
     mock_client = MagicMock()
@@ -184,7 +188,9 @@ async def test_embed_text_empty_string(monkeypatch):
     mock_client = MagicMock()
     mock_client.close = AsyncMock()
     mock_client.embeddings = MagicMock()
-    mock_client.embeddings.create = AsyncMock(return_value=_stub_embedding_response(expected_vector))
+    mock_client.embeddings.create = AsyncMock(
+        return_value=_stub_embedding_response(expected_vector)
+    )
 
     from app.engine.embeddings.embedder import embed_text
 

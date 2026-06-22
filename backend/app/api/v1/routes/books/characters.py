@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from .core import _clean_text
 from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import mark_book_cache_dirty
@@ -19,9 +18,9 @@ from app.models.character import (
     CharacterCandidate,
     CharacterDuplicateSuggestion,
     CharacterIdentityAction,
-    CharacterSuppression,
     CharacterRelationshipCandidate,
     CharacterState,
+    CharacterSuppression,
     CharacterVoiceProfile,
 )
 from app.models.intelligence import CharacterRelationship
@@ -42,49 +41,58 @@ from app.services.character_identity.constraints import add_identity_constraint
 from app.services.character_identity.merge import add_character_alias, record_identity_action
 from app.services.character_identity.normalization import normalize_name
 from app.services.character_identity.repair import CharacterIdentityRepairJob
+from app.services.quality_metrics_service import record_quality_review
 from app.utils.billing_utils import require_author_access
-from app.utils.book_utils import (
+from app.utils.books.collaboration_access import (
     collaboration_has_resource,
     get_book_with_collaboration_access,
+)
+from app.utils.books.notes import (
     get_owned_book,
 )
-from app.utils.character_utils import (
+from app.utils.characters.constants import (
     CHARACTER_APPROVAL_APPROVED,
     CHARACTER_APPROVAL_PENDING_REVIEW,
     CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
-    CHARACTER_VISIBILITY_VISIBLE,
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_DUPLICATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED,
     CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED,
-    append_unique_summary,
-    append_character_review_audit_entry,
+    CHARACTER_VISIBILITY_VISIBLE,
+)
+from app.utils.characters.duplicates import refresh_character_duplicate_suggestions
+from app.utils.characters.governance import is_cast_visible_character, is_displayable_character
+from app.utils.characters.manual import (
     apply_graph_visibility_override,
     apply_manual_character_description,
-    attach_character_candidate,
     build_manual_character,
-    clean_optional_text,
-    clean_string_list,
-    demote_character_to_review_candidate,
-    is_displayable_character,
-    is_cast_visible_character,
-    list_character_review_data,
-    mark_character_candidate_as_place,
-    mark_character_curated,
-    mark_character_candidates_merged,
-    merge_characters,
-    partition_character,
-    promote_character_candidate,
-    reject_character_candidate,
-    reject_character_as_noise,
-    refresh_character_duplicate_suggestions,
+)
+from app.utils.characters.merging import merge_characters
+from app.utils.characters.partitioning import partition_character
+from app.utils.characters.presentation import (
+    append_unique_summary,
     relationship_summary_for_character,
-    serialize_book_character,
+)
+from app.utils.characters.review import (
+    append_character_review_audit_entry,
+    attach_character_candidate,
+    demote_character_to_review_candidate,
+    mark_character_candidate_as_place,
+    mark_character_candidates_merged,
+    mark_character_curated,
+    promote_character_candidate,
+    reject_character_as_noise,
+    reject_character_candidate,
     set_character_review_state,
 )
-from app.utils.public_utils import ensure_public_mode_enabled
+from app.utils.characters.review_serialization import list_character_review_data
+from app.utils.characters.serialization import serialize_book_character
+from app.utils.characters.text import clean_optional_text, clean_string_list
+from app.utils.public.serialization import (
+    ensure_public_mode_enabled,
+)
 from app.utils.relationship_utils import (
     canonical_relationship_pair_ids,
     repair_relationship_timelines,
@@ -96,6 +104,9 @@ from app.utils.tag_utils import (
     get_custom_tags_for_entity,
     list_custom_tags_for_entity_ids,
 )
+
+from .core import _clean_text
+
 router = APIRouter()
 
 
@@ -130,18 +141,25 @@ def _serialize_relationship_record(relationship: CharacterRelationship) -> dict[
         "from_chapter": relationship.from_chapter,
         "to_chapter": relationship.to_chapter,
         "shared_labels": list(getattr(relationship, "shared_labels", None) or []),
-        "character_a_to_b_labels": list(getattr(relationship, "character_a_to_b_labels", None) or []),
-        "character_b_to_a_labels": list(getattr(relationship, "character_b_to_a_labels", None) or []),
+        "character_a_to_b_labels": list(
+            getattr(relationship, "character_a_to_b_labels", None) or []
+        ),
+        "character_b_to_a_labels": list(
+            getattr(relationship, "character_b_to_a_labels", None) or []
+        ),
         "label_evidence": dict(getattr(relationship, "label_evidence", None) or {}),
     }
 
 
 # ─── Character listing & review ──────────────────────────────────────────────
 
+
 @router.get("/{book_id}/characters")
 async def get_book_characters(
     book_id: uuid.UUID,
-    include: str | None = Query(None, description="Comma-separated sub-objects: arc_tracker, analysis_metadata, tags"),
+    include: str | None = Query(
+        None, description="Comma-separated sub-objects: arc_tracker, analysis_metadata, tags"
+    ),
     fields: str | None = Query(None, description="Comma-separated character fields to keep"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -158,7 +176,11 @@ async def get_book_characters(
         .order_by(Character.first_chapter, Character.name)
     )
     all_characters = list(result.scalars().all())
-    characters = [char for char in all_characters if is_cast_visible_character(char)] if book.mode == "author" else [char for char in all_characters if is_displayable_character(char)]
+    characters = (
+        [char for char in all_characters if is_cast_visible_character(char)]
+        if book.mode == "author"
+        else [char for char in all_characters if is_displayable_character(char)]
+    )
     char_by_id = {char.id: char for char in characters}
     character_ids = list(char_by_id.keys())
 
@@ -168,14 +190,20 @@ async def get_book_characters(
 
     rel_summaries: dict[str, list[str]] = {}
     rel_keys: dict[str, set[str]] = {}
-    states_by_character: dict[uuid.UUID, list[CharacterState]] = {char_id: [] for char_id in character_ids}
+    states_by_character: dict[uuid.UUID, list[CharacterState]] = {
+        char_id: [] for char_id in character_ids
+    }
     voice_profiles_by_character: dict[uuid.UUID, CharacterVoiceProfile] = {}
     counterpart_names: dict[uuid.UUID, str] = {char.id: char.name for char in characters}
-    relationships_by_character: dict[uuid.UUID, list[CharacterRelationship]] = {char_id: [] for char_id in character_ids}
+    relationships_by_character: dict[uuid.UUID, list[CharacterRelationship]] = {
+        char_id: [] for char_id in character_ids
+    }
     tags_by_character: dict[uuid.UUID, list[str]] = {}
 
     if not skip_arc_tracker or not rel_summaries:
-        rel_result = await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
+        rel_result = await db.execute(
+            select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
+        )
         relationships = list(rel_result.scalars().all())
 
         for rel in relationships:
@@ -190,18 +218,34 @@ async def get_book_characters(
                 for field in ("shared_labels", "character_a_to_b_labels", "character_b_to_a_labels")
             )
             if summary_a:
-                append_unique_summary(rel_summaries, rel_keys, str(a.id), f"{rel.rel_type}:{rel.from_chapter}:{rel.to_chapter}:{label_signature}:{b.name}".lower(), summary_a)
+                append_unique_summary(
+                    rel_summaries,
+                    rel_keys,
+                    str(a.id),
+                    f"{rel.rel_type}:{rel.from_chapter}:{rel.to_chapter}:{label_signature}:{b.name}".lower(),
+                    summary_a,
+                )
             if summary_b:
-                append_unique_summary(rel_summaries, rel_keys, str(b.id), f"{rel.rel_type}:{rel.from_chapter}:{rel.to_chapter}:{label_signature}:{a.name}".lower(), summary_b)
+                append_unique_summary(
+                    rel_summaries,
+                    rel_keys,
+                    str(b.id),
+                    f"{rel.rel_type}:{rel.from_chapter}:{rel.to_chapter}:{label_signature}:{a.name}".lower(),
+                    summary_b,
+                )
 
         if not skip_arc_tracker and character_ids:
             state_rows = (
-                await db.execute(
-                    select(CharacterState)
-                    .where(CharacterState.character_id.in_(character_ids))
-                    .order_by(CharacterState.character_id, CharacterState.at_chapter)
+                (
+                    await db.execute(
+                        select(CharacterState)
+                        .where(CharacterState.character_id.in_(character_ids))
+                        .order_by(CharacterState.character_id, CharacterState.at_chapter)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for state in state_rows:
                 states_by_character.setdefault(state.character_id, []).append(state)
 
@@ -277,26 +321,38 @@ async def get_character_identity_diagnostics(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     suppressions = (
-        await db.execute(
-            select(CharacterSuppression).where(CharacterSuppression.book_id == book.id)
-        )
-    ).scalars().all()
-    actions = (
-        await db.execute(
-            select(CharacterIdentityAction)
-            .where(CharacterIdentityAction.book_id == book.id)
-            .order_by(CharacterIdentityAction.created_at.desc())
-            .limit(50)
-        )
-    ).scalars().all()
-    hidden_candidates = (
-        await db.execute(
-            select(CharacterCandidate).where(
-                CharacterCandidate.book_id == book.id,
-                CharacterCandidate.status == "suppressed",
+        (
+            await db.execute(
+                select(CharacterSuppression).where(CharacterSuppression.book_id == book.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    actions = (
+        (
+            await db.execute(
+                select(CharacterIdentityAction)
+                .where(CharacterIdentityAction.book_id == book.id)
+                .order_by(CharacterIdentityAction.created_at.desc())
+                .limit(50)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    hidden_candidates = (
+        (
+            await db.execute(
+                select(CharacterCandidate).where(
+                    CharacterCandidate.book_id == book.id,
+                    CharacterCandidate.status == "suppressed",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     action_counts = Counter(action.action_type for action in actions)
     return {
         "suppressed_count": len(suppressions),
@@ -309,8 +365,12 @@ async def get_character_identity_diagnostics(
             {
                 "id": str(action.id),
                 "action_type": action.action_type,
-                "source_character_id": str(action.source_character_id) if action.source_character_id else None,
-                "target_character_id": str(action.target_character_id) if action.target_character_id else None,
+                "source_character_id": str(action.source_character_id)
+                if action.source_character_id
+                else None,
+                "target_character_id": str(action.target_character_id)
+                if action.target_character_id
+                else None,
                 "surface_text": action.surface_text,
                 "confidence": action.confidence,
                 "reason": action.reason,
@@ -340,7 +400,11 @@ async def undo_character_identity_action(
     reversible_data = dict(action.reversible_data or {})
     restored_character_id: uuid.UUID | None = None
     if action.action_type == "auto_merge":
-        secondary = await db.get(Character, action.source_character_id) if action.source_character_id else None
+        secondary = (
+            await db.get(Character, action.source_character_id)
+            if action.source_character_id
+            else None
+        )
         if secondary is None or secondary.book_id != book.id:
             raise HTTPException(404, "Merged character record not found")
         secondary.merged_into_character_id = None
@@ -349,12 +413,21 @@ async def undo_character_identity_action(
         secondary.suppression_reason = None
         set_character_review_state(
             secondary,
-            visibility_state=str(reversible_data.get("secondary_visibility_state") or "quarantined"),
-            approval_state=str(reversible_data.get("secondary_approval_state") or CHARACTER_APPROVAL_PENDING_REVIEW),
+            visibility_state=str(
+                reversible_data.get("secondary_visibility_state") or "quarantined"
+            ),
+            approval_state=str(
+                reversible_data.get("secondary_approval_state") or CHARACTER_APPROVAL_PENDING_REVIEW
+            ),
             approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
             reason_codes=["identity_action_undone"],
             action="identity_auto_merge_undone",
-            details={"identity_action_id": str(action.id), "target_character_id": str(action.target_character_id) if action.target_character_id else None},
+            details={
+                "identity_action_id": str(action.id),
+                "target_character_id": str(action.target_character_id)
+                if action.target_character_id
+                else None,
+            },
             actor_user_id=current_user.id,
         )
         restored_character_id = secondary.id
@@ -374,8 +447,16 @@ async def undo_character_identity_action(
                     confidence=1.0,
                 )
     elif action.action_type == "auto_alias":
-        target = await db.get(Character, action.target_character_id) if action.target_character_id else None
-        source = await db.get(Character, action.source_character_id) if action.source_character_id else None
+        target = (
+            await db.get(Character, action.target_character_id)
+            if action.target_character_id
+            else None
+        )
+        source = (
+            await db.get(Character, action.source_character_id)
+            if action.source_character_id
+            else None
+        )
         normalized_alias = normalize_name(action.surface_text)
         if target is not None and target.book_id == book.id and normalized_alias:
             target.aliases = [
@@ -384,14 +465,18 @@ async def undo_character_identity_action(
                 if normalize_name(alias) != normalized_alias
             ]
             alias_rows = (
-                await db.execute(
-                    select(CharacterAlias).where(
-                        CharacterAlias.book_id == book.id,
-                        CharacterAlias.character_id == target.id,
-                        CharacterAlias.normalized_alias == normalized_alias,
+                (
+                    await db.execute(
+                        select(CharacterAlias).where(
+                            CharacterAlias.book_id == book.id,
+                            CharacterAlias.character_id == target.id,
+                            CharacterAlias.normalized_alias == normalized_alias,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for alias in alias_rows:
                 await db.delete(alias)
         if source is not None and source.book_id == book.id:
@@ -406,7 +491,12 @@ async def undo_character_identity_action(
                 approval_source=CHARACTER_APPROVAL_SOURCE_MANUAL_REVIEW,
                 reason_codes=["identity_action_undone"],
                 action="identity_auto_alias_undone",
-                details={"identity_action_id": str(action.id), "target_character_id": str(action.target_character_id) if action.target_character_id else None},
+                details={
+                    "identity_action_id": str(action.id),
+                    "target_character_id": str(action.target_character_id)
+                    if action.target_character_id
+                    else None,
+                },
                 actor_user_id=current_user.id,
             )
             restored_character_id = source.id
@@ -441,7 +531,10 @@ async def undo_character_identity_action(
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
-    return {"undone": str(action.id), "restored_character_id": str(restored_character_id) if restored_character_id else None}
+    return {
+        "undone": str(action.id),
+        "restored_character_id": str(restored_character_id) if restored_character_id else None,
+    }
 
 
 @router.get("/{book_id}/character-review/reprocess")
@@ -487,6 +580,7 @@ async def apply_book_character_reprocess(
 
 
 # ─── Character CRUD ──────────────────────────────────────────────────────────
+
 
 @router.post("/{book_id}/characters", status_code=201)
 async def create_book_character(
@@ -566,16 +660,26 @@ async def list_book_character_aliases(
     if not character or character.book_id != book.id:
         raise HTTPException(404, "Character not found")
     aliases = (
-        await db.execute(
-            select(CharacterAlias)
-            .where(CharacterAlias.book_id == book.id, CharacterAlias.character_id == character.id)
-            .order_by(CharacterAlias.alias_kind, CharacterAlias.alias_text)
+        (
+            await db.execute(
+                select(CharacterAlias)
+                .where(
+                    CharacterAlias.book_id == book.id, CharacterAlias.character_id == character.id
+                )
+                .order_by(CharacterAlias.alias_kind, CharacterAlias.alias_text)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(aliases)
 
 
-@router.post("/{book_id}/characters/{character_id}/aliases", response_model=CharacterAliasOut, status_code=201)
+@router.post(
+    "/{book_id}/characters/{character_id}/aliases",
+    response_model=CharacterAliasOut,
+    status_code=201,
+)
 async def add_book_character_alias(
     book_id: uuid.UUID,
     character_id: uuid.UUID,
@@ -754,32 +858,61 @@ async def update_book_character(
         else None,
         review_note=body.review_note if body.review_note is not None else None,
     )
+    record_quality_review(
+        db,
+        book_id=book.id,
+        user_id=current_user.id,
+        entity_type="character",
+        entity_id=character.id,
+        outcome="corrected_after_promotion",
+        evidence={
+            "corrected_fields": sorted(body.model_fields_set),
+            **(
+                dict(character.analysis_metadata)
+                if isinstance(character.analysis_metadata, dict)
+                else {}
+            ),
+        },
+    )
 
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     await db.refresh(character)
     states = (
-        await db.execute(
-            select(CharacterState)
-            .where(CharacterState.character_id == character.id)
-            .order_by(CharacterState.at_chapter)
-        )
-    ).scalars().all()
-    relationships = (
-        await db.execute(
-            select(CharacterRelationship).where(
-                CharacterRelationship.book_id == book.id,
-                (CharacterRelationship.character_a_id == character.id) | (CharacterRelationship.character_b_id == character.id),
+        (
+            await db.execute(
+                select(CharacterState)
+                .where(CharacterState.character_id == character.id)
+                .order_by(CharacterState.at_chapter)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    relationships = (
+        (
+            await db.execute(
+                select(CharacterRelationship).where(
+                    CharacterRelationship.book_id == book.id,
+                    (CharacterRelationship.character_a_id == character.id)
+                    | (CharacterRelationship.character_b_id == character.id),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     counterpart_ids = {
         rel.character_b_id if rel.character_a_id == character.id else rel.character_a_id
         for rel in relationships
     }
     counterparts = (
-        await db.execute(select(Character).where(Character.id.in_(counterpart_ids)))
-    ).scalars().all() if counterpart_ids else []
+        (await db.execute(select(Character).where(Character.id.in_(counterpart_ids))))
+        .scalars()
+        .all()
+        if counterpart_ids
+        else []
+    )
     counterpart_names = {item.id: item.name for item in counterparts}
     voice_profile = (
         await db.execute(
@@ -904,6 +1037,7 @@ async def reject_book_character(
 
 # ─── Character candidate management ──────────────────────────────────────────
 
+
 @router.post("/{book_id}/character-review/{candidate_id}/promote")
 async def promote_book_character_candidate(
     book_id: uuid.UUID,
@@ -920,6 +1054,7 @@ async def promote_book_character_candidate(
         raise HTTPException(400, "Only pending candidates can be promoted")
 
     character = await promote_character_candidate(db, candidate=candidate)
+    record_quality_review(db, book_id=book.id, user_id=current_user.id, entity_type="character_candidate", entity_id=candidate.id, outcome="promoted", evidence=dict(candidate.evidence or {}))
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     return {"promoted": str(character.id), "candidate_id": str(candidate.id)}
@@ -945,6 +1080,7 @@ async def attach_book_character_candidate(
         raise HTTPException(400, "Only pending candidates can be attached")
 
     await attach_character_candidate(db, candidate=candidate, character=character)
+    record_quality_review(db, book_id=book.id, user_id=current_user.id, entity_type="character_candidate", entity_id=candidate.id, outcome="accepted", evidence=dict(candidate.evidence or {}))
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     return {"attached": str(character.id), "candidate_id": str(candidate.id)}
@@ -977,6 +1113,7 @@ async def reject_book_character_candidate(
                 actor_user_id=current_user.id,
             )
     reject_character_candidate(candidate, reason_codes=["author_rejected_candidate"])
+    record_quality_review(db, book_id=book.id, user_id=current_user.id, entity_type="character_candidate", entity_id=candidate.id, outcome="rejected", evidence=dict(candidate.evidence or {}))
     await db.commit()
     return {"rejected": str(candidate.id)}
 
@@ -994,11 +1131,13 @@ async def mark_book_character_candidate_as_place(
     if not candidate or candidate.book_id != book.id:
         raise HTTPException(404, "Candidate not found")
     mark_character_candidate_as_place(candidate, reason_codes=["author_marked_place"])
+    record_quality_review(db, book_id=book.id, user_id=current_user.id, entity_type="character_candidate", entity_id=candidate.id, outcome="suppressed", evidence=dict(candidate.evidence or {}))
     await db.commit()
     return {"marked": str(candidate.id), "adjudication_status": candidate.adjudication_status}
 
 
 # ─── Relationship candidate management ──────────────────────────────────────
+
 
 @router.post("/{book_id}/relationship-review/{candidate_id}/attach-a")
 async def attach_relationship_candidate_a(
@@ -1076,7 +1215,12 @@ async def accept_relationship_candidate(
 
     relationship_a = await db.get(Character, body.character_a_id)
     relationship_b = await db.get(Character, body.character_b_id)
-    if not relationship_a or relationship_a.book_id != book.id or not relationship_b or relationship_b.book_id != book.id:
+    if (
+        not relationship_a
+        or relationship_a.book_id != book.id
+        or not relationship_b
+        or relationship_b.book_id != book.id
+    ):
         raise HTTPException(404, "Character not found")
     if relationship_a.id == relationship_b.id:
         raise HTTPException(400, "Choose two different characters")
@@ -1087,7 +1231,11 @@ async def accept_relationship_candidate(
     if body.sentiment is not None and not -1.0 <= body.sentiment <= 1.0:
         raise HTTPException(400, "Sentiment must be between -1.0 and 1.0")
     evidence_payload = dict(candidate.evidence or {})
-    extracted_relationship = evidence_payload.get("relationship") if isinstance(evidence_payload.get("relationship"), dict) else {}
+    extracted_relationship = (
+        evidence_payload.get("relationship")
+        if isinstance(evidence_payload.get("relationship"), dict)
+        else {}
+    )
 
     relationship, _ = await upsert_relationship_timeline_state(
         db,
@@ -1096,18 +1244,29 @@ async def accept_relationship_candidate(
         character_b_id=relationship_b.id,
         rel_type=rel_type,
         sentiment=body.sentiment if body.sentiment is not None else candidate.sentiment,
-        description=clean_optional_text(body.description) if body.description is not None else clean_optional_text(candidate.description),
+        description=clean_optional_text(body.description)
+        if body.description is not None
+        else clean_optional_text(candidate.description),
         from_chapter=from_chapter,
         to_chapter=body.to_chapter,
-        shared_labels=body.shared_labels if body.shared_labels is not None else extracted_relationship.get("shared_labels"),
-        character_a_to_b_labels=body.character_a_to_b_labels if body.character_a_to_b_labels is not None else extracted_relationship.get("character_a_to_b_labels"),
-        character_b_to_a_labels=body.character_b_to_a_labels if body.character_b_to_a_labels is not None else extracted_relationship.get("character_b_to_a_labels"),
-        label_evidence=body.label_evidence or extracted_relationship.get("label_evidence") or evidence_payload,
+        shared_labels=body.shared_labels
+        if body.shared_labels is not None
+        else extracted_relationship.get("shared_labels"),
+        character_a_to_b_labels=body.character_a_to_b_labels
+        if body.character_a_to_b_labels is not None
+        else extracted_relationship.get("character_a_to_b_labels"),
+        character_b_to_a_labels=body.character_b_to_a_labels
+        if body.character_b_to_a_labels is not None
+        else extracted_relationship.get("character_b_to_a_labels"),
+        label_evidence=body.label_evidence
+        or extracted_relationship.get("label_evidence")
+        or evidence_payload,
     )
     relationship.edited_by_author = True
     candidate.matched_character_a_id = relationship_a.id
     candidate.matched_character_b_id = relationship_b.id
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_ACCEPTED
+    record_quality_review(db, book_id=book.id, user_id=current_user.id, entity_type="relationship_candidate", entity_id=candidate.id, outcome="accepted", evidence=dict(candidate.evidence or {}))
     append_character_review_audit_entry(
         relationship_a,
         action="relationship_candidate_accepted",
@@ -1137,6 +1296,7 @@ async def resolve_relationship_candidate(
     if not candidate or candidate.book_id != book.id:
         raise HTTPException(404, "Relationship candidate not found")
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_RESOLVED
+    record_quality_review(db, book_id=book.id, user_id=current_user.id, entity_type="relationship_candidate", entity_id=candidate.id, outcome="resolved", evidence=dict(candidate.evidence or {}))
     await db.commit()
     return {"resolved": str(candidate.id)}
 
@@ -1154,11 +1314,13 @@ async def reject_relationship_candidate(
     if not candidate or candidate.book_id != book.id:
         raise HTTPException(404, "Relationship candidate not found")
     candidate.status = CHARACTER_RELATIONSHIP_CANDIDATE_REJECTED
+    record_quality_review(db, book_id=book.id, user_id=current_user.id, entity_type="relationship_candidate", entity_id=candidate.id, outcome="rejected", evidence=dict(candidate.evidence or {}))
     await db.commit()
     return {"rejected": str(candidate.id)}
 
 
 # ─── Duplicate suggestion management ────────────────────────────────────────
+
 
 @router.post("/{book_id}/duplicate-suggestions/{suggestion_id}/accept")
 async def accept_character_duplicate_suggestion(
@@ -1228,6 +1390,7 @@ async def dismiss_character_duplicate_suggestion(
 
 # ─── Relationship CRUD ──────────────────────────────────────────────────────
 
+
 @router.post("/{book_id}/relationships", status_code=201)
 async def create_book_relationship(
     book_id: uuid.UUID,
@@ -1242,7 +1405,12 @@ async def create_book_relationship(
 
     relationship_a = await db.get(Character, body.character_a_id)
     relationship_b = await db.get(Character, body.character_b_id)
-    if not relationship_a or relationship_a.book_id != book.id or not relationship_b or relationship_b.book_id != book.id:
+    if (
+        not relationship_a
+        or relationship_a.book_id != book.id
+        or not relationship_b
+        or relationship_b.book_id != book.id
+    ):
         raise HTTPException(404, "Character not found")
     if relationship_a.id == relationship_b.id:
         raise HTTPException(400, "Choose two different characters")
@@ -1268,6 +1436,15 @@ async def create_book_relationship(
         label_evidence=body.label_evidence,
     )
     relationship.edited_by_author = True
+    record_quality_review(
+        db,
+        book_id=book.id,
+        user_id=current_user.id,
+        entity_type="relationship",
+        entity_id=relationship.id,
+        outcome="manual_created",
+        evidence={"corrected_fields": sorted(body.model_fields_set)},
+    )
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)
@@ -1309,9 +1486,20 @@ async def update_book_relationship(
         shared_labels=body.shared_labels,
         character_a_to_b_labels=body.character_a_to_b_labels,
         character_b_to_a_labels=body.character_b_to_a_labels,
-        label_evidence=body.label_evidence if body.label_evidence is not None else dict(getattr(relationship, "label_evidence", None) or {}),
+        label_evidence=body.label_evidence
+        if body.label_evidence is not None
+        else dict(getattr(relationship, "label_evidence", None) or {}),
     )
     relationship.edited_by_author = True
+    record_quality_review(
+        db,
+        book_id=book.id,
+        user_id=current_user.id,
+        entity_type="relationship",
+        entity_id=relationship.id,
+        outcome="corrected",
+        evidence={"corrected_fields": sorted(body.model_fields_set)},
+    )
     await db.commit()
     await mark_book_cache_dirty(str(book.id))
     await db.refresh(relationship)
@@ -1359,6 +1547,7 @@ async def delete_book_relationship(
 
 # ─── Character sharing ──────────────────────────────────────────────────────
 
+
 @router.post("/{book_id}/characters/{character_id}/share", response_model=CharacterShareOut)
 async def share_book_character(
     book_id: uuid.UUID,
@@ -1373,5 +1562,12 @@ async def share_book_character(
     if not character or character.book_id != book.id:
         raise HTTPException(404, "Character not found")
 
-    token = create_asset_token(str(current_user.id), f"character-card:{book.id}:{character.id}", expires_minutes=7 * 24 * 60)
-    return CharacterShareOut(share_url=f"/share/character/{book.id}/{character.id}?token={token}", expires_in_minutes=7 * 24 * 60)
+    token = create_asset_token(
+        str(current_user.id),
+        f"character-card:{book.id}:{character.id}",
+        expires_minutes=7 * 24 * 60,
+    )
+    return CharacterShareOut(
+        share_url=f"/share/character/{book.id}/{character.id}?token={token}",
+        expires_in_minutes=7 * 24 * 60,
+    )

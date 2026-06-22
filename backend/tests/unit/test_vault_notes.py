@@ -9,17 +9,21 @@ from fastapi import HTTPException
 
 from app.models.book import Book
 from app.models.user import User
-from app.utils.book_utils import (
+from app.utils.books.vault import (
     build_vault_graph,
-    export_vault_notes_zip,
     extract_wiki_links,
     extract_wiki_references,
     extract_wiki_tags,
-    import_vault_notes_zip,
-    list_vault_notes,
-    list_vault_note_relations,
     list_vault_bible_notes,
     load_vault_note_overrides,
+)
+from app.utils.books.vault_relations import (
+    list_vault_note_relations,
+)
+from app.utils.books.vault_storage import (
+    export_vault_notes_zip,
+    import_vault_notes_zip,
+    list_vault_notes,
     save_vault_note,
 )
 
@@ -62,7 +66,9 @@ async def test_save_list_and_load_vault_notes(db):
 
 @pytest.mark.asyncio
 async def test_save_vault_note_updates_existing_row(db):
-    user = User(email="vault-notes-update@lorevia.app", username="vault-notes-update", password_hash="hash")
+    user = User(
+        email="vault-notes-update@lorevia.app", username="vault-notes-update", password_hash="hash"
+    )
     book = Book(
         user=user,
         title="Vault Story",
@@ -74,8 +80,12 @@ async def test_save_vault_note_updates_existing_row(db):
     await db.commit()
 
     path = "LoreVia Export - Vault-Story/Characters/Aria.md"
-    first = await save_vault_note(db, book=book, user_id=user.id, path=path, content="first version")
-    second = await save_vault_note(db, book=book, user_id=user.id, path=path, content="second version")
+    first = await save_vault_note(
+        db, book=book, user_id=user.id, path=path, content="first version"
+    )
+    second = await save_vault_note(
+        db, book=book, user_id=user.id, path=path, content="second version"
+    )
 
     assert first["persisted"] is True
     assert second["persisted"] is True
@@ -88,7 +98,9 @@ async def test_save_vault_note_updates_existing_row(db):
 
 @pytest.mark.asyncio
 async def test_user_notes_are_isolated_from_character_bible_notes(db):
-    user = User(email="vault-note-sources@lorevia.app", username="vault-note-sources", password_hash="hash")
+    user = User(
+        email="vault-note-sources@lorevia.app", username="vault-note-sources", password_hash="hash"
+    )
     book = Book(
         user=user,
         title="Vault Story",
@@ -100,8 +112,12 @@ async def test_user_notes_are_isolated_from_character_bible_notes(db):
     await db.commit()
 
     path = "Characters/Aria.md"
-    await save_vault_note(db, book=book, user_id=user.id, path=path, content="bible", source="character_bible")
-    await save_vault_note(db, book=book, user_id=user.id, path=path, content="notes", source="user_notes")
+    await save_vault_note(
+        db, book=book, user_id=user.id, path=path, content="bible", source="character_bible"
+    )
+    await save_vault_note(
+        db, book=book, user_id=user.id, path=path, content="notes", source="user_notes"
+    )
 
     bible_notes = await list_vault_bible_notes(db, book, user.id)
     user_notes = await list_vault_notes(db, book=book, user_id=user.id, source="user_notes")
@@ -128,12 +144,20 @@ def test_extract_wiki_links_and_graph():
         ]
     )
     assert len(graph["nodes"]) == 3
-    assert {edge["source"] for edge in graph["edges"]} == {"Characters/Aria.md", "Characters/Blaire.md"}
-    assert {edge["target"] for edge in graph["edges"]} == {"Characters/Aria.md", "Characters/Blaire.md"}
+    assert {edge["source"] for edge in graph["edges"]} == {
+        "Characters/Aria.md",
+        "Characters/Blaire.md",
+    }
+    assert {edge["target"] for edge in graph["edges"]} == {
+        "Characters/Aria.md",
+        "Characters/Blaire.md",
+    }
 
 
 def test_extract_wiki_references_and_tags():
-    references = extract_wiki_references("![[Aria]] meets [[Blaire|B]] in #World-Building and #plot_notes.")
+    references = extract_wiki_references(
+        "![[Aria]] meets [[Blaire|B]] in #World-Building and #plot_notes."
+    )
     assert references == [
         {"target": "Aria", "alias": "Aria", "link_type": "embed"},
         {"target": "Blaire", "alias": "B", "link_type": "reference"},
@@ -145,7 +169,11 @@ def test_extract_wiki_references_and_tags():
 
 @pytest.mark.asyncio
 async def test_save_vault_notes_syncs_links_backlinks_and_tags(db):
-    user = User(email="vault-note-relations@lorevia.app", username="vault-note-relations", password_hash="hash")
+    user = User(
+        email="vault-note-relations@lorevia.app",
+        username="vault-note-relations",
+        password_hash="hash",
+    )
     book = Book(
         user=user,
         title="Vault Story",
@@ -173,8 +201,12 @@ async def test_save_vault_notes_syncs_links_backlinks_and_tags(db):
         source="user_notes",
     )
 
-    aria_relations = await list_vault_note_relations(db, book=book, user_id=user.id, path="Characters/Aria.md")
-    blaire_relations = await list_vault_note_relations(db, book=book, user_id=user.id, path="Characters/Blaire.md")
+    aria_relations = await list_vault_note_relations(
+        db, book=book, user_id=user.id, path="Characters/Aria.md"
+    )
+    blaire_relations = await list_vault_note_relations(
+        db, book=book, user_id=user.id, path="Characters/Blaire.md"
+    )
 
     assert len(aria_relations["links"]) == 1
     assert aria_relations["links"][0]["source_note_path"] == "Characters/Aria.md"
@@ -223,7 +255,11 @@ async def test_import_and_export_vault_user_notes_zip(db):
 
 @pytest.mark.asyncio
 async def test_import_vault_notes_zip_rejects_suspicious_compression(db, monkeypatch):
-    user = User(email="vault-note-zip-guard@lorevia.app", username="vault-note-zip-guard", password_hash="hash")
+    user = User(
+        email="vault-note-zip-guard@lorevia.app",
+        username="vault-note-zip-guard",
+        password_hash="hash",
+    )
     book = Book(
         user=user,
         title="Vault Story",
@@ -234,7 +270,9 @@ async def test_import_vault_notes_zip_rejects_suspicious_compression(db, monkeyp
     db.add_all([user, book])
     await db.commit()
 
-    monkeypatch.setattr("app.core.config.settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO", 2, raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.UPLOAD_ARCHIVE_MAX_COMPRESSION_RATIO", 2, raising=False
+    )
 
     archive_buffer = BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:

@@ -22,24 +22,24 @@ from app.core.redis import get_advisor_response_cache
 from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import AdvisorJob, PlotThread
-from app.services.advisor_jobs_service import (
-    ADVISOR_SCOPE_BOOK,
-    create_advisor_job,
-    mark_advisor_job_failed,
-    serialize_advisor_job,
-)
 from app.schemas.advisor import (
     AdvisorRequest,
     AdvisorTaskStatusResponse,
     WhatsTheWordRequest,
     WhatsTheWordResponse,
 )
-from app.utils.billing_utils import require_author_access
+from app.services.advisor_jobs_service import (
+    ADVISOR_SCOPE_BOOK,
+    create_advisor_job,
+    mark_advisor_job_failed,
+    serialize_advisor_job,
+)
 from app.utils.advisor_utils import (
     generate_whats_the_word_result,
     make_advisor_cache_key,
     stream_advisor_reply_payload,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.logging.errors import public_error_message
 from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
 
@@ -62,7 +62,9 @@ def _best_issue_snippet(text: str, description: str) -> str:
     sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", text or "") if item.strip()]
     if not sentences:
         return " ".join((text or "").split())[:220]
-    description_tokens = {token for token in re.findall(r"[a-z0-9']+", (description or "").lower()) if len(token) > 3}
+    description_tokens = {
+        token for token in re.findall(r"[a-z0-9']+", (description or "").lower()) if len(token) > 3
+    }
     ranked = sorted(
         sentences,
         key=lambda sentence: sum(1 for token in description_tokens if token in sentence.lower()),
@@ -126,7 +128,7 @@ async def _enqueue_book_advisor_task(
                 "total_chapters": body.total_chapters,
             },
         )
-    except Exception as exc:
+    except Exception:
         await mark_advisor_job_failed(
             db,
             job_id=job.id,
@@ -139,6 +141,7 @@ async def _enqueue_book_advisor_task(
 
 
 # ─── Main advisor conversation endpoint ──────────────────────────────────────
+
 
 @router.post("/{book_id}/advisor/message")
 async def advisor_message(
@@ -217,10 +220,14 @@ async def advisor_greeting(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
     plot_thread_count = (
-        await db.execute(select(func.count()).select_from(PlotThread).where(PlotThread.book_id == book.id))
+        await db.execute(
+            select(func.count()).select_from(PlotThread).where(PlotThread.book_id == book.id)
+        )
     ).scalar_one()
     character_count = (
-        await db.execute(select(func.count()).select_from(Character).where(Character.book_id == book.id))
+        await db.execute(
+            select(func.count()).select_from(Character).where(Character.book_id == book.id)
+        )
     ).scalar_one()
 
     return {
@@ -285,8 +292,10 @@ async def whats_the_word_stream(
                 description=body.description,
                 previous_word=body.previous_word,
             )
-            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload))))
-        except Exception as exc:
+            yield _advisor_sse(
+                "done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload)))
+            )
+        except Exception:
             yield _advisor_sse("error", {"error": public_error_message(500)})
         finally:
             await client.close()

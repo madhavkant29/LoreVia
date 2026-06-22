@@ -1,6 +1,6 @@
 import fitz
 
-from app.utils.book_utils import build_import_preview
+from app.utils.books.imports import build_import_preview
 
 
 def _make_text_pdf(chapters: list[str]) -> bytes:
@@ -73,9 +73,16 @@ def test_preview_includes_all_fields():
     raw = _make_text_pdf(["Chapter 1"])
     preview = build_import_preview(format_name="pdf", work_type="novel", raw=raw)
     required = [
-        "detected_language", "language_confidence", "title", "author",
-        "sections", "chapter_count", "toc_detected", "front_matter_count",
-        "confidence", "warnings",
+        "detected_language",
+        "language_confidence",
+        "title",
+        "author",
+        "sections",
+        "chapter_count",
+        "toc_detected",
+        "front_matter_count",
+        "confidence",
+        "warnings",
     ]
     for key in required:
         assert key in preview, f"Missing field: {key}"
@@ -85,6 +92,7 @@ def test_preview_sections_are_serializable():
     raw = _make_text_pdf(["Chapter 1", "Chapter 2"])
     preview = build_import_preview(format_name="pdf", work_type="novel", raw=raw)
     import json
+
     serialized = json.dumps(preview)
     assert serialized
 

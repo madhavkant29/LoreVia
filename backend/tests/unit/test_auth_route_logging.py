@@ -1,14 +1,24 @@
+import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
-import uuid
 
 import pytest
-from fastapi import Response
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from starlette.requests import Request
 
-from app.api.v1.routes.auth import _record_login_activity, _schedule_trial_email_events_best_effort, login, oauth_supabase, refresh
-from app.core.security import DUMMY_PASSWORD_HASH, create_access_token, create_refresh_token, decode_token
+from app.api.v1.routes.auth import (
+    _record_login_activity,
+    _schedule_trial_email_events_best_effort,
+    login,
+    oauth_supabase,
+    refresh,
+)
+from app.core.security import (
+    DUMMY_PASSWORD_HASH,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+)
 from app.schemas.auth import LoginBody, RefreshBody, SupabaseOAuthBody
 
 
@@ -39,11 +49,19 @@ async def test_supabase_oauth_failure_does_not_log_response_body(monkeypatch, ca
         async def get(self, url, headers):
             return FakeResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
-    body = SupabaseOAuthBody(token="user-token", accepted_terms=True, device_id="device-logging-1234567890")
+    body = SupabaseOAuthBody(
+        token="user-token", accepted_terms=True, device_id="device-logging-1234567890"
+    )
     response = Response()
 
     with caplog.at_level("WARNING", logger="lorevia.auth"):
@@ -94,8 +112,12 @@ async def test_login_activity_cache_failure_does_not_block_auth(monkeypatch, cap
     async def fake_mark_cache_dirty(*_args, **_kwargs):
         raise RuntimeError("redis unavailable")
 
-    monkeypatch.setattr("app.api.v1.routes.auth.record_login_activity_row", fake_record_login_activity_row)
-    monkeypatch.setattr("app.api.v1.routes.auth.mark_user_dashboard_cache_dirty", fake_mark_cache_dirty)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.record_login_activity_row", fake_record_login_activity_row
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.mark_user_dashboard_cache_dirty", fake_mark_cache_dirty
+    )
 
     with caplog.at_level("WARNING", logger="lorevia.auth"):
         await _record_login_activity(object(), user)
@@ -184,28 +206,42 @@ async def test_refresh_route_uses_canonical_local_user_for_supabase_subject(monk
         return (
             {"id": str(resolved_user.id)},
             create_access_token(str(resolved_user.id), version=resolved_user.token_version),
-            create_refresh_token(str(resolved_user.id), version=resolved_user.token_version, session_id="new-session"),
+            create_refresh_token(
+                str(resolved_user.id), version=resolved_user.token_version, session_id="new-session"
+            ),
         )
 
-    def fake_user_response_with_cookies(_response, user_out, access_token: str, refresh_token: str, **_kwargs):
+    def fake_user_response_with_cookies(
+        _response, user_out, access_token: str, refresh_token: str, **_kwargs
+    ):
         captured["access"] = access_token
         captured["refresh"] = refresh_token
         return user_out
 
     monkeypatch.setattr(
         "app.api.v1.routes.auth.decode_token",
-        lambda token: {
-            "sub": str(supabase_auth_id),
-            "type": "refresh",
-            "ver": user.token_version,
-            "sid": "legacy-session",
-        } if token == "legacy-refresh-token" else None,
+        lambda token: (
+            {
+                "sub": str(supabase_auth_id),
+                "type": "refresh",
+                "ver": user.token_version,
+                "sid": "legacy-session",
+            }
+            if token == "legacy-refresh-token"
+            else None
+        ),
     )
-    monkeypatch.setattr("app.api.v1.routes.auth.get_user_for_auth_subject", fake_get_user_for_auth_subject)
-    monkeypatch.setattr("app.api.v1.routes.auth.consume_refresh_session", fake_consume_refresh_session)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.get_user_for_auth_subject", fake_get_user_for_auth_subject
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.consume_refresh_session", fake_consume_refresh_session
+    )
     monkeypatch.setattr("app.api.v1.routes.auth._record_login_activity", fake_record_login_activity)
     monkeypatch.setattr("app.api.v1.routes.auth._mint_token_pair", fake_mint_token_pair)
-    monkeypatch.setattr("app.api.v1.routes.auth._user_response_with_cookies", fake_user_response_with_cookies)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth._user_response_with_cookies", fake_user_response_with_cookies
+    )
 
     result = await refresh(
         request=Request({"type": "http", "method": "POST", "headers": []}),

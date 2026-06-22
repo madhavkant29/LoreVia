@@ -2,17 +2,15 @@ import Link from "next/link"
 import type { Metadata } from "next"
 import type { Route } from "next"
 import type { ReactNode } from "react"
-import { preload } from "react-dom"
 import Image from "next/image"
+import dynamic from "next/dynamic"
 
 import { AudienceSection } from "@/components/marketing/AudienceSection"
 import { SiteFooter } from "@/components/layout/SiteFooter"
 import { HomePricingSection } from "@/components/marketing/HomePricingSection"
-import { LandingShowcase } from "@/components/marketing/LandingShowcase"
 import { MarketingHeader } from "@/components/marketing/MarketingHeader"
 import { Reveal } from "@/components/marketing/Reveal"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { LANDING_SHOWCASE_VISUALS } from "@/lib/marketing/landingShowcaseVisuals"
 import { homepageComparisonRows, comparisonIndexCards } from "@/lib/comparisons"
 import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
 import {
@@ -55,6 +53,15 @@ export const metadata: Metadata = {
 }
 
 const fileFormats = ["DOCX", "PDF", "EPUB", "Markdown", "TXT", "Vault"]
+
+const LandingShowcase = dynamic(
+  () => import("@/components/marketing/LandingShowcase").then((module) => module.LandingShowcase),
+  {
+    loading: () => (
+      <section className="mx-auto min-h-[32rem] max-w-[1600px] px-5 py-20 md:px-8" aria-label="Loading product example" />
+    ),
+  },
+)
 
 const workflowSteps = [
   {
@@ -112,16 +119,6 @@ const faqItems = [
     a: "Yes. LoreVia includes export and compile workflows so you can keep publishing progress moving without locking the book inside the platform.",
   },
 ]
-
-function LandingScreenshotPreloads() {
-  for (const visual of LANDING_SHOWCASE_VISUALS) {
-    preload(visual, {
-      as: "image",
-      fetchPriority: visual === "/landing/manuscript-analysis.png" ? "high" : "low",
-    })
-  }
-  return null
-}
 
 function Section({
   id,
@@ -353,7 +350,6 @@ export default function HomePage() {
 
   return (
     <>
-      <LandingScreenshotPreloads />
       <JsonLdScript id="home-faq-jsonld" data={faqJsonLd} />
       <JsonLdScript id="home-software-jsonld" data={softwareJsonLd} />
 
@@ -378,15 +374,18 @@ export default function HomePage() {
                       href={ctaHref}
                       className="inline-flex items-center justify-center rounded-md bg-[#d6a84f] px-6 py-3.5 text-base font-semibold text-[#15120b] transition hover:bg-[#e4bb67]"
                     >
-                      Start analyzing your manuscript
+                      Analyze my manuscript
                     </Link>
                     <Link
-                      href="#features"
+                      href="/demo/workspace"
                       className="inline-flex items-center justify-center rounded-md border border-white/[0.12] bg-white/5 px-6 py-3.5 text-base font-semibold text-[#f4f1ea] transition hover:bg-white/[0.08]"
                     >
-                      See how it works
+                      See a sample finding
                     </Link>
                   </div>
+                  <p className="mt-3 text-sm text-[#a09a90]">
+                    Includes a 10-day Author trial. No payment required.
+                  </p>
 
                   <div className="mt-9">
                     <p className="text-sm text-[#a09a90]">Built for fiction writers, novelists, beta readers, and editors.</p>
@@ -458,7 +457,7 @@ export default function HomePage() {
                   href={ctaHref}
                   className="inline-flex items-center justify-center rounded-md bg-[#d6a84f] px-7 py-3.5 text-base font-semibold text-[#15120b] transition hover:bg-[#e4bb67]"
                 >
-                  Start your 10-day trial
+                  Analyze my manuscript
                 </Link>
                 <Link
                   href="/pricing"
@@ -467,6 +466,9 @@ export default function HomePage() {
                   View pricing
                 </Link>
               </div>
+              <p className="text-sm text-[#a09a90] lg:col-start-2 lg:text-right">
+                Includes a 10-day Author trial. No payment required.
+              </p>
             </div>
           </div>
         </section>

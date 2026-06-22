@@ -8,8 +8,10 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1.routes import public
+from app.core.redis import key_public_books
 from app.schemas.public import PublicBookManualIn, PublicBookShareBody, PublicChapterIn
 from app.utils import public_utils
+from app.utils.public import content
 
 
 class _ScalarList:
@@ -80,14 +82,18 @@ async def _async_empty_book_analytics(*_args, **_kwargs):
 
 
 def _request():
-    return SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={"user-agent": "pytest"})
+    return SimpleNamespace(
+        client=SimpleNamespace(host="127.0.0.1"), headers={"user-agent": "pytest"}
+    )
 
 
 def _allow_public_share(monkeypatch):
     async def _allow(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr("app.services.public_publish_service.enforce_daily_public_publish_limit", _allow)
+    monkeypatch.setattr(
+        "app.services.public_publish_service.enforce_daily_public_publish_limit", _allow
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -197,7 +203,9 @@ async def test_list_public_beta_forum_posts_returns_cached_payload(monkeypatch):
     monkeypatch.setattr(public, "cache_get_int", _fake_cache_get_int)
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
 
-    payload = await public.list_public_beta_forum_posts(db=_FakeDB(), page=1, page_size=20, current_user=None)
+    payload = await public.list_public_beta_forum_posts(
+        db=_FakeDB(), page=1, page_size=20, current_user=None
+    )
 
     assert payload.items[0].id == cached_post["id"]
     assert payload.total == 1
@@ -218,14 +226,18 @@ async def test_list_public_beta_forum_posts_caches_anonymous_page(monkeypatch):
         cached["args"] = (key, value, ttl)
 
     async def _fake_list_public_forum_posts(_db, **kwargs):
-        return public.PublicForumPostListOut(items=[], total=3, page=kwargs["page"], page_size=kwargs["page_size"], has_more=True)
+        return public.PublicForumPostListOut(
+            items=[], total=3, page=kwargs["page"], page_size=kwargs["page_size"], has_more=True
+        )
 
     monkeypatch.setattr(public, "cache_get_int", _fake_cache_get_int)
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
     monkeypatch.setattr(public, "list_public_forum_posts", _fake_list_public_forum_posts)
 
-    payload = await public.list_public_beta_forum_posts(db=_FakeDB(), q=" sky ", page=2, page_size=15, current_user=None)
+    payload = await public.list_public_beta_forum_posts(
+        db=_FakeDB(), q=" sky ", page=2, page_size=15, current_user=None
+    )
 
     assert payload.page == 2
     assert payload.page_size == 15
@@ -262,7 +274,9 @@ async def test_list_public_beta_forum_comments_uses_anonymous_cache(monkeypatch)
     monkeypatch.setattr(public, "cache_get_int", _fake_cache_get_int)
     monkeypatch.setattr(public, "get_public_forum_comments_cache", _fake_get_comments_cache)
 
-    payload = await public.list_public_beta_forum_comments(post_id=uuid.uuid4(), db=_FakeDB(), current_user=None)
+    payload = await public.list_public_beta_forum_comments(
+        post_id=uuid.uuid4(), db=_FakeDB(), current_user=None
+    )
 
     assert payload.items[0].body == "Great premise"
 
@@ -307,7 +321,9 @@ async def test_list_public_beta_forum_comments_caches_anonymous_payload(monkeypa
     monkeypatch.setattr(public, "list_public_forum_comments", _fake_list_comments)
 
     post_id = uuid.uuid4()
-    payload = await public.list_public_beta_forum_comments(post_id=post_id, db=_FakeDB(), current_user=None)
+    payload = await public.list_public_beta_forum_comments(
+        post_id=post_id, db=_FakeDB(), current_user=None
+    )
 
     assert payload.items[0].body == "Looks fun"
     assert cached["args"][1] == str(post_id)
@@ -445,7 +461,9 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
         created_at=datetime.now(UTC),
         public_share_status="approved",
     )
-    db = _FakeDB(execute_values=[_Result(all_rows=[(demo_book, "demo_user"), (shared_book, "shared_user")])])
+    db = _FakeDB(
+        execute_values=[_Result(all_rows=[(demo_book, "demo_user"), (shared_book, "shared_user")])]
+    )
 
     payload = await public.list_public_books(db=db)
 
@@ -461,7 +479,9 @@ async def test_get_public_book_returns_cached_payload(monkeypatch):
 
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     book_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None)
+    book = SimpleNamespace(
+        id=book_id, is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None
+    )
     payload = await public.get_public_book(book_id, db=_FakeDB(get_values=[book]))
     assert payload["id"] == "cached"
     assert payload["analytics"]["book_view_count"] == 0
@@ -613,7 +633,9 @@ async def test_get_public_chapter_returns_cached_payload(monkeypatch):
         return {"chapter_number": 1}
 
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
-    book = SimpleNamespace(id=uuid.uuid4(), is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None)
+    book = SimpleNamespace(
+        id=uuid.uuid4(), is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None
+    )
     payload = await public.get_public_chapter(book.id, 1, db=_FakeDB(get_values=[book]))
     assert payload["chapter_number"] == 1
 
@@ -634,7 +656,9 @@ async def test_get_public_chapter_skips_cache_for_user_shared_samples(monkeypatc
 
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
-    monkeypatch.setattr(public, "deserialize_manuscript_content", lambda _raw: {"text": "fresh text", "html": None})
+    monkeypatch.setattr(
+        public, "deserialize_manuscript_content", lambda _raw: {"text": "fresh text", "html": None}
+    )
     monkeypatch.setattr(public, "download_book", lambda _key: b"chapter")
     monkeypatch.setattr(public, "get_presigned_url", lambda key: f"https://signed/{key}")
 
@@ -661,7 +685,9 @@ async def test_get_public_chapter_skips_cache_for_user_shared_samples(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_get_public_chapter_ignores_cached_payload_when_book_is_no_longer_visible(monkeypatch):
+async def test_get_public_chapter_ignores_cached_payload_when_book_is_no_longer_visible(
+    monkeypatch,
+):
     monkeypatch.setattr(public, "build_public_book_analytics", _async_empty_book_analytics)
 
     async def _fake_cache_get(_key):
@@ -696,7 +722,9 @@ async def test_get_public_chapter_raises_for_missing_book_or_chapter(monkeypatch
         await public.get_public_chapter(uuid.uuid4(), 1, db=db)
     assert exc.value.status_code == 404
 
-    book = SimpleNamespace(id=uuid.uuid4(), is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None)
+    book = SimpleNamespace(
+        id=uuid.uuid4(), is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None
+    )
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=None)])
     with pytest.raises(HTTPException) as exc:
         await public.get_public_chapter(book.id, 4, db=db)
@@ -715,12 +743,24 @@ async def test_get_public_chapter_builds_payload(monkeypatch):
 
     monkeypatch.setattr(public, "cache_get", _fake_cache_get)
     monkeypatch.setattr(public, "cache_set", _fake_cache_set)
-    monkeypatch.setattr(public, "deserialize_manuscript_content", lambda _raw: {"text": "chapter text", "html": "<p>x</p>"})
+    monkeypatch.setattr(
+        public,
+        "deserialize_manuscript_content",
+        lambda _raw: {"text": "chapter text", "html": "<p>x</p>"},
+    )
     monkeypatch.setattr(public, "download_book", lambda _key: b"chapter")
     monkeypatch.setattr(public, "get_presigned_url", lambda key: f"https://signed/{key}")
 
     book_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, is_public=True, source_kind="public_demo", hidden_at=None, archived_at=None, title="Book", total_chapters=5)
+    book = SimpleNamespace(
+        id=book_id,
+        is_public=True,
+        source_kind="public_demo",
+        hidden_at=None,
+        archived_at=None,
+        title="Book",
+        total_chapters=5,
+    )
     chapter = SimpleNamespace(number=2, title="Two", description="Desc", s3_key="chapters/2.txt")
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=chapter)])
 
@@ -735,7 +775,9 @@ async def test_get_public_chapter_builds_payload(monkeypatch):
 async def test_create_public_book_manual_requires_chapters():
     body = PublicBookManualIn(title="Title", chapters=[])
     with pytest.raises(HTTPException) as exc:
-        await public.create_public_book_manual(db=_FakeDB(), body=body, admin_user=SimpleNamespace(id=uuid.uuid4()))
+        await public.create_public_book_manual(
+            db=_FakeDB(), body=body, admin_user=SimpleNamespace(id=uuid.uuid4())
+        )
     assert exc.value.status_code == 400
 
 
@@ -743,13 +785,13 @@ async def test_create_public_book_manual_requires_chapters():
 async def test_create_public_book_manual_persists_book_and_chapters(monkeypatch):
     uploaded = []
     invalidated = []
-    monkeypatch.setattr(public_utils, "upload_text", lambda key, text: uploaded.append((key, text)))
-    monkeypatch.setattr(public_utils, "count_tokens", lambda text: len(text.split()))
+    monkeypatch.setattr(content, "upload_text", lambda key, text: uploaded.append((key, text)))
+    monkeypatch.setattr(content, "count_tokens", lambda text: len(text.split()))
 
     async def _fake_cache_del(key):
         invalidated.append(key)
 
-    monkeypatch.setattr(public_utils, "cache_del", _fake_cache_del)
+    monkeypatch.setattr(content, "cache_del", _fake_cache_del)
     user = SimpleNamespace(id=uuid.uuid4())
     body = PublicBookManualIn(
         title="Title",
@@ -773,7 +815,7 @@ async def test_create_public_book_manual_persists_book_and_chapters(monkeypatch)
     assert book.total_chapters == 2
     assert book.total_tokens == 3
     assert len(uploaded) == 2
-    assert invalidated == [public_utils.key_public_books()]
+    assert invalidated == [key_public_books()]
 
 
 @pytest.mark.asyncio
@@ -783,27 +825,38 @@ async def test_append_public_chapter_raises_for_foreign_book():
     body = PublicChapterIn(title="Title", text="text", description="desc")
 
     with pytest.raises(HTTPException) as exc:
-        await public.append_public_chapter(db=db, book_id=uuid.uuid4(), body=body, admin_user=SimpleNamespace(id=uuid.uuid4()))
+        await public.append_public_chapter(
+            db=db, book_id=uuid.uuid4(), body=body, admin_user=SimpleNamespace(id=uuid.uuid4())
+        )
     assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_append_public_chapter_updates_counts_and_invalidates_cache(monkeypatch):
     invalidated = []
-    monkeypatch.setattr(public_utils, "upload_text", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(public_utils, "count_tokens", lambda text: len(text.split()))
+    monkeypatch.setattr(content, "upload_text", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(content, "count_tokens", lambda text: len(text.split()))
 
     async def _fake_cache_del(key):
         invalidated.append(key)
 
-    monkeypatch.setattr(public_utils, "cache_del", _fake_cache_del)
+    monkeypatch.setattr(content, "cache_del", _fake_cache_del)
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
-    book = SimpleNamespace(id=book_id, user_id=user_id, is_public=True, source_kind="public_demo", total_tokens=2, total_chapters=1)
+    book = SimpleNamespace(
+        id=book_id,
+        user_id=user_id,
+        is_public=True,
+        source_kind="public_demo",
+        total_tokens=2,
+        total_chapters=1,
+    )
     db = _FakeDB(get_values=[book], execute_values=[_Result(scalar_one=2)])
     body = PublicChapterIn(title="Next", text="one two three", description="desc")
 
-    payload = await public.append_public_chapter(db=db, book_id=book_id, body=body, admin_user=SimpleNamespace(id=user_id))
+    payload = await public.append_public_chapter(
+        db=db, book_id=book_id, body=body, admin_user=SimpleNamespace(id=user_id)
+    )
 
     assert payload == {"book_id": str(book_id), "chapter_number": 2, "saved": True}
     assert book.total_chapters == 2
@@ -827,13 +880,13 @@ async def test_publish_user_shared_book_requires_explicit_confirmation():
     )
 
     with pytest.raises(HTTPException) as exc:
-            await public.publish_user_shared_book(
-                book_id,
-                PublicBookShareBody(confirm_public_share=False, description="Share me"),
-                _request(),
-                db=_FakeDB(get_values=[book]),
-                current_user=SimpleNamespace(id=user_id, tier="author"),
-            )
+        await public.publish_user_shared_book(
+            book_id,
+            PublicBookShareBody(confirm_public_share=False, description="Share me"),
+            _request(),
+            db=_FakeDB(get_values=[book]),
+            current_user=SimpleNamespace(id=user_id, tier="author"),
+        )
     assert exc.value.status_code == 400
 
 
@@ -895,7 +948,9 @@ async def test_publish_user_shared_book_refreshes_copyright_signals_before_reque
     db = _FakeDB(get_values=[book])
     _allow_public_share(monkeypatch)
 
-    monkeypatch.setattr("app.services.public_publish_service.download_book", lambda _key: b"%PDF-1.4 sample")
+    monkeypatch.setattr(
+        "app.services.public_publish_service.download_book", lambda _key: b"%PDF-1.4 sample"
+    )
 
     async def _fake_evaluate_document_copyright(*, format_name, raw, existing_isbn=None):
         assert format_name == "pdf"
@@ -903,7 +958,10 @@ async def test_publish_user_shared_book_refreshes_copyright_signals_before_reque
         assert existing_isbn is None
         return {"isbn": "9780306406157", "copyright_warning": True}
 
-    monkeypatch.setattr("app.services.public_publish_service.evaluate_document_copyright", _fake_evaluate_document_copyright)
+    monkeypatch.setattr(
+        "app.services.public_publish_service.evaluate_document_copyright",
+        _fake_evaluate_document_copyright,
+    )
 
     payload = await public.publish_user_shared_book(
         book_id,

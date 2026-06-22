@@ -317,26 +317,29 @@ async def create_tracked_chat_completion(
     metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> ChatCompletion:
-    await assert_llm_token_capacity_for_request(
-        db=db,
-        user_id=user_id,
-        estimated_tokens=estimate_chat_completion_tokens(kwargs),
-        limit_subject="LLM usage",
+    resolved_user_id = _coerce_uuid(user_id or get_request_user_id())
+    if resolved_user_id is None:
+        return await client.chat.completions.create(model=model, **kwargs)
+    from app.services.llm_control_service import (
+        fail_llm_reservation,
+        finish_llm_reservation,
+        reserve_llm_call,
     )
-    response = await client.chat.completions.create(model=model, **kwargs)
+
+    reservation = await reserve_llm_call(
+        user_id=resolved_user_id,
+        estimated_tokens=estimate_chat_completion_tokens(kwargs),
+        feature=feature,
+        operation="chat",
+        model=model,
+        book_id=book_id,
+    )
     try:
-        await record_llm_usage_event(
-            response=response,
-            feature=feature,
-            operation="chat_completion",
-            model=model,
-            db=db,
-            user_id=user_id,
-            book_id=book_id,
-            metadata=metadata,
-        )
+        response = await client.chat.completions.create(model=model, **kwargs)
     except Exception:
-        log.warning("llm_usage_record_failed feature=%s operation=chat_completion", feature, exc_info=True)
+        await fail_llm_reservation(reservation)
+        raise
+    await finish_llm_reservation(reservation, response)
     return response
 
 
@@ -351,26 +354,29 @@ async def create_tracked_embedding(
     metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> CreateEmbeddingResponse:
-    await assert_llm_token_capacity_for_request(
-        db=db,
-        user_id=user_id,
-        estimated_tokens=estimate_embedding_tokens(kwargs),
-        limit_subject="LLM usage",
+    resolved_user_id = _coerce_uuid(user_id or get_request_user_id())
+    if resolved_user_id is None:
+        return await client.embeddings.create(model=model, **kwargs)
+    from app.services.llm_control_service import (
+        fail_llm_reservation,
+        finish_llm_reservation,
+        reserve_llm_call,
     )
-    response = await client.embeddings.create(model=model, **kwargs)
+
+    reservation = await reserve_llm_call(
+        user_id=resolved_user_id,
+        estimated_tokens=estimate_embedding_tokens(kwargs),
+        feature=feature,
+        operation="embedding",
+        model=model,
+        book_id=book_id,
+    )
     try:
-        await record_llm_usage_event(
-            response=response,
-            feature=feature,
-            operation="embedding",
-            model=model,
-            db=db,
-            user_id=user_id,
-            book_id=book_id,
-            metadata=metadata,
-        )
+        response = await client.embeddings.create(model=model, **kwargs)
     except Exception:
-        log.warning("llm_usage_record_failed feature=%s operation=embedding", feature, exc_info=True)
+        await fail_llm_reservation(reservation)
+        raise
+    await finish_llm_reservation(reservation, response)
     return response
 
 

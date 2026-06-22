@@ -220,7 +220,13 @@ async def get_transaction_summary(transaction_id: str) -> PaddleTransactionSumma
 
     plan = normalize_plan_code((data.get("custom_data") or {}).get("plan"))
     interval = _transaction_billing_interval(data, plan=plan)
-    display_name = "Architect" if plan.startswith("architect_") else "Author" if plan.startswith("author_") else plan.replace("_", " ").title()
+    display_name = (
+        "Architect"
+        if plan.startswith("architect_")
+        else "Author"
+        if plan.startswith("author_")
+        else plan.replace("_", " ").title()
+    )
 
     return PaddleTransactionSummary(
         transaction_id=str(data.get("id") or transaction_id),
@@ -233,8 +239,17 @@ async def get_transaction_summary(transaction_id: str) -> PaddleTransactionSumma
         invoice_number=data.get("invoice_number"),
         invoice_pdf_url=invoice_pdf_url,
         subscription_id=data.get("subscription_id"),
-        customer_email=((data.get("customer") or {}).get("email") if isinstance(data.get("customer"), dict) else None),
-        customer_id=((data.get("customer") or {}).get("id") if isinstance(data.get("customer"), dict) else None) or data.get("customer_id"),
+        customer_email=(
+            (data.get("customer") or {}).get("email")
+            if isinstance(data.get("customer"), dict)
+            else None
+        ),
+        customer_id=(
+            (data.get("customer") or {}).get("id")
+            if isinstance(data.get("customer"), dict)
+            else None
+        )
+        or data.get("customer_id"),
         charge_at=(
             _parse_paddle_datetime(data.get("billed_at"))
             or _parse_paddle_datetime(data.get("completed_at"))

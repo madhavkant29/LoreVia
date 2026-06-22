@@ -7,8 +7,10 @@ from typing import Any
 
 from app.engine.character.entity_filters import character_visibility_score, entity_words
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
-from app.services.character_identity.normalization import display_name_form, normalized_comparison_name
-
+from app.services.character_identity.normalization import (
+    display_name_form,
+    normalized_comparison_name,
+)
 
 ADJUDICATION_CANDIDATE = "candidate"
 ADJUDICATION_PROMOTED_CHARACTER = "promoted_character"
@@ -43,7 +45,17 @@ DIALOGUE_VERBS = {
     "told",
 }
 HUMAN_PRONOUNS = {"he", "she", "they", "him", "her", "his", "hers", "their", "theirs"}
-LOCATION_PREPOSITIONS = {"in", "at", "from", "near", "towards", "toward", "inside", "outside", "through"}
+LOCATION_PREPOSITIONS = {
+    "in",
+    "at",
+    "from",
+    "near",
+    "towards",
+    "toward",
+    "inside",
+    "outside",
+    "through",
+}
 HUMAN_ACTION_VERBS = {
     "walked",
     "looked",
@@ -209,13 +221,18 @@ def adjudicate_character_candidate(
         entity_type=entity_type,
         matched_character_id=matched_character_id,
     )
-    rejection_reason = status_reason if status in {
-        ADJUDICATION_REJECTED,
-        ADJUDICATION_PLACE,
-        ADJUDICATION_ORGANIZATION,
-        ADJUDICATION_OBJECT,
-        ADJUDICATION_TITLE_OR_ROLE,
-    } else None
+    rejection_reason = (
+        status_reason
+        if status
+        in {
+            ADJUDICATION_REJECTED,
+            ADJUDICATION_PLACE,
+            ADJUDICATION_ORGANIZATION,
+            ADJUDICATION_OBJECT,
+            ADJUDICATION_TITLE_OR_ROLE,
+        }
+        else None
+    )
     return CandidateAdjudication(
         raw_name=raw_name,
         display_name=display_name,
@@ -224,13 +241,17 @@ def adjudicate_character_candidate(
         adjudication_status=status,
         character_score=score,
         confidence=_coerce_confidence(confidence),
-        reason_codes=tuple(_dedupe([*(reason_codes or []), *type_reasons, *score_reasons, status_reason])),
+        reason_codes=tuple(
+            _dedupe([*(reason_codes or []), *type_reasons, *score_reasons, status_reason])
+        ),
         rejection_reason=rejection_reason,
         evidence_windows=tuple(evidence_windows),
     )
 
 
-def classify_entity_type(name: str | None, evidence: Mapping[str, Any] | None = None) -> tuple[str, list[str]]:
+def classify_entity_type(
+    name: str | None, evidence: Mapping[str, Any] | None = None
+) -> tuple[str, list[str]]:
     display_name = display_name_form(name)
     words = [word.casefold() for word in entity_words(display_name)]
     reasons: list[str] = []
@@ -246,7 +267,11 @@ def classify_entity_type(name: str | None, evidence: Mapping[str, Any] | None = 
         return ENTITY_JUNK, [f"candidate_kind_{kind.value}"]
     if kind == CandidateKind.GROUP_DESCRIPTOR:
         return ENTITY_TITLE_OR_ROLE, [f"candidate_kind_{kind.value}"]
-    if kind in {CandidateKind.ROLE_DESCRIPTOR, CandidateKind.TITLE_NAME, CandidateKind.KINSHIP_DESCRIPTOR}:
+    if kind in {
+        CandidateKind.ROLE_DESCRIPTOR,
+        CandidateKind.TITLE_NAME,
+        CandidateKind.KINSHIP_DESCRIPTOR,
+    }:
         reasons.append(f"candidate_kind_{kind.value}")
         if _has_human_evidence(evidence or {}):
             return ENTITY_ALIAS_CANDIDATE, reasons
@@ -276,7 +301,9 @@ def classify_entity_type(name: str | None, evidence: Mapping[str, Any] | None = 
     return ENTITY_PERSON, reasons or ["person_name_shape"]
 
 
-def collect_candidate_evidence_windows(name: str | None, evidence: Mapping[str, Any]) -> list[dict[str, Any]]:
+def collect_candidate_evidence_windows(
+    name: str | None, evidence: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     display_name = display_name_form(name)
     windows: list[dict[str, Any]] = []
     for raw_windows in _candidate_window_sources(evidence):
@@ -292,7 +319,13 @@ def collect_candidate_evidence_windows(name: str | None, evidence: Mapping[str, 
 
     for key in ("snippets", "mention_texts", "passages", "local_passages"):
         raw_value = evidence.get(key)
-        values = raw_value if isinstance(raw_value, list) else [raw_value] if isinstance(raw_value, str) else []
+        values = (
+            raw_value
+            if isinstance(raw_value, list)
+            else [raw_value]
+            if isinstance(raw_value, str)
+            else []
+        )
         for value in values:
             text = _compact_text(value)
             if not text:
@@ -325,12 +358,26 @@ def score_character_likeness(
         or verifier_local.get("mention_count")
     )
     chapter_numbers = evidence.get("chapter_numbers")
-    chapter_count = len({int(chapter) for chapter in chapter_numbers if isinstance(chapter, int) or str(chapter).isdigit()}) if isinstance(chapter_numbers, list) else 0
+    chapter_count = (
+        len(
+            {
+                int(chapter)
+                for chapter in chapter_numbers
+                if isinstance(chapter, int) or str(chapter).isdigit()
+            }
+        )
+        if isinstance(chapter_numbers, list)
+        else 0
+    )
 
-    if any(window.get("dialogue_attribution") for window in evidence_windows) or evidence.get("dialogue_support"):
+    if any(window.get("dialogue_attribution") for window in evidence_windows) or evidence.get(
+        "dialogue_support"
+    ):
         score += 25
         reasons.append("dialogue_attribution")
-    if any(window.get("subject_action") for window in evidence_windows) or evidence.get("has_dialogue_or_action"):
+    if any(window.get("subject_action") for window in evidence_windows) or evidence.get(
+        "has_dialogue_or_action"
+    ):
         score += 20
         reasons.append("human_action")
     if any(window.get("human_pronouns") for window in evidence_windows):
@@ -339,7 +386,9 @@ def score_character_likeness(
     if any(window.get("person_ner") for window in evidence_windows):
         score += 15
         reasons.append("person_ner_window")
-    if any(window.get("trait_words") for window in evidence_windows) or evidence.get("has_physical_description"):
+    if any(window.get("trait_words") for window in evidence_windows) or evidence.get(
+        "has_physical_description"
+    ):
         score += 15
         reasons.append("trait_evidence")
     if chapter_count >= 2 or evidence.get("appears_multiple_times") or mention_count >= 2:
@@ -355,7 +404,12 @@ def score_character_likeness(
         reasons.append("visibility_score_person_like")
 
     words = [word.casefold() for word in entity_words(name)]
-    if entity_type == ENTITY_PERSON and len(words) >= 2 and mention_count >= 2 and _has_human_evidence(evidence):
+    if (
+        entity_type == ENTITY_PERSON
+        and len(words) >= 2
+        and mention_count >= 2
+        and _has_human_evidence(evidence)
+    ):
         score += 5
         reasons.append("full_name_human_evidence")
     if entity_type == ENTITY_JUNK:
@@ -364,7 +418,9 @@ def score_character_likeness(
     if entity_type == ENTITY_PLACE and not _has_human_evidence(evidence):
         score -= 30
         reasons.append("place_without_human_evidence")
-    if any(window.get("location_preposition") for window in evidence_windows) and not _has_human_evidence(evidence):
+    if any(
+        window.get("location_preposition") for window in evidence_windows
+    ) and not _has_human_evidence(evidence):
         score -= 25
         reasons.append("location_preposition_context")
     if mention_count <= 1 and not _has_human_evidence(evidence):
@@ -389,7 +445,11 @@ def adjudication_status_for_score(
     entity_type: str,
     matched_character_id: object | None = None,
 ) -> tuple[str, str]:
-    if matched_character_id is not None and entity_type in {ENTITY_PERSON, ENTITY_ALIAS_CANDIDATE} and score >= 35:
+    if (
+        matched_character_id is not None
+        and entity_type in {ENTITY_PERSON, ENTITY_ALIAS_CANDIDATE}
+        and score >= 35
+    ):
         return ADJUDICATION_MERGED_ALIAS, "matched_existing_character"
     if entity_type == ENTITY_JUNK:
         return ADJUDICATION_REJECTED, "junk_fragment"
@@ -413,13 +473,24 @@ def adjudication_status_for_score(
 def _window_features(name: str, text: str, raw: Mapping[str, Any]) -> dict[str, Any]:
     lowered = text.casefold()
     name_pattern = re.escape(name.casefold()) if name else ""
-    dialogue_attribution = bool(raw.get("dialogue_attribution")) or bool(
-        name_pattern and re.search(rf"\b{name_pattern}\b[^.!?]{{0,40}}\b({'|'.join(DIALOGUE_VERBS)})\b", lowered)
-    ) or bool(
-        name_pattern and re.search(rf"\b({'|'.join(DIALOGUE_VERBS)})\b[^.!?]{{0,40}}\b{name_pattern}\b", lowered)
+    dialogue_attribution = (
+        bool(raw.get("dialogue_attribution"))
+        or bool(
+            name_pattern
+            and re.search(
+                rf"\b{name_pattern}\b[^.!?]{{0,40}}\b({'|'.join(DIALOGUE_VERBS)})\b", lowered
+            )
+        )
+        or bool(
+            name_pattern
+            and re.search(
+                rf"\b({'|'.join(DIALOGUE_VERBS)})\b[^.!?]{{0,40}}\b{name_pattern}\b", lowered
+            )
+        )
     )
     subject_action = bool(raw.get("subject_action") or raw.get("has_person_context")) or bool(
-        name_pattern and re.search(rf"\b{name_pattern}\b\s+(?:{'|'.join(HUMAN_ACTION_VERBS)})\b", lowered)
+        name_pattern
+        and re.search(rf"\b{name_pattern}\b\s+(?:{'|'.join(HUMAN_ACTION_VERBS)})\b", lowered)
     )
     tokens = set(re.findall(r"[a-z][a-z'-]*", lowered))
     return {

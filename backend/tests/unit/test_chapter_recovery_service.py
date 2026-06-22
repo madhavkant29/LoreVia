@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,7 +22,9 @@ class _FakeDB:
 
 
 @pytest.mark.asyncio
-async def test_resolve_reader_chapter_payload_returns_source_fallback_for_missing_chapter(monkeypatch):
+async def test_resolve_reader_chapter_payload_returns_source_fallback_for_missing_chapter(
+    monkeypatch,
+):
     book = SimpleNamespace(
         id=uuid.uuid4(),
         format="pdf",
@@ -34,7 +36,11 @@ async def test_resolve_reader_chapter_payload_returns_source_fallback_for_missin
     monkeypatch.setattr(
         chapter_recovery_service,
         "parse_chapter_from_source",
-        lambda *_args, **_kwargs: {"title": "Recovered", "text": "Recovered text", "images": [{"bytes": b"x", "marker": "[[IMAGE:1]]"}]},
+        lambda *_args, **_kwargs: {
+            "title": "Recovered",
+            "text": "Recovered text",
+            "images": [{"bytes": b"x", "marker": "[[IMAGE:1]]"}],
+        },
     )
     monkeypatch.setattr(
         chapter_recovery_service,
@@ -57,7 +63,9 @@ async def test_resolve_reader_chapter_payload_returns_source_fallback_for_missin
 
 
 @pytest.mark.asyncio
-async def test_resolve_reader_chapter_payload_queues_repair_for_mismatched_source_integrity(monkeypatch):
+async def test_resolve_reader_chapter_payload_queues_repair_for_mismatched_source_integrity(
+    monkeypatch,
+):
     chapter = SimpleNamespace(
         id=uuid.uuid4(),
         number=1,
@@ -82,8 +90,10 @@ async def test_resolve_reader_chapter_payload_queues_repair_for_mismatched_sourc
         "deserialize_manuscript_content",
         lambda _raw: {"text": "", "html": None},
     )
+
     async def _fake_serialize_media(*_args, **_kwargs):
         return []
+
     monkeypatch.setattr(
         chapter_recovery_service,
         "serialize_chapter_media",
@@ -94,7 +104,10 @@ async def test_resolve_reader_chapter_payload_queues_repair_for_mismatched_sourc
         "chapter_body_needs_scene_workspace_fallback",
         lambda *_args, **_kwargs: False,
     )
-    async def _fake_queue(_db, *, book, chapter, current_user=None, reason="source_integrity_mismatch"):
+
+    async def _fake_queue(
+        _db, *, book, chapter, current_user=None, reason="source_integrity_mismatch"
+    ):
         chapter.analysis_state = {
             **(chapter.analysis_state or {}),
             "source_integrity": {
@@ -106,6 +119,7 @@ async def test_resolve_reader_chapter_payload_queues_repair_for_mismatched_sourc
             },
         }
         return True
+
     monkeypatch.setattr(chapter_recovery_service, "queue_chapter_repair_if_needed", _fake_queue)
 
     payload = await chapter_recovery_service.resolve_reader_chapter_payload(
@@ -214,10 +228,20 @@ async def test_repair_chapter_payload_from_source_persists_recovered_state(monke
     monkeypatch.setattr(
         chapter_recovery_service,
         "parse_chapter_from_source",
-        lambda *_args, **_kwargs: {"title": "One", "text": "[[IMAGE:1]] repaired", "images": [{"bytes": b"x", "marker": "[[IMAGE:1]]"}]},
+        lambda *_args, **_kwargs: {
+            "title": "One",
+            "text": "[[IMAGE:1]] repaired",
+            "images": [{"bytes": b"x", "marker": "[[IMAGE:1]]"}],
+        },
     )
-    monkeypatch.setattr(chapter_recovery_service, "upload_text", lambda key, content: uploads.append((key, content)) or key)
-    monkeypatch.setattr(chapter_recovery_service, "upload_binary", lambda key, raw, content_type=None: key)
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "upload_text",
+        lambda key, content: uploads.append((key, content)) or key,
+    )
+    monkeypatch.setattr(
+        chapter_recovery_service, "upload_binary", lambda key, raw, content_type=None: key
+    )
     monkeypatch.setattr(chapter_recovery_service, "cache_del", _async_none)
 
     result = await chapter_recovery_service.repair_chapter_payload_from_source(
@@ -273,7 +297,9 @@ async def test_queue_chapter_repair_if_needed_marks_state_and_enqueues(monkeypat
             queued.append({"args": args, "queue": queue, "kwargs": kwargs})
 
     monkeypatch.setattr(chapter_recovery_service, "cache_set_if_absent", _async_true)
-    monkeypatch.setattr("app.workers.tasks.extraction_tasks.repair_chapter_payload_task", _Task(), raising=False)
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.repair_chapter_payload_task", _Task(), raising=False
+    )
 
     scheduled = await chapter_recovery_service.queue_chapter_repair_if_needed(
         db,

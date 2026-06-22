@@ -16,10 +16,11 @@ from app.parsers.heading_patterns import (
 )
 from app.parsers.pdf_parser import parse_pdf_with_diagnostics
 from app.parsers.text_parser import parse_text_chapters
-from app.utils.book_utils import build_import_preview
+from app.utils.books.imports import build_import_preview
 from app.utils.language_utils import detect_language
 
 # ── PDF fixture builders ───────────────────────────────────────────────────
+
 
 def _make_pdf(pages: list[dict]) -> bytes:
     """Build a PDF from page specs: {'heading': str, 'body': str}."""
@@ -53,13 +54,26 @@ def _french_toc_pages() -> bytes:
     )
     pages.append({"heading": "Table des matieres", "body": toc_body})
     # Preface
-    pages.append({"heading": "Preface", "body": "Je vous presente ce deuxieme tome avec beaucoup d'emotion. " * 6})
+    pages.append(
+        {
+            "heading": "Preface",
+            "body": "Je vous presente ce deuxieme tome avec beaucoup d'emotion. " * 6,
+        }
+    )
     # Avant-propos
-    pages.append({"heading": "Avant-propos", "body": "Avant de commencer cette aventure, je tiens a remercier mes lecteurs. " * 6})
+    pages.append(
+        {
+            "heading": "Avant-propos",
+            "body": "Avant de commencer cette aventure, je tiens a remercier mes lecteurs. " * 6,
+        }
+    )
     # Real chapters
     for i in range(1, 7):
         chapter_title = f"Chapitre {i}"
-        chapter_body = f"Le chapitre {i} commence ici. Cet Ulysse qui a accoste sur mon ile etait un homme etrange. " * 10
+        chapter_body = (
+            f"Le chapitre {i} commence ici. Cet Ulysse qui a accoste sur mon ile etait un homme etrange. "
+            * 10
+        )
         pages.append({"heading": chapter_title, "body": chapter_body})
     return _make_pdf(pages)
 
@@ -69,8 +83,14 @@ def _english_clean_pdf() -> bytes:
     pages = [
         {"heading": "Prologue", "body": "Before the story begins there was darkness. " * 10},
         {"heading": "Chapter 1: The Beginning", "body": "It was a dark and stormy night. " * 10},
-        {"heading": "Chapter 2: The Journey", "body": "The next day dawned bright and clear. " * 10},
-        {"heading": "Chapter 3: The Return", "body": "After many years, the hero returned home. " * 10},
+        {
+            "heading": "Chapter 2: The Journey",
+            "body": "The next day dawned bright and clear. " * 10,
+        },
+        {
+            "heading": "Chapter 3: The Return",
+            "body": "After many years, the hero returned home. " * 10,
+        },
         {"heading": "Epilogue", "body": "And so the story came to an end. " * 10},
     ]
     return _make_pdf(pages)
@@ -88,18 +108,39 @@ def _messy_pdf_with_toc_and_repeated_headings() -> bytes:
     )
     pages.append({"heading": "Contents", "body": toc_body})
     # Real chapter 1
-    pages.append({"heading": "Chapter 1: The Forest", "body": "Deep in the ancient woods there lived a hermit. " * 10})
+    pages.append(
+        {
+            "heading": "Chapter 1: The Forest",
+            "body": "Deep in the ancient woods there lived a hermit. " * 10,
+        }
+    )
     # Repeated heading (POV shift)
-    pages.append({"heading": "Chapter 2: The Forest", "body": "Meanwhile, back in the forest, another traveler arrived. " * 10})
+    pages.append(
+        {
+            "heading": "Chapter 2: The Forest",
+            "body": "Meanwhile, back in the forest, another traveler arrived. " * 10,
+        }
+    )
     # Real chapter 3
-    pages.append({"heading": "Chapter 3: The River", "body": "The river flowed endlessly toward the sea. " * 10})
+    pages.append(
+        {
+            "heading": "Chapter 3: The River",
+            "body": "The river flowed endlessly toward the sea. " * 10,
+        }
+    )
     return _make_pdf(pages)
 
 
 # ── Scenario 1: English DOCX-like text with Chapter 1 ──────────────────────
 
+
 def test_english_chapter_detection():
-    text = "Chapter 1: Introduction\n" + ("This is the opening of the story. " * 60) + "\nChapter 2\n" + ("The second chapter begins. " * 60)
+    text = (
+        "Chapter 1: Introduction\n"
+        + ("This is the opening of the story. " * 60)
+        + "\nChapter 2\n"
+        + ("The second chapter begins. " * 60)
+    )
     chapters = parse_text_chapters(text, language="en")
     assert len(chapters) == 2
     assert chapters[0]["title"] == "Chapter 1: Introduction"
@@ -108,6 +149,7 @@ def test_english_chapter_detection():
 
 
 # ── Scenario 2: French PDF with TOC + preface + avant-propos ───────────────
+
 
 def test_french_pdf_toc_detection():
     raw = _french_toc_pages()
@@ -139,6 +181,7 @@ def test_french_pdf_chapter_count():
 
 # ── Scenario 3: Spanish text with Capítulo 1 ───────────────────────────────
 
+
 def test_spanish_text_chapter_detection():
     body = "trabajo " * 120
     text = f"Capitulo 1: El Comienzo\n{body}\nCapitulo 2: La Aventura\n{body}"
@@ -149,6 +192,7 @@ def test_spanish_text_chapter_detection():
 
 # ── Scenario 4: German text with Kapitel 1 ─────────────────────────────────
 
+
 def test_german_chapter_detection():
     body = "arbeit " * 120
     text = f"Kapitel 1: Der Anfang\n{body}\nKapitel 2: Die Reise\n{body}"
@@ -158,6 +202,7 @@ def test_german_chapter_detection():
 
 
 # ── Scenario 5: Messy PDF with TOC-like structure ──────────────────────────
+
 
 def test_messy_pdf_toc_exclusion():
     raw = _messy_pdf_with_toc_and_repeated_headings()
@@ -186,6 +231,7 @@ def test_messy_pdf_repeated_headings_handled():
 
 # ── Scenario 6: Prologue but no Chapter 1 ──────────────────────────────────
 
+
 def test_prologue_only_manuscript():
     body = "Before the story began there was only silence. " * 30
     text = f"Prologue\n{body}"
@@ -196,9 +242,11 @@ def test_prologue_only_manuscript():
 
 
 def test_prologue_with_body_pdf():
-    raw = _make_pdf([
-        {"heading": "Prologue", "body": "Before the story began, there was darkness. " * 20},
-    ])
+    raw = _make_pdf(
+        [
+            {"heading": "Prologue", "body": "Before the story began, there was darkness. " * 20},
+        ]
+    )
     chapters, diagnostics = parse_pdf_with_diagnostics(raw, language="en")
     assert len(chapters) >= 1
     section_types = [ch.get("section_type", "unknown") for ch in chapters]
@@ -206,6 +254,7 @@ def test_prologue_with_body_pdf():
 
 
 # ── Scenario 7: Repeated POV titles ────────────────────────────────────────
+
 
 def test_repeated_pov_titles():
     body1 = "work " * 120
@@ -220,6 +269,7 @@ def test_repeated_pov_titles():
 
 # ── Scenario 8: Single long manuscript with no headings ────────────────────
 
+
 def test_no_heading_manuscript_fallback():
     text = "This is a long document with absolutely no chapter headings anywhere. " * 50
     chapters = parse_text_chapters(text, language="en")
@@ -228,6 +278,7 @@ def test_no_heading_manuscript_fallback():
 
 
 # ── End-to-end: build_import_preview pipeline ──────────────────────────────
+
 
 def test_english_pdf_full_preview():
     raw = _english_clean_pdf()
@@ -255,6 +306,7 @@ def test_french_pdf_full_preview():
 
 
 # ── Language detection accuracy regression ─────────────────────────────────
+
 
 def test_language_detection_french_manuscript():
     text = (
@@ -291,6 +343,7 @@ def test_language_detection_german_manuscript():
 
 # ── Section type classification regression ─────────────────────────────────
 
+
 def test_classify_preface_french():
     heading_regex = build_heading_regex(languages=["fr"])
     assert heading_regex.match("Preface")
@@ -324,6 +377,7 @@ def test_classify_chapitre_french():
 
 # ── TOC indicator regression ───────────────────────────────────────────────
 
+
 def test_toc_dotted_leaders():
     assert is_toc_indicator("Chapitre 1: SCYLLA.................. 1")
     assert is_toc_indicator("Chapter 2.......... 5")
@@ -353,6 +407,7 @@ def test_has_toc_signals_negative():
 
 
 # ── Heading regex coverage across languages ────────────────────────────────
+
 
 def test_regex_coverage_french():
     r = build_heading_regex(languages=["fr"])

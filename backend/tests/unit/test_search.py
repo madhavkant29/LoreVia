@@ -17,6 +17,7 @@ async def test_semantic_search_spoiler_gate():
 
     with patch("app.engine.search.semantic.embed_text", AsyncMock(return_value=[0.1] * 1536)):
         from app.engine.search.semantic import semantic_search
+
         results = await semantic_search(mock_db, uuid.uuid4(), "test query", max_chapter=5)
         assert isinstance(results, list)
 
@@ -58,8 +59,12 @@ async def test_semantic_search_uses_candidate_limit_and_threshold():
     mock_db = AsyncMock()
     mock_result = MagicMock()
     mock_result.fetchall.return_value = [
-        SimpleNamespace(text="One", chunk_index=0, chapter_num=1, chapter_title="A", relevance=0.91),
-        SimpleNamespace(text="Two", chunk_index=1, chapter_num=2, chapter_title="B", relevance=0.89),
+        SimpleNamespace(
+            text="One", chunk_index=0, chapter_num=1, chapter_title="A", relevance=0.91
+        ),
+        SimpleNamespace(
+            text="Two", chunk_index=1, chapter_num=2, chapter_title="B", relevance=0.89
+        ),
     ]
     mock_db.execute = AsyncMock(return_value=mock_result)
 

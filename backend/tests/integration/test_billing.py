@@ -1,10 +1,10 @@
-import pytest
 import uuid
+
+import pytest
 from sqlalchemy import select
 
-from app.models.user import AdminPrincipal, Subscription
-from app.models.user import User
 from app.core.security import create_access_token
+from app.models.user import AdminPrincipal, Subscription, User
 from app.utils.billing_utils import create_billing_confirmation_token
 
 
@@ -48,12 +48,24 @@ async def test_billing_status_requires_admin(auth_headers, client):
 async def test_billing_status_reports_missing_configuration(client, db, monkeypatch):
     headers = await _admin_headers(client, db)
     monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", None, raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", None, raising=False
+    )
     monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", None, raising=False)
 
@@ -84,7 +96,9 @@ async def test_billing_status_reports_missing_configuration(client, db, monkeypa
     assert "subscription.resumed" in payload["supported_webhook_events"]
     assert "subscription.trialing" in payload["supported_webhook_events"]
     author_monthly = next(plan for plan in payload["plans"] if plan["code"] == "author_monthly")
-    architect_monthly = next(plan for plan in payload["plans"] if plan["code"] == "architect_monthly")
+    architect_monthly = next(
+        plan for plan in payload["plans"] if plan["code"] == "architect_monthly"
+    )
     assert author_monthly["display_name"] == "Author"
     assert author_monthly["billing_interval"] == "monthly"
     assert author_monthly["price_usd"] == 29
@@ -96,19 +110,45 @@ async def test_billing_status_reports_missing_configuration(client, db, monkeypa
 @pytest.mark.asyncio
 async def test_billing_status_reports_fully_configured_catalog(client, db, monkeypatch):
     headers = await _admin_headers(client, db)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False
+    )
     monkeypatch.setattr(
         "app.utils.billing_utils.settings.PADDLE_DEFAULT_CHECKOUT_URL",
         "https://getlorevia.com/checkout",
         raising=False,
     )
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "pri_author_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", "pri_author_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "pri_architect_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "pri_architect_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "re_live_test", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", "internal_job_secret_value", raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "pri_author_monthly",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID",
+        "pri_author_annual",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID",
+        "pri_architect_monthly",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID",
+        "pri_architect_annual",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.RESEND_API_KEY", "re_live_test", raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.INTERNAL_JOB_SECRET",
+        "internal_job_secret_value",
+        raising=False,
+    )
 
     response = await client.get("/api/v1/admin/billing/status", headers=headers)
 
@@ -125,17 +165,47 @@ async def test_billing_status_reports_fully_configured_catalog(client, db, monke
 
 
 @pytest.mark.asyncio
-async def test_billing_status_requires_backend_checkout_url_for_payments_ready(client, db, monkeypatch):
+async def test_billing_status_requires_backend_checkout_url_for_payments_ready(
+    client, db, monkeypatch
+):
     headers = await _admin_headers(client, db)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "pri_author_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID", "pri_author_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "pri_architect_monthly", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "pri_architect_annual", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.RESEND_API_KEY", "re_live_test", raising=False)
-    monkeypatch.setattr("app.utils.billing_utils.settings.INTERNAL_JOB_SECRET", "internal_job_secret_value", raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_WEBHOOK_SECRET", "whsec_test", raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "pri_author_monthly",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_AUTHOR_ANNUAL_PRICE_ID",
+        "pri_author_annual",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_ARCHITECT_MONTHLY_PRICE_ID",
+        "pri_architect_monthly",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.PADDLE_ARCHITECT_ANNUAL_PRICE_ID",
+        "pri_architect_annual",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.RESEND_API_KEY", "re_live_test", raising=False
+    )
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.INTERNAL_JOB_SECRET",
+        "internal_job_secret_value",
+        raising=False,
+    )
 
     response = await client.get("/api/v1/admin/billing/status", headers=headers)
 
@@ -205,9 +275,13 @@ async def test_billing_confirmation_returns_transaction_summary(client, db, monk
         assert transaction_id == "txn_123"
         return Summary()
 
-    monkeypatch.setattr("app.api.v1.routes.billing.get_transaction_summary", fake_get_transaction_summary)
+    monkeypatch.setattr(
+        "app.api.v1.routes.billing.get_transaction_summary", fake_get_transaction_summary
+    )
 
-    response = await client.get("/api/v1/billing/confirmation?transaction_id=txn_123", headers=cookie_headers)
+    response = await client.get(
+        "/api/v1/billing/confirmation?transaction_id=txn_123", headers=cookie_headers
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -262,7 +336,9 @@ async def test_billing_confirmation_allows_public_success_page_lookup(client, db
         assert transaction_id == "txn_public_123"
         return Summary()
 
-    monkeypatch.setattr("app.api.v1.routes.billing.get_transaction_summary", fake_get_transaction_summary)
+    monkeypatch.setattr(
+        "app.api.v1.routes.billing.get_transaction_summary", fake_get_transaction_summary
+    )
     monkeypatch.setattr("app.utils.billing_utils.settings.JWT_SECRET", "jwt-secret", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.settings.JWT_ALGORITHM", "HS256", raising=False)
     confirmation_token = create_billing_confirmation_token("txn_public_123")
@@ -316,7 +392,9 @@ async def test_billing_confirmation_rejects_public_lookup_without_token(client, 
 
 
 @pytest.mark.asyncio
-async def test_checkout_creates_pending_subscription_and_portal_session(client, db, auth_headers, monkeypatch):
+async def test_checkout_creates_pending_subscription_and_portal_session(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     user_id = uuid.UUID(me.json()["id"])
 
@@ -343,9 +421,7 @@ async def test_checkout_creates_pending_subscription_and_portal_session(client, 
     assert checkout.json()["billing_enabled"] is True
     assert "confirm-txn_123" in checkout.json()["checkout_url"]
 
-    subscription = await db.scalar(
-        select(Subscription).where(Subscription.user_id == user_id)
-    )
+    subscription = await db.scalar(select(Subscription).where(Subscription.user_id == user_id))
     assert subscription is not None
     assert subscription.status == "pending"
     assert subscription.paddle_customer_id == "ctm_123"
@@ -365,7 +441,9 @@ async def test_checkout_creates_pending_subscription_and_portal_session(client, 
 
 
 @pytest.mark.asyncio
-async def test_checkout_and_portal_cover_disabled_invalid_and_provider_failures(client, auth_headers, monkeypatch):
+async def test_checkout_and_portal_cover_disabled_invalid_and_provider_failures(
+    client, auth_headers, monkeypatch
+):
     invalid = await client.post(
         "/api/v1/billing/checkout",
         headers=auth_headers,

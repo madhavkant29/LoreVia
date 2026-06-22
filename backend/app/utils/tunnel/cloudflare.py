@@ -14,7 +14,6 @@ import ipaddress
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-
 _HEALTHCHECK_PATHS = frozenset({"/health", "/ready"})
 _TRUSTED_EDGE_PROXY_NETS = (
     ipaddress.ip_network("10.0.0.0/8"),

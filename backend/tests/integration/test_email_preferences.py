@@ -32,7 +32,9 @@ async def test_authenticated_email_preferences_can_be_loaded_and_updated(client,
 
 
 @pytest.mark.asyncio
-async def test_token_based_email_preferences_lookup_returns_promotional_state(client, db, auth_headers):
+async def test_token_based_email_preferences_lookup_returns_promotional_state(
+    client, db, auth_headers
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     user = await db.get(User, uuid.UUID(me.json()["id"]))
     assert user is not None
@@ -48,7 +50,9 @@ async def test_token_based_email_preferences_lookup_returns_promotional_state(cl
 
 
 @pytest.mark.asyncio
-async def test_one_click_unsubscribe_immediately_suppresses_promotional_email(client, db, auth_headers):
+async def test_one_click_unsubscribe_immediately_suppresses_promotional_email(
+    client, db, auth_headers
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     user = await db.get(User, uuid.UUID(me.json()["id"]))
     assert user is not None

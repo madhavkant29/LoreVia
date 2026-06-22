@@ -59,35 +59,54 @@ async def resolve_character_mention(
             reason="kinship_descriptor_unresolved_suppressed",
             confidence=0.86,
         )
-        return IdentityResolutionResult("auto_suppress", None, 0.86, "kinship_descriptor_unresolved_suppressed")
+        return IdentityResolutionResult(
+            "auto_suppress", None, 0.86, "kinship_descriptor_unresolved_suppressed"
+        )
 
     if kind == CandidateKind.TITLE_NAME:
         return IdentityResolutionResult("needs_review", None, 0.5, "title_name_requires_review")
 
     if normalized:
         exact = (
-            await db.execute(
-                select(Character).where(
-                    Character.book_id == book_id,
-                    Character.normalized_name == normalized,
-                    Character.merged_into_character_id.is_(None),
-                    Character.visibility_state == "visible",
-                    Character.approval_state.in_(("approved", "protected")),
-                ).limit(1)
-            )
-        ).scalars().first()
-        if exact is None:
-            candidates = (
+            (
                 await db.execute(
-                    select(Character).where(
+                    select(Character)
+                    .where(
                         Character.book_id == book_id,
+                        Character.normalized_name == normalized,
                         Character.merged_into_character_id.is_(None),
                         Character.visibility_state == "visible",
                         Character.approval_state.in_(("approved", "protected")),
                     )
+                    .limit(1)
                 )
-            ).scalars().all()
-            exact = next((character for character in candidates if normalize_name(character.name) == normalized), None)
+            )
+            .scalars()
+            .first()
+        )
+        if exact is None:
+            candidates = (
+                (
+                    await db.execute(
+                        select(Character).where(
+                            Character.book_id == book_id,
+                            Character.merged_into_character_id.is_(None),
+                            Character.visibility_state == "visible",
+                            Character.approval_state.in_(("approved", "protected")),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            exact = next(
+                (
+                    character
+                    for character in candidates
+                    if normalize_name(character.name) == normalized
+                ),
+                None,
+            )
         if exact is not None:
             await record_identity_action(
                 db,
@@ -104,15 +123,19 @@ async def resolve_character_mention(
         token = first_name_token(surface_text)
         if token:
             candidates = (
-                await db.execute(
-                    select(Character).where(
-                        Character.book_id == book_id,
-                        Character.merged_into_character_id.is_(None),
-                        Character.visibility_state == "visible",
-                        Character.approval_state.in_(("approved", "protected")),
+                (
+                    await db.execute(
+                        select(Character).where(
+                            Character.book_id == book_id,
+                            Character.merged_into_character_id.is_(None),
+                            Character.visibility_state == "visible",
+                            Character.approval_state.in_(("approved", "protected")),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             full_name_match = next(
                 (
                     character
@@ -131,7 +154,9 @@ async def resolve_character_mention(
                     source="resolver",
                     confidence=0.9,
                 )
-                return IdentityResolutionResult("auto_alias", full_name_match.id, 0.9, "single_token_first_name_alias")
+                return IdentityResolutionResult(
+                    "auto_alias", full_name_match.id, 0.9, "single_token_first_name_alias"
+                )
 
     if kind == CandidateKind.ROLE_DESCRIPTOR:
         await suppress_candidate(
@@ -143,7 +168,9 @@ async def resolve_character_mention(
             reason="role_descriptor_low_evidence_suppressed",
             confidence=0.88,
         )
-        return IdentityResolutionResult("auto_suppress", None, 0.88, "role_descriptor_low_evidence_suppressed")
+        return IdentityResolutionResult(
+            "auto_suppress", None, 0.88, "role_descriptor_low_evidence_suppressed"
+        )
 
     return IdentityResolutionResult("needs_review", None, 0.5, f"{kind.value}_needs_review")
 
@@ -155,15 +182,19 @@ async def reconcile_pending_first_name_alias_candidates(
     chapter_number: int | None = None,
 ) -> int:
     characters = (
-        await db.execute(
-            select(Character).where(
-                Character.book_id == book_id,
-                Character.merged_into_character_id.is_(None),
-                Character.visibility_state == "visible",
-                Character.approval_state.in_(("approved", "protected")),
+        (
+            await db.execute(
+                select(Character).where(
+                    Character.book_id == book_id,
+                    Character.merged_into_character_id.is_(None),
+                    Character.visibility_state == "visible",
+                    Character.approval_state.in_(("approved", "protected")),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     full_name_by_first_token: dict[str, list[Character]] = {}
     for character in characters:
         tokens = normalize_name(character.name).split()
@@ -177,7 +208,9 @@ async def reconcile_pending_first_name_alias_candidates(
     ]
     if chapter_number is not None:
         candidate_filters.append(CharacterCandidate.chapter_number == chapter_number)
-    candidates = (await db.execute(select(CharacterCandidate).where(*candidate_filters))).scalars().all()
+    candidates = (
+        (await db.execute(select(CharacterCandidate).where(*candidate_filters))).scalars().all()
+    )
     reconciled = 0
     for candidate in candidates:
         if classify_candidate_kind(candidate.proposed_name) != CandidateKind.ALIAS:
@@ -201,15 +234,19 @@ async def reconcile_pending_first_name_alias_candidates(
         candidate.status = "accepted"
         candidate.reason_codes = ["first_name_alias_reconciled"]
         mentions = (
-            await db.execute(
-                select(CharacterMention).where(
-                    CharacterMention.book_id == book_id,
-                    CharacterMention.chapter_number == candidate.chapter_number,
-                    CharacterMention.normalized_name == candidate.normalized_name,
-                    CharacterMention.matched_character_id.is_(None),
+            (
+                await db.execute(
+                    select(CharacterMention).where(
+                        CharacterMention.book_id == book_id,
+                        CharacterMention.chapter_number == candidate.chapter_number,
+                        CharacterMention.normalized_name == candidate.normalized_name,
+                        CharacterMention.matched_character_id.is_(None),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for mention in mentions:
             mention.matched_character_id = target.id
             mention.resolver_status = "auto_alias"

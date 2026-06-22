@@ -3,14 +3,15 @@ import os
 import sys
 from pathlib import Path
 
-from alembic import context
 import sqlalchemy as sa
+from alembic import context
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
 from app.db.base import Base  # noqa
+from app.utils.logging import get_logger
 from app.utils.migration_utils import (
     destructive_downgrade_revisions,
     destructive_upgrade_revisions,
@@ -18,7 +19,6 @@ from app.utils.migration_utils import (
     redact_database_target,
     resolve_alembic_database_url,
 )
-from app.utils.logging import get_logger
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -66,7 +66,10 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
             tables = _table_names(inspector)
 
             if path.name == "20260517_finalize_subscription_events_and_remove_monetization.py":
-                if any(table_name in tables for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")):
+                if any(
+                    table_name in tables
+                    for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")
+                ):
                     return True
 
                 if "users" in tables and "referral_code" in _column_names(inspector, "users"):
@@ -165,6 +168,7 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
     finally:
         engine.dispose()
 
+
 if any(arg == "upgrade" for arg in sys.argv[1:]):
     offending_revisions = [
         path
@@ -202,8 +206,12 @@ def do_run(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        include_object=lambda obj, name, type_, reflected, compare_to: not (
-            type_ == "table" and reflected and getattr(obj, "schema", None) not in (None, "public")
+        include_object=lambda obj, name, type_, reflected, compare_to: (
+            not (
+                type_ == "table"
+                and reflected
+                and getattr(obj, "schema", None) not in (None, "public")
+            )
         ),
     )
     with context.begin_transaction():
@@ -231,8 +239,12 @@ def run_migrations_offline() -> None:
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
-        include_object=lambda obj, name, type_, reflected, compare_to: not (
-            type_ == "table" and reflected and getattr(obj, "schema", None) not in (None, "public")
+        include_object=lambda obj, name, type_, reflected, compare_to: (
+            not (
+                type_ == "table"
+                and reflected
+                and getattr(obj, "schema", None) not in (None, "public")
+            )
         ),
     )
     with context.begin_transaction():

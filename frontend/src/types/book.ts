@@ -472,6 +472,16 @@ export interface UserStats {
     llm_total_tokens?: number
     total_chapters_tracked: number
     saved_quotes: number
+    active_analyzed_words: number
+    active_word_limit: number
+    active_words_remaining: number
+    monthly_processed_words: number
+    monthly_processed_word_limit: number
+    monthly_processed_words_remaining: number
+    source_storage_bytes: number
+    source_storage_limit_bytes: number
+    source_storage_remaining_bytes: number
+    allowances_enforced: boolean
   }
   writing: WritingDashboardStats
 }
@@ -799,6 +809,28 @@ export interface RevisionActionItem {
   status: "pending" | "fixed" | "ignored" | "task_created" | string
   assigned_version_id?: string | null
   task_id?: string | null
+  why_flagged?: string
+  evidence_strength?: "strong" | "moderate" | "limited"
+  evidence?: RevisionEvidence[]
+  is_stale?: boolean
+  decision?: "accepted" | "dismissed" | "resolved" | null
+  action?: "added_to_revision_plan" | "saved_note" | "manuscript_edit" | "exported_report" | null
+  reason?: "intentional" | "incorrect" | "not_relevant" | "other" | null
+}
+
+export interface RevisionEvidence {
+  chapter_ref: number
+  source_label?: string | null
+  excerpt: string
+  source_content_version: number
+}
+
+export interface RevisionActivation {
+  eligible: boolean
+  completed: boolean
+  completed_at?: string | null
+  completion_action?: string | null
+  completed_finding_id?: string | null
 }
 
 export interface RevisionGenreCheck {
@@ -865,6 +897,10 @@ export interface RevisionIntelligence {
   scene_advice: RevisionActionItem[]
   confusion_map: RevisionActionItem[]
   voice_alerts: RevisionActionItem[]
+  priority_findings?: RevisionActionItem[]
+  activation?: RevisionActivation
+  analysis_complete?: boolean
+  analysis_limitations?: string[]
 }
 
 export interface NovelScene {
@@ -958,6 +994,12 @@ export interface BookProcessing {
   is_fully_ready?: boolean
   retry_actions?: string[]
   retry_available?: boolean
+  processing_run_id?: string | null
+  pause_reason?: string | null
+  resume_available?: boolean
+  resume_blockers?: Array<{ kind?: string; detail?: string }>
+  next_chapter_number?: number | null
+  next_resume_at?: string | null
   pipeline?: {
     extraction?: ProcessingPipelineStage | null
     analysis?: ProcessingPipelineStage | null
@@ -1098,6 +1140,15 @@ export interface ImportPreview {
   front_matter_count: number
   confidence: number
   warnings: ImportWarning[]
+  total_words: number
+  source_size_bytes: number
+  allowance_allowed: boolean
+  projected_active_words: number
+  active_word_limit: number
+  projected_monthly_processed_words: number
+  monthly_processed_word_limit: number
+  projected_source_storage_bytes: number
+  source_storage_limit_bytes: number
 }
 
 export interface BookEventsItem {

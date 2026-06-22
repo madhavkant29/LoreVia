@@ -61,22 +61,54 @@ async def _build_series_bible_fixture(db):
         ]
     )
 
-    scene_one = Scene(book_id=pilot.id, number=1, heading="INT. CLUB - NIGHT", location="CLUB", time_of_day="NIGHT", word_count=120)
-    scene_two = Scene(book_id=finale.id, number=1, heading="EXT. ROOFTOP - NIGHT", location="ROOFTOP", time_of_day="NIGHT", word_count=150)
+    scene_one = Scene(
+        book_id=pilot.id,
+        number=1,
+        heading="INT. CLUB - NIGHT",
+        location="CLUB",
+        time_of_day="NIGHT",
+        word_count=120,
+    )
+    scene_two = Scene(
+        book_id=finale.id,
+        number=1,
+        heading="EXT. ROOFTOP - NIGHT",
+        location="ROOFTOP",
+        time_of_day="NIGHT",
+        word_count=150,
+    )
     db.add_all([scene_one, scene_two])
     await db.flush()
 
     db.add_all(
         [
-            Dialogue(scene_id=scene_one.id, character_name="MAYA", dialogue_text="We are out of time.", line_number=0, word_count=5),
-            Dialogue(scene_id=scene_two.id, character_name="MAYA", dialogue_text="Then we finish it.", line_number=0, word_count=4),
+            Dialogue(
+                scene_id=scene_one.id,
+                character_name="MAYA",
+                dialogue_text="We are out of time.",
+                line_number=0,
+                word_count=5,
+            ),
+            Dialogue(
+                scene_id=scene_two.id,
+                character_name="MAYA",
+                dialogue_text="Then we finish it.",
+                line_number=0,
+                word_count=4,
+            ),
         ]
     )
 
-    maya_pilot = Character(book_id=pilot.id, name="MAYA", role="mc", first_chapter=1, mention_count=8)
+    maya_pilot = Character(
+        book_id=pilot.id, name="MAYA", role="mc", first_chapter=1, mention_count=8
+    )
     jon_pilot = Character(book_id=pilot.id, name="JON", role="sc", first_chapter=1, mention_count=4)
-    maya_finale = Character(book_id=finale.id, name="Maya", role="mc", first_chapter=1, mention_count=9)
-    jon_finale = Character(book_id=finale.id, name="Jon", role="sc", first_chapter=1, mention_count=5)
+    maya_finale = Character(
+        book_id=finale.id, name="Maya", role="mc", first_chapter=1, mention_count=9
+    )
+    jon_finale = Character(
+        book_id=finale.id, name="Jon", role="sc", first_chapter=1, mention_count=5
+    )
     db.add_all([maya_pilot, jon_pilot, maya_finale, jon_finale])
     await db.flush()
 
@@ -155,4 +187,7 @@ async def test_series_bible_endpoint_aggregates_recurring_screenplay_entities(cl
     assert payload["recurring_characters"][0]["episode_count"] == 2
     assert payload["recurring_relationships"][0]["relationship_type"] == "ally"
     assert payload["unresolved_plot_threads"][0]["title"] == "The Blackout Conspiracy"
-    assert any("The Grid has differing location descriptions across episodes." == item for item in payload["continuity_risks"])
+    assert any(
+        "The Grid has differing location descriptions across episodes." == item
+        for item in payload["continuity_risks"]
+    )

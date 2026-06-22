@@ -3,11 +3,13 @@ import uuid
 import pytest
 from sqlalchemy import select
 
+from app.core.storage import download_book
 from app.models.book import Book, BookCollaborator, Chapter, NovelScene
 from app.models.intelligence import ChapterSummary
 from app.models.progress import ReadingProgress
-from app.utils.book_utils import deserialize_manuscript_content
-from app.core.storage import download_book
+from app.utils.books.manuscript import (
+    deserialize_manuscript_content,
+)
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
@@ -34,7 +36,14 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 @pytest.mark.asyncio
 async def test_writer_workspace_goal_calendar_round_trip(client, db):
     headers, user_id = await _register_user(client, f"workspace-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Planner", format="pdf", s3_key="planner.pdf", status="ready", mode="author")
+    book = Book(
+        user_id=user_id,
+        title="Planner",
+        format="pdf",
+        s3_key="planner.pdf",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.commit()
 
@@ -54,7 +63,9 @@ async def test_writer_workspace_goal_calendar_round_trip(client, db):
         ]
     }
 
-    updated = await client.put(f"/api/v1/books/{book.id}/writer-workspace", headers=headers, json=payload)
+    updated = await client.put(
+        f"/api/v1/books/{book.id}/writer-workspace", headers=headers, json=payload
+    )
     assert updated.status_code == 200
     body = updated.json()
     assert len(body["goal_calendar"]) == 1
@@ -131,8 +142,17 @@ async def test_book_overview_returns_critical_reader_payload(client, db):
 
 @pytest.mark.asyncio
 async def test_scene_path_round_trip_accepts_nested_folders(client, db):
-    headers, user_id = await _register_user(client, f"scene-path-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Planner", format="pdf", s3_key="planner.pdf", status="ready", mode="author")
+    headers, user_id = await _register_user(
+        client, f"scene-path-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Planner",
+        format="pdf",
+        s3_key="planner.pdf",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.commit()
 
@@ -169,16 +189,29 @@ async def test_scene_path_round_trip_accepts_nested_folders(client, db):
 
 
 @pytest.mark.asyncio
-async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content(client, db, monkeypatch):
-    headers, user_id = await _register_user(client, f"scene-sync-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Planner", format="txt", s3_key="planner.txt", status="ready", mode="author")
+async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content(
+    client, db, monkeypatch
+):
+    headers, user_id = await _register_user(
+        client, f"scene-sync-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Planner",
+        format="txt",
+        s3_key="planner.txt",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.commit()
 
     async def _fake_process_chapter(_db, _book, ch_data, queue_wait_ms=None):
         chapter = (
             await _db.execute(
-                select(Chapter).where(Chapter.book_id == _book.id, Chapter.number == int(ch_data["number"]))
+                select(Chapter).where(
+                    Chapter.book_id == _book.id, Chapter.number == int(ch_data["number"])
+                )
             )
         ).scalar_one_or_none()
         if chapter is None:
@@ -207,11 +240,16 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
     )
 
     assert import_response.status_code == 200
-    scenes_response = await client.get(f"/api/v1/books/{book.id}/scenes?chapter_number=1", headers=headers)
+    scenes_response = await client.get(
+        f"/api/v1/books/{book.id}/scenes?chapter_number=1", headers=headers
+    )
     assert scenes_response.status_code == 200
     scenes = scenes_response.json()
     assert len(scenes) == 2
-    assert [scene["title"] for scene in scenes] == ["Arrival at the docks.", "The captain blocked her path."]
+    assert [scene["title"] for scene in scenes] == [
+        "Arrival at the docks.",
+        "The captain blocked her path.",
+    ]
 
     chapter_response = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=headers)
     assert chapter_response.status_code == 200
@@ -239,7 +277,9 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
     )
 
     assert update_response.status_code == 200
-    updated_chapter_response = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=headers)
+    updated_chapter_response = await client.get(
+        f"/api/v1/reader/{book.id}/chapter/1", headers=headers
+    )
     assert updated_chapter_response.status_code == 200
     updated_payload = updated_chapter_response.json()
     assert "POV: Mira" in updated_payload["text_content"]
@@ -248,8 +288,17 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
 
 @pytest.mark.asyncio
 async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(client, db):
-    headers, user_id = await _register_user(client, f"scene-order-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Planner", format="pdf", s3_key="planner.pdf", status="ready", mode="author")
+    headers, user_id = await _register_user(
+        client, f"scene-order-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Planner",
+        format="pdf",
+        s3_key="planner.pdf",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.flush()
 
@@ -329,12 +378,16 @@ async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
     expected_scene_ids = [str(scene.id) for scene in (scenes[2], scenes[0], scenes[1])]
     db.expire_all()
     persisted = (
-        await db.execute(
-            select(NovelScene)
-            .where(NovelScene.book_id == book_id, NovelScene.chapter_number == 2)
-            .order_by(NovelScene.sort_order.asc())
+        (
+            await db.execute(
+                select(NovelScene)
+                .where(NovelScene.book_id == book_id, NovelScene.chapter_number == 2)
+                .order_by(NovelScene.sort_order.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [str(scene.id) for scene in persisted] == expected_scene_ids
 
     refreshed_chapter = await db.get(Chapter, chapter_id)
@@ -348,8 +401,17 @@ async def test_reorder_chapter_scenes_persists_sort_order_and_structure_version(
 
 @pytest.mark.asyncio
 async def test_reorder_chapter_scenes_rejects_stale_structure_versions(client, db):
-    headers, user_id = await _register_user(client, f"scene-order-conflict-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Planner", format="pdf", s3_key="planner.pdf", status="ready", mode="author")
+    headers, user_id = await _register_user(
+        client, f"scene-order-conflict-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Planner",
+        format="pdf",
+        s3_key="planner.pdf",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.flush()
 
@@ -393,8 +455,17 @@ async def test_reorder_chapter_scenes_rejects_stale_structure_versions(client, d
 
 @pytest.mark.asyncio
 async def test_manuscript_annotations_round_trip_and_resolve(client, db):
-    headers, user_id = await _register_user(client, f"annotations-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Planner", format="txt", s3_key="planner.txt", status="ready", mode="author")
+    headers, user_id = await _register_user(
+        client, f"annotations-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Planner",
+        format="txt",
+        s3_key="planner.txt",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.flush()
     db.add(Chapter(book_id=book.id, number=2, title="The Ember Gate", s3_key="chapters/2.json"))
@@ -439,12 +510,23 @@ async def test_manuscript_annotations_round_trip_and_resolve(client, db):
 
 
 @pytest.mark.asyncio
-async def test_shared_manuscript_annotations_visible_to_scoped_collaborators_and_private_hidden(client, db):
-    author_headers, author_user_id = await _register_user(client, f"author-ann-{uuid.uuid4().hex[:8]}@lorevia.app")
+async def test_shared_manuscript_annotations_visible_to_scoped_collaborators_and_private_hidden(
+    client, db
+):
+    author_headers, author_user_id = await _register_user(
+        client, f"author-ann-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     collaborator_email = f"reviewer-ann-{uuid.uuid4().hex[:8]}@lorevia.app"
     collaborator_headers, collaborator_user_id = await _register_user(client, collaborator_email)
 
-    book = Book(user_id=author_user_id, title="Planner", format="txt", s3_key="planner.txt", status="ready", mode="author")
+    book = Book(
+        user_id=author_user_id,
+        title="Planner",
+        format="txt",
+        s3_key="planner.txt",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.flush()
     db.add(Chapter(book_id=book.id, number=2, title="The Ember Gate", s3_key="chapters/2.json"))
@@ -499,7 +581,9 @@ async def test_shared_manuscript_annotations_visible_to_scoped_collaborators_and
         )
         assert response.status_code == 200
 
-    collaborator_list = await client.get(f"/api/v1/books/{book.id}/annotations", headers=collaborator_headers)
+    collaborator_list = await client.get(
+        f"/api/v1/books/{book.id}/annotations", headers=collaborator_headers
+    )
     assert collaborator_list.status_code == 200
     visible = collaborator_list.json()
     assert len(visible) == 1
@@ -508,8 +592,17 @@ async def test_shared_manuscript_annotations_visible_to_scoped_collaborators_and
 
 @pytest.mark.asyncio
 async def test_scene_version_history_can_snapshot_compare_and_restore(client, db):
-    headers, user_id = await _register_user(client, f"scene-versions-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Planner", format="txt", s3_key="planner.txt", status="ready", mode="author")
+    headers, user_id = await _register_user(
+        client, f"scene-versions-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Planner",
+        format="txt",
+        s3_key="planner.txt",
+        status="ready",
+        mode="author",
+    )
     db.add(book)
     await db.commit()
 
@@ -558,7 +651,9 @@ async def test_scene_version_history_can_snapshot_compare_and_restore(client, db
     assert len(versions) >= 2
     assert {version["snapshot_kind"] for version in versions} >= {"manual", "auto_checkpoint"}
 
-    auto_checkpoint = next(version for version in versions if version["snapshot_kind"] == "auto_checkpoint")
+    auto_checkpoint = next(
+        version for version in versions if version["snapshot_kind"] == "auto_checkpoint"
+    )
     detail_response = await client.get(
         f"/api/v1/books/{book.id}/scene-versions/{auto_checkpoint['id']}",
         headers=headers,

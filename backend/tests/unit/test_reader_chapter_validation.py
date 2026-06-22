@@ -1,4 +1,5 @@
 """Tests for chapter validation in reader routes."""
+
 from __future__ import annotations
 
 import uuid
@@ -43,10 +44,10 @@ async def test_get_chapter_validates_empty_project():
         total_tokens=0,
     )
     db = _FakeDB(get_values=[book])
-    
+
     with pytest.raises(HTTPException) as exc_info:
         await reader.get_chapter(book.id, 1, db=db, current_user=_user(user_id))
-    
+
     assert exc_info.value.status_code == 400
     assert "no chapters yet" in exc_info.value.detail.lower()
     assert "create your first chapter" in exc_info.value.detail.lower()
@@ -69,20 +70,20 @@ async def test_get_chapter_validates_chapter_number_range():
         total_tokens=0,
     )
     db = _FakeDB(get_values=[book])
-    
+
     # Test chapter number too high
     with pytest.raises(HTTPException) as exc_info:
         await reader.get_chapter(book.id, 10, db=db, current_user=_user(user_id))
-    
+
     assert exc_info.value.status_code == 404
     assert "does not exist" in exc_info.value.detail.lower()
     assert "5 chapters" in exc_info.value.detail.lower()
-    
+
     # Test chapter number too low
     db = _FakeDB(get_values=[book])
     with pytest.raises(HTTPException) as exc_info:
         await reader.get_chapter(book.id, 0, db=db, current_user=_user(user_id))
-    
+
     assert exc_info.value.status_code == 400
     assert "invalid chapter number" in exc_info.value.detail.lower()
 
@@ -104,10 +105,10 @@ async def test_get_chapter_validates_none_total_chapters():
         total_tokens=0,
     )
     db = _FakeDB(get_values=[book])
-    
+
     with pytest.raises(HTTPException) as exc_info:
         await reader.get_chapter(book.id, 1, db=db, current_user=_user(user_id))
-    
+
     assert exc_info.value.status_code == 400
     assert "no chapters yet" in exc_info.value.detail.lower()
 
@@ -128,16 +129,18 @@ async def test_get_summary_validates_chapter_range(monkeypatch):
         is_truncated=False,
         total_tokens=0,
     )
-    
+
     async def _fake_access(*_args, **_kwargs):
         return book, None
 
     monkeypatch.setattr(reader, "get_book_with_collaboration_access", _fake_access)
     monkeypatch.setattr(reader, "summary_mode_allowed", lambda *a, **kw: True)
     db = _FakeDB()
-    
+
     with pytest.raises(HTTPException) as exc_info:
-        await reader.get_summary(book.id, 10, mode="short", db=db, current_user=_user(user_id), _=None)
-    
+        await reader.get_summary(
+            book.id, 10, mode="short", db=db, current_user=_user(user_id), _=None
+        )
+
     assert exc_info.value.status_code == 404
     assert "does not exist" in exc_info.value.detail.lower()

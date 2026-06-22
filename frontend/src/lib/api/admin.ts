@@ -19,6 +19,11 @@ import type {
   AdminScope,
   AdminSession,
   AdminSubscriptionMetrics,
+  AdminTaskExecution,
+  AdminOperationsMetrics,
+  AdminAiQualityMetrics,
+  AdminContributionMargin,
+  AdminSupportIncident,
 } from "@/types/admin"
 
 export const adminApi = {
@@ -50,6 +55,17 @@ export const adminApi = {
     apiClient.put(`/admin/users/${userId}/tier`, { tier }).then((r) => r.data),
   metrics: () => apiClient.get<AdminMetrics>("/admin/metrics").then((r) => r.data),
   queueDepth: () => apiClient.get<AdminQueueDepth>("/admin/queue-depth").then((r) => r.data),
+  taskExecutions: () => apiClient.get<AdminTaskExecution[]>("/admin/task-executions?status=failed_terminal&limit=50").then((r) => r.data),
+  retryTaskExecution: (id: string, reason: string) => apiClient.post(`/admin/task-executions/${id}/retry`, { reason }).then((r) => r.data),
+  dismissTaskExecution: (id: string, reason: string) => apiClient.post(`/admin/task-executions/${id}/dismiss`, { reason }).then((r) => r.data),
+  operationsMetrics: () => apiClient.get<AdminOperationsMetrics>("/admin/operations-metrics").then((r) => r.data),
+  aiQuality: () => apiClient.get<AdminAiQualityMetrics>("/admin/ai-quality").then((r) => r.data),
+  contributionMargin: () => apiClient.get<AdminContributionMargin>("/admin/contribution-margin").then((r) => r.data),
+  supportIncidents: () => apiClient.get<AdminSupportIncident[]>("/admin/support-incidents").then((r) => r.data),
+  createSupportIncident: (body: { user_id?: string; book_id?: string; category: string; feature?: string; severity: string; summary: string }) =>
+    apiClient.post("/admin/support-incidents", body).then((r) => r.data),
+  resolveSupportIncident: (id: string, resolution: string) =>
+    apiClient.post(`/admin/support-incidents/${id}/resolve`, { resolution }).then((r) => r.data),
   subscriptionMetrics: (params?: { start_date?: string; end_date?: string; reactivation_window_days?: number }) =>
     apiClient.get<AdminSubscriptionMetrics>("/admin/subscription-metrics", { params }).then((r) => r.data),
   getRateLimit: (userId: string) =>

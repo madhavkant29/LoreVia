@@ -271,7 +271,9 @@ def test_create_policy_if_missing_executes_expected_do_block(monkeypatch) -> Non
     assert "WITH CHECK (auth.uid() = author_user_id)" in executed[0]
 
 
-def test_grant_supabase_data_api_table_access_grants_authenticated_and_service_role(monkeypatch) -> None:
+def test_grant_supabase_data_api_table_access_grants_authenticated_and_service_role(
+    monkeypatch,
+) -> None:
     executed: list[str] = []
     monkeypatch.setattr(
         "app.utils.migration_utils.op",
@@ -287,7 +289,9 @@ def test_grant_supabase_data_api_table_access_grants_authenticated_and_service_r
     ]
 
 
-def test_grant_supabase_data_api_sequence_access_grants_authenticated_and_service_role(monkeypatch) -> None:
+def test_grant_supabase_data_api_sequence_access_grants_authenticated_and_service_role(
+    monkeypatch,
+) -> None:
     executed: list[str] = []
     monkeypatch.setattr(
         "app.utils.migration_utils.op",

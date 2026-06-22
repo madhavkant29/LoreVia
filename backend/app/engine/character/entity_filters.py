@@ -2,69 +2,341 @@ from __future__ import annotations
 
 import functools
 import re
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 PERSON_ROLE_WORDS = {
-    "mr", "mrs", "ms", "miss", "dr", "doctor", "professor", "captain", "commander",
-    "sir", "lady", "lord", "king", "queen", "prince", "princess", "duke", "duchess",
-    "baron", "master", "mistress", "mentor", "servant", "rider", "saber", "archer",
-    "lancer", "caster", "berserker", "assassin", "ruler", "shielder", "avenger",
-    "foreigner", "alterego", "alter", "teacher", "father", "mother", "brother",
-    "sister", "uncle", "aunt",
+    "mr",
+    "mrs",
+    "ms",
+    "miss",
+    "dr",
+    "doctor",
+    "professor",
+    "captain",
+    "commander",
+    "sir",
+    "lady",
+    "lord",
+    "king",
+    "queen",
+    "prince",
+    "princess",
+    "duke",
+    "duchess",
+    "baron",
+    "master",
+    "mistress",
+    "mentor",
+    "servant",
+    "rider",
+    "saber",
+    "archer",
+    "lancer",
+    "caster",
+    "berserker",
+    "assassin",
+    "ruler",
+    "shielder",
+    "avenger",
+    "foreigner",
+    "alterego",
+    "alter",
+    "teacher",
+    "father",
+    "mother",
+    "brother",
+    "sister",
+    "uncle",
+    "aunt",
 }
 
 NON_PERSON_HEADWORDS = {
-    "academy", "association", "catholicism", "church", "city", "circles", "convention",
-    "country", "crest", "department", "designations", "enforcers", "energy", "empire",
-    "eyes", "fundamentals", "gospel", "kingdom", "magecraft", "magic", "mystic",
-    "nation", "office", "order", "republic", "ritual", "school", "sequence", "society",
-    "spirit", "system", "temple", "theory", "tower", "towers", "university", "wonders",
+    "academy",
+    "association",
+    "catholicism",
+    "church",
+    "city",
+    "circles",
+    "convention",
+    "country",
+    "crest",
+    "department",
+    "designations",
+    "enforcers",
+    "energy",
+    "empire",
+    "eyes",
+    "fundamentals",
+    "gospel",
+    "kingdom",
+    "magecraft",
+    "magic",
+    "mystic",
+    "nation",
+    "office",
+    "order",
+    "republic",
+    "ritual",
+    "school",
+    "sequence",
+    "society",
+    "spirit",
+    "system",
+    "temple",
+    "theory",
+    "tower",
+    "towers",
+    "university",
+    "wonders",
 }
 
 LEADING_DESCRIPTOR_WORDS = {
-    "ancient", "arcane", "central", "eastern", "first", "fourth", "great", "holy",
-    "last", "magic", "mystic", "northern", "old", "roman", "royal", "sacred",
-    "second", "seventh", "silver", "southern", "starless", "third", "western", "young",
+    "ancient",
+    "arcane",
+    "central",
+    "eastern",
+    "first",
+    "fourth",
+    "great",
+    "holy",
+    "last",
+    "magic",
+    "mystic",
+    "northern",
+    "old",
+    "roman",
+    "royal",
+    "sacred",
+    "second",
+    "seventh",
+    "silver",
+    "southern",
+    "starless",
+    "third",
+    "western",
+    "young",
 }
 
 ABSTRACT_SUFFIXES = ("ism", "tion", "ness", "ity", "ology", "ship", "ment", "ance", "ence")
 NUMBER_WORDS = {
-    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
 }
 
-SINGLE_TOKEN_DISCOURSE_WORDS = frozenset({
-    "absolutely", "actually", "again", "aha", "ahaha", "about", "according",
-    "also", "clean", "dammit", "during", "fine", "flatly", "good", "hadn",
-    "having", "heh", "hmph", "hunh", "however", "language", "looking",
-    "maybe", "moreover", "neither", "next", "nothing", "okay", "optimistic",
-    "parent", "please", "really", "scary", "send", "setting", "sheesh",
-    "someone", "staring", "still", "stop", "sure", "sunday", "swings",
-    "take", "thanks", "though", "true", "understood", "unfortunately",
-    "very", "wait", "whether",
-    "amenez", "anges", "aucune", "aujourd", "avez", "bien", "bienvenue",
-    "cessez", "cette", "chapitre", "dans", "depuis", "dixit", "elle",
-    "encore", "entendu", "extrait", "finir", "gardes", "inutile", "jaune",
-    "jaunes", "laisse", "maintenant", "mais", "merci", "nous", "peine",
-    "personne", "pourquoi", "pourrais", "pourtant", "quelqu", "quelle",
-    "refusant", "regarde", "rien", "rouges", "sachant", "sais",
-    "salutations", "soudain", "tant", "tandis", "texte", "toujours",
-    "toutefois", "tous", "viendrez", "viens", "violet", "violets",
-    "violettes", "votre", "voulez", "vous",
-})
+SINGLE_TOKEN_DISCOURSE_WORDS = frozenset(
+    {
+        "absolutely",
+        "actually",
+        "again",
+        "aha",
+        "ahaha",
+        "about",
+        "according",
+        "also",
+        "clean",
+        "dammit",
+        "during",
+        "fine",
+        "flatly",
+        "good",
+        "hadn",
+        "having",
+        "heh",
+        "hmph",
+        "hunh",
+        "however",
+        "language",
+        "looking",
+        "maybe",
+        "moreover",
+        "neither",
+        "next",
+        "nothing",
+        "okay",
+        "optimistic",
+        "parent",
+        "please",
+        "really",
+        "scary",
+        "send",
+        "setting",
+        "sheesh",
+        "someone",
+        "staring",
+        "still",
+        "stop",
+        "sure",
+        "sunday",
+        "swings",
+        "take",
+        "thanks",
+        "though",
+        "true",
+        "understood",
+        "unfortunately",
+        "very",
+        "wait",
+        "whether",
+        "amenez",
+        "anges",
+        "aucune",
+        "aujourd",
+        "avez",
+        "bien",
+        "bienvenue",
+        "cessez",
+        "cette",
+        "chapitre",
+        "dans",
+        "depuis",
+        "dixit",
+        "elle",
+        "encore",
+        "entendu",
+        "extrait",
+        "finir",
+        "gardes",
+        "inutile",
+        "jaune",
+        "jaunes",
+        "laisse",
+        "maintenant",
+        "mais",
+        "merci",
+        "nous",
+        "peine",
+        "personne",
+        "pourquoi",
+        "pourrais",
+        "pourtant",
+        "quelqu",
+        "quelle",
+        "refusant",
+        "regarde",
+        "rien",
+        "rouges",
+        "sachant",
+        "sais",
+        "salutations",
+        "soudain",
+        "tant",
+        "tandis",
+        "texte",
+        "toujours",
+        "toutefois",
+        "tous",
+        "viendrez",
+        "viens",
+        "violet",
+        "violets",
+        "violettes",
+        "votre",
+        "voulez",
+        "vous",
+    }
+)
 
 COMMON_NON_NAME_WORDS = {
     # High-frequency English words that often appear capitalized at sentence start
     # and should almost never be treated as character entities.
-    "a", "an", "and", "as", "at", "back", "because", "before", "but", "by",
-    "come", "for", "from", "had", "has", "have", "he", "her", "here", "him", "his",
-    "how", "i", "if", "in", "into", "is", "it", "its", "like", "me", "more",
-    "my", "near", "no", "not", "now", "of", "off", "on", "once", "one",
-    "or", "our", "out", "over", "she", "so", "some", "than", "that", "the",
-    "their", "them", "then", "there", "these", "they", "this", "those", "to",
-    "too", "up", "us", "was", "we", "were", "what", "when", "where", "which",
-    "who", "why", "well", "would", "with", "without", "you", "your",
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "back",
+    "because",
+    "before",
+    "but",
+    "by",
+    "come",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "he",
+    "her",
+    "here",
+    "him",
+    "his",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "like",
+    "me",
+    "more",
+    "my",
+    "near",
+    "no",
+    "not",
+    "now",
+    "of",
+    "off",
+    "on",
+    "once",
+    "one",
+    "or",
+    "our",
+    "out",
+    "over",
+    "she",
+    "so",
+    "some",
+    "than",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "to",
+    "too",
+    "up",
+    "us",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "well",
+    "would",
+    "with",
+    "without",
+    "you",
+    "your",
 } | set(SINGLE_TOKEN_DISCOURSE_WORDS)
 
 NON_NAME_PATTERNS = (
@@ -260,10 +532,7 @@ def _single_token_has_grounded_support(
         or (
             not is_common_word
             and strong_mention_count >= 1
-            and (
-                has_dialogue_or_action
-                or has_physical_description
-            )
+            and (has_dialogue_or_action or has_physical_description)
         )
     )
 
@@ -339,7 +608,10 @@ def character_persistence_decision(
     strong_single_token_profile = profile_score >= 2 and _has_meaningful_text(arc_summary)
 
     if _single_token_name(name):
-        if not _single_token_has_grounded_support(name, evidence, stopwords=stopwords) and not strong_single_token_profile:
+        if (
+            not _single_token_has_grounded_support(name, evidence, stopwords=stopwords)
+            and not strong_single_token_profile
+        ):
             reasons.append("single_token_needs_stronger_support")
         if support_score < 3 and profile_score == 0 and not strong_single_token_profile:
             reasons.append("single_token_lacks_profile_evidence")
@@ -354,7 +626,11 @@ def character_persistence_decision(
     if support_score < 2 and profile_score == 0:
         reasons.append("no_profile_or_passage_signal")
 
-    if _single_token_name(name) and not _single_token_has_grounded_support(name, evidence, stopwords=stopwords) and not strong_single_token_profile:
+    if (
+        _single_token_name(name)
+        and not _single_token_has_grounded_support(name, evidence, stopwords=stopwords)
+        and not strong_single_token_profile
+    ):
         reasons.append("single_token_requires_more_evidence")
 
     allowed = not reasons
@@ -403,17 +679,17 @@ def is_displayable_character_entity(
 # signals still carry the decision — the system never hard-fails.
 
 NER_LABEL_SCORES: dict[str, int] = {
-    "PERSON":        3,   # named person — strong positive
-    "ORG":          -2,   # organisation
-    "GPE":          -3,   # geo-political entity (city / country)
-    "LOC":          -3,   # location
-    "FAC":          -3,   # facility
-    "PRODUCT":      -1,   # product name
-    "EVENT":        -1,   # named event
-    "WORK_OF_ART":  -1,   # book / movie title
-    "LAW":          -2,
-    "LANGUAGE":     -2,
-    "NORP":         -2,   # nationality / religion / political group
+    "PERSON": 3,  # named person — strong positive
+    "ORG": -2,  # organisation
+    "GPE": -3,  # geo-political entity (city / country)
+    "LOC": -3,  # location
+    "FAC": -3,  # facility
+    "PRODUCT": -1,  # product name
+    "EVENT": -1,  # named event
+    "WORK_OF_ART": -1,  # book / movie title
+    "LAW": -2,
+    "LANGUAGE": -2,
+    "NORP": -2,  # nationality / religion / political group
 }
 
 _nlp = None
@@ -428,6 +704,7 @@ def _get_nlp():
         return _nlp
     try:
         import spacy
+
         _nlp = spacy.load(
             "en_core_web_sm",
             exclude=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"],
@@ -504,18 +781,19 @@ def contextual_ner_entity_label(text: str, target_name: str) -> str | None:
 
 # ─── Composite visibility scoring constants ───────────────────────────────────
 
-STOPWORD_PENALTY = -3       # name is a known common / noise word  (soft — NER can override)
+STOPWORD_PENALTY = -3  # name is a known common / noise word  (soft — NER can override)
 KNOWN_CONCEPT_PENALTY = -4  # name is in the exact-match concept blocklist
-SUFFIX_CONCEPT_PENALTY = -2 # name ends with a known concept suffix (e.g. " Association")
+SUFFIX_CONCEPT_PENALTY = -2  # name ends with a known concept suffix (e.g. " Association")
 NON_NAME_PATTERN_PENALTY = -4
-ARC_EVIDENCE_BONUS = 1      # character has an arc_summary on record
+ARC_EVIDENCE_BONUS = 1  # character has an arc_summary on record
 SINGLE_PROPER_NAME_BONUS = 1  # title-cased single word ≥4 chars, not a common word
-                               # rescues short CJK-origin names (Ling, Shen, Yuki) that
-                               # en_core_web_sm cannot tag as PERSON in isolation
-VISIBILITY_THRESHOLD = 2    # composite score >= this → treat as a visible character
+# rescues short CJK-origin names (Ling, Shen, Yuki) that
+# en_core_web_sm cannot tag as PERSON in isolation
+VISIBILITY_THRESHOLD = 2  # composite score >= this → treat as a visible character
 
 
 # ─── Composite character visibility scorer ────────────────────────────────────
+
 
 def character_visibility_score(
     name: str | None,
@@ -608,7 +886,9 @@ def character_visibility_score(
     if normalized in stopwords:
         score += STOPWORD_PENALTY
 
-    if matches_non_name_pattern(title_name) or any(pattern.match(normalized) for pattern in non_name_patterns):
+    if matches_non_name_pattern(title_name) or any(
+        pattern.match(normalized) for pattern in non_name_patterns
+    ):
         score += NON_NAME_PATTERN_PENALTY
 
     # 7. Exact concept blocklist — known non-person proper nouns
@@ -628,27 +908,81 @@ def character_visibility_score(
 # statistical footprint.  Never a hard gate — returns a numeric score so
 # callers can apply their own threshold.
 
-_GAG_PERSONALITY_MARKERS: frozenset[str] = frozenset({
-    "comedic", "absurdist", "clumsy", "bumbling", "eccentric", "quirky",
-    "slapstick", "goofy", "silly", "ridiculous", "oblivious", "buffoon",
-    "hapless", "dim-witted", "naive", "over-the-top", "flamboyant",
-    "chaotic", "erratic", "wacky", "manic", "comic-relief", "parody",
-    "self-aware", "fourth-wall", "meta", "satirical", "ironic",
-})
+_GAG_PERSONALITY_MARKERS: frozenset[str] = frozenset(
+    {
+        "comedic",
+        "absurdist",
+        "clumsy",
+        "bumbling",
+        "eccentric",
+        "quirky",
+        "slapstick",
+        "goofy",
+        "silly",
+        "ridiculous",
+        "oblivious",
+        "buffoon",
+        "hapless",
+        "dim-witted",
+        "naive",
+        "over-the-top",
+        "flamboyant",
+        "chaotic",
+        "erratic",
+        "wacky",
+        "manic",
+        "comic-relief",
+        "parody",
+        "self-aware",
+        "fourth-wall",
+        "meta",
+        "satirical",
+        "ironic",
+    }
+)
 
-_GAG_ARCHETYPE_SIGNALS: frozenset[str] = frozenset({
-    "fool", "trickster", "jester", "court jester", "clown", "comic relief",
-    "sidekick", "bumbling sidekick", "village idiot", "eccentric mentor",
-    "absurd villain", "parody", "meme", "comic villain", "one-off",
-    "throwaway", "cameo",
-})
+_GAG_ARCHETYPE_SIGNALS: frozenset[str] = frozenset(
+    {
+        "fool",
+        "trickster",
+        "jester",
+        "court jester",
+        "clown",
+        "comic relief",
+        "sidekick",
+        "bumbling sidekick",
+        "village idiot",
+        "eccentric mentor",
+        "absurd villain",
+        "parody",
+        "meme",
+        "comic villain",
+        "one-off",
+        "throwaway",
+        "cameo",
+    }
+)
 
 _GAG_ARC_PHRASES: tuple[str, ...] = (
-    "comic relief", "played for laughs", "running gag", "running joke",
-    "punchline", "punchline character", "absurd", "deliberately ridiculous",
-    "comedic foil", "meme", "satirical", "satirize", "parody of",
-    "breaks the fourth wall", "self-aware", "one-off joke",
-    "appears once for a laugh", "forgotten immediately", "throwaway",
+    "comic relief",
+    "played for laughs",
+    "running gag",
+    "running joke",
+    "punchline",
+    "punchline character",
+    "absurd",
+    "deliberately ridiculous",
+    "comedic foil",
+    "meme",
+    "satirical",
+    "satirize",
+    "parody of",
+    "breaks the fourth wall",
+    "self-aware",
+    "one-off joke",
+    "appears once for a laugh",
+    "forgotten immediately",
+    "throwaway",
 )
 
 
@@ -678,7 +1012,7 @@ def gag_character_score(
 
     # 1. Personality tags
     tag_hits = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _GAG_PERSONALITY_MARKERS:
             score += 2
             tag_hits += 1
@@ -726,18 +1060,22 @@ def is_gag_character(
     threshold: int = 3,
 ) -> bool:
     """Return True when the character scores at or above the gag threshold."""
-    return gag_character_score(
-        personality_tags=personality_tags,
-        archetype=archetype,
-        arc_summary=arc_summary,
-        mention_count=mention_count,
-        role=role,
-        growth_events=growth_events,
-    ) >= threshold
+    return (
+        gag_character_score(
+            personality_tags=personality_tags,
+            archetype=archetype,
+            arc_summary=arc_summary,
+            mention_count=mention_count,
+            role=role,
+            growth_events=growth_events,
+        )
+        >= threshold
+    )
 
 
 # ─── Complex character detection ─────────────────────────────────────────────
 # Identifies characters with depth, growth, and narrative significance.
+
 
 def complex_character_score(
     *,
@@ -808,18 +1146,41 @@ def complex_character_score(
 # Each subtype has markers for personality, archetype, and arc language.
 
 # Emotional subtypes
-_STOIC_MARKERS: frozenset[str] = frozenset({
-    "stoic", "unemotional", "reserved", "calm", "composed", "detached",
-    "unflappable", "steady", "stoic", "emotionless", "impassive",
-})
-_STOIC_ARCHETYPES: frozenset[str] = frozenset({
-    "stoic hero", "silent protagonist", "warrior monk", "stoic mentor",
-    "unflappable leader", "stone-faced",
-})
-_STOIC_PHRASES: tuple[str, ...] = (
-    "maintains composure", "shows no emotion", "keeps feelings hidden",
-    "stoic demeanor", "unflappable", "emotionally reserved", "calm under pressure",
+_STOIC_MARKERS: frozenset[str] = frozenset(
+    {
+        "stoic",
+        "unemotional",
+        "reserved",
+        "calm",
+        "composed",
+        "detached",
+        "unflappable",
+        "steady",
+        "stoic",
+        "emotionless",
+        "impassive",
+    }
 )
+_STOIC_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "stoic hero",
+        "silent protagonist",
+        "warrior monk",
+        "stoic mentor",
+        "unflappable leader",
+        "stone-faced",
+    }
+)
+_STOIC_PHRASES: tuple[str, ...] = (
+    "maintains composure",
+    "shows no emotion",
+    "keeps feelings hidden",
+    "stoic demeanor",
+    "unflappable",
+    "emotionally reserved",
+    "calm under pressure",
+)
+
 
 def stoic_score(
     *,
@@ -828,7 +1189,7 @@ def stoic_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _STOIC_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -841,18 +1202,42 @@ def stoic_score(
     return min(score, 10)
 
 
-_BROKEN_MARKERS: frozenset[str] = frozenset({
-    "broken", "traumatized", "damaged", "scarred", "wounded", "shattered",
-    "haunted", "tormented", "suffering", "pained", "hurt", "devastated",
-})
-_BROKEN_ARCHETYPES: frozenset[str] = frozenset({
-    "broken hero", "tragic figure", "wounded healer", "trauma survivor",
-    "damaged protagonist", "haunted past",
-})
-_BROKEN_PHRASES: tuple[str, ...] = (
-    "broken by", "trauma from", "haunted by past", "emotional scars",
-    "deeply wounded", "psychological damage", "never recovered from",
+_BROKEN_MARKERS: frozenset[str] = frozenset(
+    {
+        "broken",
+        "traumatized",
+        "damaged",
+        "scarred",
+        "wounded",
+        "shattered",
+        "haunted",
+        "tormented",
+        "suffering",
+        "pained",
+        "hurt",
+        "devastated",
+    }
 )
+_BROKEN_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "broken hero",
+        "tragic figure",
+        "wounded healer",
+        "trauma survivor",
+        "damaged protagonist",
+        "haunted past",
+    }
+)
+_BROKEN_PHRASES: tuple[str, ...] = (
+    "broken by",
+    "trauma from",
+    "haunted by past",
+    "emotional scars",
+    "deeply wounded",
+    "psychological damage",
+    "never recovered from",
+)
+
 
 def broken_score(
     *,
@@ -862,7 +1247,7 @@ def broken_score(
     growth_events: list[dict] | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _BROKEN_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -881,18 +1266,40 @@ def broken_score(
     return min(score, 10)
 
 
-_HIDING_FEELINGS_MARKERS: frozenset[str] = frozenset({
-    "secretive", "guarded", "closed off", "withdrawn", "private", "mysterious",
-    "evasive", "defensive", "hidden", "suppressed", "bottled up",
-})
-_HIDING_FEELINGS_ARCHETYPES: frozenset[str] = frozenset({
-    "mysterious stranger", "secretive protagonist", "hidden past",
-    "enigmatic figure", "cloaked figure",
-})
-_HIDING_FEELINGS_PHRASES: tuple[str, ...] = (
-    "hides feelings", "bottles up emotions", "keeps to themselves",
-    "guarded about", "secretive nature", "won't open up", "emotional walls",
+_HIDING_FEELINGS_MARKERS: frozenset[str] = frozenset(
+    {
+        "secretive",
+        "guarded",
+        "closed off",
+        "withdrawn",
+        "private",
+        "mysterious",
+        "evasive",
+        "defensive",
+        "hidden",
+        "suppressed",
+        "bottled up",
+    }
 )
+_HIDING_FEELINGS_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "mysterious stranger",
+        "secretive protagonist",
+        "hidden past",
+        "enigmatic figure",
+        "cloaked figure",
+    }
+)
+_HIDING_FEELINGS_PHRASES: tuple[str, ...] = (
+    "hides feelings",
+    "bottles up emotions",
+    "keeps to themselves",
+    "guarded about",
+    "secretive nature",
+    "won't open up",
+    "emotional walls",
+)
+
 
 def hiding_feelings_score(
     *,
@@ -901,7 +1308,7 @@ def hiding_feelings_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _HIDING_FEELINGS_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -915,18 +1322,40 @@ def hiding_feelings_score(
 
 
 # Moral subtypes
-_PSYCHOPATH_MARKERS: frozenset[str] = frozenset({
-    "psychopathic", "sociopathic", "remorseless", "ruthless", "cold-blooded",
-    "sadistic", "manipulative", "lacks empathy", "cruel", "merciless",
-})
-_PSYCHOPATH_ARCHETYPES: frozenset[str] = frozenset({
-    "psychopath", "sociopath", "serial killer", "cold-blooded killer",
-    "ruthless villain", "sadistic antagonist",
-})
-_PSYCHOPATH_PHRASES: tuple[str, ...] = (
-    "no empathy", "lacks remorse", "psychopathic tendencies", "cold-blooded",
-    "sadistic pleasure", "enjoys suffering", "ruthless killer",
+_PSYCHOPATH_MARKERS: frozenset[str] = frozenset(
+    {
+        "psychopathic",
+        "sociopathic",
+        "remorseless",
+        "ruthless",
+        "cold-blooded",
+        "sadistic",
+        "manipulative",
+        "lacks empathy",
+        "cruel",
+        "merciless",
+    }
 )
+_PSYCHOPATH_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "psychopath",
+        "sociopath",
+        "serial killer",
+        "cold-blooded killer",
+        "ruthless villain",
+        "sadistic antagonist",
+    }
+)
+_PSYCHOPATH_PHRASES: tuple[str, ...] = (
+    "no empathy",
+    "lacks remorse",
+    "psychopathic tendencies",
+    "cold-blooded",
+    "sadistic pleasure",
+    "enjoys suffering",
+    "ruthless killer",
+)
+
 
 def psychopath_score(
     *,
@@ -935,7 +1364,7 @@ def psychopath_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _PSYCHOPATH_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -948,18 +1377,41 @@ def psychopath_score(
     return min(score, 10)
 
 
-_SERIOUS_MARKERS: frozenset[str] = frozenset({
-    "serious", "grim", "stern", "solemn", "dour", "severe", "intense",
-    "no-nonsense", "businesslike", "formal", "strict", "disciplined",
-})
-_SERIOUS_ARCHETYPES: frozenset[str] = frozenset({
-    "serious protagonist", "grim warrior", "stern mentor", "no-nonsense leader",
-    "disciplined soldier", "formal authority",
-})
-_SERIOUS_PHRASES: tuple[str, ...] = (
-    "takes things seriously", "grim demeanor", "stern expression",
-    "no-nonsense approach", "serious manner", "deadly serious",
+_SERIOUS_MARKERS: frozenset[str] = frozenset(
+    {
+        "serious",
+        "grim",
+        "stern",
+        "solemn",
+        "dour",
+        "severe",
+        "intense",
+        "no-nonsense",
+        "businesslike",
+        "formal",
+        "strict",
+        "disciplined",
+    }
 )
+_SERIOUS_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "serious protagonist",
+        "grim warrior",
+        "stern mentor",
+        "no-nonsense leader",
+        "disciplined soldier",
+        "formal authority",
+    }
+)
+_SERIOUS_PHRASES: tuple[str, ...] = (
+    "takes things seriously",
+    "grim demeanor",
+    "stern expression",
+    "no-nonsense approach",
+    "serious manner",
+    "deadly serious",
+)
+
 
 def serious_score(
     *,
@@ -968,7 +1420,7 @@ def serious_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _SERIOUS_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -982,18 +1434,39 @@ def serious_score(
 
 
 # Personality subtypes
-_CHARISMATIC_MARKERS: frozenset[str] = frozenset({
-    "charismatic", "charming", "magnetic", "persuasive", "influential",
-    "captivating", "enchanting", "compelling", "inspiring", "leader-like",
-})
-_CHARISMATIC_ARCHETYPES: frozenset[str] = frozenset({
-    "charismatic leader", "natural leader", "inspiring figure", "cult leader",
-    "beloved hero", "popular figure",
-})
-_CHARISMATIC_PHRASES: tuple[str, ...] = (
-    "natural charisma", "magnetic personality", "inspires others",
-    "charms people", "persuasive speaker", "draws people in",
+_CHARISMATIC_MARKERS: frozenset[str] = frozenset(
+    {
+        "charismatic",
+        "charming",
+        "magnetic",
+        "persuasive",
+        "influential",
+        "captivating",
+        "enchanting",
+        "compelling",
+        "inspiring",
+        "leader-like",
+    }
 )
+_CHARISMATIC_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "charismatic leader",
+        "natural leader",
+        "inspiring figure",
+        "cult leader",
+        "beloved hero",
+        "popular figure",
+    }
+)
+_CHARISMATIC_PHRASES: tuple[str, ...] = (
+    "natural charisma",
+    "magnetic personality",
+    "inspires others",
+    "charms people",
+    "persuasive speaker",
+    "draws people in",
+)
+
 
 def charismatic_score(
     *,
@@ -1002,7 +1475,7 @@ def charismatic_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _CHARISMATIC_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -1015,18 +1488,39 @@ def charismatic_score(
     return min(score, 10)
 
 
-_CYNICAL_MARKERS: frozenset[str] = frozenset({
-    "cynical", "skeptical", "distrustful", "pessimistic", "world-weary",
-    "jaded", "disillusioned", "cynical", "sarcastic", "ironic",
-})
-_CYNICAL_ARCHETYPES: frozenset[str] = frozenset({
-    "cynical protagonist", "jaded veteran", "disillusioned hero",
-    "world-weary detective", "skeptical investigator",
-})
-_CYNICAL_PHRASES: tuple[str, ...] = (
-    "cynical outlook", "lost faith", "disillusioned with", "skeptical of",
-    "world-weary", "jaded by experience", "sees the worst in people",
+_CYNICAL_MARKERS: frozenset[str] = frozenset(
+    {
+        "cynical",
+        "skeptical",
+        "distrustful",
+        "pessimistic",
+        "world-weary",
+        "jaded",
+        "disillusioned",
+        "cynical",
+        "sarcastic",
+        "ironic",
+    }
 )
+_CYNICAL_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "cynical protagonist",
+        "jaded veteran",
+        "disillusioned hero",
+        "world-weary detective",
+        "skeptical investigator",
+    }
+)
+_CYNICAL_PHRASES: tuple[str, ...] = (
+    "cynical outlook",
+    "lost faith",
+    "disillusioned with",
+    "skeptical of",
+    "world-weary",
+    "jaded by experience",
+    "sees the worst in people",
+)
+
 
 def cynical_score(
     *,
@@ -1035,7 +1529,7 @@ def cynical_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _CYNICAL_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -1049,18 +1543,39 @@ def cynical_score(
 
 
 # Social subtypes
-_LONER_MARKERS: frozenset[str] = frozenset({
-    "loner", "solitary", "isolated", "reclusive", "anti-social", "withdrawn",
-    "introverted", "alone", "independent", "self-reliant",
-})
-_LONER_ARCHETYPES: frozenset[str] = frozenset({
-    "loner protagonist", "solitary figure", "reclusive genius",
-    "isolated wanderer", "lone wolf",
-})
-_LONER_PHRASES: tuple[str, ...] = (
-    "prefers solitude", "works alone", "isolated from", "loner by choice",
-    "keeps to themselves", "no close connections", "solitary life",
+_LONER_MARKERS: frozenset[str] = frozenset(
+    {
+        "loner",
+        "solitary",
+        "isolated",
+        "reclusive",
+        "anti-social",
+        "withdrawn",
+        "introverted",
+        "alone",
+        "independent",
+        "self-reliant",
+    }
 )
+_LONER_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "loner protagonist",
+        "solitary figure",
+        "reclusive genius",
+        "isolated wanderer",
+        "lone wolf",
+    }
+)
+_LONER_PHRASES: tuple[str, ...] = (
+    "prefers solitude",
+    "works alone",
+    "isolated from",
+    "loner by choice",
+    "keeps to themselves",
+    "no close connections",
+    "solitary life",
+)
+
 
 def loner_score(
     *,
@@ -1069,7 +1584,7 @@ def loner_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _LONER_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -1082,18 +1597,41 @@ def loner_score(
     return min(score, 10)
 
 
-_MENTOR_MARKERS: frozenset[str] = frozenset({
-    "wise", "guiding", "teaching", "mentor", "teacher", "advisor",
-    "experienced", "knowledgeable", "patient", "nurturing",
-})
-_MENTOR_ARCHETYPES: frozenset[str] = frozenset({
-    "mentor", "wise teacher", "old master", "guiding figure",
-    "experienced advisor", "patient teacher",
-})
-_MENTOR_PHRASES: tuple[str, ...] = (
-    "mentors", "teaches", "guides", "imparts wisdom", "shares experience",
-    "acts as mentor", "wise guidance", "teacher figure",
+_MENTOR_MARKERS: frozenset[str] = frozenset(
+    {
+        "wise",
+        "guiding",
+        "teaching",
+        "mentor",
+        "teacher",
+        "advisor",
+        "experienced",
+        "knowledgeable",
+        "patient",
+        "nurturing",
+    }
 )
+_MENTOR_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "mentor",
+        "wise teacher",
+        "old master",
+        "guiding figure",
+        "experienced advisor",
+        "patient teacher",
+    }
+)
+_MENTOR_PHRASES: tuple[str, ...] = (
+    "mentors",
+    "teaches",
+    "guides",
+    "imparts wisdom",
+    "shares experience",
+    "acts as mentor",
+    "wise guidance",
+    "teacher figure",
+)
+
 
 def mentor_score(
     *,
@@ -1102,7 +1640,7 @@ def mentor_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _MENTOR_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -1116,18 +1654,41 @@ def mentor_score(
 
 
 # Mental subtypes
-_INTELLIGENT_MARKERS: frozenset[str] = frozenset({
-    "intelligent", "smart", "brilliant", "genius", "clever", "sharp",
-    "analytical", "strategic", "intellectual", "quick-witted",
-})
-_INTELLIGENT_ARCHETYPES: frozenset[str] = frozenset({
-    "genius", "intellectual", "strategist", "mastermind", "brilliant scientist",
-    "clever tactician", "quick-witted hero",
-})
-_INTELLIGENT_PHRASES: tuple[str, ...] = (
-    "highly intelligent", "brilliant mind", "strategic thinker", "genius-level",
-    "quick-witted", "analytical mind", "intellectual prowess",
+_INTELLIGENT_MARKERS: frozenset[str] = frozenset(
+    {
+        "intelligent",
+        "smart",
+        "brilliant",
+        "genius",
+        "clever",
+        "sharp",
+        "analytical",
+        "strategic",
+        "intellectual",
+        "quick-witted",
+    }
 )
+_INTELLIGENT_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "genius",
+        "intellectual",
+        "strategist",
+        "mastermind",
+        "brilliant scientist",
+        "clever tactician",
+        "quick-witted hero",
+    }
+)
+_INTELLIGENT_PHRASES: tuple[str, ...] = (
+    "highly intelligent",
+    "brilliant mind",
+    "strategic thinker",
+    "genius-level",
+    "quick-witted",
+    "analytical mind",
+    "intellectual prowess",
+)
+
 
 def intelligent_score(
     *,
@@ -1136,7 +1697,7 @@ def intelligent_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _INTELLIGENT_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -1149,18 +1710,39 @@ def intelligent_score(
     return min(score, 10)
 
 
-_NAIVE_MARKERS: frozenset[str] = frozenset({
-    "naive", "innocent", "inexperienced", "idealistic", "optimistic",
-    "trusting", "gullible", "unworldly", "pure", "unsuspecting",
-})
-_NAIVE_ARCHETYPES: frozenset[str] = frozenset({
-    "innocent protagonist", "naive hero", "idealistic youth",
-    "trusting soul", "pure-hearted figure",
-})
-_NAIVE_PHRASES: tuple[str, ...] = (
-    "naive about", "innocent to", "idealistic view", "trusting nature",
-    "believes the best", "unaware of", "pure heart",
+_NAIVE_MARKERS: frozenset[str] = frozenset(
+    {
+        "naive",
+        "innocent",
+        "inexperienced",
+        "idealistic",
+        "optimistic",
+        "trusting",
+        "gullible",
+        "unworldly",
+        "pure",
+        "unsuspecting",
+    }
 )
+_NAIVE_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "innocent protagonist",
+        "naive hero",
+        "idealistic youth",
+        "trusting soul",
+        "pure-hearted figure",
+    }
+)
+_NAIVE_PHRASES: tuple[str, ...] = (
+    "naive about",
+    "innocent to",
+    "idealistic view",
+    "trusting nature",
+    "believes the best",
+    "unaware of",
+    "pure heart",
+)
+
 
 def naive_score(
     *,
@@ -1169,7 +1751,7 @@ def naive_score(
     arc_summary: str | None = None,
 ) -> int:
     score = 0
-    for tag in (personality_tags or []):
+    for tag in personality_tags or []:
         if tag.strip().lower() in _NAIVE_MARKERS:
             score += 2
     arch_lower = (archetype or "").strip().lower()
@@ -1184,6 +1766,7 @@ def naive_score(
 
 # ─── Composite subtype scoring ───────────────────────────────────────────────
 
+
 def compute_all_subtype_scores(
     *,
     personality_tags: list[str] | None = None,
@@ -1197,17 +1780,42 @@ def compute_all_subtype_scores(
     Only includes subtypes with score >= 3 to reduce noise.
     """
     scores = {
-        "stoic": stoic_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "broken": broken_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary, growth_events=growth_events),
-        "hiding_feelings": hiding_feelings_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "psychopath": psychopath_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "serious": serious_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "charismatic": charismatic_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "cynical": cynical_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "loner": loner_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "mentor": mentor_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "intelligent": intelligent_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
-        "naive": naive_score(personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary),
+        "stoic": stoic_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "broken": broken_score(
+            personality_tags=personality_tags,
+            archetype=archetype,
+            arc_summary=arc_summary,
+            growth_events=growth_events,
+        ),
+        "hiding_feelings": hiding_feelings_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "psychopath": psychopath_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "serious": serious_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "charismatic": charismatic_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "cynical": cynical_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "loner": loner_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "mentor": mentor_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "intelligent": intelligent_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
+        "naive": naive_score(
+            personality_tags=personality_tags, archetype=archetype, arc_summary=arc_summary
+        ),
     }
     # Filter to only scores >= 3 to reduce noise
     return {k: v for k, v in scores.items() if v >= 3}

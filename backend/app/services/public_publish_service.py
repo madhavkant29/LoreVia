@@ -12,8 +12,22 @@ from app.core.storage import download_book
 from app.models.book import Book
 from app.models.user import User
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
-from app.utils.book_utils import touch_public_book_updated_at
+from app.utils.books.writer_workspace import (
+    touch_public_book_updated_at,
+)
 from app.utils.compliance.copyright_check import evaluate_document_copyright
+from app.utils.public.content import (
+    normalize_public_slug,
+)
+from app.utils.public.moderation import (
+    add_moderation_action,
+    enforce_daily_public_publish_limit,
+    ensure_content_source_allowed_for_user,
+    invalidate_public_book_caches,
+)
+from app.utils.public.requests import (
+    hash_text,
+)
 from app.utils.public_utils import (
     CONTENT_SOURCE_TYPE_ADMIN_SEEDED,
     CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN,
@@ -28,12 +42,6 @@ from app.utils.public_utils import (
     PUBLIC_STATUS_PENDING_REVIEW,
     PUBLIC_STATUS_PUBLISHED,
     USER_PUBLIC_SHARE_SOURCE_KIND,
-    add_moderation_action,
-    enforce_daily_public_publish_limit,
-    ensure_content_source_allowed_for_user,
-    hash_text,
-    invalidate_public_book_caches,
-    normalize_public_slug,
 )
 
 log = logging.getLogger("lorevia.public_publish")
@@ -48,10 +56,17 @@ async def submit_public_share(
     request_ip: str | None,
     user_agent: str | None,
 ) -> PublicBookCreateOut:
-    if getattr(book, "hidden_at", None) is not None or getattr(book, "archived_at", None) is not None:
+    if (
+        getattr(book, "hidden_at", None) is not None
+        or getattr(book, "archived_at", None) is not None
+    ):
         raise HTTPException(404, "Book not found")
     moderation_status = str(getattr(book, "moderation_status", "") or "").strip().lower()
-    if moderation_status in {MODERATION_STATUS_HIDDEN, MODERATION_STATUS_REMOVED, MODERATION_STATUS_UNDER_REVIEW}:
+    if moderation_status in {
+        MODERATION_STATUS_HIDDEN,
+        MODERATION_STATUS_REMOVED,
+        MODERATION_STATUS_UNDER_REVIEW,
+    }:
         raise HTTPException(409, "This book is not eligible for public publishing right now.")
     if getattr(book, "takedown_at", None) is not None:
         raise HTTPException(409, "This book is under takedown and cannot be republished.")
@@ -65,19 +80,17 @@ async def submit_public_share(
     now = datetime.now(UTC)
     source_kind = (
         PUBLIC_DEMO_SOURCE_KIND
-        if content_source_type in {CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN, CONTENT_SOURCE_TYPE_ADMIN_SEEDED}
+        if content_source_type
+        in {CONTENT_SOURCE_TYPE_PUBLIC_DOMAIN, CONTENT_SOURCE_TYPE_ADMIN_SEEDED}
         else USER_PUBLIC_SHARE_SOURCE_KIND
     )
-    can_publish_automatically = (
-        source_kind == PUBLIC_DEMO_SOURCE_KIND
-        or (
-            content_source_type == CONTENT_SOURCE_TYPE_USER_ORIGINAL
-            and getattr(user, "email_verified_at", None) is not None
-            and str(getattr(book, "status", "") or "").strip().lower() == "ready"
-            and public_slug is not None
-            and copyright_check_available
-            and not bool(getattr(book, "copyright_warning", False))
-        )
+    can_publish_automatically = source_kind == PUBLIC_DEMO_SOURCE_KIND or (
+        content_source_type == CONTENT_SOURCE_TYPE_USER_ORIGINAL
+        and getattr(user, "email_verified_at", None) is not None
+        and str(getattr(book, "status", "") or "").strip().lower() == "ready"
+        and public_slug is not None
+        and copyright_check_available
+        and not bool(getattr(book, "copyright_warning", False))
     )
 
     book.public_slug = public_slug
@@ -124,7 +137,10 @@ async def submit_public_share(
         book_id=book.id,
         new_status=book.public_status,
         reason=message,
-        metadata={"content_source_type": content_source_type, "copyright_check_available": copyright_check_available},
+        metadata={
+            "content_source_type": content_source_type,
+            "copyright_check_available": copyright_check_available,
+        },
     )
     await db.commit()
     await invalidate_public_book_caches(book)
@@ -139,13 +155,17 @@ async def submit_public_share(
     )
 
 
-async def _resolve_public_slug(db: AsyncSession, *, book: Book, requested_slug: str | None) -> str | None:
+async def _resolve_public_slug(
+    db: AsyncSession, *, book: Book, requested_slug: str | None
+) -> str | None:
     raw_slug = requested_slug or getattr(book, "public_slug", None)
     if not raw_slug:
         return None
     normalized_slug = normalize_public_slug(raw_slug)
     existing_slug = (
-        await db.execute(select(Book.id).where(Book.public_slug == normalized_slug, Book.id != book.id))
+        await db.execute(
+            select(Book.id).where(Book.public_slug == normalized_slug, Book.id != book.id)
+        )
     ).scalar_one_or_none()
     if existing_slug is not None:
         raise HTTPException(409, "That public URL is already in use.")

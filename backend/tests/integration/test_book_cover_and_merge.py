@@ -1,6 +1,7 @@
-from io import BytesIO
 import uuid
+from io import BytesIO
 
+import fitz
 import pytest
 from PIL import Image, ImageDraw
 from sqlalchemy import select
@@ -19,8 +20,18 @@ def _register_user_payload(image_size: tuple[int, int] = (120, 180)) -> bytes:
     return buffer.getvalue()
 
 
+def _pdf_bytes(text: str) -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), text)
+    raw = document.write()
+    document.close()
+    return raw
+
+
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     from app.core.security import create_access_token
+
     username = email.split("@")[0][:32]
     response = await client.post(
         "/api/v1/auth/register",
@@ -35,7 +46,9 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
     assert response.status_code == 201
     token = create_access_token(str(response.json()["id"]))
     assert token
-    me_response = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={token}"})
+    me_response = await client.get(
+        "/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={token}"}
+    )
     assert me_response.status_code == 200
     return {"Cookie": f"lorevia_access_token={token}"}, uuid.UUID(me_response.json()["id"])
 
@@ -48,7 +61,7 @@ async def test_manual_cover_upload_returns_original_cover_without_processing_met
         "/api/v1/books/upload",
         headers=headers,
         files={
-            "file": ("manual-cover.pdf", b"%PDF-1.4 test payload", "application/pdf"),
+            "file": ("manual-cover.pdf", _pdf_bytes("Covered book"), "application/pdf"),
             "cover_file": ("manual-cover.png", _register_user_payload(), "image/png"),
         },
         data={
@@ -105,7 +118,13 @@ async def test_merge_characters_endpoint_merges_duplicate_records(client, db):
     db.add_all([primary, secondary])
     await db.flush()
 
-    db.add(CharacterState(character_id=secondary.id, at_chapter=3, trait_snapshot={"eyes": {"value": "gray", "confidence": 0.9}}))
+    db.add(
+        CharacterState(
+            character_id=secondary.id,
+            at_chapter=3,
+            trait_snapshot={"eyes": {"value": "gray", "confidence": 0.9}},
+        )
+    )
     db.add(
         CharacterRelationship(
             book_id=book.id,
@@ -132,8 +151,20 @@ async def test_merge_characters_endpoint_merges_duplicate_records(client, db):
     db.expire_all()
     merged = await db.get(Character, primary_id)
     deleted = await db.get(Character, secondary_id)
-    states = (await db.execute(select(CharacterState).where(CharacterState.character_id == primary_id))).scalars().all()
-    relationships = (await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))).scalars().all()
+    states = (
+        (await db.execute(select(CharacterState).where(CharacterState.character_id == primary_id)))
+        .scalars()
+        .all()
+    )
+    relationships = (
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert merged is not None
     assert deleted is not None
@@ -220,7 +251,9 @@ async def test_create_character_endpoint_supports_manual_profiles(client, db):
     assert payload["description"] == "The family matriarch with a sharp memory."
     assert payload["aliases"] == ["Mother"]
 
-    characters = (await db.execute(select(Character).where(Character.book_id == book.id))).scalars().all()
+    characters = (
+        (await db.execute(select(Character).where(Character.book_id == book.id))).scalars().all()
+    )
     assert len(characters) == 1
     assert characters[0].name == "Mom"
     assert characters[0].last_seen_chapter == 2

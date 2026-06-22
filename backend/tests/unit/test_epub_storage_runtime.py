@@ -40,8 +40,12 @@ def test_parse_epub_extracts_documents_removes_assets_and_skips_short_items(monk
     fake_book = SimpleNamespace(
         get_items=lambda: [
             FakeEpubItem(b"cover", item_type=ebooklib.ITEM_COVER),
-            FakeEpubItem(b"<html><h1>Chapter 12: The Gate</h1><script>bad()</script><style>.x{}</style><img src='x'>tiny</html>"),
-            FakeEpubItem(f"<html><h2>Chapter 12: The Gate</h2><p>{long_text}</p><p>\u2726 The key turned.</p></html>".encode()),
+            FakeEpubItem(
+                b"<html><h1>Chapter 12: The Gate</h1><script>bad()</script><style>.x{}</style><img src='x'>tiny</html>"
+            ),
+            FakeEpubItem(
+                f"<html><h2>Chapter 12: The Gate</h2><p>{long_text}</p><p>\u2726 The key turned.</p></html>".encode()
+            ),
             FakeEpubItem(f"<html><p>{long_text}</p></html>".encode()),
         ]
     )
@@ -88,7 +92,7 @@ def test_epub_split_helpers_split_only_at_sentence_boundaries(monkeypatch):
     ]
     assert epub_parser._split_parts([]) == []
     assert epub_parser._can_close_section(["unfinished clause"]) is False
-    assert epub_parser._can_close_section(["Finished sentence!\""]) is True
+    assert epub_parser._can_close_section(['Finished sentence!"']) is True
 
 
 def test_local_storage_round_trip_move_delete_and_permissions(monkeypatch, tmp_path):
@@ -103,7 +107,10 @@ def test_local_storage_round_trip_move_delete_and_permissions(monkeypatch, tmp_p
     assert storage.download_book(book_key) == b"book"
     assert storage.download_book(bytes_key) == b"bytes"
 
-    assert storage.upload_binary("assets/image.bin", b"binary", "application/octet-stream") == "assets/image.bin"
+    assert (
+        storage.upload_binary("assets/image.bin", b"binary", "application/octet-stream")
+        == "assets/image.bin"
+    )
     assert storage.upload_text("notes/note.txt", "hello") == "notes/note.txt"
     assert storage.download_book("assets/image.bin") == b"binary"
     assert storage.download_book("notes/note.txt") == b"hello"
@@ -119,7 +126,11 @@ def test_local_storage_round_trip_move_delete_and_permissions(monkeypatch, tmp_p
     touched = []
     monkeypatch.setattr(storage.os, "geteuid", lambda: 0)
     monkeypatch.setattr(storage, "_storage_owner_ids", lambda: (10001, 10001))
-    monkeypatch.setattr(storage, "_apply_local_storage_permissions", lambda path, uid, gid: touched.append((path, uid, gid)))
+    monkeypatch.setattr(
+        storage,
+        "_apply_local_storage_permissions",
+        lambda path, uid, gid: touched.append((path, uid, gid)),
+    )
     storage.ensure_local_storage_permissions()
     assert any(path.name == "note.txt" for path, _, _ in touched)
 

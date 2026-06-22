@@ -34,8 +34,14 @@ async def register_user(db: AsyncSession, email: str, password: str) -> tuple[Us
     await db.refresh(user)
     version = current_token_version(user)
     session_id = str(uuid.uuid4())
-    await store_refresh_session(str(user.id), session_id, settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60)
-    return user, create_access_token(str(user.id), version), create_refresh_token(str(user.id), version, session_id)
+    await store_refresh_session(
+        str(user.id), session_id, settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60
+    )
+    return (
+        user,
+        create_access_token(str(user.id), version),
+        create_refresh_token(str(user.id), version, session_id),
+    )
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:

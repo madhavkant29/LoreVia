@@ -20,7 +20,9 @@ async def delete_storage_key_best_effort(key: str | None, *, context: str = "sto
         return False
 
 
-async def delete_storage_keys_best_effort(keys: Iterable[str | None], *, context: str = "storage") -> list[str]:
+async def delete_storage_keys_best_effort(
+    keys: Iterable[str | None], *, context: str = "storage"
+) -> list[str]:
     deleted: list[str] = []
     for key in dict.fromkeys(key for key in keys if key):
         if await delete_storage_key_best_effort(key, context=context):

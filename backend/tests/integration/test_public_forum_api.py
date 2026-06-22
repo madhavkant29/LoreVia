@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -49,7 +49,8 @@ async def _create_book(
     author_id: uuid.UUID,
     title: str,
     genre: str | None = "Fantasy",
-    public_description: str | None = "A private fantasy manuscript seeking structured reader feedback.",
+    public_description: str
+    | None = "A private fantasy manuscript seeking structured reader feedback.",
 ) -> Book:
     book = Book(
         user_id=author_id,
@@ -129,7 +130,9 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     interest_response = await client.post(
         f"/api/v1/public/forum/posts/{high_post_id}/interests",
         headers=_auth_headers(seeker.id),
-        json={"message": "I focus on scene-level readability and would love to help with this draft."},
+        json={
+            "message": "I focus on scene-level readability and would love to help with this draft."
+        },
     )
     assert interest_response.status_code == 201
 
@@ -212,7 +215,9 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     comment_response = await client.post(
         f"/api/v1/public/forum/posts/{high_post_id}/comments",
         headers=_auth_headers(seeker.id),
-        json={"body": "I can give detailed pacing notes and line-level clarity comments if you want another pass."},
+        json={
+            "body": "I can give detailed pacing notes and line-level clarity comments if you want another pass."
+        },
     )
     assert comment_response.status_code == 201
     comment_id = comment_response.json()["id"]
@@ -310,7 +315,11 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
 
     for assignment_id, reader_id, body_text in (
         (high_assignment_id, first_reader.id, "The reveal hit hard and the opening moved quickly."),
-        (low_assignment_id, second_reader.id, "I understood the setup, but the opening felt distant."),
+        (
+            low_assignment_id,
+            second_reader.id,
+            "I understood the setup, but the opening felt distant.",
+        ),
     ):
         feedback_response = await client.post(
             f"/api/v1/beta-reads/{assignment_id}/feedback-items",
@@ -379,11 +388,14 @@ async def test_private_book_forum_supports_interest_and_rating_rankings(client, 
     assert seeker_profile_payload["forum_comment_count"] == 1
 
 
-
 @pytest.mark.asyncio
-async def test_public_profile_requires_public_presence_and_skips_private_only_project_fallback(client, db):
+async def test_public_profile_requires_public_presence_and_skips_private_only_project_fallback(
+    client, db
+):
     private_only_user = await _create_user(db, email="private-only@lorevia.test", tier="author")
-    private_only_book = await _create_book(db, author_id=private_only_user.id, title="Hidden Lantern")
+    private_only_book = await _create_book(
+        db, author_id=private_only_user.id, title="Hidden Lantern"
+    )
 
     no_presence_profile = await client.get(f"/api/v1/public/users/{private_only_user.username}")
     assert no_presence_profile.status_code == 404
@@ -505,7 +517,9 @@ async def test_public_share_requires_admin_approval_before_author_book_surfaces(
 async def test_free_users_cannot_open_public_discussions_or_submit_public_samples(client, db):
     paid_author = await _create_user(db, email="paid-forum-author@lorevia.test", tier="author")
     expired_trial_at = datetime.now(UTC) - timedelta(days=14)
-    free_author = await _create_user(db, email="free-forum-author@lorevia.test", tier="free", created_at=expired_trial_at)
+    free_author = await _create_user(
+        db, email="free-forum-author@lorevia.test", tier="free", created_at=expired_trial_at
+    )
     free_reader = await _create_user(db, email="free-forum-reader@lorevia.test", tier="free")
 
     paid_book = await _create_book(db, author_id=paid_author.id, title="Paid Harbor")
@@ -536,15 +550,24 @@ async def test_free_users_cannot_open_public_discussions_or_submit_public_sample
         },
     )
     assert blocked_post.status_code == 403
-    assert blocked_post.json()["detail"] == "Opening a public discussion requires Trial, Author, or Architect access."
+    assert (
+        blocked_post.json()["detail"]
+        == "Opening a public discussion requires Trial, Author, or Architect access."
+    )
 
     blocked_share = await client.post(
         f"/api/v1/public/shared-books/{free_book.id}/publish",
         headers=_auth_headers(free_author.id),
-        json={"confirm_public_share": True, "description": "Trying to request a public sample on free."},
+        json={
+            "confirm_public_share": True,
+            "description": "Trying to request a public sample on free.",
+        },
     )
     assert blocked_share.status_code == 403
-    assert blocked_share.json()["detail"] == "Submitting a public sample requires Trial, Author, or Architect access."
+    assert (
+        blocked_share.json()["detail"]
+        == "Submitting a public sample requires Trial, Author, or Architect access."
+    )
 
     comment_response = await client.post(
         f"/api/v1/public/forum/posts/{paid_post.json()['id']}/comments",
@@ -579,17 +602,24 @@ async def test_trial_users_can_open_discussions_and_submit_public_samples(client
     )
     assert discussion_response.status_code == 201
 
-    public_share_book = await _create_book(db, author_id=trial_author.id, title="Trial Public Sample")
+    public_share_book = await _create_book(
+        db, author_id=trial_author.id, title="Trial Public Sample"
+    )
     publish_response = await client.post(
         f"/api/v1/public/shared-books/{public_share_book.id}/publish",
         headers=_auth_headers(trial_author.id),
-        json={"confirm_public_share": True, "description": "Trial user requesting a public sample."},
+        json={
+            "confirm_public_share": True,
+            "description": "Trial user requesting a public sample.",
+        },
     )
     assert publish_response.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_general_public_discussions_are_open_to_signed_in_users_and_visible_on_profiles(client, db):
+async def test_general_public_discussions_are_open_to_signed_in_users_and_visible_on_profiles(
+    client, db
+):
     member = await _create_user(db, email="general-forum-member@lorevia.test", tier="free")
 
     create_response = await client.post(

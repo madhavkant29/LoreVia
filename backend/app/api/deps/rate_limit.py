@@ -110,7 +110,9 @@ async def _bump_weekly_bucket(
     if count > limit:
         if isinstance(user, User) or getattr(user, "email", None):
             await track_usage_limit_friction_and_maybe_send(user, action=action)
-        raise HTTPException(429, "Your free Story Advisor turn refreshes next week. Upgrade for more capacity.")
+        raise HTTPException(
+            429, "Your free Story Advisor turn refreshes next week. Upgrade for more capacity."
+        )
 
 
 async def rate_limit_search(
@@ -149,7 +151,9 @@ async def rate_limit_advisor(
 
     daily_limit = protected_authoring_limit_per_day(current_user)
     if daily_limit <= 0:
-        raise HTTPException(403, "Story Advisor requires an active trial, Author, or Architect plan.")
+        raise HTTPException(
+            403, "Story Advisor requires an active trial, Author, or Architect plan."
+        )
     daily_limit = await _limit_for_user(db, current_user.id, "advisor_per_day", daily_limit)
     await _bump_daily_bucket(db, current_user, "high_cost_authoring", daily_limit)
 
@@ -170,7 +174,9 @@ async def rate_limit_continuity_checker(
 ):
     daily_limit = continuity_limit_per_day(current_user)
     if daily_limit <= 0:
-        raise HTTPException(403, "Continuity checks are authoring features. Upgrade to Author for access.")
+        raise HTTPException(
+            403, "Continuity checks are authoring features. Upgrade to Author for access."
+        )
     await _bump_daily_bucket(db, current_user, "continuity", daily_limit)
 
 
@@ -183,6 +189,7 @@ async def rate_limit_api(
     ok = await _window(key_ratelimit(str(current_user.id), "api"), limit, 60)
     if not ok:
         raise HTTPException(429, "Rate limit exceeded")
+
 
 # RFC-1918 + loopback ranges that may legitimately act as reverse proxies.
 # Forwarded-IP headers are only trusted when the *direct* TCP connection
@@ -339,7 +346,9 @@ async def rate_limit_public_report(request: Request):
     identifier = _client_identifier(request)
     ok = await _window(key_ratelimit(f"public-report:{identifier}", "report"), 8, 3600)
     if not ok:
-        raise HTTPException(429, "Report rate limit exceeded. Please wait before sending another report.")
+        raise HTTPException(
+            429, "Report rate limit exceeded. Please wait before sending another report."
+        )
 
 
 async def rate_limit_manuscript_import(

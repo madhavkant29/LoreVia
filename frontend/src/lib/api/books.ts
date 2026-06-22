@@ -60,6 +60,11 @@ export const booksApi = {
     invalidateReaderCache(id)
     return r.data
   }),
+  continueProcessing: (id: string) => apiClient.post<BookProcessing>(bookPath(id, "/processing/continue")).then(r => {
+    invalidateBookCache(id)
+    invalidateReaderCache(id)
+    return r.data
+  }),
   getReaderBootstrap: (id: string) =>
     apiClient.get<ReaderBootstrapPayload>(bookPath(id, "/reader-bootstrap")).then(r => r.data),
   getManuscriptBootstrap: (
@@ -159,6 +164,21 @@ export const booksApi = {
     apiClient.get<StoryHealth>(bookPath(id, "/story-health")).then(r => r.data),
   getRevisionIntelligence: (id: string) =>
     apiClient.get<RevisionIntelligence>(bookPath(id, "/revision-intelligence")).then(r => r.data),
+  decideRevisionFinding: (
+    id: string,
+    findingId: string,
+    payload: {
+      decision: "accepted" | "dismissed" | "resolved"
+      action?: "added_to_revision_plan" | "saved_note" | "manuscript_edit" | "exported_report" | null
+      reason?: "intentional" | "incorrect" | "not_relevant" | "other" | null
+    },
+  ) => apiClient
+    .post<RevisionIntelligence>(bookPath(id, `/revision-findings/${findingId}/decision`), payload)
+    .then(r => {
+      void invalidateQueryKeys(bookCacheKey(id, "revision-intelligence"))
+      void invalidateQueryKeys(bookCacheKey(id, "writer-workspace"))
+      return r.data
+    }),
   getChapterVersions: (id: string, chapterNumber: number, limit = 12) =>
     apiClient.get<ChapterVersion[]>(bookPath(id, "/chapter-versions"), { params: { chapter_number: chapterNumber, limit } }).then(r => r.data),
   createChapterSnapshot: (id: string, chapterNumber: number, note?: string) =>

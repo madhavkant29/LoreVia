@@ -24,7 +24,7 @@ services:
 
   worker-extraction:
     build: { context: ., dockerfile: backend/Dockerfile.worker }
-    command: celery -A app.workers.celery_app worker -Q extraction,extraction_priority --loglevel=info -c 4
+    command: python -m app.workers.worker_launcher extraction
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
@@ -46,7 +46,29 @@ services:
 
   worker-analysis:
     build: { context: ., dockerfile: backend/Dockerfile.worker }
-    command: celery -A app.workers.celery_app worker -Q analysis,analysis_priority,embedding --loglevel=info -c 2
+    command: python -m app.workers.worker_launcher analysis
+    env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - local_storage:/app/storage
+    networks:
+      - default
+      - redis_internal
+
+  worker-embedding:
+    build: { context: ., dockerfile: backend/Dockerfile.worker }
+    command: python -m app.workers.worker_launcher embedding
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
@@ -68,7 +90,7 @@ services:
 
   worker-intelligence:
     build: { context: ., dockerfile: backend/Dockerfile.worker }
-    command: celery -A app.workers.celery_app worker -Q intelligence --loglevel=info -c 1
+    command: python -m app.workers.worker_launcher intelligence
     env_file: ./backend/.env.local
     environment:
       NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"

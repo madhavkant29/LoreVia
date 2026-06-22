@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -27,7 +27,10 @@ def test_claim_version_rejects_missing_or_invalid_values(payload):
 
 
 def test_decode_access_payload_only_accepts_access_tokens(monkeypatch):
-    monkeypatch.setattr("app.api.deps.auth.decode_token", lambda token: {"type": "access", "sub": "user"} if token == "good" else {"type": "refresh"})
+    monkeypatch.setattr(
+        "app.api.deps.auth.decode_token",
+        lambda token: {"type": "access", "sub": "user"} if token == "good" else {"type": "refresh"},
+    )
 
     assert _decode_access_payload("good") == {"type": "access", "sub": "user"}
     assert _decode_access_payload("wrong-type") is None
@@ -64,8 +67,20 @@ async def test_get_current_user_falls_back_to_refresh_when_access_user_is_missin
 
     monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", lambda _request: None)
     monkeypatch.setattr("app.api.deps.auth.get_auth_token", fake_get_auth_token)
-    monkeypatch.setattr("app.api.deps.auth._decode_access_payload", lambda token: {"sub": "stale-user", "ver": 1, "type": "access"} if token == "access-token" else None)
-    monkeypatch.setattr("app.api.deps.auth._decode_refresh_payload", lambda token: {"sub": "valid-user", "ver": 1, "sid": "session-1", "type": "refresh"} if token == "refresh-token" else None)
+    monkeypatch.setattr(
+        "app.api.deps.auth._decode_access_payload",
+        lambda token: (
+            {"sub": "stale-user", "ver": 1, "type": "access"} if token == "access-token" else None
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.deps.auth._decode_refresh_payload",
+        lambda token: (
+            {"sub": "valid-user", "ver": 1, "sid": "session-1", "type": "refresh"}
+            if token == "refresh-token"
+            else None
+        ),
+    )
     monkeypatch.setattr("app.api.deps.auth._load_user_from_claims", fake_load_user_from_claims)
     monkeypatch.setattr("app.api.deps.auth.refresh_session_active", fake_refresh_session_active)
 
@@ -90,12 +105,16 @@ async def test_get_current_user_rejects_refresh_tokens_without_session_id(monkey
     monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", lambda _request: None)
     monkeypatch.setattr(
         "app.api.deps.auth.get_auth_token",
-        lambda _request, bearer_token=None, cookie_name="lorevia_access_token": "refresh-token" if cookie_name == "lorevia_refresh_token" else None,
+        lambda _request, bearer_token=None, cookie_name="lorevia_access_token": (
+            "refresh-token" if cookie_name == "lorevia_refresh_token" else None
+        ),
     )
     monkeypatch.setattr("app.api.deps.auth._decode_access_payload", lambda token: None)
     monkeypatch.setattr(
         "app.api.deps.auth._decode_refresh_payload",
-        lambda token: {"sub": "valid-user", "ver": 1, "type": "refresh"} if token == "refresh-token" else None,
+        lambda token: (
+            {"sub": "valid-user", "ver": 1, "type": "refresh"} if token == "refresh-token" else None
+        ),
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -106,7 +125,9 @@ async def test_get_current_user_rejects_refresh_tokens_without_session_id(monkey
 
 
 @pytest.mark.asyncio
-async def test_get_current_user_rejects_inactive_refresh_sessions_without_resetting_cookie(monkeypatch):
+async def test_get_current_user_rejects_inactive_refresh_sessions_without_resetting_cookie(
+    monkeypatch,
+):
     request = Request({"type": "http", "headers": []})
     response = Response()
     user = SimpleNamespace(id="user-id", username="inactive")
@@ -114,12 +135,18 @@ async def test_get_current_user_rejects_inactive_refresh_sessions_without_resett
     monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", lambda _request: None)
     monkeypatch.setattr(
         "app.api.deps.auth.get_auth_token",
-        lambda _request, bearer_token=None, cookie_name="lorevia_access_token": "refresh-token" if cookie_name == "lorevia_refresh_token" else None,
+        lambda _request, bearer_token=None, cookie_name="lorevia_access_token": (
+            "refresh-token" if cookie_name == "lorevia_refresh_token" else None
+        ),
     )
     monkeypatch.setattr("app.api.deps.auth._decode_access_payload", lambda token: None)
     monkeypatch.setattr(
         "app.api.deps.auth._decode_refresh_payload",
-        lambda token: {"sub": "valid-user", "ver": 3, "sid": "session-9", "type": "refresh"} if token == "refresh-token" else None,
+        lambda token: (
+            {"sub": "valid-user", "ver": 3, "sid": "session-9", "type": "refresh"}
+            if token == "refresh-token"
+            else None
+        ),
     )
 
     async def fake_load_user_from_claims(user_id: str, claimed_version: int, db):
@@ -133,7 +160,10 @@ async def test_get_current_user_rejects_inactive_refresh_sessions_without_resett
     monkeypatch.setattr("app.api.deps.auth.refresh_session_active", fake_refresh_session_active)
 
     set_access_cookie_calls: list[str] = []
-    monkeypatch.setattr("app.api.deps.auth.set_access_cookie", lambda _response, access_token: set_access_cookie_calls.append(access_token))
+    monkeypatch.setattr(
+        "app.api.deps.auth.set_access_cookie",
+        lambda _response, access_token: set_access_cookie_calls.append(access_token),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(request, response, credentials=None, db=SimpleNamespace())
@@ -230,10 +260,16 @@ async def test_get_admin_rejects_non_admin_users(monkeypatch):
     async def fake_get_active_admin_principal(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr("app.api.deps.auth.get_active_admin_principal", fake_get_active_admin_principal)
+    monkeypatch.setattr(
+        "app.api.deps.auth.get_active_admin_principal", fake_get_active_admin_principal
+    )
 
     with pytest.raises(HTTPException) as exc_info:
-        await get_admin(request=request, current_user=SimpleNamespace(id="00000000-0000-0000-0000-000000000001"), db=_FakeDB())
+        await get_admin(
+            request=request,
+            current_user=SimpleNamespace(id="00000000-0000-0000-0000-000000000001"),
+            db=_FakeDB(),
+        )
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Admin only"
@@ -253,8 +289,13 @@ async def test_get_current_user_enforces_csrf_for_cookie_authenticated_writes(mo
         return SimpleNamespace(id="user-id")
 
     monkeypatch.setattr("app.api.deps.auth.enforce_cookie_csrf", fake_enforce_cookie_csrf)
-    monkeypatch.setattr("app.api.deps.auth.get_auth_token", lambda *_args, **_kwargs: "access-token")
-    monkeypatch.setattr("app.api.deps.auth._decode_access_payload", lambda _token: {"sub": "user-id", "ver": 2, "type": "access"})
+    monkeypatch.setattr(
+        "app.api.deps.auth.get_auth_token", lambda *_args, **_kwargs: "access-token"
+    )
+    monkeypatch.setattr(
+        "app.api.deps.auth._decode_access_payload",
+        lambda _token: {"sub": "user-id", "ver": 2, "type": "access"},
+    )
     monkeypatch.setattr("app.api.deps.auth._load_user_from_claims", fake_load_user_from_claims)
 
     result = await get_current_user(request, response, credentials=None, db=SimpleNamespace())

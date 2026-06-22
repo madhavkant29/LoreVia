@@ -1,33 +1,65 @@
 import uuid
 
+import fitz
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
 from app.models.intelligence import CharacterRelationship, Notification
+from app.models.operations import TaskExecution
 from app.models.user import User
 from app.workers.consumers import extraction_consumer
-from app.workers.consumers.extraction_consumer import _claim_book_completion, _process_chapter, process_book
+from app.workers.consumers.extraction_consumer import (
+    _claim_book_completion,
+    _process_chapter,
+    process_book,
+)
 
 
 def _embedding_for(text_count: int) -> list[list[float]]:
     return [[0.01] * 1536 for _ in range(text_count)]
 
 
-VALID_PDF_BYTES = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+def _pdf_bytes(text: str) -> bytes:
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), text)
+    raw = document.write()
+    document.close()
+    return raw
+
+
+VALID_PDF_BYTES = _pdf_bytes("Ingestion test manuscript")
+
+
+@pytest.fixture(autouse=True)
+async def _allow_ingestion_tests_to_dispatch_all_fixture_chapters(monkeypatch, db):
+    monkeypatch.setattr(
+        "app.services.task_execution_service.settings.EXTRACTION_WORKER_CONCURRENCY", 20
+    )
+    await db.execute(
+        update(TaskExecution)
+        .where(TaskExecution.status.in_(("pending_dispatch", "queued", "running")))
+        .values(status="succeeded")
+    )
+    await db.commit()
 
 
 def _bind_worker_session(monkeypatch, db) -> None:
-    worker_session_factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
+    worker_session_factory = async_sessionmaker(
+        db.bind, class_=AsyncSession, expire_on_commit=False
+    )
     monkeypatch.setattr(extraction_consumer, "AsyncSessionLocal", worker_session_factory)
     monkeypatch.setitem(process_book.__globals__, "AsyncSessionLocal", worker_session_factory)
 
 
 @pytest.mark.asyncio
 async def test_claim_book_completion_skips_already_ready_book(db):
-    user = User(email="completion-claim@lorevia.app", username="completion-claim", password_hash="hash")
+    user = User(
+        email="completion-claim@lorevia.app", username="completion-claim", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -61,7 +93,9 @@ async def test_claim_book_completion_skips_already_ready_book(db):
 
 @pytest.mark.asyncio
 async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_only(db, monkeypatch):
-    user = User(email="stale-candidates@lorevia.app", username="stale-candidates", password_hash="hash")
+    user = User(
+        email="stale-candidates@lorevia.app", username="stale-candidates", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -116,7 +150,9 @@ async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_on
         raw_character_b="Texte",
         status="suppressed",
     )
-    db.add_all([accepted, stale_pending, stale_suppressed, accepted_relationship, stale_relationship])
+    db.add_all(
+        [accepted, stale_pending, stale_suppressed, accepted_relationship, stale_relationship]
+    )
     await db.commit()
 
     async def _fake_extract(_text: str, **_kwargs) -> dict:
@@ -125,28 +161,51 @@ async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_on
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
-    await _process_chapter(db, book, {"number": 1, "title": "One", "text": "Nothing relevant."}, queue_wait_ms=1)
+    await _process_chapter(
+        db, book, {"number": 1, "title": "One", "text": "Nothing relevant."}, queue_wait_ms=1
+    )
 
     character_candidates = (
-        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id).order_by(CharacterCandidate.proposed_name))
-    ).scalars().all()
-    relationship_candidates = (
-        await db.execute(
-            select(CharacterRelationshipCandidate)
-            .where(CharacterRelationshipCandidate.book_id == book.id)
-            .order_by(CharacterRelationshipCandidate.raw_character_b)
+        (
+            await db.execute(
+                select(CharacterCandidate)
+                .where(CharacterCandidate.book_id == book.id)
+                .order_by(CharacterCandidate.proposed_name)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    relationship_candidates = (
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate)
+                .where(CharacterRelationshipCandidate.book_id == book.id)
+                .order_by(CharacterRelationshipCandidate.raw_character_b)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
-    assert [(candidate.proposed_name, candidate.status) for candidate in character_candidates] == [("Mira", "accepted")]
-    assert [(candidate.raw_character_b, candidate.status) for candidate in relationship_candidates] == [("Sol", "accepted")]
+    assert [(candidate.proposed_name, candidate.status) for candidate in character_candidates] == [
+        ("Mira", "accepted")
+    ]
+    assert [
+        (candidate.raw_character_b, candidate.status) for candidate in relationship_candidates
+    ] == [("Sol", "accepted")]
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_stages_and_processes_multiple_chapters(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
     captured_analysis_tasks: list[dict] = []
@@ -233,16 +292,26 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     async def _fake_send_processing_complete_with_stats(email: str, **payload):
         sent_ready_emails.append({"email": email, **payload})
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask()
+    )
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _AnalysisTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
     monkeypatch.setattr(
         "app.workers.consumers.extraction_consumer.send_processing_complete_with_stats",
@@ -265,11 +334,17 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
 
     assert result == {"book_id": str(book_id), "chapters": 3}
     assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2, 3]
-    assert [item["kwargs"].get("countdown", 0) for item in captured_chapter_tasks] == [0, 0, 1]
+    assert [item["kwargs"].get("countdown", 0) for item in captured_chapter_tasks] == [0, 0, 0]
 
     staged_chapters = (
-        await db.execute(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert [chapter.s3_key for chapter in staged_chapters] == [
         f"chapters/{book_id}/1.txt",
         f"chapters/{book_id}/2.txt",
@@ -286,8 +361,14 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     assert processing_state["chapters_completed"] == 0
     assert processing_state["progress_pct"] == 0.0
     assert processing_state["parser_diagnostics"]["source"] == "pdf"
-    pipeline = processing_state.get("pipeline") if isinstance(processing_state.get("pipeline"), dict) else {}
-    extraction_pipeline = pipeline.get("extraction") if isinstance(pipeline.get("extraction"), dict) else None
+    pipeline = (
+        processing_state.get("pipeline")
+        if isinstance(processing_state.get("pipeline"), dict)
+        else {}
+    )
+    extraction_pipeline = (
+        pipeline.get("extraction") if isinstance(pipeline.get("extraction"), dict) else None
+    )
     if extraction_pipeline is not None:
         assert extraction_pipeline["status"] == "running"
     assert processing_state.get("is_fully_ready", False) is False
@@ -297,8 +378,14 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
 
     await db.refresh(book)
     processed_chapters = (
-        await db.execute(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert book.status == "processing"
     final_processing_state = (book.writer_workspace or {}).get("processing", {})
@@ -308,18 +395,51 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
     assert final_processing_state["progress_pct"] == 100.0
     assert final_processing_state["eta_seconds"] == 0
     assert final_processing_state["parser_diagnostics"]["chapter_count"] == 3
-    final_pipeline = final_processing_state.get("pipeline") if isinstance(final_processing_state.get("pipeline"), dict) else {}
-    final_extraction = final_pipeline.get("extraction") if isinstance(final_pipeline.get("extraction"), dict) else None
+    final_pipeline = (
+        final_processing_state.get("pipeline")
+        if isinstance(final_processing_state.get("pipeline"), dict)
+        else {}
+    )
+    final_extraction = (
+        final_pipeline.get("extraction")
+        if isinstance(final_pipeline.get("extraction"), dict)
+        else None
+    )
     if final_extraction is not None:
         assert final_extraction["status"] == "succeeded"
     assert all(chapter.processed is True for chapter in processed_chapters)
-    assert all((chapter.analysis_state or {}).get("source_integrity", {}).get("recovery_status") == "ok" for chapter in processed_chapters)
-    assert captured_analysis_tasks
-    assert captured_analysis_tasks[0]["args"][2] == "One"
-    assert any(batch and batch[0].startswith("Chapter 1: One\n\nAoi Tanaka enters the archive") for batch in captured_embed_inputs)
+    assert all(
+        (chapter.analysis_state or {}).get("source_integrity", {}).get("recovery_status") == "ok"
+        for chapter in processed_chapters
+    )
+    analysis_executions = (
+        (
+            await db.execute(
+                select(TaskExecution)
+                .where(
+                    TaskExecution.book_id == book_id,
+                    TaskExecution.task_name == "analysis_tasks.analyse_chapter",
+                )
+                .order_by(TaskExecution.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [execution.chapter_number for execution in analysis_executions] == [1, 2, 3]
+    assert all(
+        execution.status in {"pending_dispatch", "queued"}
+        for execution in analysis_executions
+    )
+    assert any(
+        batch and batch[0].startswith("Chapter 1: One\n\nAoi Tanaka enters the archive")
+        for batch in captured_embed_inputs
+    )
     ready_notification = (
         await db.execute(
-            select(Notification).where(Notification.book_id == book_id, Notification.kind == "book_ready")
+            select(Notification).where(
+                Notification.book_id == book_id, Notification.kind == "book_ready"
+            )
         )
     ).scalar()
     assert ready_notification is not None
@@ -332,7 +452,9 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(client, db
 
 
 @pytest.mark.asyncio
-async def test_process_book_persists_isbn_and_copyright_warning(client, db, auth_headers, monkeypatch):
+async def test_process_book_persists_isbn_and_copyright_warning(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
 
     class _ProcessBookTask:
@@ -343,11 +465,16 @@ async def test_process_book_persists_isbn_and_copyright_warning(client, db, auth
 
     chapters = [{"number": 1, "title": "One", "text": "A single clean chapter."}]
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": 1}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": 1},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
 
@@ -383,7 +510,9 @@ async def test_process_book_persists_isbn_and_copyright_warning(client, db, auth
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
 
@@ -400,7 +529,11 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
             return None
 
     chapters = [
-        {"number": 1, "title": "One", "text": "Well, Gregor watched the room while Grete spoke softly. Help, he shouted toward the pier."},
+        {
+            "number": 1,
+            "title": "One",
+            "text": "Well, Gregor watched the room while Grete spoke softly. Help, he shouted toward the pier.",
+        },
     ]
 
     async def _fake_extract(_text: str, **_kwargs) -> dict:
@@ -464,15 +597,23 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
     response = await client.post(
@@ -497,30 +638,48 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     await db.refresh(book)
 
     persisted_characters = (
-        await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Character).where(Character.book_id == book_id).order_by(Character.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert persisted_characters == []
 
     processing = (book.writer_workspace or {}).get("processing", {})
-    extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get("character_extraction") or {}
+    extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get(
+        "character_extraction"
+    ) or {}
     rejected = extraction_diagnostics.get("rejected_characters") or []
     rejected_reported = any(
         item["name"] in {"Well", "Help"}
         and item["stage"] in {"candidate_augmentation", "llm_clean", "mention_verifier"}
         and any(
             reason in str(item.get("reason") or "")
-            for reason in {"save_gate", "visibility_score_below_threshold", "single_token_lacks_profile_evidence", "interjection_like_usage", "sentence_start_capitalization_only"}
+            for reason in {
+                "save_gate",
+                "visibility_score_below_threshold",
+                "single_token_lacks_profile_evidence",
+                "interjection_like_usage",
+                "sentence_start_capitalization_only",
+            }
         )
         for item in rejected
     )
     candidate_rows = (
-        await db.execute(
-            select(CharacterCandidate).where(
-                CharacterCandidate.book_id == book_id,
-                CharacterCandidate.raw_name == "Well",
+        (
+            await db.execute(
+                select(CharacterCandidate).where(
+                    CharacterCandidate.book_id == book_id,
+                    CharacterCandidate.raw_name == "Well",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     gregor_candidate = (
         await db.execute(
             select(CharacterCandidate).where(
@@ -536,7 +695,9 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_routes_low_confidence_new_character_into_review_queue(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_routes_low_confidence_new_character_into_review_queue(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
 
     class _ProcessBookTask:
@@ -546,7 +707,11 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
             return None
 
     chapters = [
-        {"number": 1, "title": "One", "text": "Anna looked up once. Gregor kept moving toward the door."},
+        {
+            "number": 1,
+            "title": "One",
+            "text": "Anna looked up once. Gregor kept moving toward the door.",
+        },
     ]
 
     async def _fake_extract(_text: str, **_kwargs) -> dict:
@@ -593,14 +758,22 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
     response = await client.post(
@@ -620,16 +793,34 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
     await _process_chapter(db, book, chapters[0], queue_wait_ms=2)
 
     persisted_characters = (
-        await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Character).where(Character.book_id == book_id).order_by(Character.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     candidate_rows = (
-        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(CharacterCandidate)
+                .where(CharacterCandidate.book_id == book_id)
+                .order_by(CharacterCandidate.proposed_name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert persisted_characters == []
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna", "Gregor"]
-    anna_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Anna")
-    gregor_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor")
+    anna_candidate = next(
+        candidate for candidate in candidate_rows if candidate.proposed_name == "Anna"
+    )
+    gregor_candidate = next(
+        candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor"
+    )
     assert anna_candidate.status == "suppressed"
     assert "low_confidence_needs_review" in (anna_candidate.reason_codes or [])
     assert gregor_candidate.status == "pending"
@@ -638,7 +829,9 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_promotes_grounded_first_pass_full_name(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
 
     class _ProcessBookTask:
@@ -684,7 +877,7 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(client, db
                                 "confidence_band": "accept",
                                 "is_person_like": True,
                                 "reasons": [],
-                            }
+                            },
                         },
                     },
                 },
@@ -695,14 +888,22 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(client, db
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
     response = await client.post(
@@ -722,11 +923,25 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(client, db
     await _process_chapter(db, book, chapters[0], queue_wait_ms=2)
 
     persisted_characters = (
-        await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Character).where(Character.book_id == book_id).order_by(Character.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     candidate_rows = (
-        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(CharacterCandidate)
+                .where(CharacterCandidate.book_id == book_id)
+                .order_by(CharacterCandidate.proposed_name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert [character.name for character in persisted_characters] == ["Anna Sergeyevna"]
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna Sergeyevna"]
@@ -791,7 +1006,10 @@ async def test_process_chapter_records_ambiguous_roster_match_without_crashing(d
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
     await _process_chapter(
@@ -802,10 +1020,10 @@ async def test_process_chapter_records_ambiguous_roster_match_without_crashing(d
     )
 
     candidates = (
-        await db.execute(
-            select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)))
+        .scalars()
+        .all()
+    )
 
     assert len(candidates) == 1
     assert candidates[0].proposed_name == "Mimi"
@@ -813,7 +1031,9 @@ async def test_process_chapter_records_ambiguous_roster_match_without_crashing(d
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_duplicates(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_duplicates(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
 
     class _ProcessBookTask:
@@ -823,7 +1043,11 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
             return None
 
     chapters = [
-        {"number": 1, "title": "One", "text": "Gregor Samsa woke before dawn. Gregor warned Grete to stay back."},
+        {
+            "number": 1,
+            "title": "One",
+            "text": "Gregor Samsa woke before dawn. Gregor warned Grete to stay back.",
+        },
     ]
 
     async def _fake_extract(_text: str, **_kwargs) -> dict:
@@ -901,14 +1125,22 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
     response = await client.post(
@@ -928,31 +1160,71 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
     await _process_chapter(db, book, chapters[0], queue_wait_ms=2)
 
     persisted_characters = (
-        await db.execute(select(Character).where(Character.book_id == book_id).order_by(Character.name.asc()))
-    ).scalars().all()
-    relationships = (
-        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    ).scalars().all()
-    relationship_candidates = (
-        await db.execute(
-            select(CharacterRelationshipCandidate).where(CharacterRelationshipCandidate.book_id == book_id)
+        (
+            await db.execute(
+                select(Character).where(Character.book_id == book_id).order_by(Character.name.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    relationships = (
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    relationship_candidates = (
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     candidate_rows = (
-        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc()))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(CharacterCandidate)
+                .where(CharacterCandidate.book_id == book_id)
+                .order_by(CharacterCandidate.proposed_name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert [character.name for character in persisted_characters] == ["Gregor Samsa"]
     assert persisted_characters[0].aliases == ["Gregor"]
     assert relationships == []
-    assert [candidate.proposed_name for candidate in candidate_rows] == ["Gregor", "Gregor Samsa", "Grete"]
+    assert [candidate.proposed_name for candidate in candidate_rows] == [
+        "Gregor",
+        "Gregor Samsa",
+        "Grete",
+    ]
     candidate_statuses = {candidate.proposed_name: candidate.status for candidate in candidate_rows}
-    assert candidate_statuses == {"Gregor": "accepted", "Gregor Samsa": "promoted", "Grete": "suppressed"}
-    gregor_samsa_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor Samsa")
+    assert candidate_statuses == {
+        "Gregor": "accepted",
+        "Gregor Samsa": "promoted",
+        "Grete": "suppressed",
+    }
+    gregor_samsa_candidate = next(
+        candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor Samsa"
+    )
     assert gregor_samsa_candidate.matched_character_id == persisted_characters[0].id
-    gregor_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor")
+    gregor_candidate = next(
+        candidate for candidate in candidate_rows if candidate.proposed_name == "Gregor"
+    )
     assert gregor_candidate.matched_character_id == persisted_characters[0].id
-    grete_candidate = next(candidate for candidate in candidate_rows if candidate.proposed_name == "Grete")
+    grete_candidate = next(
+        candidate for candidate in candidate_rows if candidate.proposed_name == "Grete"
+    )
     assert "weak_single_token_suppressed" in (grete_candidate.reason_codes or [])
     assert len(relationship_candidates) == 1
     assert relationship_candidates[0].raw_character_a == "Gregor"
@@ -961,7 +1233,9 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
 
 
 @pytest.mark.asyncio
-async def test_unresolved_relationships_become_relationship_review_records(client, db, auth_headers, monkeypatch):
+async def test_unresolved_relationships_become_relationship_review_records(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
 
     class _ProcessBookTask:
@@ -1009,14 +1283,22 @@ async def test_unresolved_relationships_become_relationship_review_records(clien
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
     response = await client.post(
@@ -1037,23 +1319,36 @@ async def test_unresolved_relationships_become_relationship_review_records(clien
     await db.refresh(book)
 
     relationship_candidates = (
-        await db.execute(
-            select(CharacterRelationshipCandidate).where(CharacterRelationshipCandidate.book_id == book_id)
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book_id
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     character_candidates = (
-        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id))
-    ).scalars().all()
+        (await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id)))
+        .scalars()
+        .all()
+    )
 
     assert len(relationship_candidates) == 1
     assert relationship_candidates[0].raw_character_a == "Gregor"
     assert relationship_candidates[0].raw_character_b == "Doctor"
     assert relationship_candidates[0].status == "suppressed"
-    assert all("relationship_unresolved" not in (candidate.reason_codes or []) for candidate in character_candidates)
+    assert all(
+        "relationship_unresolved" not in (candidate.reason_codes or [])
+        for candidate in character_candidates
+    )
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_continues_when_cover_upload_fails(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_continues_when_cover_upload_fails(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
 
@@ -1083,16 +1378,28 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(client, db, aut
     def _raise_permission_error(*args, **kwargs):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
-    monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: (b"cover-bytes", "image/png"))
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.upload_binary", _raise_permission_error)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.extract_first_page_cover", lambda raw: (b"cover-bytes", "image/png")
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.upload_binary", _raise_permission_error
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _fake_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
 
     response = await client.post(
@@ -1121,7 +1428,9 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(client, db, aut
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fails(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fails(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
 
@@ -1157,18 +1466,30 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     async def _never_find_similar(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.extract_characters_and_relationships", _raise_extract)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        _raise_extract,
+    )
     monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_for_dedup", _fake_embed_for_dedup)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.find_similar", _never_find_similar)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.embed_for_dedup", _fake_embed_for_dedup
+    )
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.find_similar", _never_find_similar
+    )
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -1192,7 +1513,9 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
 
     ready_notification = (
         await db.execute(
-            select(Notification).where(Notification.book_id == book_id, Notification.kind == "book_ready")
+            select(Notification).where(
+                Notification.book_id == book_id, Notification.kind == "book_ready"
+            )
         )
     ).scalar_one()
 
@@ -1201,17 +1524,29 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
 
     refreshed_book = await db.get(Book, book_id)
     processing = (refreshed_book.writer_workspace or {}).get("processing", {})
-    extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get("character_extraction") or {}
+    extraction_diagnostics = (processing.get("parser_diagnostics") or {}).get(
+        "character_extraction"
+    ) or {}
     fallback_characters = (
-        await db.execute(
-            select(Character).where(Character.book_id == book_id).order_by(Character.name.asc())
+        (
+            await db.execute(
+                select(Character).where(Character.book_id == book_id).order_by(Character.name.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     fallback_candidates = (
-        await db.execute(
-            select(CharacterCandidate).where(CharacterCandidate.book_id == book_id).order_by(CharacterCandidate.proposed_name.asc())
+        (
+            await db.execute(
+                select(CharacterCandidate)
+                .where(CharacterCandidate.book_id == book_id)
+                .order_by(CharacterCandidate.proposed_name.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(fallback_characters) == 1
     candidate_names = [candidate.proposed_name for candidate in fallback_candidates]
     assert "Gregor Samsa" in candidate_names or "Gregor" in candidate_names
@@ -1221,7 +1556,9 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_preserves_chapter_numbers_when_requested(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
 
@@ -1244,11 +1581,15 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, 
     ]
     parse_calls: list[bool] = []
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
 
-    def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True, language: str | None = None):
+    def _fake_parse_pdf(
+        raw: bytes, *, split_large_chapters: bool = True, language: str | None = None
+    ):
         parse_calls.append(split_large_chapters)
         return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
 
@@ -1273,7 +1614,7 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, 
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 3}
-    assert parse_calls == [False]
+    assert parse_calls == [True, False]
     assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2, 3]
 
     book = await db.get(Book, book_id)
@@ -1282,7 +1623,9 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(client, 
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
 
@@ -1299,16 +1642,30 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
             return None
 
     parsed_chapters = [
-        {"number": 1, "source_number": 1, "title": "Chapter 1", "text": "Very long intact opening text."},
-        {"number": 2, "source_number": 2, "title": "Chapter 2", "text": "Very long intact middle text."},
+        {
+            "number": 1,
+            "source_number": 1,
+            "title": "Chapter 1",
+            "text": "Very long intact opening text.",
+        },
+        {
+            "number": 2,
+            "source_number": 2,
+            "title": "Chapter 2",
+            "text": "Very long intact middle text.",
+        },
     ]
     parse_calls: list[bool] = []
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
 
-    def _fake_parse_pdf(raw: bytes, *, split_large_chapters: bool = True, language: str | None = None):
+    def _fake_parse_pdf(
+        raw: bytes, *, split_large_chapters: bool = True, language: str | None = None
+    ):
         parse_calls.append(split_large_chapters)
         return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
 
@@ -1333,7 +1690,7 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 2}
-    assert parse_calls == [False]
+    assert parse_calls == [True, False]
     assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2]
 
     book = await db.get(Book, book_id)
@@ -1342,7 +1699,9 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
 
 
 @pytest.mark.asyncio
-async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(client, db, auth_headers, monkeypatch):
+async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(
+    client, db, auth_headers, monkeypatch
+):
     captured_book_tasks: list[dict] = []
     captured_chapter_tasks: list[dict] = []
 
@@ -1366,15 +1725,22 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(client, 
     async def _fake_is_book_hidden(*args, **kwargs):
         return True
 
-    monkeypatch.setattr("app.api.v1.routes.books.process_book_task", _ProcessBookTask())
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+    )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, {"source": "pdf", "chapter_count": len(chapters)}),
+        lambda raw, *, split_large_chapters=True, language=None: (
+            chapters,
+            {"source": "pdf", "chapter_count": len(chapters)},
+        ),
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.is_book_hidden", _fake_is_book_hidden)
+    monkeypatch.setattr(
+        "app.workers.consumers.extraction_consumer.is_book_hidden", _fake_is_book_hidden
+    )
 
     response = await client.post(
         "/api/v1/books/upload",

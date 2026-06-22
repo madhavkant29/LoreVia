@@ -9,6 +9,8 @@ export type NormalizedProcessingStatus = {
   chaptersTotal: number | null
   lastError: string | null
   retryAvailable: boolean
+  resumeAvailable?: boolean
+  paused?: boolean
   partialReady: boolean
   ready: boolean
   failed: boolean
@@ -46,6 +48,8 @@ const STAGE_ALIASES: Record<string, ProcessingStage> = {
   done: "ready",
   error: "failed",
   failed: "failed",
+  cancelled: "failed",
+  canceled: "failed",
 }
 
 export function normalizeProcessingStage(processing?: BookProcessing | null, book?: Pick<Book, "status"> | null): ProcessingStage {
@@ -70,18 +74,25 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
     || stage === "failed"
     || processing?.last_error
   )
+  const resumeAvailable = Boolean(
+    processing?.resume_available || retryActions.includes("continue_processing")
+  )
   const partialReady = stage !== "ready" && stage !== "failed" && chaptersCompleted !== null && chaptersCompleted > 0
   const detail = buildProcessingDetail(stage, chaptersCompleted, chaptersTotal, progressPct, partialReady)
 
   return {
     stage,
-    label: processing?.current_step_label || STAGE_LABELS[stage],
-    detail,
+    label: resumeAvailable ? "Processing paused" : processing?.current_step_label || STAGE_LABELS[stage],
+    detail: resumeAvailable
+      ? processing?.resume_blockers?.[0]?.detail || "Continue when processing capacity is available"
+      : detail,
     progressPct,
     chaptersCompleted,
     chaptersTotal,
     lastError: processing?.last_error || null,
     retryAvailable,
+    resumeAvailable,
+    paused: resumeAvailable,
     partialReady,
     ready: stage === "ready",
     failed: stage === "failed",

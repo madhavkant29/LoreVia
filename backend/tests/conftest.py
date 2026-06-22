@@ -32,6 +32,7 @@ warnings.filterwarnings(
     category=DeprecationWarning,
 )
 
+import app.models
 from app.api.deps.rate_limit import (
     rate_limit_api,
     rate_limit_auth_login,
@@ -54,7 +55,6 @@ from app.api.deps.rate_limit import (
 from app.core.config import allowed_hosts, settings
 from app.core.database import Base, get_db
 from app.core.storage import download_book
-import app.models
 from app.main import app
 from app.utils.migration_utils import (
     drop_orphan_table_rowtype_if_present_on_connection,
@@ -79,9 +79,13 @@ def test_runtime_defaults(monkeypatch, request):
     monkeypatch.setattr(settings, "FREE_CONTINUITY_PER_MINUTE", 0, raising=False)
 
     from app.utils import billing_utils as _billing_utils
-    monkeypatch.setattr(_billing_utils, "has_authoring_access", lambda *_args, **_kwargs: True, raising=False)
+
+    monkeypatch.setattr(
+        _billing_utils, "has_authoring_access", lambda *_args, **_kwargs: True, raising=False
+    )
 
     from app.utils import auth_csrf as _csrf
+
     if not request.node.module.__name__.endswith("test_auth"):
         monkeypatch.setattr(_csrf, "validate_auth_csrf_token", lambda _request: None, raising=False)
 
@@ -97,9 +101,17 @@ def mock_storage_uploads(monkeypatch):
     """Mock upload functions to avoid S3/local storage errors in all tests."""
     # Force local storage mode by mocking S3_ENDPOINT_URL
     monkeypatch.setattr("app.core.config.settings.S3_ENDPOINT_URL", "file://local", raising=False)
-    monkeypatch.setattr("app.core.storage.upload_book_bytes", lambda raw, owner, filename: f"uploads/{owner}/{filename}", raising=False)
-    monkeypatch.setattr("app.core.storage.upload_binary", lambda key, raw, content_type=None: key, raising=False)
-    monkeypatch.setattr("app.core.storage.upload_book", lambda *args, **kwargs: "books/mock.pdf", raising=False)
+    monkeypatch.setattr(
+        "app.core.storage.upload_book_bytes",
+        lambda raw, owner, filename: f"uploads/{owner}/{filename}",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.core.storage.upload_binary", lambda key, raw, content_type=None: key, raising=False
+    )
+    monkeypatch.setattr(
+        "app.core.storage.upload_book", lambda *args, **kwargs: "books/mock.pdf", raising=False
+    )
     monkeypatch.setattr("app.core.storage.upload_text", lambda key, content: key, raising=False)
 
 
@@ -140,6 +152,7 @@ def mock_dedup_embeddings(monkeypatch):
 @pytest.fixture(autouse=True)
 def mock_email_delivery(monkeypatch):
     """Prevent tests from consuming Resend quota."""
+
     def _fake_send(*args, **kwargs):
         return {"id": "test-email-id"}
 
@@ -157,13 +170,17 @@ def mock_celery_tasks(monkeypatch, request):
         @staticmethod
         def apply_async(*args, **kwargs):
             return None
-        
+
         @staticmethod
         def delay(*args, **kwargs):
             return None
-    
+
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _FakeTask())
-    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task.delay", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.process_book_task.delay",
+        lambda *args, **kwargs: None,
+        raising=False,
+    )
     monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _FakeTask())
     monkeypatch.setattr("app.api.v1.routes.books.analyse_chapter_task", _FakeTask(), raising=False)
 
@@ -171,8 +188,8 @@ def mock_celery_tasks(monkeypatch, request):
 @pytest.fixture(autouse=True)
 def mock_redis(monkeypatch, request):
     """Mock Redis by default while allowing focused runtime tests to opt out."""
-    from app.core import redis as redis_module
     from app.api.deps import rate_limit as rate_limit_module
+    from app.core import redis as redis_module
 
     if request.node.module.__name__.endswith("test_redis_runtime"):
         return
@@ -214,7 +231,9 @@ def mock_redis(monkeypatch, request):
 
         async def eval(self, script, numkeys, key, owner_token):
             if numkeys != 1:
-                raise NotImplementedError("FakeRedis.eval only supports single-key ownership deletes in tests.")
+                raise NotImplementedError(
+                    "FakeRedis.eval only supports single-key ownership deletes in tests."
+                )
             if self.store.get(key) == str(owner_token):
                 return await self.delete(key)
             return 0
@@ -313,7 +332,9 @@ def mock_redis(monkeypatch, request):
 
     fake_redis = FakeRedis()
     monkeypatch.setattr(redis_module, "_redis_clients", weakref.WeakKeyDictionary(), raising=False)
-    monkeypatch.setattr(redis_module.aioredis, "from_url", lambda *args, **kwargs: fake_redis, raising=False)
+    monkeypatch.setattr(
+        redis_module.aioredis, "from_url", lambda *args, **kwargs: fake_redis, raising=False
+    )
 
     async def fake_get_redis():
         return fake_redis
@@ -321,8 +342,10 @@ def mock_redis(monkeypatch, request):
     monkeypatch.setattr(redis_module, "get_redis", fake_get_redis)
     monkeypatch.setattr(rate_limit_module, "get_redis", fake_get_redis)
 
+
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 def _resolved_test_database_url() -> str:
     explicit = os.getenv("TEST_DATABASE_URL")
@@ -406,7 +429,9 @@ def _drop_orphan_test_rowtypes(connection: sa.Connection) -> None:
 async def client(db):
     async def override_get_db():
         yield db
+
     from app.main import _lazy_api_app
+
     api_app = await _lazy_api_app.ensure_app()
     api_app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_db] = override_get_db
@@ -439,8 +464,10 @@ async def client(db):
 
 @pytest_asyncio.fixture
 async def auth_headers(client):
-    from app.core.security import create_access_token
     import uuid
+
+    from app.core.security import create_access_token
+
     uid = str(uuid.uuid4())[:8]
     email = f"user-{uid}@lorevia.app"
     r = await client.post(

@@ -2,6 +2,7 @@
 
 import React from "react"
 import Link from "next/link"
+import type { Route } from "next"
 import { useState } from "react"
 
 import { booksApi } from "@/lib/api/books"
@@ -241,6 +242,7 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
               const recentEditLabel = typeof item.data?.recent_edit_label === "string" ? item.data.recent_edit_label : null
               const topRevisionTitle = typeof item.data?.top_item_title === "string" ? item.data.top_item_title : null
               const friendRequestId = typeof item.data?.friend_request_id === "string" ? item.data.friend_request_id : null
+              const notificationHref = typeof item.data?.href === "string" && item.data.href.startsWith("/") ? item.data.href : null
               const hasRevisionDigestDetails =
                 item.kind === "revision_digest" &&
                 Boolean(revisionTagline || revisionHero || recentEditLabel || topRevisionTitle || activeRevisionItems !== null || highRevisionItems !== null)
@@ -306,6 +308,11 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
                         </div>
                       ) : (
                         <div className="mt-4 flex flex-wrap gap-3">
+                          {notificationHref ? (
+                            <Link href={notificationHref as Route} onClick={() => void markRead(item.id)} className={`text-sm font-semibold transition ${isDark ? "text-teal-300 hover:text-teal-200" : "text-teal-700 hover:text-teal-800"}`}>
+                              Open workspace
+                            </Link>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => void toggleDetails(item)}

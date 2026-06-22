@@ -525,11 +525,7 @@ export const WorldbuildingWorkspace = memo(function WorldbuildingWorkspace({
   }
 
   const uploadLimitNote = uploadStats
-    ? uploadStats.private.upload_limit_unlimited
-      ? "Worldbuilding manuscripts count as uploads on every tier. Architect remains unlimited, including for series-linked worldbuilding."
-      : typeof uploadStats.private.upload_limit === "number"
-        ? `${uploadStats.private.total_uploads}/${uploadStats.private.upload_limit} uploads used. ${uploadStats.private.uploads_remaining ?? 0} remaining. Worldbuilding manuscripts count as uploads on every tier, and series-linked worldbuilding counts once per book in the series.`
-        : null
+    ? `${(uploadStats.private.active_analyzed_words ?? 0).toLocaleString()}/${(uploadStats.private.active_word_limit ?? 0).toLocaleString()} active words · ${((uploadStats.private.source_storage_bytes ?? 0) / 1024 ** 3).toFixed(1)}/${((uploadStats.private.source_storage_limit_bytes ?? 0) / 1024 ** 3).toFixed(0)} GB source storage${uploadStats.private.allowances_enforced ? "" : " (reporting only)"}.`
     : null
 
   return (

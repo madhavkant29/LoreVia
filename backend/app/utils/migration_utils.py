@@ -5,8 +5,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 LOCAL_DATABASE_HOSTS = {"localhost", "127.0.0.1", "::1", "postgres", "db"}
 CORE_APPLICATION_TABLES = frozenset({"users", "books", "chapters"})
@@ -26,9 +26,7 @@ SUPABASE_POLICY_COMMANDS = frozenset({"ALL", "SELECT", "INSERT", "UPDATE", "DELE
 _UPGRADE_BLOCK_PATTERN = re.compile(
     r"(?ms)^def upgrade\(\)(?: -> None)?:\n(?P<body>.*?)(?=^def downgrade\(\)(?: -> None)?:|\Z)"
 )
-_DOWNGRADE_BLOCK_PATTERN = re.compile(
-    r"(?ms)^def downgrade\(\)(?: -> None)?:\n(?P<body>.*?)(?=\Z)"
-)
+_DOWNGRADE_BLOCK_PATTERN = re.compile(r"(?ms)^def downgrade\(\)(?: -> None)?:\n(?P<body>.*?)(?=\Z)")
 _DESTRUCTIVE_UPGRADE_PATTERNS = (
     re.compile(r"\bop\.drop_table\s*\("),
     re.compile(r"\bop\.drop_column\s*\("),
@@ -53,7 +51,9 @@ def _quote_literal(value: str) -> str:
 
 
 def _normalize_privileges(privileges: Iterable[str]) -> tuple[str, ...]:
-    normalized = tuple(privilege.strip().upper() for privilege in privileges if privilege and privilege.strip())
+    normalized = tuple(
+        privilege.strip().upper() for privilege in privileges if privilege and privilege.strip()
+    )
     if not normalized:
         raise ValueError("At least one privilege is required.")
     return normalized
@@ -72,7 +72,9 @@ def is_local_database_url(database_url: str) -> bool:
 def normalized_database_target(database_url: str) -> tuple[str, int | None, str]:
     parsed = urlsplit(database_url)
     host = parsed.hostname or ""
-    normalized_host = "local" if not host or host in LOCAL_DATABASE_HOSTS or host.endswith(".local") else host
+    normalized_host = (
+        "local" if not host or host in LOCAL_DATABASE_HOSTS or host.endswith(".local") else host
+    )
     database_name = parsed.path.lstrip("/").lower()
     return normalized_host, parsed.port, database_name
 
@@ -80,7 +82,9 @@ def normalized_database_target(database_url: str) -> tuple[str, int | None, str]
 def is_safe_test_database_url(application_database_url: str, test_database_url: str) -> bool:
     if not is_local_database_url(test_database_url):
         return False
-    return normalized_database_target(application_database_url) != normalized_database_target(test_database_url)
+    return normalized_database_target(application_database_url) != normalized_database_target(
+        test_database_url
+    )
 
 
 def redact_database_target(database_url: str) -> str:
@@ -145,7 +149,9 @@ def destructive_downgrade_revisions(versions_dir: Path) -> list[Path]:
 
 
 def should_reset_local_alembic_state(existing_tables: set[str]) -> bool:
-    return "alembic_version" in existing_tables and not CORE_APPLICATION_TABLES.issubset(existing_tables)
+    return "alembic_version" in existing_tables and not CORE_APPLICATION_TABLES.issubset(
+        existing_tables
+    )
 
 
 def legacy_bootstrap_metadata_tables(metadata: sa.MetaData) -> list[sa.Table]:

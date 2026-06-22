@@ -58,7 +58,9 @@ async def test_register_requires_email_verification_before_login(client):
     assert r2.status_code == 403
     assert r2.json()["detail"] == "Please verify your email before signing in."
     access_token = create_access_token(str(r.json()["id"]))
-    me = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"})
+    me = await client.get(
+        "/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"}
+    )
     assert me.status_code == 200
     assert me.json()["email_verified"] is False
 
@@ -124,7 +126,9 @@ async def test_resend_verification_rotates_token(client):
     first_token = await redis.get(key_email_verification_user(user_id))
     assert first_token
 
-    resend = await client.post("/api/v1/auth/resend-verification", json={"email": "resend@lorevia.app"})
+    resend = await client.post(
+        "/api/v1/auth/resend-verification", json={"email": "resend@lorevia.app"}
+    )
     assert resend.status_code == 200
     assert resend.json()["ok"] is True
 
@@ -140,7 +144,11 @@ async def test_supabase_oauth_rejects_new_users_without_account(client, monkeypa
 
         @staticmethod
         def json():
-            return {"id": str(uuid.uuid4()), "email": "oauth-new@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(uuid.uuid4()),
+                "email": "oauth-new@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -155,8 +163,14 @@ async def test_supabase_oauth_rejects_new_users_without_account(client, monkeypa
         async def get(self, url, headers):
             return FakeResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
@@ -177,7 +191,11 @@ async def test_supabase_oauth_allows_existing_user_without_terms(client, db, mon
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-existing@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id),
+                "email": "oauth-existing@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -202,13 +220,23 @@ async def test_supabase_oauth_allows_existing_user_without_terms(client, db, mon
     db.add(existing_user)
     await db.commit()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-existing-device01"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": False,
+            "device_id": "oauth-existing-device01",
+        },
     )
 
     assert response.status_code == 200
@@ -228,7 +256,11 @@ async def test_supabase_oauth_creates_account_with_accepted_terms(client, db, mo
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-created@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id),
+                "email": "oauth-created@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -243,32 +275,50 @@ async def test_supabase_oauth_creates_account_with_accepted_terms(client, db, mo
         async def get(self, url, headers):
             return FakeResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-create-device0001"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": True,
+            "device_id": "oauth-create-device0001",
+        },
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["email"] == "oauth-created@lorevia.app"
     assert body["email_verified"] is True
-    
+
     # Verify the user was created in the database
-    created_user = (await db.execute(sa.select(User).where(User.email == "oauth-created@lorevia.app"))).scalar()
+    created_user = (
+        await db.execute(sa.select(User).where(User.email == "oauth-created@lorevia.app"))
+    ).scalar()
     assert created_user is not None
     assert created_user.supabase_auth_id == supabase_auth_id
     assert created_user.email_verified_at is not None
-    
+
     # Verify device was linked
-    device_trial = (await db.execute(sa.select(DeviceTrial).where(DeviceTrial.user_id == created_user.id))).scalar()
+    device_trial = (
+        await db.execute(sa.select(DeviceTrial).where(DeviceTrial.user_id == created_user.id))
+    ).scalar()
     assert device_trial is not None
-    
+
     # Verify login activity was recorded
-    login_activity = (await db.execute(sa.select(UserLoginActivity).where(UserLoginActivity.user_id == created_user.id))).scalar()
+    login_activity = (
+        await db.execute(
+            sa.select(UserLoginActivity).where(UserLoginActivity.user_id == created_user.id)
+        )
+    ).scalar()
     assert login_activity is not None
 
 
@@ -283,7 +333,11 @@ async def test_supabase_oauth_registration_sets_correct_fields(client, db, monke
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": email, "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id),
+                "email": email,
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -298,8 +352,14 @@ async def test_supabase_oauth_registration_sets_correct_fields(client, db, monke
         async def get(self, url, headers):
             return FakeResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
@@ -315,7 +375,7 @@ async def test_supabase_oauth_registration_sets_correct_fields(client, db, monke
     assert created_user.email == email
     assert created_user.supabase_auth_id == supabase_auth_id
     assert created_user.email_verified_at is not None
-    
+
     # Verify auth cookies are set in response
     set_cookie_headers = response.headers.get_list("set-cookie")
     assert any("lorevia_access_token" in header for header in set_cookie_headers)
@@ -333,7 +393,11 @@ async def test_supabase_oauth_login_rejects_nonexistent_user_without_terms(clien
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-login-reject@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id),
+                "email": "oauth-login-reject@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -348,13 +412,23 @@ async def test_supabase_oauth_login_rejects_nonexistent_user_without_terms(clien
         async def get(self, url, headers):
             return FakeResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-login-reject-device01"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": False,
+            "device_id": "oauth-login-reject-device01",
+        },
     )
 
     assert response.status_code == 401
@@ -390,7 +464,11 @@ async def test_supabase_oauth_registration_respects_device_trial_limit(client, d
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-trial-third@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id),
+                "email": "oauth-trial-third@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -405,8 +483,14 @@ async def test_supabase_oauth_registration_respects_device_trial_limit(client, d
         async def get(self, url, headers):
             return FakeResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
@@ -433,14 +517,22 @@ async def test_supabase_oauth_prevents_registration_login_confusion(client, db, 
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id_register), "email": "oauth-flow-test@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id_register),
+                "email": "oauth-flow-test@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeResponseLogin:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id_login), "email": "oauth-different-user@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id_login),
+                "email": "oauth-different-user@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     responses = []
 
@@ -457,8 +549,14 @@ async def test_supabase_oauth_prevents_registration_login_confusion(client, db, 
         async def get(self, url, headers):
             return responses.pop(0)
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     # Scenario 1: User clicks Google sign-in on /register page (accepted_terms=True)
@@ -466,13 +564,19 @@ async def test_supabase_oauth_prevents_registration_login_confusion(client, db, 
     responses.append(FakeResponseRegister())
     register_response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": True, "device_id": "oauth-flow-register-device01"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": True,
+            "device_id": "oauth-flow-register-device01",
+        },
     )
     assert register_response.status_code == 200
     assert register_response.json()["email"] == "oauth-flow-test@lorevia.app"
-    
+
     # Verify account was created
-    created_user = (await db.execute(sa.select(User).where(User.email == "oauth-flow-test@lorevia.app"))).scalar()
+    created_user = (
+        await db.execute(sa.select(User).where(User.email == "oauth-flow-test@lorevia.app"))
+    ).scalar()
     assert created_user is not None
 
     # Scenario 2: Different user clicks Google sign-in on /login page (accepted_terms=False)
@@ -480,7 +584,11 @@ async def test_supabase_oauth_prevents_registration_login_confusion(client, db, 
     responses.append(FakeResponseLogin())
     login_response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-flow-login-device01"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": False,
+            "device_id": "oauth-flow-login-device01",
+        },
     )
     assert login_response.status_code == 401
     assert "Register page" in login_response.json()["detail"]
@@ -490,7 +598,11 @@ async def test_supabase_oauth_prevents_registration_login_confusion(client, db, 
     responses.append(FakeResponseRegister())
     returning_login_response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-flow-returning-device01"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": False,
+            "device_id": "oauth-flow-returning-device01",
+        },
     )
     assert returning_login_response.status_code == 200
     assert returning_login_response.json()["email"] == "oauth-flow-test@lorevia.app"
@@ -503,7 +615,11 @@ async def test_supabase_oauth_debug_mode_still_rejects_new_users(client, monkeyp
 
         @staticmethod
         def json():
-            return {"id": str(uuid.uuid4()), "email": "oauth-local-recovery@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(uuid.uuid4()),
+                "email": "oauth-local-recovery@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -519,13 +635,23 @@ async def test_supabase_oauth_debug_mode_still_rejects_new_users(client, monkeyp
             return FakeResponse()
 
     monkeypatch.setattr("app.api.v1.routes.auth.settings.DEBUG", True, raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-recovery-device01"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": False,
+            "device_id": "oauth-recovery-device01",
+        },
     )
 
     assert response.status_code == 401
@@ -567,7 +693,9 @@ async def test_refresh_and_logout_use_cookies(client):
     assert "access_token" not in refresh_body
     assert "refresh_token" not in refresh_body
 
-    me = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"})
+    me = await client.get(
+        "/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"}
+    )
     assert me.status_code == 200
 
     logout = await client.post(
@@ -651,7 +779,9 @@ async def test_username_update_falls_back_from_stale_access_cookie(client, db):
 
 
 @pytest.mark.asyncio
-async def test_username_update_allows_existing_user_to_rename_and_me_returns_updated_username(client):
+async def test_username_update_allows_existing_user_to_rename_and_me_returns_updated_username(
+    client,
+):
     register_response = await client.post(
         "/api/v1/auth/register",
         json={
@@ -668,7 +798,9 @@ async def test_username_update_allows_existing_user_to_rename_and_me_returns_upd
     access_token = create_access_token(user_id)
     headers = cookie_auth_headers(f"lorevia_access_token={access_token}")
 
-    rename_response = await client.patch("/api/v1/auth/me/username?username=renamed_writer", headers=headers)
+    rename_response = await client.patch(
+        "/api/v1/auth/me/username?username=renamed_writer", headers=headers
+    )
     assert rename_response.status_code == 200
     assert rename_response.json()["username"] == "renamed_writer"
 
@@ -727,7 +859,10 @@ async def test_username_update_rejects_invalid_username_for_existing_user(client
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Username can only contain letters, numbers, underscores, and hyphens"
+    assert (
+        response.json()["detail"]
+        == "Username can only contain letters, numbers, underscores, and hyphens"
+    )
 
 
 @pytest.mark.asyncio
@@ -768,7 +903,9 @@ async def test_refresh_with_cookie_requires_csrf_header(client):
     )
     assert register_response.status_code == 201
 
-    refresh_token = create_refresh_token(str(register_response.json()["id"]), session_id="csrf-refresh-session")
+    refresh_token = create_refresh_token(
+        str(register_response.json()["id"]), session_id="csrf-refresh-session"
+    )
     response = await client.post(
         "/api/v1/auth/refresh",
         headers={"Cookie": f"lorevia_refresh_token={refresh_token}"},
@@ -1090,20 +1227,29 @@ async def test_login_sets_device_cookie_and_records_device_id(client, db):
     trial_links = list(result.scalars().all())
     assert len(trial_links) == 1
 
-    activity = await db.execute(sa.select(UserLoginActivity).where(UserLoginActivity.user_id == user.id))
+    activity = await db.execute(
+        sa.select(UserLoginActivity).where(UserLoginActivity.user_id == user.id)
+    )
     login_rows = list(activity.scalars().all())
     assert login_rows[-1].device_id == "records-device-id01"
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_registration_respects_device_limit_when_at_capacity(client, monkeypatch):
+async def test_supabase_oauth_registration_respects_device_limit_when_at_capacity(
+    client, monkeypatch
+):
     """Test that OAuth registration enforces device trial limits even when accepted_terms=True"""
+
     class FakeResponse:
         status_code = 200
 
         @staticmethod
         def json():
-            return {"id": str(uuid.uuid4()), "email": "oauth-blocked@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(uuid.uuid4()),
+                "email": "oauth-blocked@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -1142,8 +1288,14 @@ async def test_supabase_oauth_registration_respects_device_limit_when_at_capacit
     )
     assert second_register_response.status_code == 201
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
@@ -1156,7 +1308,9 @@ async def test_supabase_oauth_registration_respects_device_limit_when_at_capacit
 
 
 @pytest.mark.asyncio
-async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(client, db, monkeypatch):
+async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(
+    client, db, monkeypatch
+):
     supabase_auth_id = uuid.uuid4()
 
     class FakeResponse:
@@ -1164,7 +1318,11 @@ async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(clie
 
         @staticmethod
         def json():
-            return {"id": str(supabase_auth_id), "email": "oauth-legacy@lorevia.app", "email_confirmed_at": "2026-05-01T00:00:00Z"}
+            return {
+                "id": str(supabase_auth_id),
+                "email": "oauth-legacy@lorevia.app",
+                "email_confirmed_at": "2026-05-01T00:00:00Z",
+            }
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -1191,13 +1349,23 @@ async def test_supabase_oauth_handles_legacy_user_with_missing_reading_mode(clie
     db.add(legacy_user)
     await db.commit()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example.com", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL",
+        "https://supabase.example.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeAsyncClient)
 
     response = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-legacy-device001"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": False,
+            "device_id": "oauth-legacy-device001",
+        },
     )
 
     assert response.status_code == 200
@@ -1223,7 +1391,9 @@ async def test_me_accepts_access_token_with_supabase_auth_subject(client, db):
     await db.commit()
 
     access_token = create_access_token(str(supabase_auth_id))
-    response = await client.get("/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"})
+    response = await client.get(
+        "/api/v1/auth/me", headers={"Cookie": f"lorevia_access_token={access_token}"}
+    )
 
     assert response.status_code == 200
     assert response.json()["email"] == "supabase-subject@lorevia.app"
@@ -1268,7 +1438,9 @@ async def test_forgot_password_rotates_to_latest_reset_token_only(client, db):
 
 
 @pytest.mark.asyncio
-async def test_forgot_password_cooldown_suppresses_repeat_emails_for_same_account(client, db, monkeypatch):
+async def test_forgot_password_cooldown_suppresses_repeat_emails_for_same_account(
+    client, db, monkeypatch
+):
     deliveries: list[str] = []
 
     async def _fake_deliver(email: str, token: str) -> tuple[bool, str]:
@@ -1432,7 +1604,9 @@ async def test_manuscript_import_updates_today_word_count(client, db, auth_heade
 
 
 @pytest.mark.asyncio
-async def test_session_uses_valid_access_cookie_then_rotates_refresh_cookie(client, db, auth_headers, monkeypatch):
+async def test_session_uses_valid_access_cookie_then_rotates_refresh_cookie(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     user = await db.get(User, uuid.UUID(me.json()["id"]))
     user.email_verified_at = datetime.now(UTC)
@@ -1495,8 +1669,12 @@ async def test_supabase_oauth_creates_user_and_links_existing_email(client, db, 
             assert headers["Authorization"] == "Bearer oauth-token"
             return VerificationResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example", raising=False
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeHttpClient)
 
     created = await client.post(
@@ -1515,7 +1693,11 @@ async def test_supabase_oauth_creates_user_and_links_existing_email(client, db, 
 
     second = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "oauth-token", "accepted_terms": False, "device_id": "oauth-existing-device-123456"},
+        json={
+            "token": "oauth-token",
+            "accepted_terms": False,
+            "device_id": "oauth-existing-device-123456",
+        },
     )
     assert second.status_code == 200
     assert second.json()["id"] == created.json()["id"]
@@ -1548,11 +1730,19 @@ async def test_supabase_oauth_rejects_missing_config_and_bad_provider_token(clie
         async def get(self, *_args, **_kwargs):
             return BadResponse()
 
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example", raising=False)
-    monkeypatch.setattr("app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False)
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_URL", "https://supabase.example", raising=False
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.auth.settings.SUPABASE_SERVICE_KEY", "service-key", raising=False
+    )
     monkeypatch.setattr("app.api.v1.routes.auth.httpx.AsyncClient", FakeHttpClient)
     invalid = await client.post(
         "/api/v1/auth/oauth/supabase",
-        json={"token": "bad-token", "accepted_terms": False, "device_id": "oauth-error-device-123456"},
+        json={
+            "token": "bad-token",
+            "accepted_terms": False,
+            "device_id": "oauth-error-device-123456",
+        },
     )
     assert invalid.status_code == 401

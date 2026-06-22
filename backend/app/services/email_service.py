@@ -8,13 +8,6 @@ from sqlalchemy import func, select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.user import User
-from app.utils.trial_email_utils import (
-    FIRST_MANUSCRIPT_NUDGE,
-    TRIAL_EMAIL_ENDED,
-    TRIAL_EMAIL_ENDING,
-    TRIAL_EMAIL_NUDGE,
-    TRIAL_EMAIL_STARTED,
-)
 from app.utils.email_utils import (
     EMAIL_CATEGORY_MARKETING,
     EMAIL_CATEGORY_PRODUCT_UPDATES,
@@ -24,6 +17,13 @@ from app.utils.email_utils import (
     get_or_create_email_preference,
 )
 from app.utils.logging.logger import get_logger
+from app.utils.trial_email_utils import (
+    FIRST_MANUSCRIPT_NUDGE,
+    TRIAL_EMAIL_ENDED,
+    TRIAL_EMAIL_ENDING,
+    TRIAL_EMAIL_NUDGE,
+    TRIAL_EMAIL_STARTED,
+)
 
 resend.api_key = settings.RESEND_API_KEY
 
@@ -119,32 +119,32 @@ def _button_html(label: str, url: str) -> str:
     safe_url = escape(url, quote=True)
     return (
         f'<a href="{safe_url}" '
-        "style=\"display:inline-block;border-radius:999px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);"
+        'style="display:inline-block;border-radius:999px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);'
         "color:#f8fafc;padding:14px 22px;font-size:15px;font-weight:700;line-height:1;text-decoration:none;"
-        "box-shadow:0 14px 34px rgba(15,118,110,0.24);border:1px solid rgba(255,255,255,0.18);\">"
+        'box-shadow:0 14px 34px rgba(15,118,110,0.24);border:1px solid rgba(255,255,255,0.18);">'
         f"{safe_label}</a>"
     )
 
 
 def _paragraph(text: str) -> str:
-    return f"<p style=\"margin:0 0 16px;color:#344054;font-size:16px;line-height:1.75;\">{text}</p>"
+    return f'<p style="margin:0 0 16px;color:#344054;font-size:16px;line-height:1.75;">{text}</p>'
 
 
 def _list_panel(title: str, items: list[str]) -> str:
     safe_title = escape(title)
     rows = "".join(
         (
-            "<li style=\"margin:0 0 10px;color:#344054;font-size:15px;line-height:1.7;\">"
+            '<li style="margin:0 0 10px;color:#344054;font-size:15px;line-height:1.7;">'
             f"{escape(item)}"
             "</li>"
         )
         for item in items
     )
     return (
-        "<div style=\"margin:10px 0 22px;padding:18px 20px;border-radius:22px;"
-        "background:linear-gradient(180deg,#f8fafc 0%,#f3f7fb 100%);border:1px solid #e4e7ec;\">"
-        f"<p style=\"margin:0 0 12px;color:#101828;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;\">{safe_title}</p>"
-        f"<ul style=\"margin:0;padding-left:20px;\">{rows}</ul>"
+        '<div style="margin:10px 0 22px;padding:18px 20px;border-radius:22px;'
+        'background:linear-gradient(180deg,#f8fafc 0%,#f3f7fb 100%);border:1px solid #e4e7ec;">'
+        f'<p style="margin:0 0 12px;color:#101828;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">{safe_title}</p>'
+        f'<ul style="margin:0;padding-left:20px;">{rows}</ul>'
         "</div>"
     )
 
@@ -153,21 +153,21 @@ def _support_footer() -> str:
     support_email = escape(settings.SUPPORT_EMAIL)
     app_url = escape(_canonical_app_url(), quote=True)
     return (
-        "<div style=\"margin-top:28px;padding:22px 22px 20px;border-radius:22px;"
-        "background:linear-gradient(180deg,#f8fafc 0%,#f2f7fb 100%);border:1px solid #e4e7ec;\">"
-        "<p style=\"margin:0 0 10px;color:#101828;font-size:14px;font-weight:700;line-height:1.7;\">"
+        '<div style="margin-top:28px;padding:22px 22px 20px;border-radius:22px;'
+        'background:linear-gradient(180deg,#f8fafc 0%,#f2f7fb 100%);border:1px solid #e4e7ec;">'
+        '<p style="margin:0 0 10px;color:#101828;font-size:14px;font-weight:700;line-height:1.7;">'
         "Need help?"
         "</p>"
-        "<p style=\"margin:0 0 10px;color:#475467;font-size:14px;line-height:1.7;\">"
+        '<p style="margin:0 0 10px;color:#475467;font-size:14px;line-height:1.7;">'
         "Need help with your account, uploads, billing, or workspace? "
-        f"Reply to this email or reach us at <a href=\"mailto:{support_email}\" "
-        f"style=\"color:#0f766e;text-decoration:none;\">{support_email}</a>."
+        f'Reply to this email or reach us at <a href="mailto:{support_email}" '
+        f'style="color:#0f766e;text-decoration:none;">{support_email}</a>.'
         "</p>"
-        "<p style=\"margin:0 0 10px;color:#667085;font-size:13px;line-height:1.7;\">"
+        '<p style="margin:0 0 10px;color:#667085;font-size:13px;line-height:1.7;">'
         "LoreVia helps readers and writers keep track of characters, relationships, summaries, continuity details, and story context across long-form fiction."
         "</p>"
-        "<p style=\"margin:0;color:#667085;font-size:13px;line-height:1.7;\">"
-        f"<a href=\"{app_url}\" style=\"color:#0f766e;text-decoration:none;\">Open LoreVia</a>"
+        '<p style="margin:0;color:#667085;font-size:13px;line-height:1.7;">'
+        f'<a href="{app_url}" style="color:#0f766e;text-decoration:none;">Open LoreVia</a>'
         "</p>"
         "</div>"
     )
@@ -183,27 +183,25 @@ def _promotional_footer(
     safe_preferences_url = escape(preferences_url, quote=True)
     mailing_address = escape((settings.BUSINESS_MAILING_ADDRESS or "").strip())
     button_html = (
-        "<div style=\"margin:18px 0 14px;\">"
-        f"{_button_html('Unsubscribe', unsubscribe_url)}"
-        "</div>"
+        f'<div style="margin:18px 0 14px;">{_button_html("Unsubscribe", unsubscribe_url)}</div>'
         if include_unsubscribe_button
         else ""
     )
     return (
-        "<div style=\"margin-top:24px;padding:22px 22px 20px;border-radius:22px;"
-        "background:linear-gradient(180deg,#fffaf0 0%,#fff6e8 100%);border:1px solid #f2e4c2;\">"
-        "<p style=\"margin:0 0 10px;color:#7a2e0e;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;\">Email preferences</p>"
-        "<p style=\"margin:0 0 12px;color:#475467;font-size:14px;line-height:1.7;\">"
+        '<div style="margin-top:24px;padding:22px 22px 20px;border-radius:22px;'
+        'background:linear-gradient(180deg,#fffaf0 0%,#fff6e8 100%);border:1px solid #f2e4c2;">'
+        '<p style="margin:0 0 10px;color:#7a2e0e;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">Email preferences</p>'
+        '<p style="margin:0 0 12px;color:#475467;font-size:14px;line-height:1.7;">'
         "You're receiving this because you signed up for LoreVia."
         "</p>"
         f"{button_html}"
-        "<p style=\"margin:0 0 10px;color:#475467;font-size:14px;line-height:1.7;\">"
-        f"Unsubscribe from these emails: <a href=\"{safe_unsubscribe_url}\" style=\"color:#0f766e;text-decoration:none;word-break:break-all;\">{safe_unsubscribe_url}</a>"
+        '<p style="margin:0 0 10px;color:#475467;font-size:14px;line-height:1.7;">'
+        f'Unsubscribe from these emails: <a href="{safe_unsubscribe_url}" style="color:#0f766e;text-decoration:none;word-break:break-all;">{safe_unsubscribe_url}</a>'
         "</p>"
-        "<p style=\"margin:0 0 12px;color:#475467;font-size:14px;line-height:1.7;\">"
-        f"Manage email preferences: <a href=\"{safe_preferences_url}\" style=\"color:#0f766e;text-decoration:none;word-break:break-all;\">{safe_preferences_url}</a>"
+        '<p style="margin:0 0 12px;color:#475467;font-size:14px;line-height:1.7;">'
+        f'Manage email preferences: <a href="{safe_preferences_url}" style="color:#0f766e;text-decoration:none;word-break:break-all;">{safe_preferences_url}</a>'
         "</p>"
-        "<p style=\"margin:0;color:#667085;font-size:13px;line-height:1.7;white-space:pre-line;\">"
+        '<p style="margin:0;color:#667085;font-size:13px;line-height:1.7;white-space:pre-line;">'
         f"LoreVia\n{mailing_address}"
         "</p>"
         "</div>"
@@ -224,9 +222,7 @@ def _render_email(
     safe_eyebrow = escape(eyebrow.upper())
     safe_heading = escape(heading)
     safe_cta_url = escape(cta_url, quote=True)
-    closing_section = (
-        f"<div style=\"margin-top:20px;\">{closing_html}</div>" if closing_html else ""
-    )
+    closing_section = f'<div style="margin-top:20px;">{closing_html}</div>' if closing_html else ""
 
     return f"""
     <html>
@@ -389,14 +385,18 @@ def _render_stats_grid(stats: list[tuple[str, str]]) -> str:
     cards: list[str] = []
     for value, label in stats:
         cards.append(
-            "<td style=\"padding:0 8px 12px;vertical-align:top;\">"
-            "<div style=\"min-width:120px;padding:16px 18px;border-radius:20px;background:#f8fafc;border:1px solid #e4e7ec;\">"
-            f"<div style=\"margin:0 0 6px;color:#101828;font-size:24px;font-weight:800;line-height:1;\">{escape(value)}</div>"
-            f"<div style=\"margin:0;color:#667085;font-size:13px;line-height:1.5;\">{escape(label)}</div>"
+            '<td style="padding:0 8px 12px;vertical-align:top;">'
+            '<div style="min-width:120px;padding:16px 18px;border-radius:20px;background:#f8fafc;border:1px solid #e4e7ec;">'
+            f'<div style="margin:0 0 6px;color:#101828;font-size:24px;font-weight:800;line-height:1;">{escape(value)}</div>'
+            f'<div style="margin:0;color:#667085;font-size:13px;line-height:1.5;">{escape(label)}</div>'
             "</div>"
             "</td>"
         )
-    return "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin:8px -8px 10px;\"><tr>" + "".join(cards) + "</tr></table>"
+    return (
+        '<table role="presentation" cellspacing="0" cellpadding="0" style="margin:8px -8px 10px;"><tr>'
+        + "".join(cards)
+        + "</tr></table>"
+    )
 
 
 def _trial_email_category(email_type: str) -> str:
@@ -533,9 +533,7 @@ async def send_subscription_cancellation(email: str, plan: str) -> None:
             ),
         ]
     )
-    closing_html = _paragraph(
-        "Thanks for having used LoreVia in your reading or writing workflow."
-    )
+    closing_html = _paragraph("Thanks for having used LoreVia in your reading or writing workflow.")
     await _send_categorized_email(
         email=email,
         subject=f"Your LoreVia {plan_label} subscription has ended",
@@ -779,7 +777,9 @@ async def send_feature_launch_email(
             body_html="".join(body_sections),
             cta_label="See what's new",
             cta_url=feature_url,
-            closing_html=_paragraph("We are continuing to build LoreVia as a serious working environment for long-form fiction."),
+            closing_html=_paragraph(
+                "We are continuing to build LoreVia as a serious working environment for long-form fiction."
+            ),
         ),
     )
 
@@ -880,9 +880,7 @@ async def deliver_password_reset_email(email: str, token: str) -> tuple[bool, st
     reset_url = f"{_app_link('/reset-password')}?token={token}"
     body_html = "".join(
         [
-            _paragraph(
-                "We received a request to reset the password for your LoreVia account."
-            ),
+            _paragraph("We received a request to reset the password for your LoreVia account."),
             _paragraph(
                 "Use the secure link below to choose a new password and regain access to your workspace. For security, this link expires in 1 hour."
             ),

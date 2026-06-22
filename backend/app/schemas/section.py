@@ -35,33 +35,39 @@ SectionTypeLiteral = Literal[
 ]
 
 # Section types included in AI analysis by default.
-_INCLUDE_BY_DEFAULT: frozenset[SectionTypeLiteral] = frozenset({
-    "chapter",
-    "prologue",
-    "epilogue",
-    "interlude",
-})
+_INCLUDE_BY_DEFAULT: frozenset[SectionTypeLiteral] = frozenset(
+    {
+        "chapter",
+        "prologue",
+        "epilogue",
+        "interlude",
+    }
+)
 
 # Section types excluded from AI analysis by default.
-_EXCLUDE_BY_DEFAULT: frozenset[SectionTypeLiteral] = frozenset({
-    "title_page",
-    "copyright",
-    "dedication",
-    "toc",
-    "acknowledgements",
-    "glossary",
-    "notes",
-})
+_EXCLUDE_BY_DEFAULT: frozenset[SectionTypeLiteral] = frozenset(
+    {
+        "title_page",
+        "copyright",
+        "dedication",
+        "toc",
+        "acknowledgements",
+        "glossary",
+        "notes",
+    }
+)
 
 # Section types included by default but user may toggle off.
-_OPTIONAL: frozenset[SectionTypeLiteral] = frozenset({
-    "foreword",
-    "preface",
-    "afterword",
-    "appendix",
-    "part",
-    "unknown",
-})
+_OPTIONAL: frozenset[SectionTypeLiteral] = frozenset(
+    {
+        "foreword",
+        "preface",
+        "afterword",
+        "appendix",
+        "part",
+        "unknown",
+    }
+)
 
 
 def _default_include(type_: SectionTypeLiteral) -> bool:
@@ -138,6 +144,15 @@ class ImportPreview(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     warnings: list[ImportWarning] = Field(default_factory=list)
     raw_diagnostics: dict[str, Any] | None = None
+    total_words: int = 0
+    source_size_bytes: int = 0
+    allowance_allowed: bool = True
+    projected_active_words: int = 0
+    active_word_limit: int = 0
+    projected_monthly_processed_words: int = 0
+    monthly_processed_word_limit: int = 0
+    projected_source_storage_bytes: int = 0
+    source_storage_limit_bytes: int = 0
 
     @property
     def analysis_sections(self) -> list[SectionMeta]:
@@ -205,32 +220,42 @@ class ImportPreview(BaseModel):
         # Generate warnings from diagnostics
         warnings: list[ImportWarning] = []
         if self.toc_detected:
-            warnings.append(ImportWarning(
-                message="Table of contents detected and excluded from analysis.",
-                severity="info",
-            ))
+            warnings.append(
+                ImportWarning(
+                    message="Table of contents detected and excluded from analysis.",
+                    severity="info",
+                )
+            )
         for anomaly in diagnostics.get("anomalies", []):
-            warnings.append(ImportWarning(
-                message=f"Parse anomaly detected: {anomaly}",
-                severity="warning",
-            ))
+            warnings.append(
+                ImportWarning(
+                    message=f"Parse anomaly detected: {anomaly}",
+                    severity="warning",
+                )
+            )
         if diagnostics.get("fallback_strategy"):
-            warnings.append(ImportWarning(
-                message=f"Parser used fallback: {diagnostics['fallback_strategy']}",
-                severity="info",
-            ))
+            warnings.append(
+                ImportWarning(
+                    message=f"Parser used fallback: {diagnostics['fallback_strategy']}",
+                    severity="info",
+                )
+            )
         if self.language_confidence < 0.4:
-            warnings.append(ImportWarning(
-                message="Low confidence in language detection. Review may be needed.",
-                severity="warning",
-            ))
+            warnings.append(
+                ImportWarning(
+                    message="Low confidence in language detection. Review may be needed.",
+                    severity="warning",
+                )
+            )
         self.warnings = warnings
 
         self.compute_confidence()
         if self.confidence < 0.4:
-            warnings.append(ImportWarning(
-                message="Low overall import confidence. Consider reviewing the structure or importing as a single manuscript.",
-                severity="warning",
-            ))
+            warnings.append(
+                ImportWarning(
+                    message="Low overall import confidence. Consider reviewing the structure or importing as a single manuscript.",
+                    severity="warning",
+                )
+            )
 
         return self

@@ -26,7 +26,9 @@ async def test_deliver_verification_email_uses_public_safe_url_and_shared_copy(m
     monkeypatch.setattr("app.core.config.settings.APP_URL", "http://localhost:3000", raising=False)
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
-    delivered, verification_url = await email_service.deliver_verification_email("reader@example.com", "abc123")
+    delivered, verification_url = await email_service.deliver_verification_email(
+        "reader@example.com", "abc123"
+    )
 
     assert delivered is True
     assert verification_url == "https://getlorevia.com/verify-email?token=abc123"
@@ -38,10 +40,14 @@ async def test_deliver_verification_email_uses_public_safe_url_and_shared_copy(m
 
 
 @pytest.mark.asyncio
-async def test_send_onboarding_email_renders_long_form_LoreVia_copy_without_promotional_gating(monkeypatch):
+async def test_send_onboarding_email_renders_long_form_LoreVia_copy_without_promotional_gating(
+    monkeypatch,
+):
     captured: list[dict] = []
 
-    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com/", raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.APP_URL", "https://getlorevia.com/", raising=False
+    )
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
     await email_service.send_onboarding_email("reader@example.com")
@@ -49,7 +55,9 @@ async def test_send_onboarding_email_renders_long_form_LoreVia_copy_without_prom
     html = captured[0]["html"]
     assert captured[0]["subject"] == "Welcome to LoreVia"
     assert "Your workspace is ready" in html
-    assert "readers and writers who need a more dependable way to keep track of long stories" in html
+    assert (
+        "readers and writers who need a more dependable way to keep track of long stories" in html
+    )
     assert "Open your library" in html
     assert "support@getlorevia.com" in html
     assert "You're receiving this because you signed up for LoreVia." not in html
@@ -83,7 +91,9 @@ async def test_deliver_password_reset_email_uses_query_token_and_security_langua
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
-    delivered, reset_url = await email_service.deliver_password_reset_email("reader@example.com", "reset-token")
+    delivered, reset_url = await email_service.deliver_password_reset_email(
+        "reader@example.com", "reset-token"
+    )
 
     html = captured[0]["html"]
     assert delivered is True
@@ -112,7 +122,10 @@ async def test_send_processing_complete_with_stats_renders_metrics_and_library_c
 
     html = captured[0]["html"]
     assert captured[0]["subject"] == "The Atlas is ready in LoreVia"
-    assert "<strong>The Atlas</strong> has finished processing and is now ready inside LoreVia." in html
+    assert (
+        "<strong>The Atlas</strong> has finished processing and is now ready inside LoreVia."
+        in html
+    )
     assert "characters, relationships, plot threads, and continuity signals" in html
     assert "12" in html
     assert "characters tracked" in html
@@ -122,7 +135,9 @@ async def test_send_processing_complete_with_stats_renders_metrics_and_library_c
 
 
 @pytest.mark.asyncio
-async def test_send_trial_email_uses_pricing_cta_for_trial_ending_without_promotional_gating(monkeypatch):
+async def test_send_trial_email_uses_pricing_cta_for_trial_ending_without_promotional_gating(
+    monkeypatch,
+):
     captured: list[dict] = []
 
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
@@ -152,7 +167,9 @@ async def test_send_trial_email_first_manuscript_nudge_uses_professional_company
         }
 
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
-    monkeypatch.setattr("app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False
+    )
     monkeypatch.setattr(email_service, "_resolve_promotional_context", _fake_promotional_context)
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
@@ -177,7 +194,9 @@ async def test_send_categorized_email_adds_visible_unsubscribe_button_for_market
             "preferences_url": "https://getlorevia.com/api/v1/email/preferences?token=def",
         }
 
-    monkeypatch.setattr("app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False
+    )
     monkeypatch.setattr(email_service, "_resolve_promotional_context", _fake_promotional_context)
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
@@ -191,7 +210,10 @@ async def test_send_categorized_email_adds_visible_unsubscribe_button_for_market
     assert delivered is True
     assert "Unsubscribe" in captured[0]["html"]
     assert "Manage email preferences" in captured[0]["html"]
-    assert captured[0]["headers"]["List-Unsubscribe"] == "<https://getlorevia.com/api/v1/email/unsubscribe?token=abc>"
+    assert (
+        captured[0]["headers"]["List-Unsubscribe"]
+        == "<https://getlorevia.com/api/v1/email/unsubscribe?token=abc>"
+    )
 
 
 @pytest.mark.asyncio
@@ -205,7 +227,9 @@ async def test_send_feature_launch_email_uses_professional_product_language(monk
             "preferences_url": "https://getlorevia.com/api/v1/email/preferences?token=def",
         }
 
-    monkeypatch.setattr("app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.BUSINESS_MAILING_ADDRESS", "123 Story Lane", raising=False
+    )
     monkeypatch.setattr(email_service, "_resolve_promotional_context", _fake_promotional_context)
     monkeypatch.setattr(email_service, "_send", lambda payload: captured.append(payload) or True)
 
@@ -221,7 +245,10 @@ async def test_send_feature_launch_email_uses_professional_product_language(monk
     assert delivered is True
     assert captured[0]["subject"] == "New in LoreVia: Revision Command Center"
     assert "We have released <strong>Revision Command Center</strong> in LoreVia." in html
-    assert "This update is intended to make LoreVia more useful in real reading and writing workflows" in html
+    assert (
+        "This update is intended to make LoreVia more useful in real reading and writing workflows"
+        in html
+    )
 
 
 @pytest.mark.asyncio

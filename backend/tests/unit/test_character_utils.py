@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 
@@ -7,16 +7,15 @@ from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterAlias
 from app.models.intelligence import BookChunk
 from app.models.user import User
-from app.utils.character_utils import (
+from app.utils.characters.candidates import build_character_analysis_payload
+from app.utils.characters.governance import infer_character_trust_tier, is_cast_visible_character
+from app.utils.characters.manual import (
     backfill_character_first_chapters_for_chapter_text,
-    build_character_analysis_payload,
-    build_character_dossier_summary,
     find_earliest_character_mention_chapters,
-    infer_character_trust_tier,
-    is_cast_visible_character,
-    serialize_book_character,
-    set_character_review_state,
 )
+from app.utils.characters.presentation import build_character_dossier_summary
+from app.utils.characters.review import set_character_review_state
+from app.utils.characters.serialization import serialize_book_character
 
 
 def test_build_character_analysis_payload_fills_consistent_defaults():
@@ -153,7 +152,7 @@ def test_serialize_book_character_includes_declared_profile_fields():
     book_id = uuid.uuid4()
     character_id = uuid.uuid4()
     alias_id = uuid.uuid4()
-    created_at = datetime(2026, 6, 11, tzinfo=timezone.utc)
+    created_at = datetime(2026, 6, 11, tzinfo=UTC)
     character = Character(
         id=character_id,
         book_id=book_id,
@@ -220,7 +219,9 @@ def test_serialize_book_character_includes_declared_profile_fields():
 
 @pytest.mark.asyncio
 async def test_backfill_character_first_chapters_repairs_stale_first_appearance(db):
-    user = User(email="character-utils@lorevia.app", username="character-utils", password_hash="hash")
+    user = User(
+        email="character-utils@lorevia.app", username="character-utils", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
 
@@ -235,29 +236,35 @@ async def test_backfill_character_first_chapters_repairs_stale_first_appearance(
     db.add(book)
     await db.flush()
 
-    chapter_one = Chapter(book_id=book.id, number=1, title="Chapter 1", s3_key="chapters/1.txt", processed=True)
-    chapter_two = Chapter(book_id=book.id, number=2, title="Chapter 2", s3_key="chapters/2.txt", processed=True)
+    chapter_one = Chapter(
+        book_id=book.id, number=1, title="Chapter 1", s3_key="chapters/1.txt", processed=True
+    )
+    chapter_two = Chapter(
+        book_id=book.id, number=2, title="Chapter 2", s3_key="chapters/2.txt", processed=True
+    )
     db.add_all([chapter_one, chapter_two])
     await db.flush()
 
-    db.add_all([
-        BookChunk(
-            book_id=book.id,
-            chapter_id=chapter_one.id,
-            chunk_index=0,
-            text="Captain Mira steps onto the deck before sunrise.",
-            embedding=[0.0] * 1536,
-            token_count=8,
-        ),
-        BookChunk(
-            book_id=book.id,
-            chapter_id=chapter_two.id,
-            chunk_index=0,
-            text="Mira orders the crew toward the storm wall.",
-            embedding=[0.0] * 1536,
-            token_count=8,
-        ),
-    ])
+    db.add_all(
+        [
+            BookChunk(
+                book_id=book.id,
+                chapter_id=chapter_one.id,
+                chunk_index=0,
+                text="Captain Mira steps onto the deck before sunrise.",
+                embedding=[0.0] * 1536,
+                token_count=8,
+            ),
+            BookChunk(
+                book_id=book.id,
+                chapter_id=chapter_two.id,
+                chunk_index=0,
+                text="Mira orders the crew toward the storm wall.",
+                embedding=[0.0] * 1536,
+                token_count=8,
+            ),
+        ]
+    )
 
     character = Character(
         book_id=book.id,
@@ -284,7 +291,11 @@ async def test_backfill_character_first_chapters_repairs_stale_first_appearance(
 
 @pytest.mark.asyncio
 async def test_find_earliest_character_mention_chapters_batches_lookups(db):
-    user = User(email="character-utils-batch@lorevia.app", username="character-utils-batch", password_hash="hash")
+    user = User(
+        email="character-utils-batch@lorevia.app",
+        username="character-utils-batch",
+        password_hash="hash",
+    )
     db.add(user)
     await db.flush()
 
@@ -299,38 +310,46 @@ async def test_find_earliest_character_mention_chapters_batches_lookups(db):
     db.add(book)
     await db.flush()
 
-    chapter_one = Chapter(book_id=book.id, number=1, title="Chapter 1", s3_key="chapters/1.txt", processed=True)
-    chapter_two = Chapter(book_id=book.id, number=2, title="Chapter 2", s3_key="chapters/2.txt", processed=True)
-    chapter_three = Chapter(book_id=book.id, number=3, title="Chapter 3", s3_key="chapters/3.txt", processed=True)
+    chapter_one = Chapter(
+        book_id=book.id, number=1, title="Chapter 1", s3_key="chapters/1.txt", processed=True
+    )
+    chapter_two = Chapter(
+        book_id=book.id, number=2, title="Chapter 2", s3_key="chapters/2.txt", processed=True
+    )
+    chapter_three = Chapter(
+        book_id=book.id, number=3, title="Chapter 3", s3_key="chapters/3.txt", processed=True
+    )
     db.add_all([chapter_one, chapter_two, chapter_three])
     await db.flush()
 
-    db.add_all([
-        BookChunk(
-            book_id=book.id,
-            chapter_id=chapter_one.id,
-            chunk_index=0,
-            text="Captain Mira steps onto the deck before sunrise.",
-            embedding=[0.0] * 1536,
-            token_count=8,
-        ),
-        BookChunk(
-            book_id=book.id,
-            chapter_id=chapter_two.id,
-            chunk_index=0,
-            text="Jon Ember studies the storm map in silence.",
-            embedding=[0.0] * 1536,
-            token_count=8,
-        ),
-        BookChunk(
-            book_id=book.id,
-            chapter_id=chapter_three.id,
-            chunk_index=0,
-            text="Mira and Jon Ember argue over the route.",
-            embedding=[0.0] * 1536,
-            token_count=9,
-        ),
-    ])
+    db.add_all(
+        [
+            BookChunk(
+                book_id=book.id,
+                chapter_id=chapter_one.id,
+                chunk_index=0,
+                text="Captain Mira steps onto the deck before sunrise.",
+                embedding=[0.0] * 1536,
+                token_count=8,
+            ),
+            BookChunk(
+                book_id=book.id,
+                chapter_id=chapter_two.id,
+                chunk_index=0,
+                text="Jon Ember studies the storm map in silence.",
+                embedding=[0.0] * 1536,
+                token_count=8,
+            ),
+            BookChunk(
+                book_id=book.id,
+                chapter_id=chapter_three.id,
+                chunk_index=0,
+                text="Mira and Jon Ember argue over the route.",
+                embedding=[0.0] * 1536,
+                token_count=9,
+            ),
+        ]
+    )
     await db.commit()
 
     resolved = await find_earliest_character_mention_chapters(

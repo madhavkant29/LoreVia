@@ -84,9 +84,7 @@ async def evaluate_document_copyright(
     has_copyright_marker = bool(COPYRIGHT_RE.search(document_text))
     has_isbn_signal = resolved_isbn is not None
     copyright_warning = bool(
-        registry_hit
-        or has_isbn_signal
-        or (has_copyright_marker and not has_public_domain_marker)
+        registry_hit or has_isbn_signal or (has_copyright_marker and not has_public_domain_marker)
     )
 
     return {
@@ -107,9 +105,15 @@ def extract_document_text_for_copyright_checks(format_name: str | None, raw: byt
     if normalized_format in {"txt", "md", "fountain"}:
         return _safe_decode(raw)
     if normalized_format == "docx":
-        return _extract_zip_text(raw, suffixes=(".xml",), preferred_names=("word/document.xml", "docProps/core.xml"))
+        return _extract_zip_text(
+            raw, suffixes=(".xml",), preferred_names=("word/document.xml", "docProps/core.xml")
+        )
     if normalized_format == "epub":
-        return _extract_zip_text(raw, suffixes=(".xhtml", ".html", ".htm", ".xml"), preferred_names=("content.opf", "toc.ncx", "mimetype"))
+        return _extract_zip_text(
+            raw,
+            suffixes=(".xhtml", ".html", ".htm", ".xml"),
+            preferred_names=("content.opf", "toc.ncx", "mimetype"),
+        )
     return ""
 
 
@@ -125,7 +129,9 @@ def _extract_pdf_text(raw: bytes) -> str:
         return ""
 
 
-def _extract_zip_text(raw: bytes, *, suffixes: tuple[str, ...], preferred_names: tuple[str, ...]) -> str:
+def _extract_zip_text(
+    raw: bytes, *, suffixes: tuple[str, ...], preferred_names: tuple[str, ...]
+) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             selected_names: list[str] = []

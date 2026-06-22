@@ -2,6 +2,7 @@
 Prediction engine - RAG over book chunks + GPT-4o-mini reasoning.
 Phase 3 feature.
 """
+
 import json
 import uuid
 
@@ -15,6 +16,7 @@ from app.utils.llm_usage_utils import create_tracked_chat_completion
 
 def get_client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
 
 PREDICT_SYSTEM = """You are analysing a novel. The user asks a prediction question.
 Based ONLY on the evidence provided (story context up to the current chapter),

@@ -86,6 +86,7 @@ async def test_invalidate_advisor_cache_namespaces_deletes_book_and_series_keys(
         redis_utils.key_series_advisor_response_cache("series-1", "c"): '{"reply":"three"}',
         "public:books": '{"ignored":true}',
     }
+
     async def _fake_get_redis():
         return fake_redis
 
@@ -112,7 +113,9 @@ async def test_story_context_and_dashboard_cache_round_trip(monkeypatch):
     monkeypatch.setattr(redis_utils, "get_redis", _fake_get_redis)
 
     await redis_utils.set_story_context_cache("book-1", 0, 12, "story")
-    await redis_utils.set_writing_dashboard_cache("user-1", 0, "2026-05-22", {"today": {"words": 42}})
+    await redis_utils.set_writing_dashboard_cache(
+        "user-1", 0, "2026-05-22", {"today": {"words": 42}}
+    )
 
     story_payload = await redis_utils.get_story_context_cache("book-1", 0, 12)
     dashboard_payload = await redis_utils.get_writing_dashboard_cache("user-1", 0, "2026-05-22")
@@ -130,13 +133,19 @@ async def test_reader_derived_caches_round_trip(monkeypatch):
 
     monkeypatch.setattr(redis_utils, "get_redis", _fake_get_redis)
 
-    await redis_utils.set_reader_events_cache("book-1", "user-1", 4, 10, 20, {"major_events": [], "character_events": []})
-    await redis_utils.set_reader_timeline_cache("book-1", "user-1", 10, 20, {"chapters": [], "events": []})
+    await redis_utils.set_reader_events_cache(
+        "book-1", "user-1", 4, 10, 20, {"major_events": [], "character_events": []}
+    )
+    await redis_utils.set_reader_timeline_cache(
+        "book-1", "user-1", 10, 20, {"chapters": [], "events": []}
+    )
     await redis_utils.set_relationship_evolution_cache("book-1", "user-1", 4, 10, 20, {"pairs": []})
 
     events_payload = await redis_utils.get_reader_events_cache("book-1", "user-1", 4, 10, 20)
     timeline_payload = await redis_utils.get_reader_timeline_cache("book-1", "user-1", 10, 20)
-    evolution_payload = await redis_utils.get_relationship_evolution_cache("book-1", "user-1", 4, 10, 20)
+    evolution_payload = await redis_utils.get_relationship_evolution_cache(
+        "book-1", "user-1", 4, 10, 20
+    )
 
     assert events_payload == {"major_events": [], "character_events": []}
     assert timeline_payload == {"chapters": [], "events": []}

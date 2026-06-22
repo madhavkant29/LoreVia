@@ -1,11 +1,12 @@
 """Database utility helpers for transient read-query failures."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import Any, TypeVar
+from typing import Any
 
 from sqlalchemy.engine import Result
 from sqlalchemy.exc import DBAPIError
@@ -13,9 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Executable
 
 logger = logging.getLogger(__name__)
-ReadResult = TypeVar("ReadResult")
-
-
 TRANSIENT_READ_DB_ERROR_MARKERS = (
     "ssl syscall error: eof detected",
     "consuming input failed",
@@ -34,9 +32,7 @@ def is_retryable_read_db_error(exc: BaseException) -> bool:
     if getattr(exc, "connection_invalidated", False):
         return True
     message = " ".join(
-        str(part).lower()
-        for part in (getattr(exc, "orig", None), exc)
-        if part is not None
+        str(part).lower() for part in (getattr(exc, "orig", None), exc) if part is not None
     )
     return any(marker in message for marker in TRANSIENT_READ_DB_ERROR_MARKERS)
 
@@ -56,7 +52,7 @@ async def execute_read_with_retry(
     )
 
 
-async def run_read_with_retry(
+async def run_read_with_retry[ReadResult](
     db: AsyncSession,
     operation: Callable[[], Awaitable[ReadResult]],
     *,

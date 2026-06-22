@@ -28,7 +28,9 @@ async def test_search_requires_auth(client):
 
 
 @pytest.mark.asyncio
-async def test_reader_chapter_repairs_stale_character_first_appearance(client, db, auth_headers, monkeypatch):
+async def test_reader_chapter_repairs_stale_character_first_appearance(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     user_id = uuid.UUID(me.json()["id"])
 

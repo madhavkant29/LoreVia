@@ -10,25 +10,30 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from app.models.book import Book, Chapter
-from app.models.user import User
-from app.core.storage import download_book, upload_text
-from app.utils.book_utils import (
-    deserialize_manuscript_content,
-    normalize_processing_timestamp,
-    normalize_writer_workspace,
-    serialize_manuscript_content,
-)
-from app.utils.logging.errors import redact_sensitive_text
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.storage import download_book, upload_text
+from app.models.book import Book, Chapter
+from app.models.user import User
+from app.utils.books.manuscript import (
+    deserialize_manuscript_content,
+    serialize_manuscript_content,
+)
+from app.utils.books.processing import (
+    normalize_processing_timestamp,
+)
+from app.utils.books.writer_workspace import (
+    normalize_writer_workspace,
+)
+from app.utils.logging.errors import redact_sensitive_text
 
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 READING_CHAPTER_TARGET_WORDS = 7000
 READING_CHAPTER_MIN_WORDS = 1200
 READING_CHAPTER_MIN_TAIL_WORDS = 2000
-ANALYSIS_INFLIGHT_TTL_SECONDS = 20 * 60      # Must exceed analysis time_limit (15 min) by >= 5 min
-EXTRACTION_INFLIGHT_TTL_SECONDS = 30 * 60    # Must exceed extraction time_limit (25 min) by >= 5 min
+ANALYSIS_INFLIGHT_TTL_SECONDS = 20 * 60  # Must exceed analysis time_limit (15 min) by >= 5 min
+EXTRACTION_INFLIGHT_TTL_SECONDS = 30 * 60  # Must exceed extraction time_limit (25 min) by >= 5 min
 CHAPTER_RECOVERY_INFLIGHT_TTL_SECONDS = 15 * 60
 LLM_USAGE_LIMIT_RETRY_SECONDS = 30 * 60
 LLM_USAGE_LIMIT_MAX_RETRIES = 10
@@ -245,7 +250,9 @@ def _clean_pipeline_stage(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     failed_chapters = source.get("failed_chapters")
     if isinstance(failed_chapters, Sequence) and not isinstance(failed_chapters, (str, bytes)):
         payload["failed_chapters"] = [
-            int(item) for item in failed_chapters if isinstance(item, (int, float)) and int(item) > 0
+            int(item)
+            for item in failed_chapters
+            if isinstance(item, (int, float)) and int(item) > 0
         ]
     return payload or None
 
@@ -270,12 +277,16 @@ def merge_processing_pipeline(
     analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     next_processing = dict(processing_state)
-    current_pipeline = next_processing.get("pipeline") if isinstance(next_processing.get("pipeline"), dict) else {}
+    current_pipeline = (
+        next_processing.get("pipeline") if isinstance(next_processing.get("pipeline"), dict) else {}
+    )
     pipeline: dict[str, Any] = {}
 
     current_extraction = _clean_pipeline_stage(current_pipeline.get("extraction"))
     current_analysis = _clean_pipeline_stage(current_pipeline.get("analysis"))
-    next_extraction = _clean_pipeline_stage(extraction) if extraction is not None else current_extraction
+    next_extraction = (
+        _clean_pipeline_stage(extraction) if extraction is not None else current_extraction
+    )
     next_analysis = _clean_pipeline_stage(analysis) if analysis is not None else current_analysis
 
     if next_extraction:
@@ -286,7 +297,9 @@ def merge_processing_pipeline(
     extraction_status = ((next_extraction or {}).get("status") or "").strip().lower()
     analysis_status = ((next_analysis or {}).get("status") or "").strip().lower()
     next_processing["pipeline"] = pipeline or None
-    next_processing["is_fully_ready"] = extraction_status == "succeeded" and analysis_status == "succeeded"
+    next_processing["is_fully_ready"] = (
+        extraction_status == "succeeded" and analysis_status == "succeeded"
+    )
     next_processing["retry_actions"] = _derive_retry_actions(pipeline)
     return next_processing
 
@@ -303,19 +316,27 @@ def build_analysis_chapter_state(
     current = dict(existing) if isinstance(existing, dict) else {}
     attempts = int(current.get("attempt_count") or 0)
     current_modes = [
-        str(mode).strip()
-        for mode in (current.get("generated_modes") or [])
-        if str(mode).strip()
+        str(mode).strip() for mode in (current.get("generated_modes") or []) if str(mode).strip()
     ]
-    next_modes = list(dict.fromkeys([*current_modes, *[str(mode).strip() for mode in (generated_modes or []) if str(mode).strip()]]))
+    next_modes = list(
+        dict.fromkeys(
+            [
+                *current_modes,
+                *[str(mode).strip() for mode in (generated_modes or []) if str(mode).strip()],
+            ]
+        )
+    )
     payload: dict[str, Any] = {
         "status": " ".join(str(status or "").split()).strip() or "pending",
         "generated_modes": next_modes,
         "attempt_count": attempts + (1 if increment_attempt else 0),
-        "last_error": " ".join((redact_sensitive_text(str(last_error or "")) or "").split()).strip() or None,
+        "last_error": " ".join((redact_sensitive_text(str(last_error or "")) or "").split()).strip()
+        or None,
         "updated_at": datetime.now(UTC).isoformat(),
     }
-    next_source_integrity = source_integrity if isinstance(source_integrity, dict) else current.get("source_integrity")
+    next_source_integrity = (
+        source_integrity if isinstance(source_integrity, dict) else current.get("source_integrity")
+    )
     if isinstance(next_source_integrity, dict):
         payload["source_integrity"] = next_source_integrity
     return payload
@@ -341,7 +362,9 @@ def build_source_integrity_state(
     return payload
 
 
-def build_writer_workspace_with_processing(book: Book, processing_state: dict[str, Any] | None) -> dict:
+def build_writer_workspace_with_processing(
+    book: Book, processing_state: dict[str, Any] | None
+) -> dict:
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
     workspace["processing"] = processing_state
     return normalize_writer_workspace(workspace)
@@ -354,7 +377,9 @@ def processing_state_for_completed_extraction(*, analysis_complete: bool) -> tup
 
 
 def _current_processing_progress(book: Book) -> tuple[int, int | None]:
-    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
     processing = workspace.get("processing") if isinstance(workspace, dict) else None
     completed_chapters = 0
     total_chapters = book.total_chapters
@@ -372,7 +397,9 @@ def _current_processing_progress(book: Book) -> tuple[int, int | None]:
 
 
 def current_parser_diagnostics(book: Book) -> dict[str, Any] | None:
-    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
     processing = workspace.get("processing") if isinstance(workspace, dict) else None
     if not isinstance(processing, dict):
         return None
@@ -396,7 +423,9 @@ def update_book_processing_state(
     progress_pct: float | None = None,
 ) -> dict:
     processing_started_at = started_at or get_processing_started_at(book) or datetime.now(UTC)
-    effective_parser_diagnostics = parser_diagnostics if parser_diagnostics is not None else current_parser_diagnostics(book)
+    effective_parser_diagnostics = (
+        parser_diagnostics if parser_diagnostics is not None else current_parser_diagnostics(book)
+    )
     processing_state = build_ingestion_progress_state(
         status=status,
         stage=stage,
@@ -412,8 +441,12 @@ def update_book_processing_state(
     if isinstance(progress_pct, (int, float)) and math.isfinite(float(progress_pct)):
         processing_state["progress_pct"] = round(max(0.0, min(100.0, float(progress_pct))), 1)
     workspace = book.writer_workspace if isinstance(book.writer_workspace, dict) else {}
-    current_processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
-    active_rebuild_run_id = current_processing.get("rebuild_run_id") if isinstance(current_processing, dict) else None
+    current_processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
+    active_rebuild_run_id = (
+        current_processing.get("rebuild_run_id") if isinstance(current_processing, dict) else None
+    )
     if active_rebuild_run_id:
         processing_state["rebuild_run_id"] = str(active_rebuild_run_id)
     extraction_status = "running"
@@ -448,7 +481,9 @@ async def is_book_hidden(db: AsyncSession, book_id: uuid.UUID) -> bool:
     if not row:
         return True
     hidden_at, deletion_status, deleted_at = row
-    return hidden_at is not None or (deletion_status or "active") != "active" or deleted_at is not None
+    return (
+        hidden_at is not None or (deletion_status or "active") != "active" or deleted_at is not None
+    )
 
 
 async def mark_book_processing_cancelled(
@@ -481,7 +516,9 @@ async def mark_book_processing_cancelled(
     )
     from app.services.editor_project_service import fail_rebuild_if_active
 
-    await fail_rebuild_if_active(db, book, error=last_error or f"Book was removed while processing at {stage} stage.")
+    await fail_rebuild_if_active(
+        db, book, error=last_error or f"Book was removed while processing at {stage} stage."
+    )
     await db.commit()
 
 
@@ -582,7 +619,13 @@ def _should_regroup_before_renumbering(chapters: Sequence[Mapping[str, Any]]) ->
     if len(normalized_titles) < 2:
         return False
 
-    if all(re.fullmatch(r"(chapter|part|section|scene|act|book|episode|volume)\s+([0-9]+|[ivxlcdm]+|[a-z])", title) for title in normalized_titles):
+    if all(
+        re.fullmatch(
+            r"(chapter|part|section|scene|act|book|episode|volume)\s+([0-9]+|[ivxlcdm]+|[a-z])",
+            title,
+        )
+        for title in normalized_titles
+    ):
         return True
 
     repeated_bases: dict[str, int] = {}
@@ -620,7 +663,11 @@ def regroup_prose_chapters_for_reading(
     min_chapter_words: int = READING_CHAPTER_MIN_WORDS,
     min_tail_words: int = READING_CHAPTER_MIN_TAIL_WORDS,
 ) -> list[dict[str, Any]]:
-    normalized = [dict(chapter) for chapter in chapters if _chapter_word_count(chapter) > 0 or chapter.get("images")]
+    normalized = [
+        dict(chapter)
+        for chapter in chapters
+        if _chapter_word_count(chapter) > 0 or chapter.get("images")
+    ]
     if not normalized:
         return []
 
@@ -655,8 +702,16 @@ def regroup_prose_chapters_for_reading(
 
 def _merge_chapter_group(group: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     merged = dict(group[0])
-    text_parts = [str(chapter.get("text") or "").strip() for chapter in group if str(chapter.get("text") or "").strip()]
-    html_parts = [str(chapter.get("html") or "").strip() for chapter in group if str(chapter.get("html") or "").strip()]
+    text_parts = [
+        str(chapter.get("text") or "").strip()
+        for chapter in group
+        if str(chapter.get("text") or "").strip()
+    ]
+    html_parts = [
+        str(chapter.get("html") or "").strip()
+        for chapter in group
+        if str(chapter.get("html") or "").strip()
+    ]
     image_parts: list[Any] = []
     for chapter in group:
         image_parts.extend(list(chapter.get("images") or []))
@@ -688,7 +743,9 @@ def _chapter_ends_naturally(chapter: Mapping[str, Any]) -> bool:
     return bool(re.search(r"[.!?][\"')\]]*\s*$", cleaned))
 
 
-def _estimate_ingestion_eta_seconds(completed_chapters: int, total_chapters: int | None, elapsed_seconds: float) -> int | None:
+def _estimate_ingestion_eta_seconds(
+    completed_chapters: int, total_chapters: int | None, elapsed_seconds: float
+) -> int | None:
     if not total_chapters or total_chapters <= 0:
         return None
 
@@ -703,7 +760,9 @@ def _estimate_ingestion_eta_seconds(completed_chapters: int, total_chapters: int
 
 
 def is_retryable_processing_error(exc: BaseException) -> bool:
-    status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(exc, "status_code", None)
+    status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(
+        exc, "status_code", None
+    )
     if isinstance(status_code, int) and status_code in {408, 425, 429, 500, 502, 503, 504}:
         return True
 
@@ -723,10 +782,23 @@ def is_retryable_processing_error(exc: BaseException) -> bool:
 
 
 def is_llm_usage_limit_error(exc: BaseException) -> bool:
-    status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(exc, "status_code", None)
+    status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(
+        exc, "status_code", None
+    )
     if status_code != 429:
         return False
 
     detail = getattr(exc, "detail", None)
     message = " ".join(str(detail if detail is not None else exc).lower().split())
     return "token limit exceeded" in message and "window" in message
+
+
+def is_llm_coordination_retry_error(exc: BaseException) -> bool:
+    status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(
+        exc, "status_code", None
+    )
+    if status_code not in {429, 503}:
+        return False
+    detail = getattr(exc, "detail", None)
+    message = " ".join(str(detail if detail is not None else exc).lower().split())
+    return "llm capacity" in message or "llm coordination" in message

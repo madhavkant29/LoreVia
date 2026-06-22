@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
 import uuid
+from typing import Any
 
 import httpx
 
@@ -24,7 +24,12 @@ async def delete_supabase_auth_user(supabase_auth_id: uuid.UUID | str | None) ->
                 },
             )
             if response.status_code == 404:
-                return {"configured": True, "deleted": True, "followup_required": False, "not_found": True}
+                return {
+                    "configured": True,
+                    "deleted": True,
+                    "followup_required": False,
+                    "not_found": True,
+                }
             response.raise_for_status()
     except httpx.HTTPError as exc:
         return {

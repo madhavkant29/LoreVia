@@ -29,6 +29,15 @@ const adminApiMock = vi.hoisted(() => ({
   setRateLimit: vi.fn(),
   stepUp: vi.fn(),
   subscriptionMetrics: vi.fn(),
+  taskExecutions: vi.fn(),
+  retryTaskExecution: vi.fn(),
+  dismissTaskExecution: vi.fn(),
+  operationsMetrics: vi.fn(),
+  aiQuality: vi.fn(),
+  contributionMargin: vi.fn(),
+  supportIncidents: vi.fn(),
+  createSupportIncident: vi.fn(),
+  resolveSupportIncident: vi.fn(),
 }))
 
 vi.mock("@/lib/api/admin", () => ({ adminApi: adminApiMock }))
@@ -181,6 +190,33 @@ beforeEach(() => {
     embedding: 2,
     intelligence: 1,
   })
+  adminApiMock.taskExecutions.mockResolvedValue([])
+  adminApiMock.operationsMetrics.mockResolvedValue({
+    total_executions: 12,
+    terminal_failures: 0,
+    failure_rate: 0,
+    oldest_job_age_seconds: 4,
+    average_task_duration_seconds: 10,
+    paused_runs: 1,
+  })
+  adminApiMock.aiQuality.mockResolvedValue({
+    label: "Review-confirmed precision proxy",
+    reviewed: 5,
+    accepted: 4,
+    acceptance_rate: 0.8,
+    breakdown: [],
+  })
+  adminApiMock.contributionMargin.mockResolvedValue({
+    currency: "USD",
+    recognized_net_revenue: 20,
+    llm_cost: 1,
+    worker_cost: 2,
+    storage_cost: 0.1,
+    contribution_margin: 16.9,
+    complete: true,
+    by_feature: [],
+  })
+  adminApiMock.supportIncidents.mockResolvedValue([])
   adminApiMock.subscriptionMetrics.mockResolvedValue({
     cohort_start: "2026-01-01",
     cohort_end: "2026-01-31",

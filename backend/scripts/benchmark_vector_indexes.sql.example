@@ -1,0 +1,16 @@
+-- Run before and after the HNSW migration with representative query vectors.
+SELECT extversion AS pgvector_version FROM pg_extension WHERE extname = 'vector';
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id
+FROM book_chunks
+WHERE embedding IS NOT NULL
+ORDER BY embedding <=> (SELECT embedding FROM book_chunks WHERE embedding IS NOT NULL LIMIT 1)
+LIMIT 20;
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id
+FROM characters
+WHERE embedding IS NOT NULL
+ORDER BY embedding <=> (SELECT embedding FROM characters WHERE embedding IS NOT NULL LIMIT 1)
+LIMIT 20;

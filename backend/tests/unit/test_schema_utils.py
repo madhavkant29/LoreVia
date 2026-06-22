@@ -106,7 +106,12 @@ async def test_assert_core_runtime_schema_compatible_reports_missing_columns():
     rows = [
         row
         for row in _complete_core_schema_rows()
-        if row not in {("books", "public_status"), ("advisor_jobs", "status"), ("public_book_rankings", "snapshot_date")}
+        if row
+        not in {
+            ("books", "public_status"),
+            ("advisor_jobs", "status"),
+            ("public_book_rankings", "snapshot_date"),
+        }
     ]
 
     with pytest.raises(RuntimeError) as exc_info:

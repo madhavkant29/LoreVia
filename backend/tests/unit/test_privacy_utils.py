@@ -1,6 +1,6 @@
+import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
-import uuid
 
 import pytest
 
@@ -32,8 +32,14 @@ def test_book_deletion_confirmation_requires_exact_text():
 
 def test_user_is_deleted_checks_status_and_deleted_at():
     assert user_is_deleted(SimpleNamespace(deletion_status="active", deleted_at=None)) is False
-    assert user_is_deleted(SimpleNamespace(deletion_status="pending_hard_delete", deleted_at=None)) is True
-    assert user_is_deleted(SimpleNamespace(deletion_status="active", deleted_at=datetime.now(UTC))) is True
+    assert (
+        user_is_deleted(SimpleNamespace(deletion_status="pending_hard_delete", deleted_at=None))
+        is True
+    )
+    assert (
+        user_is_deleted(SimpleNamespace(deletion_status="active", deleted_at=datetime.now(UTC)))
+        is True
+    )
 
 
 def test_data_deletion_scheduled_for_defaults_to_30_days():
@@ -45,5 +51,8 @@ def test_data_deletion_scheduled_for_defaults_to_30_days():
 def test_deleted_account_email_and_hash_are_stable():
     user_id = uuid.UUID("00000000-0000-0000-0000-000000000123")
 
-    assert deleted_account_email(user_id) == "deleted+00000000000000000000000000000123@deleted.getlorevia.local"
+    assert (
+        deleted_account_email(user_id)
+        == "deleted+00000000000000000000000000000123@deleted.getlorevia.local"
+    )
     assert hash_deleted_email(" Author@Example.com ") == hash_deleted_email("author@example.com")

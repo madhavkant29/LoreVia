@@ -140,6 +140,97 @@ export interface AdminQueueDepth {
   intelligence: number
 }
 
+export interface AdminTaskExecution {
+  id: string
+  task_name: string
+  feature: string
+  status: string
+  user_id?: string | null
+  book_id?: string | null
+  chapter_number?: number | null
+  attempt_count: number
+  max_attempts: number
+  error_category?: string | null
+  error_detail?: string | null
+  created_at: string
+}
+
+export interface AdminOperationsMetrics {
+  total_executions: number
+  terminal_failures: number
+  failure_rate: number
+  oldest_job_age_seconds: number
+  average_task_duration_seconds: number
+  paused_runs: number
+  queue_depth?: number
+  running_executions?: number
+  retry_count?: number
+  by_task?: Array<{
+    task_name: string
+    count: number
+    terminal_failures: number
+    retries: number
+    average_duration_seconds: number
+  }>
+}
+
+export interface AdminAiQualityMetrics {
+  label: string
+  reviewed: number
+  accepted: number
+  acceptance_rate: number | null
+  character_corrections_after_promotion?: number
+  relationship_corrections?: number
+  reprocessing_runs?: number
+  support_incidents?: number
+  support_incidents_per_processed_manuscript?: number | null
+  breakdown: Array<{ entity_type: string; outcome: string; count: number }>
+  by_model_version?: Array<{
+    model?: string | null
+    extractor_version?: string | null
+    outcome: string
+    count: number
+  }>
+}
+
+export interface AdminContributionMargin {
+  currency: string
+  recognized_net_revenue: number
+  llm_cost: number
+  worker_cost: number
+  storage_cost: number
+  contribution_margin: number
+  complete: boolean
+  allocation_basis?: string
+  by_feature: Array<{ feature: string; direct_cost: number; allocated_revenue: number }>
+  by_user?: Array<{
+    user_id: string
+    tier?: string | null
+    recognized_revenue: number
+    direct_cost: number
+    contribution_margin: number
+  }>
+  by_book?: Array<{
+    book_id: string
+    user_id?: string | null
+    direct_cost: number
+    allocated_revenue: number
+  }>
+}
+
+export interface AdminSupportIncident {
+  id: string
+  user_id?: string | null
+  book_id?: string | null
+  category: string
+  feature?: string | null
+  severity: string
+  status: string
+  summary: string
+  resolution?: string | null
+  created_at: string
+}
+
 export interface AdminSubscriptionMetrics {
   cohort_start: string
   cohort_end: string

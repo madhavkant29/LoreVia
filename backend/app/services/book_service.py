@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import upload_book, upload_text
 from app.models.book import Book
-
-from app.utils.book_utils import normalize_writer_workspace
+from app.utils.books.writer_workspace import (
+    normalize_writer_workspace,
+)
 
 
 async def create_book(
@@ -23,8 +24,14 @@ async def create_book(
 ) -> Book:
     s3_key = upload_book(file, str(user_id), filename)
     book = Book(
-        user_id=user_id, title=title, genre=genre, author=author,
-        format=fmt, s3_key=s3_key, isbn=isbn, status="pending",
+        user_id=user_id,
+        title=title,
+        genre=genre,
+        author=author,
+        format=fmt,
+        s3_key=s3_key,
+        isbn=isbn,
+        status="pending",
     )
     db.add(book)
     await db.commit()

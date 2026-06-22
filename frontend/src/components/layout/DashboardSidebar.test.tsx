@@ -104,6 +104,7 @@ describe("DashboardSidebar", () => {
     expect(uploadsLinks).toHaveLength(1)
     expect(uploadsLinks[0].getAttribute("href")).toBe("/public/uploads")
     expect(libraryLink?.getAttribute("href")).toBe("/library")
+    expect(Boolean(libraryLink && uploadsLinks[0] && libraryLink.compareDocumentPosition(uploadsLinks[0]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(libraryLink?.className).toContain("bg-stone-200")
     expect(view.textContent).toContain("Page content")
   })

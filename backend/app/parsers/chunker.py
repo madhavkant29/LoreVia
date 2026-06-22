@@ -54,7 +54,13 @@ def chunk_text(
     *,
     config: ChunkingConfig | None = None,
 ) -> list[str]:
-    cfg = config or ChunkingConfig(target_tokens=max_tokens, max_tokens=max_tokens, min_tokens=0, overlap_tokens=overlap, overlap_ratio=0.0)
+    cfg = config or ChunkingConfig(
+        target_tokens=max_tokens,
+        max_tokens=max_tokens,
+        min_tokens=0,
+        overlap_tokens=overlap,
+        overlap_ratio=0.0,
+    )
     target_tokens = max(1, int(cfg.target_tokens))
     max_tokens = max(1, int(cfg.max_tokens))
     min_tokens = max(0, int(cfg.min_tokens))
@@ -214,7 +220,11 @@ def _sentence_segments(paragraph: str) -> list[str]:
     }
     for source, target in abbreviations.items():
         protected = protected.replace(source, target)
-    segments = [segment.replace("<dot>", ".").strip() for segment in re.split(r"(?<=[.!?])\s+", protected) if segment.strip()]
+    segments = [
+        segment.replace("<dot>", ".").strip()
+        for segment in re.split(r"(?<=[.!?])\s+", protected)
+        if segment.strip()
+    ]
     return segments
 
 

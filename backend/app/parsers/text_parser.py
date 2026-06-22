@@ -126,12 +126,14 @@ def parse_text_chapters(
 
     # ── Fallback: single chapter ──────────────────────────────────────
     if len(valid_headings) < MIN_VALID_HEADINGS:
-        return [{
-            "title": title,
-            "text": text.strip(),
-            "number": 1,
-            "section_type": "unknown",
-        }]
+        return [
+            {
+                "title": title,
+                "text": text.strip(),
+                "number": 1,
+                "section_type": "unknown",
+            }
+        ]
 
     # ── Build chapter dicts from valid heading splits ─────────────────
     chapters: list[dict] = []
@@ -147,12 +149,14 @@ def parse_text_chapters(
             raw_body.insert(0, extra_body)
         chapter_text = "\n".join(raw_body).strip()
 
-        chapters.append({
-            "title": clean_title,
-            "text": chapter_text,
-            "number": i + 1,
-            "section_type": stype,
-        })
+        chapters.append(
+            {
+                "title": clean_title,
+                "text": chapter_text,
+                "number": i + 1,
+                "section_type": stype,
+            }
+        )
 
     return chapters
 
@@ -175,14 +179,14 @@ def _extract_clean_heading(line: str) -> tuple[str, str]:
         return line, ""
 
     base = m.group(0).strip()
-    rest = line[m.end():].strip()
+    rest = line[m.end() :].strip()
     if not rest:
         return base, ""
 
     # Check for a separator (colon, period, dash) that may introduce a title
     sep_match = re.match(r"\s*[:.\-]\s*", rest)
     if sep_match:
-        after_sep = rest[sep_match.end():]
+        after_sep = rest[sep_match.end() :]
         # Look for body-text indicators in the text after the separator
         body_pos = _find_body_text_start(after_sep)
         if body_pos is not None:

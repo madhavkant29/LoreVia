@@ -1,7 +1,7 @@
 import type { Page, Route } from "@playwright/test"
 import type { Character } from "@/types/character"
 import type { EmailPreferences } from "@/types/email"
-import type { PublicBook } from "@/types/book"
+import type { PublicBook, RevisionIntelligence } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
 
 type SessionMode = "authenticated" | "guest"
@@ -9,7 +9,7 @@ type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
 type CharacterBibleMode = "default" | "review-only"
-type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads"
+type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads" | "allowance-paused"
 type UserTierMode = "author" | "free"
 
 type MockOptions = {
@@ -20,6 +20,7 @@ type MockOptions = {
   characterBible?: CharacterBibleMode
   manuscriptProcessing?: ManuscriptProcessingMode
   userTier?: UserTierMode
+  activationPending?: boolean
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
@@ -2217,6 +2218,43 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const characterBibleMode = options.characterBible ?? "default"
   const manuscriptProcessingMode = options.manuscriptProcessing ?? "default"
+  let activationRevision = (options.activationPending
+    ? {
+        ...revisionIntelligence,
+        priority_findings: [
+          {
+            ...revisionIntelligence.change_impacts[0],
+            why_flagged: revisionIntelligence.change_impacts[0].description,
+            evidence_strength: "strong",
+            evidence: [{ chapter_ref: 2, source_label: "The Ember Gate", excerpt: "Nora crossed the silver gate without the blood oath Kael expected.", source_content_version: 2 }],
+            is_stale: false,
+          },
+          {
+            ...revisionIntelligence.scene_advice[0],
+            why_flagged: revisionIntelligence.scene_advice[0].description,
+            evidence_strength: "moderate",
+            evidence: [{ chapter_ref: 3, source_label: "River of Glass", excerpt: "The gate warning returned before the reveal moved forward.", source_content_version: 1 }],
+            is_stale: false,
+          },
+          {
+            ...revisionIntelligence.confusion_map[0],
+            why_flagged: revisionIntelligence.confusion_map[0].description,
+            evidence_strength: "moderate",
+            evidence: [{ chapter_ref: 1, source_label: "Ashfall", excerpt: "Four names arrived with the first ashfall bulletin.", source_content_version: 1 }],
+            is_stale: false,
+          },
+        ],
+        activation: { eligible: true, completed: false, completed_at: null, completion_action: null, completed_finding_id: null },
+        analysis_complete: true,
+        analysis_limitations: [],
+      }
+    : {
+        ...revisionIntelligence,
+        priority_findings: [],
+        activation: { eligible: false, completed: true, completed_at: "2026-05-01T00:00:00Z", completion_action: "added_to_revision_plan", completed_finding_id: "rev-impact-1" },
+        analysis_complete: true,
+        analysis_limitations: [],
+      }) as unknown as RevisionIntelligence
   book.hidden_at = null
   book.is_public = false
   const mockUser = {
@@ -2310,6 +2348,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     unsubscribed_at: null,
   }
   let bookDetailReadCount = 0
+  let allowanceProcessingContinued = false
 
   const buildBookOverview = () => ({
     book: mockBook,
@@ -2362,11 +2401,31 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     prewriting_check: preWritingCheck,
     story_health: storyHealth,
     writer_workspace: mockWriterWorkspace,
-    revision_intelligence: revisionIntelligence,
+    revision_intelligence: activationRevision,
   })
 
   const buildBookDetailResponse = () => {
     bookDetailReadCount += 1
+    if (manuscriptProcessingMode === "allowance-paused" && !allowanceProcessingContinued) {
+      return {
+        ...mockBook,
+        status: "processing",
+        processing: {
+          ...(mockBook.processing ?? {}),
+          status: "paused",
+          stage: "paused",
+          progress_pct: 50,
+          chapters_completed: 1,
+          chapters_total: 3,
+          processing_run_id: "processing-run-1",
+          pause_reason: "monthly_processed_words",
+          resume_available: true,
+          resume_blockers: [{ kind: "monthly_processed_words", detail: "Monthly processing allowance reached." }],
+          next_chapter_number: 2,
+          retry_available: true,
+        },
+      }
+    }
     if (manuscriptProcessingMode === "refresh-after-two-book-reads") {
       // The manuscript route performs multiple detail reads while the page is
       // still settling; keep one poll cycle visible before switching to ready.
@@ -2682,6 +2741,29 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
       return json(route, buildBookDetailResponse())
+    }
+
+    if (path === "/api/v1/books/book-1/processing/continue" && method === "POST") {
+      allowanceProcessingContinued = true
+      mockBook = {
+        ...mockBook,
+        status: "processing",
+        processing: {
+          ...(mockBook.processing ?? {}),
+          status: "processing",
+          stage: "queued",
+          progress_pct: 50,
+          chapters_completed: 1,
+          chapters_total: 3,
+          processing_run_id: "processing-run-1",
+          pause_reason: null,
+          resume_available: false,
+          resume_blockers: [],
+          next_chapter_number: 2,
+          retry_available: false,
+        },
+      }
+      return json(route, mockBook.processing)
     }
 
     if (path === "/api/v1/books/book-1/permanent" && method === "DELETE") {
@@ -3112,7 +3194,18 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/revision-intelligence" && method === "GET") {
-      return json(route, revisionIntelligence)
+      return json(route, activationRevision)
+    }
+
+    if (path.match(/^\/api\/v1\/books\/book-1\/revision-findings\/[^/]+\/decision$/) && method === "POST") {
+      const body = route.request().postDataJSON() as { decision?: string; action?: string } | null
+      activationRevision = {
+        ...activationRevision,
+        activation: body?.decision === "accepted"
+          ? { eligible: false, completed: true, completed_at: "2026-06-19T10:00:00Z", completion_action: body.action ?? "added_to_revision_plan", completed_finding_id: "rev-impact-1" }
+          : activationRevision.activation,
+      }
+      return json(route, activationRevision)
     }
 
     if (path === "/api/v1/books/book-1/workspace/tree" && method === "GET") {

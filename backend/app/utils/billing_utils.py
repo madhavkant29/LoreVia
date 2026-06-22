@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import HTTPException
 import jwt
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,7 +87,9 @@ LEGACY_PLAN_ALIASES = {
 }
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SHARED_PRICING_CATALOG_PATH = REPO_ROOT / "frontend" / "src" / "lib" / "billing" / "pricing-catalog.json"
+SHARED_PRICING_CATALOG_PATH = (
+    REPO_ROOT / "frontend" / "src" / "lib" / "billing" / "pricing-catalog.json"
+)
 
 
 @lru_cache(maxsize=1)
@@ -102,30 +104,20 @@ def _catalog_plans() -> list[dict[str, Any]]:
     return plans
 
 
-PLAN_METADATA_BY_CODE = {
-    str(plan["code"]): plan
-    for plan in _catalog_plans()
-}
-PLAN_PRICES_USD = {
-    code: int(plan["price_usd"])
-    for code, plan in PLAN_METADATA_BY_CODE.items()
-}
+PLAN_METADATA_BY_CODE = {str(plan["code"]): plan for plan in _catalog_plans()}
+PLAN_PRICES_USD = {code: int(plan["price_usd"]) for code, plan in PLAN_METADATA_BY_CODE.items()}
 PLAN_DISPLAY_NAMES = {
-    code: str(plan["display_name"])
-    for code, plan in PLAN_METADATA_BY_CODE.items()
+    code: str(plan["display_name"]) for code, plan in PLAN_METADATA_BY_CODE.items()
 }
 PLAN_INTERVALS = {
-    code: str(plan["billing_interval"])
-    for code, plan in PLAN_METADATA_BY_CODE.items()
+    code: str(plan["billing_interval"]) for code, plan in PLAN_METADATA_BY_CODE.items()
 }
 PLAN_PRICE_ID_ENV_KEYS = {
     code: [str(env_key) for env_key in plan.get("price_id_env_keys", [])]
     for code, plan in PLAN_METADATA_BY_CODE.items()
 }
 VALID_PAID_PLAN_CODES = {
-    code
-    for code, plan in PLAN_METADATA_BY_CODE.items()
-    if bool(plan.get("checkout_enabled"))
+    code for code, plan in PLAN_METADATA_BY_CODE.items() if bool(plan.get("checkout_enabled"))
 }
 
 
@@ -185,10 +177,7 @@ def recommended_paddle_default_checkout_url() -> str:
     if "://" not in raw_app_url:
         raw_app_url = f"https://{raw_app_url.lstrip('/')}"
     parts = urlsplit(raw_app_url)
-    if (
-        not settings.DEBUG
-        and parts.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}
-    ):
+    if not settings.DEBUG and parts.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
         raw_app_url = default_app_url
     return f"{raw_app_url.rstrip('/')}/checkout"
 
@@ -208,7 +197,9 @@ def create_billing_confirmation_token(transaction_id: str) -> str:
     )
 
 
-def _decode_billing_confirmation_token(token: str | None, transaction_id: str) -> dict[str, Any] | None:
+def _decode_billing_confirmation_token(
+    token: str | None, transaction_id: str
+) -> dict[str, Any] | None:
     if not token:
         return None
     try:
@@ -342,12 +333,11 @@ def upload_limit_for_user(user: Any) -> int | None:
     return 0
 
 
-async def _worldbuilding_upload_cost_by_book(db: AsyncSession, user_id: uuid.UUID) -> dict[uuid.UUID, int]:
+async def _worldbuilding_upload_cost_by_book(
+    db: AsyncSession, user_id: uuid.UUID
+) -> dict[uuid.UUID, int]:
     owned_book_rows = (
-        await db.execute(
-            select(Book.id, Book.primary_series_id)
-            .where(Book.user_id == user_id)
-        )
+        await db.execute(select(Book.id, Book.primary_series_id).where(Book.user_id == user_id))
     ).all()
     if not owned_book_rows:
         return {}
@@ -355,8 +345,7 @@ async def _worldbuilding_upload_cost_by_book(db: AsyncSession, user_id: uuid.UUI
     book_ids = [book_id for book_id, _primary_series_id in owned_book_rows]
     membership_rows = (
         await db.execute(
-            select(SeriesBook.series_id, SeriesBook.book_id)
-            .where(SeriesBook.book_id.in_(book_ids))
+            select(SeriesBook.series_id, SeriesBook.book_id).where(SeriesBook.book_id.in_(book_ids))
         )
     ).all()
 
@@ -382,7 +371,9 @@ async def _worldbuilding_upload_cost_by_book(db: AsyncSession, user_id: uuid.UUI
                     for series_id in linked_series_ids
                     for linked_book_id in series_to_book_ids.get(series_id, {book_id})
                 }
-            ) if linked_series_ids else 1,
+            )
+            if linked_series_ids
+            else 1,
         )
         for book_id, linked_series_ids in book_to_series_ids.items()
     }
@@ -401,7 +392,9 @@ async def calculate_upload_usage_summary(db: AsyncSession, user: Any) -> UploadU
     extra_manuscript_uploads = int(
         (
             await db.execute(
-                select(func.coalesce(func.sum(BookUploadCharge.quantity), 0)).where(BookUploadCharge.user_id == user_id)
+                select(func.coalesce(func.sum(BookUploadCharge.quantity), 0)).where(
+                    BookUploadCharge.user_id == user_id
+                )
             )
         ).scalar()
         or 0
@@ -507,7 +500,9 @@ async def ensure_upload_capacity(
     if summary.upload_limit is None:
         return summary
 
-    projected_total = max(summary.total_uploads - max(released_uploads, 0), 0) + max(requested_uploads, 0)
+    projected_total = max(summary.total_uploads - max(released_uploads, 0), 0) + max(
+        requested_uploads, 0
+    )
     if projected_total <= summary.upload_limit:
         return summary
 
@@ -517,7 +512,7 @@ async def ensure_upload_capacity(
             f"Author tier includes {summary.upload_limit} uploads. "
             f"You have {summary.uploads_remaining or 0} remaining. "
             "Worldbuilding manuscripts count as uploads too, and series-linked worldbuilding manuscripts count once per book in the series. "
-            "Upgrade to Architect for unlimited uploads."
+            "Upgrade to Architect for higher active-word, processing, and storage allowances."
         )
     else:
         base_message = (
@@ -554,7 +549,9 @@ def billing_interval_for_plan(plan: str) -> str:
 
 def paddle_plan_is_configured(plan: str) -> bool:
     try:
-        return has_meaningful_setting_value(settings.PADDLE_API_KEY) and has_meaningful_setting_value(price_id_for_plan(plan))
+        return has_meaningful_setting_value(
+            settings.PADDLE_API_KEY
+        ) and has_meaningful_setting_value(price_id_for_plan(plan))
     except RuntimeError:
         return False
 
@@ -572,7 +569,9 @@ def billing_configuration_status() -> dict[str, Any]:
 
     paddle_api_key_present = has_meaningful_setting_value(settings.PADDLE_API_KEY)
     webhook_secret_present = has_meaningful_setting_value(settings.PADDLE_WEBHOOK_SECRET)
-    default_checkout_url_present = has_meaningful_setting_value(settings.PADDLE_DEFAULT_CHECKOUT_URL)
+    default_checkout_url_present = has_meaningful_setting_value(
+        settings.PADDLE_DEFAULT_CHECKOUT_URL
+    )
     resend_api_key_present = has_meaningful_setting_value(settings.RESEND_API_KEY)
     internal_job_secret_present = has_meaningful_setting_value(settings.INTERNAL_JOB_SECRET)
 
@@ -602,10 +601,14 @@ def billing_configuration_status() -> dict[str, Any]:
         plans.append(
             {
                 "code": normalized,
-                "display_name": PLAN_DISPLAY_NAMES.get(normalized, normalized.replace("_", " ").title()),
+                "display_name": PLAN_DISPLAY_NAMES.get(
+                    normalized, normalized.replace("_", " ").title()
+                ),
                 "billing_interval": billing_interval_for_plan(normalized),
                 "price_usd": PLAN_PRICES_USD.get(normalized, 0),
-                "configured": bool(paddle_api_key_present and has_meaningful_setting_value(price_id)),
+                "configured": bool(
+                    paddle_api_key_present and has_meaningful_setting_value(price_id)
+                ),
                 "price_id_present": has_meaningful_setting_value(price_id),
             }
         )
@@ -660,10 +663,19 @@ def subscription_service_is_active(event_type: str, status: str | None) -> bool:
 
 
 def subscription_event_type_for_metrics(event_type: str, status: str | None) -> str | None:
-    if event_type in {"transaction.completed", "subscription.activated", "subscription.resumed", "subscription.trialing"}:
-        return "subscription_activated" if subscription_service_is_active(event_type, status) else None
+    if event_type in {
+        "transaction.completed",
+        "subscription.activated",
+        "subscription.resumed",
+        "subscription.trialing",
+    }:
+        return (
+            "subscription_activated" if subscription_service_is_active(event_type, status) else None
+        )
     if event_type in {"subscription.created", "subscription.updated"}:
-        return "subscription_activated" if subscription_service_is_active(event_type, status) else None
+        return (
+            "subscription_activated" if subscription_service_is_active(event_type, status) else None
+        )
     if event_type == "subscription.canceled":
         return "subscription_canceled"
     if event_type == "subscription.paused":
@@ -735,11 +747,14 @@ async def build_subscription_metrics_summary(
     window = timedelta(days=max(int(reactivation_window_days or 0), 1))
 
     cohort_users = (
-        await db.execute(
-            select(User.id)
-            .where(User.created_at >= start_at, User.created_at < end_at)
+        (
+            await db.execute(
+                select(User.id).where(User.created_at >= start_at, User.created_at < end_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     cohort_user_ids = {user_id for user_id in cohort_users}
 
     trial_to_paid_conversions = 0
@@ -749,40 +764,49 @@ async def build_subscription_metrics_summary(
                 user_id
                 for user_id in (
                     await db.execute(
-                        select(SubscriptionEvent.user_id)
-                        .where(
+                        select(SubscriptionEvent.user_id).where(
                             SubscriptionEvent.user_id.in_(cohort_user_ids),
                             SubscriptionEvent.event_type == "subscription_activated",
                         )
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             }
         )
 
     cancellation_events = (
-        await db.execute(
-            select(SubscriptionEvent)
-            .where(
-                SubscriptionEvent.event_type == "subscription_canceled",
-                SubscriptionEvent.occurred_at >= start_at,
-                SubscriptionEvent.occurred_at < end_at,
+        (
+            await db.execute(
+                select(SubscriptionEvent)
+                .where(
+                    SubscriptionEvent.event_type == "subscription_canceled",
+                    SubscriptionEvent.occurred_at >= start_at,
+                    SubscriptionEvent.occurred_at < end_at,
+                )
+                .order_by(SubscriptionEvent.occurred_at.asc())
             )
-            .order_by(SubscriptionEvent.occurred_at.asc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if cancellation_events:
         cancellation_user_ids = {event.user_id for event in cancellation_events}
         reactivation_events = (
-            await db.execute(
-                select(SubscriptionEvent)
-                .where(
-                    SubscriptionEvent.user_id.in_(cancellation_user_ids),
-                    SubscriptionEvent.event_type == "subscription_activated",
+            (
+                await db.execute(
+                    select(SubscriptionEvent)
+                    .where(
+                        SubscriptionEvent.user_id.in_(cancellation_user_ids),
+                        SubscriptionEvent.event_type == "subscription_activated",
+                    )
+                    .order_by(SubscriptionEvent.occurred_at.asc())
                 )
-                .order_by(SubscriptionEvent.occurred_at.asc())
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     else:
         reactivation_events = []
 
@@ -803,7 +827,8 @@ async def build_subscription_metrics_summary(
 
         resolved_cancellation_events += 1
         reactivated = any(
-            candidate.occurred_at > cancellation.occurred_at and candidate.occurred_at <= resolution_deadline
+            candidate.occurred_at > cancellation.occurred_at
+            and candidate.occurred_at <= resolution_deadline
             for candidate in reactivations_by_user.get(cancellation.user_id, [])
         )
         if reactivated:
@@ -831,7 +856,10 @@ def paddle_plan_from_event_data(data: dict[str, Any]) -> str:
     price_id = paddle_price_id_from_event_data(data).strip()
     if price_id:
         for plan_code, env_keys in PLAN_PRICE_ID_ENV_KEYS.items():
-            if any(str(getattr(settings, env_key, "") or "").strip() == price_id for env_key in env_keys):
+            if any(
+                str(getattr(settings, env_key, "") or "").strip() == price_id
+                for env_key in env_keys
+            ):
                 return normalize_plan_code(plan_code)
 
     items = data.get("items") or []

@@ -2143,6 +2143,19 @@ function ManuscriptPageInner() {
     if (emotionalArcResult) setEmotionalArc(emotionalArcResult)
   }
 
+  const completeFindingEdit = async () => {
+    const findingId = searchParams.get("finding")
+    if (!findingId) return
+    try {
+      await booksApi.decideRevisionFinding(bookId, findingId, { decision: "accepted", action: "manuscript_edit" })
+      capture("manuscript_edit_from_finding_completed", { book_id: bookId, finding_id: findingId })
+      capture("activation_completed", { book_id: bookId, finding_id: findingId, action: "manuscript_edit" })
+      router.replace(`/${bookId}/manuscript`)
+    } catch {
+      // The manuscript save succeeded; attribution must not turn it into a failed save.
+    }
+  }
+
   const saveChapterDraft = async (chapterNumber: number, draft?: { title: string; text: string; html: string }) => {
     const currentDraft = draft ?? bookDrafts[chapterNumber] ?? { title: chapterTitle, text, html }
     if (!currentDraft.text.trim()) return
@@ -2170,6 +2183,7 @@ function ManuscriptPageInner() {
       await loadWorkspaceTree()
       if (!autoReprocessEnabled) await refetchWriterWorkspace()
       if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, currentDraft.text)
+      await completeFindingEdit()
       setStatusMessage(
         autoReprocessEnabled
           ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
@@ -2216,6 +2230,7 @@ function ManuscriptPageInner() {
       await loadWorkspaceTree()
       if (!autoReprocessEnabled) await refetchWriterWorkspace()
       if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, text)
+      await completeFindingEdit()
       setStatusMessage(
         autoReprocessEnabled
           ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
@@ -2254,9 +2269,12 @@ function ManuscriptPageInner() {
     setProcessingRetrying(true)
     setStatusMessage(null)
     try {
-      const processing = await booksApi.retryProcessing(book.id)
+      const normalized = normalizeProcessingStatus(book.processing, book)
+      const processing = normalized?.resumeAvailable
+        ? await booksApi.continueProcessing(book.id)
+        : await booksApi.retryProcessing(book.id)
       setBook((current) => current ? { ...current, status: "processing", processing } : current)
-      setStatusMessage("Processing retry started.")
+      setStatusMessage(normalized?.resumeAvailable ? "Processing continuation started." : "Processing retry started.")
       await loadBase()
     } catch {
       setStatusMessage("Processing retry is not available right now.")

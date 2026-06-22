@@ -23,8 +23,53 @@ test("marketing home page renders the core value proposition", async ({ page }) 
 
   await expect(page.getByRole("heading", { name: /find plot holes before your readers do/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /^analyze my manuscript$/i }).first()).toBeVisible()
+  await expect(page.getByRole("link", { name: /^see a sample finding$/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /^see a sample finding$/i })).toHaveAttribute("href", "/demo/workspace")
+  await expect(page.getByText("Includes a 10-day Author trial. No payment required.").first()).toBeVisible()
+})
+
+test("mobile marketing header keeps sign in and registration visible", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/")
+
+  await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^start free$/i }).first()).toBeVisible()
-  await expect(page.getByText("Start analyzing your manuscript")).toBeVisible()
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  )
+  expect(hasHorizontalOverflow).toBe(false)
+
+  await page.getByRole("link", { name: /^sign in$/i }).click()
+  await expect(page).toHaveURL(/\/login$/)
+})
+
+test("interactive demo reviews findings without API calls or mobile overflow", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const apiRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/")) apiRequests.push(request.url())
+  })
+  await page.goto("/demo/workspace")
+
+  await expect(page.getByRole("heading", { name: "Review Dracula continuity findings" })).toBeVisible()
+  const desktopOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(desktopOverflow).toBe(false)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(page.getByText("0/3 reviewed")).toBeVisible()
+  await page.getByRole("button", { name: "Add to revision plan" }).click()
+  await expect(page.getByText("1/3 reviewed")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Revision plan" })).toBeVisible()
+  await page.getByRole("button", { name: "Reset demo" }).click()
+  await expect(page.getByText("0/3 reviewed")).toBeVisible()
+
+  const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(hasHorizontalOverflow).toBe(false)
+  expect(apiRequests).toEqual([])
+  expect(pageErrors).toEqual([])
+  expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
 })
 
 test("public SEO content hubs render without auth and link into article clusters", async ({ page }) => {
@@ -326,6 +371,18 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(page.getByText("Manuscript progress")).toBeVisible()
 })
 
+test("analysis-complete overview guides an author through the first finding", async ({ page }) => {
+  await installMockApi(page, { activationPending: true })
+  await page.goto(BOOK_ROUTE)
+
+  await expect(page.getByTestId("activation-experience")).toBeVisible()
+  await expect(page.getByRole("heading", { name: /We analyzed 3 chapters in Sky of Ash/i })).toBeVisible()
+  await page.getByRole("button", { name: /Chapter 2 assumption may break later payoff/i }).click()
+  await expect(page.getByText(/Nora crossed the silver gate/)).toBeVisible()
+  await page.getByRole("button", { name: "Add to revision plan" }).click()
+  await expect(page.getByText("Your author command center.")).toBeVisible()
+})
+
 test("expired free owners are redirected away from author-only book routes", async ({ page }) => {
   await installMockApi(page, { userTier: "free" })
   await page.goto(`${BOOK_ROUTE}/manuscript`)
@@ -537,6 +594,24 @@ test("manuscript processing state refreshes back into a reprocess action", async
 
   await expect(page.getByRole("button", { name: "Processing 53% ~3min left" })).toBeDisabled()
   await expect(page.getByRole("button", { name: "Reprocess manuscript" })).toBeEnabled({ timeout: 8000 })
+})
+
+test("allowance-paused manuscript continues from its checkpoint", async ({ page }) => {
+  await installMockApi(page, { manuscriptProcessing: "allowance-paused" })
+  const continueRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/processing/continue") && request.method() === "POST") {
+      continueRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  const continueButton = page.getByRole("button", { name: "Continue processing" }).first()
+  await expect(continueButton).toBeVisible()
+  await continueButton.click()
+  await expect(page.getByText("Processing continuation started.")).toBeVisible()
+  expect(continueRequests).toHaveLength(1)
 })
 
 test("manual chapter reprocess marks saved edits pending and starts without upload charge", async ({ page }) => {

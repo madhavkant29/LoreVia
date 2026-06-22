@@ -98,7 +98,9 @@ class TestIncludeRequested:
 
     def test_any_section_matches(self):
         assert include_requested("chapters,events", "relationship_markers", "events") is True
-        assert include_requested("chapters,events", "relationship_markers", "thread_tracks") is False
+        assert (
+            include_requested("chapters,events", "relationship_markers", "thread_tracks") is False
+        )
 
 
 class TestExcludeCharacterFields:
@@ -141,7 +143,9 @@ class TestExcludeCharacterFields:
         assert "name" in result[0]
 
     def test_all_included_keeps_everything(self):
-        result = exclude_character_fields(self._sample_chars, "arc_tracker,analysis_metadata,growth_events,tags")
+        result = exclude_character_fields(
+            self._sample_chars, "arc_tracker,analysis_metadata,growth_events,tags"
+        )
         assert "arc_tracker" in result[0]
         assert "analysis_metadata" in result[0]
         assert "growth_events" in result[0]

@@ -75,6 +75,13 @@ async def test_limit_for_user_caches_database_override(monkeypatch):
     assert db.execute_count == 1
     assert stored == {
         "key": rate_limit_utils.rate_limit_override_cache_key(user_id),
-        "value": {"api_per_minute": 75, **{field: None for field in rate_limit_utils._OVERRIDE_FIELDS if field != "api_per_minute"}},
+        "value": {
+            "api_per_minute": 75,
+            **{
+                field: None
+                for field in rate_limit_utils._OVERRIDE_FIELDS
+                if field != "api_per_minute"
+            },
+        },
         "ttl": rate_limit_utils.RATE_LIMIT_OVERRIDE_CACHE_TTL_SECONDS,
     }

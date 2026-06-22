@@ -191,7 +191,7 @@ describe("overview and manuscript controls", () => {
 
     expect(container?.textContent).toContain("Project Overview")
     expect(container?.textContent).toContain("12,500")
-    expect(container?.textContent).toContain("Writing Streak")
+    expect(container?.textContent).toContain("Writing streak")
     expect(container?.textContent).toContain("9 days")
 
     clickByText("Add Scene")

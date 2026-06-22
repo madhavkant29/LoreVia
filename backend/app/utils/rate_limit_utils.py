@@ -47,7 +47,9 @@ async def get_cached_rate_limit_override(
     try:
         cached = await cache_get(key)
     except Exception:
-        log.warning("rate_limit_override_cache_get_failed", extra={"user_id": str(user_id)}, exc_info=True)
+        log.warning(
+            "rate_limit_override_cache_get_failed", extra={"user_id": str(user_id)}, exc_info=True
+        )
         cached = None
 
     if cached == _NO_OVERRIDE:
@@ -64,7 +66,9 @@ async def get_cached_rate_limit_override(
     try:
         await cache_set(key, payload, RATE_LIMIT_OVERRIDE_CACHE_TTL_SECONDS)
     except Exception:
-        log.warning("rate_limit_override_cache_set_failed", extra={"user_id": str(user_id)}, exc_info=True)
+        log.warning(
+            "rate_limit_override_cache_set_failed", extra={"user_id": str(user_id)}, exc_info=True
+        )
     return None if payload == _NO_OVERRIDE else payload
 
 
@@ -85,4 +89,8 @@ async def invalidate_rate_limit_override_cache(user_id: uuid.UUID | str | object
     try:
         await cache_del(rate_limit_override_cache_key(user_id))
     except Exception:
-        log.warning("rate_limit_override_cache_delete_failed", extra={"user_id": str(user_id)}, exc_info=True)
+        log.warning(
+            "rate_limit_override_cache_delete_failed",
+            extra={"user_id": str(user_id)},
+            exc_info=True,
+        )

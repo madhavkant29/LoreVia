@@ -4,14 +4,6 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.security import create_access_token
-from app.utils.auth_csrf import (
-    AUTH_CSRF_COOKIE_NAME,
-    AUTH_CSRF_HEADER_NAME,
-    cookie_authenticated_request_requires_csrf,
-    create_auth_csrf_token,
-    set_auth_csrf_cookie,
-    validate_auth_csrf_token,
-)
 from app.utils.auth_cookies import (
     ACCESS_TOKEN_COOKIE_NAME,
     DEVICE_ID_COOKIE_NAME,
@@ -21,9 +13,17 @@ from app.utils.auth_cookies import (
     get_auth_token,
     get_device_cookie,
     resolve_device_id,
-    set_auth_cookies,
     set_access_cookie,
+    set_auth_cookies,
     set_device_cookie,
+)
+from app.utils.auth_csrf import (
+    AUTH_CSRF_COOKIE_NAME,
+    AUTH_CSRF_HEADER_NAME,
+    cookie_authenticated_request_requires_csrf,
+    create_auth_csrf_token,
+    set_auth_csrf_cookie,
+    validate_auth_csrf_token,
 )
 from app.utils.cookie_utils import auth_cookie_domain
 
@@ -52,12 +52,16 @@ def test_set_auth_cookies_uses_http_only_lax_path(monkeypatch):
 
 
 def test_auth_cookie_domain_requires_explicit_matching_override(monkeypatch):
-    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://app.getlorevia.com", raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.APP_URL", "https://app.getlorevia.com", raising=False
+    )
 
     monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", None, raising=False)
     assert auth_cookie_domain() is None
 
-    monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", ".getlorevia.com", raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.AUTH_COOKIE_DOMAIN", ".getlorevia.com", raising=False
+    )
     assert auth_cookie_domain() == "getlorevia.com"
 
     monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", "example.com", raising=False)
@@ -77,12 +81,30 @@ def test_set_auth_cookies_expires_legacy_api_prefix_cookies(monkeypatch):
         for name, value in response.raw_headers
         if name.lower() == b"set-cookie"
     ]
-    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
-    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
-    assert any(REFRESH_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
-    assert any(REFRESH_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
-    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
-    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
+    assert any(
+        ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        REFRESH_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        REFRESH_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1/" in header.lower()
+        for header in set_cookie_headers
+    )
 
 
 def test_set_auth_cookies_disables_secure_for_local_http(monkeypatch):
@@ -132,7 +154,8 @@ def test_set_access_cookie_sets_only_the_access_token(monkeypatch):
         if name.lower() == b"set-cookie"
     ]
     active_access_cookie = next(
-        header for header in set_cookie_headers
+        header
+        for header in set_cookie_headers
         if ACCESS_TOKEN_COOKIE_NAME in header and "max-age=900" in header.lower()
     )
     assert "httponly" in active_access_cookie.lower()
@@ -154,10 +177,22 @@ def test_set_access_cookie_expires_legacy_api_prefix_access_cookie(monkeypatch):
         for name, value in response.raw_headers
         if name.lower() == b"set-cookie"
     ]
-    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
-    assert any(ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
-    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1" in header.lower() for header in set_cookie_headers)
-    assert any(AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1/" in header.lower() for header in set_cookie_headers)
+    assert any(
+        ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        ACCESS_TOKEN_COOKIE_NAME in header and "path=/api/v1/" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1" in header.lower()
+        for header in set_cookie_headers
+    )
+    assert any(
+        AUTH_CSRF_COOKIE_NAME in header and "path=/api/v1/" in header.lower()
+        for header in set_cookie_headers
+    )
 
 
 def test_set_device_cookie_uses_http_only_lax_path(monkeypatch):
@@ -173,7 +208,8 @@ def test_set_device_cookie_uses_http_only_lax_path(monkeypatch):
         if name.lower() == b"set-cookie"
     ]
     active_device_cookie = next(
-        header for header in set_cookie_headers
+        header
+        for header in set_cookie_headers
         if DEVICE_ID_COOKIE_NAME in header and "device-cookie-id01" in header
     )
     assert "httponly" in active_device_cookie.lower()
@@ -220,7 +256,8 @@ def test_set_auth_csrf_cookie_uses_readable_lax_cookie(monkeypatch):
         if name.lower() == b"set-cookie"
     ]
     active_csrf_cookie = next(
-        header for header in set_cookie_headers
+        header
+        for header in set_cookie_headers
         if AUTH_CSRF_COOKIE_NAME in header and "csrf-token" in header
     )
     assert "httponly" not in active_csrf_cookie.lower()
@@ -231,9 +268,17 @@ def test_set_auth_csrf_cookie_uses_readable_lax_cookie(monkeypatch):
 def test_cookie_authenticated_request_requires_csrf_only_for_unsafe_requests_without_valid_bearer():
     patch_request = Request({"type": "http", "method": "PATCH", "headers": []})
     get_request = Request({"type": "http", "method": "GET", "headers": []})
-    forged_bearer_request = Request({"type": "http", "method": "POST", "headers": [(b"authorization", b"Bearer token")]})
+    forged_bearer_request = Request(
+        {"type": "http", "method": "POST", "headers": [(b"authorization", b"Bearer token")]}
+    )
     valid_bearer = create_access_token("user-1")
-    bearer_request = Request({"type": "http", "method": "POST", "headers": [(b"authorization", f"Bearer {valid_bearer}".encode())]})
+    bearer_request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [(b"authorization", f"Bearer {valid_bearer}".encode())],
+        }
+    )
 
     assert cookie_authenticated_request_requires_csrf(patch_request) is True
     assert cookie_authenticated_request_requires_csrf(get_request) is False
@@ -283,7 +328,7 @@ def test_validate_auth_csrf_token_accepts_matching_cookie_header_and_origin():
             "type": "http",
             "method": "POST",
             "headers": [
-                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode("utf-8")),
+                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode()),
                 (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
                 (b"origin", b"https://getlorevia.com"),
             ],
@@ -303,7 +348,7 @@ def test_validate_auth_csrf_token_prefers_last_duplicate_cookie_value():
             "headers": [
                 (
                     b"cookie",
-                    f"{AUTH_CSRF_COOKIE_NAME}={stale_token}; {AUTH_CSRF_COOKIE_NAME}={fresh_token}".encode("utf-8"),
+                    f"{AUTH_CSRF_COOKIE_NAME}={stale_token}; {AUTH_CSRF_COOKIE_NAME}={fresh_token}".encode(),
                 ),
                 (AUTH_CSRF_HEADER_NAME.encode("utf-8"), fresh_token.encode("utf-8")),
                 (b"origin", b"https://getlorevia.com"),
@@ -326,7 +371,7 @@ def test_validate_auth_csrf_token_prefers_last_duplicate_cookie_value():
 def test_validate_auth_csrf_token_rejects_invalid_inputs(cookie_token, header_token, origin):
     headers = []
     if cookie_token:
-        headers.append((b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={cookie_token}".encode("utf-8")))
+        headers.append((b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={cookie_token}".encode()))
     if header_token:
         headers.append((AUTH_CSRF_HEADER_NAME.encode("utf-8"), header_token.encode("utf-8")))
     if origin:

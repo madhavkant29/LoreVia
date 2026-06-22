@@ -73,6 +73,7 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
         return asyncio.run(_run_awaitable(coro))
 
     monkeypatch.setattr(extraction_tasks, "run_worker_coro", _fake_run_worker_coro)
+
     async def _visible(*_args, **_kwargs):
         return False
 
@@ -173,11 +174,15 @@ def test_process_chapter_task_stays_paused_after_llm_usage_retry_budget(monkeypa
 
     def _retry(**_kwargs):
         calls.append("retry")
-        raise AssertionError("retry should not be called after the usage-limit retry budget is exhausted")
+        raise AssertionError(
+            "retry should not be called after the usage-limit retry budget is exhausted"
+        )
 
     monkeypatch.setattr(extraction_tasks, "run_worker_coro", _fake_run_worker_coro)
     monkeypatch.setattr(extraction_tasks.process_chapter_task, "retry", _retry)
-    extraction_tasks.process_chapter_task.request.retries = extraction_tasks.LLM_USAGE_LIMIT_MAX_RETRIES
+    extraction_tasks.process_chapter_task.request.retries = (
+        extraction_tasks.LLM_USAGE_LIMIT_MAX_RETRIES
+    )
 
     result = extraction_tasks.process_chapter_task.run(str(uuid.uuid4()), 4)
 
@@ -188,7 +193,9 @@ def test_process_chapter_task_stays_paused_after_llm_usage_retry_budget(monkeypa
 def test_process_book_task_uses_shared_worker_runner(monkeypatch):
     calls: list[object] = []
 
-    async def _fake_process_book(book_id: str, queue_wait_ms: int | None = None, task_id: str | None = None):
+    async def _fake_process_book(
+        book_id: str, queue_wait_ms: int | None = None, task_id: str | None = None
+    ):
         calls.append((book_id, queue_wait_ms))
         return {"book_id": book_id}
 
@@ -251,8 +258,12 @@ def test_process_chapter_task_successfully_processes_and_sets_reprocess_guard(mo
     monkeypatch.setattr(extraction_tasks, "_process_chapter", process)
     monkeypatch.setattr("app.core.redis.get_redis", get_redis)
     monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
-    monkeypatch.setitem(sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: fake_session))
-    monkeypatch.setitem(sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel))
+    monkeypatch.setitem(
+        sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: fake_session)
+    )
+    monkeypatch.setitem(
+        sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel)
+    )
 
     result = extraction_tasks.process_chapter_task.run(str(book_id), 1, manual_reprocess=True)
 
@@ -283,8 +294,12 @@ def test_repair_chapter_payload_task_covers_success_missing_and_hidden_paths(mon
     monkeypatch.setattr(extraction_tasks, "is_book_hidden", visible)
     monkeypatch.setattr(extraction_tasks, "repair_chapter_payload_from_source", repair)
     monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
-    monkeypatch.setitem(sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: session))
-    monkeypatch.setitem(sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel))
+    monkeypatch.setitem(
+        sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: session)
+    )
+    monkeypatch.setitem(
+        sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel)
+    )
 
     assert extraction_tasks.repair_chapter_payload_task.run(str(book_id), 2) is None
     assert repaired == [(session, book, chapter)]

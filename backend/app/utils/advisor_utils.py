@@ -2,6 +2,7 @@
 Advisor utility helpers — LLM intent/response classifiers, story context
 builder, and continuity report renderers extracted from the advisor route.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,8 +17,8 @@ from typing import Any
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from sqlalchemy import func, select
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy import text as sql_text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,8 +28,8 @@ from app.core.redis import (
     get_book_cache_version,
     get_editorial_review_cache,
     get_proactive_scan_cache,
-    get_series_cache_version,
     get_series_advisor_response_cache,
+    get_series_cache_version,
     get_series_story_context_cache,
     get_story_context_cache,
     get_suggestion_scan_cache,
@@ -48,13 +49,18 @@ from app.engine.search.semantic import semantic_search
 from app.models.book import Book, Chapter, SeriesBook
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
-from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
+from app.services.llm_control_service import (
+    fail_llm_reservation,
+    finish_llm_reservation_counts,
+    reserve_llm_call,
+)
 from app.utils.llm_usage_utils import (
     assert_llm_token_capacity,
     create_tracked_chat_completion,
     estimate_chat_completion_tokens,
     record_llm_usage_counts,
 )
+from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
 from app.utils.world_building_utils import build_world_logic_response, classify_world_intent
 
 log = logging.getLogger(__name__)
@@ -63,6 +69,7 @@ log = logging.getLogger(__name__)
 # ─── Advisor response cache ───────────────────────────────────────────────────
 # Simple TTL-based LRU in-process cache keyed on sha256(book_id + last_msg).
 # No external dependency — expires automatically in CACHE_TTL_SECONDS.
+
 
 async def invalidate_advisor_caches(
     *,
@@ -140,6 +147,7 @@ def compute_synopsis_content_fingerprint(chapter_rows: list[tuple]) -> str:
 
 def safe_prompt_str(value: str | None) -> str:
     return (value or "").replace("{", "{{").replace("}", "}}")
+
 
 # ─── System / prompt templates ────────────────────────────────────────────────
 
@@ -312,7 +320,9 @@ def detect_advisor_world_mode(message: str, intent: str | None = None) -> str | 
     return classify_world_intent(message)
 
 
-def advisor_retrieval_settings(intent: str | None, world_mode: str | None = None) -> tuple[int, float]:
+def advisor_retrieval_settings(
+    intent: str | None, world_mode: str | None = None
+) -> tuple[int, float]:
     if intent in {"consistency", "plothole"} or world_mode:
         return (
             settings.ADVISOR_CONTINUITY_SEARCH_CHUNKS,
@@ -418,7 +428,11 @@ def _short_world_value(value: object, limit: int = 220) -> str:
             or value.get("answer")
             or ""
         )
-        text = _short_world_value(preferred, limit=limit) if preferred else json.dumps(value, default=str)
+        text = (
+            _short_world_value(preferred, limit=limit)
+            if preferred
+            else json.dumps(value, default=str)
+        )
     else:
         text = str(value)
     text = " ".join(text.split()).strip()
@@ -435,8 +449,12 @@ def _format_world_item(item: object) -> str:
         or item.get("category")
         or item.get("severity")
     )
-    description = _short_world_value(item.get("description") or item.get("body") or item.get("problem"))
-    fix = _short_world_value(item.get("suggested_fix") or item.get("suggestion") or item.get("what_to_add"))
+    description = _short_world_value(
+        item.get("description") or item.get("body") or item.get("problem")
+    )
+    fix = _short_world_value(
+        item.get("suggested_fix") or item.get("suggestion") or item.get("what_to_add")
+    )
     parts = [part for part in (label, description, f"Fix: {fix}" if fix else "") if part]
     return " - ".join(parts)
 
@@ -460,7 +478,9 @@ def build_advisor_world_context(world_analysis: dict[str, Any] | None) -> str:
     if suggestions:
         lines.append("Priority suggestions:")
         lines.extend(f"- {_format_world_item(item)}" for item in suggestions)
-    citations = [item for item in world_analysis.get("citations") or [] if isinstance(item, dict)][:5]
+    citations = [item for item in world_analysis.get("citations") or [] if isinstance(item, dict)][
+        :5
+    ]
     if citations:
         lines.append("World citations:")
         for item in citations:
@@ -468,7 +488,9 @@ def build_advisor_world_context(world_analysis: dict[str, Any] | None) -> str:
             element_type = _short_world_value(item.get("element_type"), limit=80)
             scope = _short_world_value(item.get("source_scope"), limit=80)
             lines.append(f"- {name} [{element_type}] source={scope}".strip())
-    steps = [_short_world_value(item) for item in world_analysis.get("simulation_steps") or [] if item][:4]
+    steps = [
+        _short_world_value(item) for item in world_analysis.get("simulation_steps") or [] if item
+    ][:4]
     if steps:
         lines.append("World-logic steps:")
         lines.extend(f"- {step}" for step in steps)
@@ -836,40 +858,76 @@ Tighten this selected passage from the manuscript.
 
 INTENT_KEYWORDS: dict[str, list[str]] = {
     "plothole": [
-        "plot hole", "plot-hole", "plothole",
-        "contradiction", "contradicts", "contradicting",
-        "inconsistency", "inconsistent",
-        "doesn't make sense", "does not make sense",
-        "doesn't add up", "does not add up",
-        "broken logic", "logic issue",
+        "plot hole",
+        "plot-hole",
+        "plothole",
+        "contradiction",
+        "contradicts",
+        "contradicting",
+        "inconsistency",
+        "inconsistent",
+        "doesn't make sense",
+        "does not make sense",
+        "doesn't add up",
+        "does not add up",
+        "broken logic",
+        "logic issue",
     ],
     "direction": [
-        "what should", "what next", "what now",
-        "where should", "where do i", "where to go",
-        "how should", "how do i continue",
-        "should i", "which direction",
-        "next step", "next chapter", "next scene",
-        "what happens next", "what do i do",
-        "stuck", "writer's block", "writers block",
-        "don't know where", "dont know where",
+        "what should",
+        "what next",
+        "what now",
+        "where should",
+        "where do i",
+        "where to go",
+        "how should",
+        "how do i continue",
+        "should i",
+        "which direction",
+        "next step",
+        "next chapter",
+        "next scene",
+        "what happens next",
+        "what do i do",
+        "stuck",
+        "writer's block",
+        "writers block",
+        "don't know where",
+        "dont know where",
     ],
     "opportunity": [
-        "opportunity", "opportunities",
-        "potential", "untapped", "unexplored",
-        "could i", "what if i",
-        "expand", "develop further",
-        "seed", "plant", "foreshadow",
-        "unused", "underused", "under-utilised",
+        "opportunity",
+        "opportunities",
+        "potential",
+        "untapped",
+        "unexplored",
+        "could i",
+        "what if i",
+        "expand",
+        "develop further",
+        "seed",
+        "plant",
+        "foreshadow",
+        "unused",
+        "underused",
+        "under-utilised",
     ],
     "consistency": [
-        "consistency", "consistent",
-        "canon", "lore",
-        "rule", "rules",
-        "worldbuild", "world-build", "world build",
-        "timeline", "continuity",
+        "consistency",
+        "consistent",
+        "canon",
+        "lore",
+        "rule",
+        "rules",
+        "worldbuild",
+        "world-build",
+        "world build",
+        "timeline",
+        "continuity",
         "does this fit",
         "does it make sense in",
-        "contradiction", "contradicts",
+        "contradiction",
+        "contradicts",
     ],
 }
 
@@ -887,6 +945,7 @@ def classify_intent_fast(user_message: str | None) -> str:
 
 async def classify_intent(client: AsyncOpenAI, message: str) -> str:
     from app.core.config import settings
+
     try:
         r = await create_tracked_chat_completion(
             client=client,
@@ -916,6 +975,7 @@ async def classify_response_type(client: AsyncOpenAI, reply: str) -> str:
 
 # ─── Story context builder ────────────────────────────────────────────────────
 
+
 async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: int) -> str:
     version = await get_book_cache_version(str(book_id))
     cached = await get_story_context_cache(str(book_id), version, int(total_ch or 0))
@@ -935,18 +995,25 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
     book = book_result.scalars().first()
 
     if book is not None and book.characters:
-        sorted_chars = sorted(book.characters, key=lambda c: (c.first_chapter or 0, c.name or ""))[:20]
+        sorted_chars = sorted(book.characters, key=lambda c: (c.first_chapter or 0, c.name or ""))[
+            :20
+        ]
         lines.append("\nCHARACTERS (extracted from manuscript):")
         for c in sorted_chars:
             role_str = f"[{c.role}]" if c.role else ""
-            arc = (c.arc_summary[:120] + "...") if c.arc_summary and len(c.arc_summary) > 120 else (c.arc_summary or "")
+            arc = (
+                (c.arc_summary[:120] + "...")
+                if c.arc_summary and len(c.arc_summary) > 120
+                else (c.arc_summary or "")
+            )
             tags = ", ".join((c.personality_tags or [])[:3])
             motives = "; ".join((c.motivations or [])[:2])
             growth = ""
             if isinstance(c.growth_events, list) and c.growth_events:
                 latest_growth = next(
                     (
-                        item for item in reversed(c.growth_events)
+                        item
+                        for item in reversed(c.growth_events)
                         if isinstance(item, dict) and (item.get("event") or item.get("event_title"))
                     ),
                     None,
@@ -958,7 +1025,11 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
             if isinstance(c.trait_state, dict):
                 for trait_k in ("eyes", "hair", "build", "age_descriptor"):
                     raw = c.trait_state.get(trait_k)
-                    val = raw.get("value") if isinstance(raw, dict) else (raw if isinstance(raw, str) else None)
+                    val = (
+                        raw.get("value")
+                        if isinstance(raw, dict)
+                        else (raw if isinstance(raw, str) else None)
+                    )
                     if val:
                         trait_bits.append(f"{trait_k}={val}")
             traits_str = "; ".join(trait_bits[:3])
@@ -974,12 +1045,16 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
     if book is not None and book.plot_threads:
         sorted_threads = sorted(
             book.plot_threads,
-            key=lambda t: (t.importance or 5),
+            key=lambda t: t.importance or 5,
             reverse=True,
         )[:12]
         lines.append("\nPLOT THREADS (extracted from manuscript):")
         for t in sorted_threads:
-            desc = (t.description[:100] + "...") if t.description and len(t.description) > 100 else (t.description or "")
+            desc = (
+                (t.description[:100] + "...")
+                if t.description and len(t.description) > 100
+                else (t.description or "")
+            )
             status_label = str(t.status or "introduced").upper()
             lines.append(
                 f"  • [{status_label}] {t.title} (importance {t.importance}/10, "
@@ -988,7 +1063,12 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
 
     world_rows = (
         await db.execute(
-            select(WorldElement.name, WorldElement.element_type, WorldElement.description, WorldElement.usage_count)
+            select(
+                WorldElement.name,
+                WorldElement.element_type,
+                WorldElement.description,
+                WorldElement.usage_count,
+            )
             .where(WorldElement.book_id == book_id, WorldElement.source_scope == "worldbuilding")
             .order_by(WorldElement.usage_count.desc(), WorldElement.name.asc())
             .limit(10)
@@ -997,7 +1077,11 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
     if world_rows:
         lines.append("\nWORLD REFERENCE CORPUS (author-supplied lore):")
         for name, element_type, description, _usage_count in world_rows:
-            snippet = (description[:120] + "...") if description and len(description) > 120 else (description or "")
+            snippet = (
+                (description[:120] + "...")
+                if description and len(description) > 120
+                else (description or "")
+            )
             lines.append(f"  • {name} [{element_type}] {snippet}")
 
     event_rows = (
@@ -1020,7 +1104,9 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
         for item in key_events[:3]:
             if not isinstance(item, dict):
                 continue
-            title = " ".join(str(item.get("event_title") or item.get("event") or "").split()).strip()
+            title = " ".join(
+                str(item.get("event_title") or item.get("event") or "").split()
+            ).strip()
             if not title:
                 continue
             chapter_label = f"ch.{chapter_num}"
@@ -1034,7 +1120,7 @@ async def build_story_context(db: AsyncSession, book_id: uuid.UUID, total_ch: in
     if book is not None and book.world_elements:
         sorted_world = sorted(
             book.world_elements,
-            key=lambda we: (we.usage_count or 0),
+            key=lambda we: we.usage_count or 0,
             reverse=True,
         )[:12]
         lines.append("\nWORLD ELEMENTS (extracted from manuscript):")
@@ -1106,7 +1192,11 @@ async def _prepare_advisor_reply_context(
         raise ValueError("messages list is empty")
 
     last_user_msg = next(
-        (str(message.get("content") or "") for message in reversed(messages) if message.get("role") == "user"),
+        (
+            str(message.get("content") or "")
+            for message in reversed(messages)
+            if message.get("role") == "user"
+        ),
         "",
     ).strip()
     if not last_user_msg:
@@ -1305,13 +1395,18 @@ async def stream_advisor_reply_payload(
     client = prepared["client"]
     reply_parts: list[str] = []
     usage_counts: tuple[int, int, int] | None = None
+    reservation = None
     try:
-        await assert_llm_token_capacity(
-            db,
+        estimated_tokens = estimate_chat_completion_tokens(
+            {"messages": prepared["llm_messages"], "max_tokens": 800}
+        )
+        reservation = await reserve_llm_call(
             user_id=user_id,
-            estimated_tokens=estimate_chat_completion_tokens(
-                {"messages": prepared["llm_messages"], "max_tokens": 800}
-            ),
+            estimated_tokens=estimated_tokens,
+            feature="advisor_message",
+            operation="chat",
+            model=settings.OPENAI_INTEL_MODEL,
+            book_id=book.id,
         )
         stream = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
@@ -1336,17 +1431,13 @@ async def stream_advisor_reply_payload(
                     yield {"event": "delta", "data": {"content": content}}
 
         if usage_counts is not None:
-            await record_llm_usage_counts(
+            await finish_llm_reservation_counts(
+                reservation,
                 prompt_tokens=usage_counts[0],
                 completion_tokens=usage_counts[1],
                 total_tokens=usage_counts[2],
-                feature="advisor_message",
-                operation="chat_completion_stream",
-                model=settings.OPENAI_INTEL_MODEL,
-                db=db,
-                user_id=user_id,
-                book_id=book.id,
             )
+            reservation = None
 
         reply = "".join(reply_parts).strip()
         result = await _finalize_advisor_reply_payload(
@@ -1361,6 +1452,8 @@ async def stream_advisor_reply_payload(
         )
         yield {"event": "done", "data": result}
     finally:
+        if reservation is not None:
+            await fail_llm_reservation(reservation)
         await client.close()
 
 
@@ -1375,7 +1468,11 @@ async def _prepare_series_advisor_reply_context(
         raise ValueError("messages list is empty")
 
     last_user_msg = next(
-        (str(message.get("content") or "") for message in reversed(messages) if message.get("role") == "user"),
+        (
+            str(message.get("content") or "")
+            for message in reversed(messages)
+            if message.get("role") == "user"
+        ),
         "",
     ).strip()
     if not last_user_msg:
@@ -1397,11 +1494,7 @@ async def _prepare_series_advisor_reply_context(
         raise ValueError("no_books_found_in_series")
 
     book_ids = [row.book_id for row in memberships]
-    book_rows = (
-        await db.execute(
-            select(Book.id, Book.title).where(Book.id.in_(book_ids))
-        )
-    ).all()
+    book_rows = (await db.execute(select(Book.id, Book.title).where(Book.id.in_(book_ids)))).all()
     book_titles = {row.id: row.title for row in book_rows}
     story_context = await build_series_story_context(
         db,
@@ -1416,9 +1509,7 @@ async def _prepare_series_advisor_reply_context(
         series_name=safe_prompt_str(series.name),
         story_context=safe_prompt_str(story_context),
     )
-    llm_messages: list[ChatCompletionMessageParam] = [
-        {"role": "system", "content": system_prompt}
-    ]
+    llm_messages: list[ChatCompletionMessageParam] = [{"role": "system", "content": system_prompt}]
     for message in history[:-1]:
         llm_messages.append(
             {
@@ -1531,13 +1622,17 @@ async def stream_series_advisor_reply_payload(
     client = prepared["client"]
     reply_parts: list[str] = []
     usage_counts: tuple[int, int, int] | None = None
+    reservation = None
     try:
-        await assert_llm_token_capacity(
-            db,
+        reservation = await reserve_llm_call(
             user_id=user_id,
             estimated_tokens=estimate_chat_completion_tokens(
                 {"messages": prepared["llm_messages"], "max_tokens": 900}
             ),
+            feature="series_advisor_message",
+            operation="chat",
+            model=settings.OPENAI_INTEL_MODEL,
+            book_id=None,
         )
         stream = await client.chat.completions.create(
             model=settings.OPENAI_INTEL_MODEL,
@@ -1562,16 +1657,13 @@ async def stream_series_advisor_reply_payload(
                     yield {"event": "delta", "data": {"content": content}}
 
         if usage_counts is not None:
-            await record_llm_usage_counts(
+            await finish_llm_reservation_counts(
+                reservation,
                 prompt_tokens=usage_counts[0],
                 completion_tokens=usage_counts[1],
                 total_tokens=usage_counts[2],
-                feature="series_advisor_message",
-                operation="chat_completion_stream",
-                model=settings.OPENAI_INTEL_MODEL,
-                db=db,
-                user_id=user_id,
             )
+            reservation = None
 
         reply = "".join(reply_parts).strip()
         result = await _finalize_series_advisor_reply_payload(
@@ -1585,6 +1677,8 @@ async def stream_series_advisor_reply_payload(
         )
         yield {"event": "done", "data": result}
     finally:
+        if reservation is not None:
+            await fail_llm_reservation(reservation)
         await client.close()
 
 
@@ -1671,17 +1765,24 @@ def normalize_voice_consistency_result(raw: str) -> dict:
         description = " ".join(str(issue.get("description") or "").split()).strip()
         if not character_name or not title or not description:
             continue
-        cleaned_issues.append({
-            "character_name": character_name,
-            "severity": str(issue.get("severity") or "moderate"),
-            "title": title,
-            "description": description,
-            "evidence": " ".join(str(issue.get("evidence") or "").split()).strip(),
-            "suggestion": " ".join(str(issue.get("suggestion") or "").split()).strip(),
-            "intentionality_prompt": " ".join(str(issue.get("intentionality_prompt") or "").split()).strip(),
-        })
+        cleaned_issues.append(
+            {
+                "character_name": character_name,
+                "severity": str(issue.get("severity") or "moderate"),
+                "title": title,
+                "description": description,
+                "evidence": " ".join(str(issue.get("evidence") or "").split()).strip(),
+                "suggestion": " ".join(str(issue.get("suggestion") or "").split()).strip(),
+                "intentionality_prompt": " ".join(
+                    str(issue.get("intentionality_prompt") or "").split()
+                ).strip(),
+            }
+        )
 
-    overall_verdict = " ".join(str(parsed.get("overall_verdict") or "").split()).strip() or fallback["overall_verdict"]
+    overall_verdict = (
+        " ".join(str(parsed.get("overall_verdict") or "").split()).strip()
+        or fallback["overall_verdict"]
+    )
     return {"issues": cleaned_issues, "overall_verdict": overall_verdict}
 
 
@@ -1708,13 +1809,15 @@ def normalize_editorial_review_result(raw: str) -> dict:
         description = " ".join(str(issue.get("description") or "").split()).strip()
         if not title or not description:
             continue
-        continuity_issues.append({
-            "type": str(issue.get("type") or "event_conflict"),
-            "severity": str(issue.get("severity") or "moderate"),
-            "title": title,
-            "description": description,
-            "suggestion": " ".join(str(issue.get("suggestion") or "").split()).strip(),
-        })
+        continuity_issues.append(
+            {
+                "type": str(issue.get("type") or "event_conflict"),
+                "severity": str(issue.get("severity") or "moderate"),
+                "title": title,
+                "description": description,
+                "suggestion": " ".join(str(issue.get("suggestion") or "").split()).strip(),
+            }
+        )
 
     insertion_opportunities = []
     for item in parsed.get("insertion_opportunities") or []:
@@ -1729,16 +1832,21 @@ def normalize_editorial_review_result(raw: str) -> dict:
             continue
         if not isinstance(target_chapter, int) or target_chapter < 1:
             continue
-        insertion_opportunities.append({
-            "title": title,
-            "problem": problem,
-            "target_chapter": target_chapter,
-            "target_chapter_title": " ".join(str(item.get("target_chapter_title") or "").split()).strip() or None,
-            "anchor_excerpt": " ".join(str(item.get("anchor_excerpt") or "").split()).strip(),
-            "what_to_add": what_to_add,
-            "why_here": why_here,
-            "purpose": str(item.get("purpose") or "foreshadowing"),
-        })
+        insertion_opportunities.append(
+            {
+                "title": title,
+                "problem": problem,
+                "target_chapter": target_chapter,
+                "target_chapter_title": " ".join(
+                    str(item.get("target_chapter_title") or "").split()
+                ).strip()
+                or None,
+                "anchor_excerpt": " ".join(str(item.get("anchor_excerpt") or "").split()).strip(),
+                "what_to_add": what_to_add,
+                "why_here": why_here,
+                "purpose": str(item.get("purpose") or "foreshadowing"),
+            }
+        )
 
     grammar_issues = []
     for issue in parsed.get("grammar_issues") or []:
@@ -1757,10 +1865,18 @@ def normalize_editorial_review_result(raw: str) -> dict:
         if " ".join(str(note or "").split()).strip()
     ]
 
-    thematic_fit = parsed.get("thematic_fit") if isinstance(parsed.get("thematic_fit"), dict) else {}
+    thematic_fit = (
+        parsed.get("thematic_fit") if isinstance(parsed.get("thematic_fit"), dict) else {}
+    )
     score = str(thematic_fit.get("score") or "moderate")
-    notes = " ".join(str(thematic_fit.get("notes") or "").split()).strip() or fallback["thematic_fit"]["notes"]
-    overall_verdict = " ".join(str(parsed.get("overall_verdict") or "").split()).strip() or fallback["overall_verdict"]
+    notes = (
+        " ".join(str(thematic_fit.get("notes") or "").split()).strip()
+        or fallback["thematic_fit"]["notes"]
+    )
+    overall_verdict = (
+        " ".join(str(parsed.get("overall_verdict") or "").split()).strip()
+        or fallback["overall_verdict"]
+    )
 
     return {
         "continuity_issues": continuity_issues,
@@ -1845,17 +1961,23 @@ def normalize_proactive_scan_result(raw: str) -> dict:
         if not title or not description or not action_label or not ask_prompt:
             continue
         chapter_ref = item.get("chapter_ref")
-        findings.append({
-            "severity": str(item.get("severity") or "info"),
-            "type": str(item.get("type") or "future_direction"),
-            "title": title,
-            "description": description,
-            "chapter_ref": chapter_ref if isinstance(chapter_ref, int) and chapter_ref > 0 else None,
-            "action_label": action_label,
-            "ask_prompt": ask_prompt,
-        })
+        findings.append(
+            {
+                "severity": str(item.get("severity") or "info"),
+                "type": str(item.get("type") or "future_direction"),
+                "title": title,
+                "description": description,
+                "chapter_ref": chapter_ref
+                if isinstance(chapter_ref, int) and chapter_ref > 0
+                else None,
+                "action_label": action_label,
+                "ask_prompt": ask_prompt,
+            }
+        )
 
-    overall_note = " ".join(str(parsed.get("overall_note") or "").split()).strip() or fallback["overall_note"]
+    overall_note = (
+        " ".join(str(parsed.get("overall_note") or "").split()).strip() or fallback["overall_note"]
+    )
     return {"findings": findings[:4], "overall_note": overall_note}
 
 
@@ -1909,39 +2031,43 @@ def build_fallback_advisor_suggestions(
         thread_title = str(focus_thread.get("title") or "current arc").strip() or "current arc"
         introduced_at = focus_thread.get("introduced_at")
         description = str(focus_thread.get("description") or "").strip()
-        suggestions.append({
-            "id": "fallback-focus-thread",
-            "type": "future_direction",
-            "severity": "direction",
-            "title": f"Pressure-test the \"{thread_title}\" thread",
-            "description": (
-                f"This looks like one of the main unresolved engines in the book"
-                + (f", running since chapter {introduced_at}" if introduced_at else "")
-                + ". Even without a visible contradiction, it is worth checking whether the eventual payoff is clear enough and whether the earlier setup is doing enough work."
-                + (f" {description[:180]}" if description else "")
-            ),
-            "chapter_ref": introduced_at if isinstance(introduced_at, int) else None,
-            "action_label": "Stress-test this arc",
-            "ask_prompt": (
-                f"Help me pressure-test the \"{thread_title}\" thread. "
-                "What ending paths fit best, and what setup might still be missing?"
-            ),
-        })
+        suggestions.append(
+            {
+                "id": "fallback-focus-thread",
+                "type": "future_direction",
+                "severity": "direction",
+                "title": f'Pressure-test the "{thread_title}" thread',
+                "description": (
+                    "This looks like one of the main unresolved engines in the book"
+                    + (f", running since chapter {introduced_at}" if introduced_at else "")
+                    + ". Even without a visible contradiction, it is worth checking whether the eventual payoff is clear enough and whether the earlier setup is doing enough work."
+                    + (f" {description[:180]}" if description else "")
+                ),
+                "chapter_ref": introduced_at if isinstance(introduced_at, int) else None,
+                "action_label": "Stress-test this arc",
+                "ask_prompt": (
+                    f'Help me pressure-test the "{thread_title}" thread. '
+                    "What ending paths fit best, and what setup might still be missing?"
+                ),
+            }
+        )
     else:
-        suggestions.append({
-            "id": "fallback-foreshadowing-sweep",
-            "type": "unresolved_clue",
-            "severity": "opportunity",
-            "title": "Run a foreshadowing sweep",
-            "description": (
-                "No urgent structural problems were flagged from extracted data, which usually means the highest-value next step is looking for underlined moments that could carry more future payoff."
-            ),
-            "chapter_ref": total_chapters if total_chapters > 0 else None,
-            "action_label": "Look for payoff gaps",
-            "ask_prompt": (
-                "What foreshadowing or payoff opportunities am I most likely missing right now?"
-            ),
-        })
+        suggestions.append(
+            {
+                "id": "fallback-foreshadowing-sweep",
+                "type": "unresolved_clue",
+                "severity": "opportunity",
+                "title": "Run a foreshadowing sweep",
+                "description": (
+                    "No urgent structural problems were flagged from extracted data, which usually means the highest-value next step is looking for underlined moments that could carry more future payoff."
+                ),
+                "chapter_ref": total_chapters if total_chapters > 0 else None,
+                "action_label": "Look for payoff gaps",
+                "ask_prompt": (
+                    "What foreshadowing or payoff opportunities am I most likely missing right now?"
+                ),
+            }
+        )
 
     return suggestions
 
@@ -1961,12 +2087,16 @@ async def build_advisor_suggestions_payload(
     data_gaps: list[str] = []
 
     all_chars = (
-        await db.execute(
-            select(Character)
-            .where(Character.book_id == book_id)
-            .order_by(Character.mention_count.desc(), Character.first_chapter, Character.name)
+        (
+            await db.execute(
+                select(Character)
+                .where(Character.book_id == book_id)
+                .order_by(Character.mention_count.desc(), Character.first_chapter, Character.name)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     character_count = len(all_chars)
     character_names = {char.id: char.name for char in all_chars}
     if character_count:
@@ -1975,24 +2105,32 @@ async def build_advisor_suggestions_payload(
         data_gaps.append("characters")
 
     all_threads = (
-        await db.execute(
-            select(PlotThread)
-            .where(PlotThread.book_id == book_id)
-            .order_by(PlotThread.importance.desc(), PlotThread.introduced_at, PlotThread.title)
+        (
+            await db.execute(
+                select(PlotThread)
+                .where(PlotThread.book_id == book_id)
+                .order_by(PlotThread.importance.desc(), PlotThread.introduced_at, PlotThread.title)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if all_threads:
         scan_basis.append("plot threads")
     else:
         data_gaps.append("plot threads")
 
     relationship_rows = (
-        await db.execute(
-            select(CharacterRelationship)
-            .where(CharacterRelationship.book_id == book_id)
-            .order_by(CharacterRelationship.from_chapter, CharacterRelationship.id)
+        (
+            await db.execute(
+                select(CharacterRelationship)
+                .where(CharacterRelationship.book_id == book_id)
+                .order_by(CharacterRelationship.from_chapter, CharacterRelationship.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     relationship_count = len(relationship_rows)
     if relationship_count:
         scan_basis.append("relationships")
@@ -2000,12 +2138,16 @@ async def build_advisor_suggestions_payload(
         data_gaps.append("relationships")
 
     world_rows = (
-        await db.execute(
-            select(WorldElement)
-            .where(WorldElement.book_id == book_id)
-            .order_by(WorldElement.usage_count.desc(), WorldElement.name.asc())
+        (
+            await db.execute(
+                select(WorldElement)
+                .where(WorldElement.book_id == book_id)
+                .order_by(WorldElement.usage_count.desc(), WorldElement.name.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     world_element_count = len(world_rows)
     if world_element_count:
         scan_basis.append("world elements")
@@ -2068,24 +2210,26 @@ async def build_advisor_suggestions_payload(
                 elif isinstance(raw_b, str):
                     val_b = raw_b
                 if val_a and val_b and val_a.lower() != val_b.lower():
-                    suggestions.append({
-                        "id": f"trait-{char_id}-{trait}",
-                        "type": "trait_contradiction",
-                        "severity": "warning",
-                        "title": f"Conflicting {trait} description: {char_name}",
-                        "description": (
-                            f"{char_name}'s {trait} is described as \"{val_a}\" in chapter "
-                            f"{earliest.at_chapter} but \"{val_b}\" in chapter {later.at_chapter}. "
-                            f"No character state change was recorded between these chapters."
-                        ),
-                        "chapter_ref": earliest.at_chapter,
-                        "action_label": "Investigate this contradiction",
-                        "ask_prompt": (
-                            f"There's a potential continuity issue with {char_name}'s {trait}: "
-                            f"\"{val_a}\" in chapter {earliest.at_chapter} vs \"{val_b}\" in chapter "
-                            f"{later.at_chapter}. Is this a plothole or an intentional change?"
-                        ),
-                    })
+                    suggestions.append(
+                        {
+                            "id": f"trait-{char_id}-{trait}",
+                            "type": "trait_contradiction",
+                            "severity": "warning",
+                            "title": f"Conflicting {trait} description: {char_name}",
+                            "description": (
+                                f'{char_name}\'s {trait} is described as "{val_a}" in chapter '
+                                f'{earliest.at_chapter} but "{val_b}" in chapter {later.at_chapter}. '
+                                f"No character state change was recorded between these chapters."
+                            ),
+                            "chapter_ref": earliest.at_chapter,
+                            "action_label": "Investigate this contradiction",
+                            "ask_prompt": (
+                                f"There's a potential continuity issue with {char_name}'s {trait}: "
+                                f'"{val_a}" in chapter {earliest.at_chapter} vs "{val_b}" in chapter '
+                                f"{later.at_chapter}. Is this a plothole or an intentional change?"
+                            ),
+                        }
+                    )
                     contradiction_count += 1
                     break
 
@@ -2113,20 +2257,22 @@ async def build_advisor_suggestions_payload(
     ][:5]
 
     for thread in dropped_threads:
-        suggestions.append({
-            "id": f"thread-{thread.id}",
-            "type": "dropped_thread",
-            "severity": "warning",
-            "title": f"Unresolved thread: \"{thread.title}\"",
-            "description": (
-                f"Introduced at chapter {thread.introduced_at}, "
-                f"still marked '{derive_plot_thread_status(thread.status, introduced_at=thread.introduced_at, last_mentioned_at=thread.last_mentioned_at or thread.introduced_at, resolved_at=thread.resolved_at, current_chapter=total_ch)}' with {total_ch - (thread.introduced_at or 0)} chapters elapsed. "
-                f"{thread.description or 'No additional detail recorded.'}"
-            ),
-            "chapter_ref": thread.introduced_at,
-            "action_label": "Ask advisor about this thread",
-            "ask_prompt": f"Is there a plothole or missed opportunity with the \"{thread.title}\" plot thread?",
-        })
+        suggestions.append(
+            {
+                "id": f"thread-{thread.id}",
+                "type": "dropped_thread",
+                "severity": "warning",
+                "title": f'Unresolved thread: "{thread.title}"',
+                "description": (
+                    f"Introduced at chapter {thread.introduced_at}, "
+                    f"still marked '{derive_plot_thread_status(thread.status, introduced_at=thread.introduced_at, last_mentioned_at=thread.last_mentioned_at or thread.introduced_at, resolved_at=thread.resolved_at, current_chapter=total_ch)}' with {total_ch - (thread.introduced_at or 0)} chapters elapsed. "
+                    f"{thread.description or 'No additional detail recorded.'}"
+                ),
+                "chapter_ref": thread.introduced_at,
+                "action_label": "Ask advisor about this thread",
+                "ask_prompt": f'Is there a plothole or missed opportunity with the "{thread.title}" plot thread?',
+            }
+        )
 
     absent_chars: list[Character] = []
     try:
@@ -2145,20 +2291,22 @@ async def build_advisor_suggestions_payload(
         pass
 
     for char in absent_chars:
-        suggestions.append({
-            "id": f"absent-{char.id}",
-            "type": "character_absent",
-            "severity": "info",
-            "title": f"{char.name} hasn't appeared in {total_ch - (char.last_seen_chapter or 0)} chapters",
-            "description": (
-                f"Last seen around chapter {char.last_seen_chapter}. "
-                f"Mentioned {char.mention_count} times overall. "
-                f"{char.role or ''} — {char.arc_summary[:120] + '...' if char.arc_summary and len(char.arc_summary) > 120 else (char.arc_summary or 'No arc summary yet.')}"
-            ),
-            "chapter_ref": char.last_seen_chapter,
-            "action_label": "Explore this character's arc",
-            "ask_prompt": f"What are good opportunities to bring {char.name} back into the story?",
-        })
+        suggestions.append(
+            {
+                "id": f"absent-{char.id}",
+                "type": "character_absent",
+                "severity": "info",
+                "title": f"{char.name} hasn't appeared in {total_ch - (char.last_seen_chapter or 0)} chapters",
+                "description": (
+                    f"Last seen around chapter {char.last_seen_chapter}. "
+                    f"Mentioned {char.mention_count} times overall. "
+                    f"{char.role or ''} — {char.arc_summary[:120] + '...' if char.arc_summary and len(char.arc_summary) > 120 else (char.arc_summary or 'No arc summary yet.')}"
+                ),
+                "chapter_ref": char.last_seen_chapter,
+                "action_label": "Explore this character's arc",
+                "ask_prompt": f"What are good opportunities to bring {char.name} back into the story?",
+            }
+        )
 
     hot_threads_result = await db.execute(
         select(PlotThread)
@@ -2178,26 +2326,29 @@ async def build_advisor_suggestions_payload(
             last_mentioned_at=thread.last_mentioned_at or thread.introduced_at,
             resolved_at=thread.resolved_at,
             current_chapter=total_ch,
-        ) in {"developing", "paused", "possibly_abandoned", "forgotten", "introduced"}
+        )
+        in {"developing", "paused", "possibly_abandoned", "forgotten", "introduced"}
     ][:3]
 
     for thread in hot_threads:
         if thread.introduced_at and total_ch - thread.introduced_at > 15:
-            suggestions.append({
-                "id": f"arc-{thread.id}",
-                "type": "arc_opportunity",
-                "severity": "opportunity",
-                "title": f"Arc decision point: \"{thread.title}\"",
-                "description": (
-                    f"High-importance thread (importance {thread.importance}/10), "
-                    f"active since chapter {thread.introduced_at}. "
-                    f"Decision points examined now can be planted as foreshadowing retroactively. "
-                    f"{thread.description or ''}"
-                ),
-                "chapter_ref": thread.introduced_at,
-                "action_label": "Debate how to end this arc",
-                "ask_prompt": f"What are the best ways to resolve the \"{thread.title}\" arc? What are the story tradeoffs?",
-            })
+            suggestions.append(
+                {
+                    "id": f"arc-{thread.id}",
+                    "type": "arc_opportunity",
+                    "severity": "opportunity",
+                    "title": f'Arc decision point: "{thread.title}"',
+                    "description": (
+                        f"High-importance thread (importance {thread.importance}/10), "
+                        f"active since chapter {thread.introduced_at}. "
+                        f"Decision points examined now can be planted as foreshadowing retroactively. "
+                        f"{thread.description or ''}"
+                    ),
+                    "chapter_ref": thread.introduced_at,
+                    "action_label": "Debate how to end this arc",
+                    "ask_prompt": f'What are the best ways to resolve the "{thread.title}" arc? What are the story tradeoffs?',
+                }
+            )
 
     if total_ch >= 20:
         late_threads_result = await db.execute(
@@ -2228,25 +2379,27 @@ async def build_advisor_suggestions_payload(
             already_covered = any(s["id"] == f"arc-{thread.id}" for s in suggestions)
             if already_covered:
                 continue
-            suggestions.append({
-                "id": f"direction-{thread.id}",
-                "type": "future_direction",
-                "severity": "direction",
-                "title": f"Future direction: how does \"{thread.title}\" end?",
-                "description": (
-                    f"This thread has been running since chapter {thread.introduced_at} "
-                    f"— {total_ch - (thread.introduced_at or 0)} chapters in. "
-                    f"At this stage, it's worth stress-testing your ending options and "
-                    f"checking whether earlier chapters planted enough foreshadowing. "
-                    f"{thread.description[:120] + '...' if thread.description and len(thread.description) > 120 else (thread.description or '')}"
-                ),
-                "chapter_ref": thread.introduced_at,
-                "action_label": "Explore ending options",
-                "ask_prompt": (
-                    f"I'm thinking about how to end the \"{thread.title}\" thread. "
-                    f"What options do I have and what are the narrative tradeoffs of each?"
-                ),
-            })
+            suggestions.append(
+                {
+                    "id": f"direction-{thread.id}",
+                    "type": "future_direction",
+                    "severity": "direction",
+                    "title": f'Future direction: how does "{thread.title}" end?',
+                    "description": (
+                        f"This thread has been running since chapter {thread.introduced_at} "
+                        f"— {total_ch - (thread.introduced_at or 0)} chapters in. "
+                        f"At this stage, it's worth stress-testing your ending options and "
+                        f"checking whether earlier chapters planted enough foreshadowing. "
+                        f"{thread.description[:120] + '...' if thread.description and len(thread.description) > 120 else (thread.description or '')}"
+                    ),
+                    "chapter_ref": thread.introduced_at,
+                    "action_label": "Explore ending options",
+                    "ask_prompt": (
+                        f'I\'m thinking about how to end the "{thread.title}" thread. '
+                        f"What options do I have and what are the narrative tradeoffs of each?"
+                    ),
+                }
+            )
 
     underused_chars: list[Character] = []
     try:
@@ -2265,22 +2418,25 @@ async def build_advisor_suggestions_payload(
         pass
 
     for char in underused_chars:
-        suggestions.append({
-            "id": f"underused-{char.id}",
-            "type": "foreshadowing_opportunity",
-            "severity": "opportunity",
-            "title": f"Foreshadowing opportunity: {char.name}",
-            "description": (
-                f"{char.name} appears {char.mention_count} times but is still tagged as a minor character. "
-                f"High mention count with a minor role often signals unused narrative potential — "
-                f"this character could serve as a plot connector or a foreshadowing anchor."
-            ),
-            "chapter_ref": char.first_chapter,
-            "action_label": "Explore narrative potential",
-            "ask_prompt": f"How could {char.name} be used more effectively in the story? Are there foreshadowing opportunities?",
-        })
+        suggestions.append(
+            {
+                "id": f"underused-{char.id}",
+                "type": "foreshadowing_opportunity",
+                "severity": "opportunity",
+                "title": f"Foreshadowing opportunity: {char.name}",
+                "description": (
+                    f"{char.name} appears {char.mention_count} times but is still tagged as a minor character. "
+                    f"High mention count with a minor role often signals unused narrative potential — "
+                    f"this character could serve as a plot connector or a foreshadowing anchor."
+                ),
+                "chapter_ref": char.first_chapter,
+                "action_label": "Explore narrative potential",
+                "ask_prompt": f"How could {char.name} be used more effectively in the story? Are there foreshadowing opportunities?",
+            }
+        )
 
     from app.models.book import Chapter as Ch
+
     recent_summaries = (
         await db.execute(
             select(ChapterSummary.clues, Ch.number, Ch.title)
@@ -2304,25 +2460,33 @@ async def build_advisor_suggestions_payload(
     for clues, chapter_num, chapter_title in recent_summaries:
         if not clues:
             continue
-        clue_list = clues if isinstance(clues, list) else list(clues.values()) if isinstance(clues, dict) else []
+        clue_list = (
+            clues
+            if isinstance(clues, list)
+            else list(clues.values())
+            if isinstance(clues, dict)
+            else []
+        )
         clue_count += len(clue_list)
         for clue in clue_list[:2]:
             clue_str = str(clue)[:120]
             if clue_str not in seen_clues:
                 seen_clues.add(clue_str)
-                suggestions.append({
-                    "id": f"clue-{book_id}-{chapter_num}-{len(seen_clues)}",
-                    "type": "unresolved_clue",
-                    "severity": "opportunity",
-                    "title": f"Planted clue from chapter {chapter_num}",
-                    "description": (
-                        f"Chapter {chapter_num} ({chapter_title or 'Untitled'}) contains: \"{clue_str}\". "
-                        f"If this hasn't paid off yet, it's either a plothole or a foreshadowing opportunity."
-                    ),
-                    "chapter_ref": chapter_num,
-                    "action_label": "Check if this clue resolved",
-                    "ask_prompt": f"Has the clue from chapter {chapter_num} been resolved? '{clue_str}'",
-                })
+                suggestions.append(
+                    {
+                        "id": f"clue-{book_id}-{chapter_num}-{len(seen_clues)}",
+                        "type": "unresolved_clue",
+                        "severity": "opportunity",
+                        "title": f"Planted clue from chapter {chapter_num}",
+                        "description": (
+                            f'Chapter {chapter_num} ({chapter_title or "Untitled"}) contains: "{clue_str}". '
+                            f"If this hasn't paid off yet, it's either a plothole or a foreshadowing opportunity."
+                        ),
+                        "chapter_ref": chapter_num,
+                        "action_label": "Check if this clue resolved",
+                        "ask_prompt": f"Has the clue from chapter {chapter_num} been resolved? '{clue_str}'",
+                    }
+                )
             if len(seen_clues) >= 3:
                 break
         if len(seen_clues) >= 3:
@@ -2338,26 +2502,38 @@ async def build_advisor_suggestions_payload(
         )
         for thread in all_threads
     }
-    open_threads = [thread for thread in all_threads if is_plot_thread_open(thread_statuses[thread.id])]
+    open_threads = [
+        thread for thread in all_threads if is_plot_thread_open(thread_statuses[thread.id])
+    ]
     open_thread_count = len(open_threads)
 
-    for thread in [item for item in all_threads if item.status == "contradicted" or thread_statuses[item.id] == "contradicted"][:2]:
-        suggestions.append({
-            "id": f"contradicted-{thread.id}",
-            "type": "event_conflict",
-            "severity": "warning",
-            "title": f"Thread contradiction: \"{thread.title}\"",
-            "description": (
-                "This tracked thread is already marked as contradicted"
-                + (f" after chapter {thread.last_mentioned_at}" if thread.last_mentioned_at else "")
-                + ". Review the affected scenes before building more logic on top of it."
-                + (f" {thread.description}" if thread.description else "")
-            ),
-            "chapter_ref": thread.last_mentioned_at or thread.introduced_at,
-            "action_label": "Trace the contradiction",
-            "ask_prompt": f"Walk me through where the \"{thread.title}\" thread started contradicting itself and how to fix it.",
-            "source": "heuristic",
-        })
+    for thread in [
+        item
+        for item in all_threads
+        if item.status == "contradicted" or thread_statuses[item.id] == "contradicted"
+    ][:2]:
+        suggestions.append(
+            {
+                "id": f"contradicted-{thread.id}",
+                "type": "event_conflict",
+                "severity": "warning",
+                "title": f'Thread contradiction: "{thread.title}"',
+                "description": (
+                    "This tracked thread is already marked as contradicted"
+                    + (
+                        f" after chapter {thread.last_mentioned_at}"
+                        if thread.last_mentioned_at
+                        else ""
+                    )
+                    + ". Review the affected scenes before building more logic on top of it."
+                    + (f" {thread.description}" if thread.description else "")
+                ),
+                "chapter_ref": thread.last_mentioned_at or thread.introduced_at,
+                "action_label": "Trace the contradiction",
+                "ask_prompt": f'Walk me through where the "{thread.title}" thread started contradicting itself and how to fix it.',
+                "source": "heuristic",
+            }
+        )
 
     relationship_groups: dict[tuple[str, str], list[CharacterRelationship]] = {}
     for rel in relationship_rows:
@@ -2368,9 +2544,17 @@ async def build_advisor_suggestions_payload(
             continue
         first = rel_items[0]
         last = rel_items[-1]
-        rel_names = " / ".join(
-            name for name in [character_names.get(first.character_a_id), character_names.get(first.character_b_id)] if name
-        ) or "Character relationship"
+        rel_names = (
+            " / ".join(
+                name
+                for name in [
+                    character_names.get(first.character_a_id),
+                    character_names.get(first.character_b_id),
+                ]
+                if name
+            )
+            or "Character relationship"
+        )
         type_changed = first.rel_type != last.rel_type
         sentiment_changed = (
             first.sentiment is not None
@@ -2379,33 +2563,45 @@ async def build_advisor_suggestions_payload(
         )
         if not type_changed and not sentiment_changed:
             continue
-        suggestions.append({
-            "id": f"relationship-{pair_key[0]}-{pair_key[1]}",
-            "type": "relationship_flip",
-            "severity": "warning" if type_changed else "info",
-            "title": f"Relationship drift: {rel_names}",
-            "description": (
-                f"This relationship shifts from {first.rel_type.replace('_', ' ')} in chapter {first.from_chapter} "
-                f"to {last.rel_type.replace('_', ' ')} in chapter {last.from_chapter}."
-                if type_changed
-                else f"The emotional tone around {rel_names} swings sharply between chapter {first.from_chapter} and chapter {last.from_chapter}."
-            ) + (f" {last.description}" if last.description else ""),
-            "chapter_ref": last.from_chapter,
-            "action_label": "Check the relationship arc",
-            "ask_prompt": f"Is the shift in the {rel_names} relationship earned on page, or am I skipping a transition?",
-            "source": "heuristic",
-        })
+        suggestions.append(
+            {
+                "id": f"relationship-{pair_key[0]}-{pair_key[1]}",
+                "type": "relationship_flip",
+                "severity": "warning" if type_changed else "info",
+                "title": f"Relationship drift: {rel_names}",
+                "description": (
+                    f"This relationship shifts from {first.rel_type.replace('_', ' ')} in chapter {first.from_chapter} "
+                    f"to {last.rel_type.replace('_', ' ')} in chapter {last.from_chapter}."
+                    if type_changed
+                    else f"The emotional tone around {rel_names} swings sharply between chapter {first.from_chapter} and chapter {last.from_chapter}."
+                )
+                + (f" {last.description}" if last.description else ""),
+                "chapter_ref": last.from_chapter,
+                "action_label": "Check the relationship arc",
+                "ask_prompt": f"Is the shift in the {rel_names} relationship earned on page, or am I skipping a transition?",
+                "source": "heuristic",
+            }
+        )
 
     world_groups: dict[tuple[str, str], list[WorldElement]] = {}
     for element in world_rows:
-        group_key = (" ".join(str(element.element_type or "").split()).strip().lower(), " ".join(str(element.name or "").split()).strip().lower())
+        group_key = (
+            " ".join(str(element.element_type or "").split()).strip().lower(),
+            " ".join(str(element.name or "").split()).strip().lower(),
+        )
         world_groups.setdefault(group_key, []).append(element)
     for (element_type, element_name), items in world_groups.items():
-        descriptions = [" ".join(str(item.description or "").split()).strip() for item in items if " ".join(str(item.description or "").split()).strip()]
+        descriptions = [
+            " ".join(str(item.description or "").split()).strip()
+            for item in items
+            if " ".join(str(item.description or "").split()).strip()
+        ]
         normalized = list(dict.fromkeys(description.lower() for description in descriptions))
         if len(items) < 2 or len(normalized) < 2:
             continue
-        if all(a in b or b in a for index, a in enumerate(normalized) for b in normalized[index + 1:]):
+        if all(
+            a in b or b in a for index, a in enumerate(normalized) for b in normalized[index + 1 :]
+        ):
             continue
         if element_type in {"place", "location"}:
             issue_type = "location_conflict"
@@ -2421,20 +2617,22 @@ async def build_advisor_suggestions_payload(
             prompt = f"Check the canon for {items[0].name}. Do my world rules now conflict?"
         else:
             continue
-        suggestions.append({
-            "id": f"world-{issue_type}-{element_name}",
-            "type": issue_type,
-            "severity": "warning",
-            "title": title,
-            "description": (
-                f"Multiple canon descriptions for {items[0].name} now diverge across extracted world elements. "
-                f"Example one: {descriptions[0][:120]} Example two: {descriptions[1][:120]}"
-            ),
-            "chapter_ref": None,
-            "action_label": "Reconcile the canon",
-            "ask_prompt": prompt,
-            "source": "heuristic",
-        })
+        suggestions.append(
+            {
+                "id": f"world-{issue_type}-{element_name}",
+                "type": issue_type,
+                "severity": "warning",
+                "title": title,
+                "description": (
+                    f"Multiple canon descriptions for {items[0].name} now diverge across extracted world elements. "
+                    f"Example one: {descriptions[0][:120]} Example two: {descriptions[1][:120]}"
+                ),
+                "chapter_ref": None,
+                "action_label": "Reconcile the canon",
+                "ask_prompt": prompt,
+                "source": "heuristic",
+            }
+        )
 
     heuristic_count = len(suggestions)
     proactive_audit_applied = False
@@ -2462,7 +2660,11 @@ async def build_advisor_suggestions_payload(
             if isinstance(key_events, list):
                 for item in key_events[:3]:
                     if isinstance(item, dict):
-                        key_bits.append(" ".join(str(item.get("event_title") or item.get("event") or "").split()).strip())
+                        key_bits.append(
+                            " ".join(
+                                str(item.get("event_title") or item.get("event") or "").split()
+                            ).strip()
+                        )
             key_line = "; ".join(item for item in key_bits if item)
             recent_summary_blocks.append(
                 f"Chapter {chapter_num} ({chapter_title or 'Untitled'}): "
@@ -2475,7 +2677,11 @@ async def build_advisor_suggestions_payload(
         open_thread_blocks = [
             f"- {thread.title} [{thread_statuses[thread.id]}]"
             + (f" introduced ch.{thread.introduced_at}" if thread.introduced_at else "")
-            + (f": {' '.join(str(thread.description or '').split())[:160]}" if thread.description else "")
+            + (
+                f": {' '.join(str(thread.description or '').split())[:160]}"
+                if thread.description
+                else ""
+            )
             for thread in open_threads[:5]
         ]
         relationship_blocks = [
@@ -2486,8 +2692,16 @@ async def build_advisor_suggestions_payload(
         ]
         world_watch_blocks = [
             f"- {element.name} [{element.element_type}] usage={element.usage_count}"
-            + (f" gap={round(float(element.gap_score), 2)}" if element.gap_score is not None else "")
-            + (f". {' '.join(str(element.description or '').split())[:160]}" if element.description else "")
+            + (
+                f" gap={round(float(element.gap_score), 2)}"
+                if element.gap_score is not None
+                else ""
+            )
+            + (
+                f". {' '.join(str(element.description or '').split())[:160]}"
+                if element.description
+                else ""
+            )
             for element in world_rows[:6]
         ]
         story_context = await build_story_context(db, book_id, total_ch)
@@ -2522,16 +2736,24 @@ async def build_advisor_suggestions_payload(
                             {
                                 "role": "user",
                                 "content": PROACTIVE_SCAN_USER.format(
-                                    recent_summaries="\n".join(recent_summary_blocks) or "No recent summaries available.",
-                                    open_threads="\n".join(open_thread_blocks) or "No open threads available.",
-                                    relationships="\n".join(relationship_blocks) or "No relationship transitions available.",
-                                    world_watch="\n".join(world_watch_blocks) or "No world elements available.",
+                                    recent_summaries="\n".join(recent_summary_blocks)
+                                    or "No recent summaries available.",
+                                    open_threads="\n".join(open_thread_blocks)
+                                    or "No open threads available.",
+                                    relationships="\n".join(relationship_blocks)
+                                    or "No relationship transitions available.",
+                                    world_watch="\n".join(world_watch_blocks)
+                                    or "No world elements available.",
                                 ),
                             },
                         ],
                     )
-                    proactive_result = normalize_proactive_scan_result(response.choices[0].message.content or "{}")
-                    await set_proactive_scan_cache(str(book.id), proactive_cache_key, proactive_result)
+                    proactive_result = normalize_proactive_scan_result(
+                        response.choices[0].message.content or "{}"
+                    )
+                    await set_proactive_scan_cache(
+                        str(book.id), proactive_cache_key, proactive_result
+                    )
                 except Exception:
                     proactive_result = {
                         "findings": [],
@@ -2547,11 +2769,13 @@ async def build_advisor_suggestions_payload(
 
         proactive_findings = (proactive_result or {}).get("findings") or []
         for index, finding in enumerate(proactive_findings):
-            suggestions.append({
-                "id": f"proactive-{index}-{finding['type']}",
-                **finding,
-                "source": "proactive_audit",
-            })
+            suggestions.append(
+                {
+                    "id": f"proactive-{index}-{finding['type']}",
+                    **finding,
+                    "source": "proactive_audit",
+                }
+            )
         proactive_audit_applied = bool(proactive_findings)
         audit_summary = (proactive_result or {}).get("overall_note") or None
 
@@ -2622,6 +2846,7 @@ async def build_advisor_suggestions_payload(
 
 # ─── Continuity report builders ───────────────────────────────────────────────
 
+
 def build_continuity_report_markdown(
     *,
     title: str,
@@ -2653,14 +2878,16 @@ def build_continuity_report_markdown(
     issues = review.get("continuity_issues") or []
     if issues:
         for issue in issues:
-            lines.extend([
-                f"### {issue.get('title', 'Untitled issue')}",
-                f"- Severity: {issue.get('severity', 'unknown')}",
-                f"- Type: {issue.get('type', 'unknown')}",
-                f"- Finding: {issue.get('description', 'No description provided.')}",
-                f"- Recommended action: {issue.get('suggestion', 'No recommendation provided.')}",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"### {issue.get('title', 'Untitled issue')}",
+                    f"- Severity: {issue.get('severity', 'unknown')}",
+                    f"- Type: {issue.get('type', 'unknown')}",
+                    f"- Finding: {issue.get('description', 'No description provided.')}",
+                    f"- Recommended action: {issue.get('suggestion', 'No recommendation provided.')}",
+                    "",
+                ]
+            )
     else:
         lines.extend(["No continuity conflicts were identified.", ""])
 
@@ -2668,14 +2895,16 @@ def build_continuity_report_markdown(
     lines.extend(["## Insertion Opportunities", ""])
     if insertions:
         for item in insertions:
-            lines.extend([
-                f"### {item.get('title', 'Untitled opportunity')}",
-                f"- Target chapter: {item.get('target_chapter', '-')}",
-                f"- Problem addressed: {item.get('problem', 'No problem stated.')}",
-                f"- Add: {item.get('what_to_add', 'No suggestion provided.')}",
-                f"- Why here: {item.get('why_here', 'No reasoning provided.')}",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"### {item.get('title', 'Untitled opportunity')}",
+                    f"- Target chapter: {item.get('target_chapter', '-')}",
+                    f"- Problem addressed: {item.get('problem', 'No problem stated.')}",
+                    f"- Add: {item.get('what_to_add', 'No suggestion provided.')}",
+                    f"- Why here: {item.get('why_here', 'No reasoning provided.')}",
+                    "",
+                ]
+            )
     else:
         lines.extend(["No insertion opportunities were identified.", ""])
 
@@ -2683,7 +2912,9 @@ def build_continuity_report_markdown(
     grammar = review.get("grammar_issues") or []
     if grammar:
         for issue in grammar:
-            lines.append(f"- {issue.get('issue', 'Grammar issue')}: \"{issue.get('original', '')}\" -> \"{issue.get('fix', '')}\"")
+            lines.append(
+                f'- {issue.get("issue", "Grammar issue")}: "{issue.get("original", "")}" -> "{issue.get("fix", "")}"'
+            )
     else:
         lines.append("- No grammar issues recorded.")
     lines.append("")
@@ -2695,7 +2926,9 @@ def build_continuity_report_markdown(
     lines.extend(["## Forgotten Threads And Follow-Up Watchlist", ""])
     if open_threads:
         for item in open_threads:
-            lines.append(f"- {item.get('title', 'Untitled')}: {item.get('description', 'No detail recorded.')}")
+            lines.append(
+                f"- {item.get('title', 'Untitled')}: {item.get('description', 'No detail recorded.')}"
+            )
     else:
         lines.append("- No forgotten-thread warnings were active for this manuscript state.")
     lines.append("")
@@ -2723,9 +2956,14 @@ def build_continuity_report_pdf(markdown: str, *, title: str, chapter_num: int |
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter,
-                            leftMargin=0.8 * inch, rightMargin=0.8 * inch,
-                            topMargin=0.75 * inch, bottomMargin=0.75 * inch)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=0.8 * inch,
+        rightMargin=0.8 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+    )
     styles = getSampleStyleSheet()
     heading = styles["Heading1"]
     subheading = styles["Heading2"]
@@ -2736,7 +2974,10 @@ def build_continuity_report_pdf(markdown: str, *, title: str, chapter_num: int |
         Paragraph("LoreVia Continuity Review Report", heading),
         Spacer(1, 0.16 * inch),
         Paragraph(f"Manuscript: {title}", body),
-        Paragraph(f"Chapter under review: {chapter_num if chapter_num is not None else 'Not specified'}", body),
+        Paragraph(
+            f"Chapter under review: {chapter_num if chapter_num is not None else 'Not specified'}",
+            body,
+        ),
         Spacer(1, 0.18 * inch),
     ]
 
@@ -2837,6 +3078,7 @@ Rules:
 
 # ─── Series story context builder ────────────────────────────────────────────
 
+
 async def build_series_story_context(
     db: AsyncSession,
     book_ids: list[uuid.UUID],
@@ -2850,8 +3092,7 @@ async def build_series_story_context(
     between volumes.  Capped to keep prompt size cost-efficient.
     """
     series_key_parts = [
-        f"{book_id}:{book_titles.get(book_id, str(book_id))}"
-        for book_id in book_ids
+        f"{book_id}:{book_titles.get(book_id, str(book_id))}" for book_id in book_ids
     ]
     series_key = hashlib.sha256("||".join(series_key_parts).encode("utf-8")).hexdigest()
     version = 0
@@ -2875,9 +3116,13 @@ async def build_series_story_context(
         chars = (
             await db.execute(
                 select(
-                    Character.name, Character.role, Character.arc_summary,
-                    Character.first_chapter, Character.archetype,
-                    Character.personality_tags, Character.motivations,
+                    Character.name,
+                    Character.role,
+                    Character.arc_summary,
+                    Character.first_chapter,
+                    Character.archetype,
+                    Character.personality_tags,
+                    Character.motivations,
                     Character.trait_state,
                 )
                 .where(Character.book_id == book_id)
@@ -2890,7 +3135,11 @@ async def build_series_story_context(
             lines.append("Characters:")
             for c in chars:
                 role_str = f"[{c.role}]" if c.role else ""
-                arc = (c.arc_summary[:100] + "...") if c.arc_summary and len(c.arc_summary) > 100 else (c.arc_summary or "")
+                arc = (
+                    (c.arc_summary[:100] + "...")
+                    if c.arc_summary and len(c.arc_summary) > 100
+                    else (c.arc_summary or "")
+                )
                 tags = ", ".join((c.personality_tags or [])[:3])
                 motives = "; ".join((c.motivations or [])[:2])
                 lines.append(
@@ -2902,7 +3151,12 @@ async def build_series_story_context(
 
         threads = (
             await db.execute(
-                select(PlotThread.title, PlotThread.status, PlotThread.introduced_at, PlotThread.description)
+                select(
+                    PlotThread.title,
+                    PlotThread.status,
+                    PlotThread.introduced_at,
+                    PlotThread.description,
+                )
                 .where(PlotThread.book_id == book_id)
                 .order_by(PlotThread.importance.desc())
                 .limit(max_threads_per_book)
@@ -2912,7 +3166,11 @@ async def build_series_story_context(
         if threads:
             lines.append("Plot threads:")
             for t in threads:
-                desc = (t.description[:80] + "...") if t.description and len(t.description) > 80 else (t.description or "")
+                desc = (
+                    (t.description[:80] + "...")
+                    if t.description and len(t.description) > 80
+                    else (t.description or "")
+                )
                 lines.append(f"  • [{t.status}] {t.title} (ch.{t.introduced_at}). {desc}")
 
     payload = "\n".join(lines)
@@ -2942,14 +3200,16 @@ def normalize_series_continuity_result(raw: str) -> dict:
         description = " ".join(str(issue.get("description") or "").split()).strip()
         if not title or not description:
             continue
-        issues.append({
-            "type": str(issue.get("type") or "cross_book_conflict"),
-            "severity": str(issue.get("severity") or "moderate"),
-            "title": title,
-            "source_book": " ".join(str(issue.get("source_book") or "").split()).strip(),
-            "description": description,
-            "suggestion": " ".join(str(issue.get("suggestion") or "").split()).strip(),
-        })
+        issues.append(
+            {
+                "type": str(issue.get("type") or "cross_book_conflict"),
+                "severity": str(issue.get("severity") or "moderate"),
+                "title": title,
+                "source_book": " ".join(str(issue.get("source_book") or "").split()).strip(),
+                "description": description,
+                "suggestion": " ".join(str(issue.get("suggestion") or "").split()).strip(),
+            }
+        )
 
     opportunities = []
     for opp in parsed.get("cross_book_opportunities") or []:
@@ -2958,22 +3218,30 @@ def normalize_series_continuity_result(raw: str) -> dict:
         title = " ".join(str(opp.get("title") or "").split()).strip()
         if not title:
             continue
-        opportunities.append({
-            "title": title,
-            "description": " ".join(str(opp.get("description") or "").split()).strip(),
-            "earlier_book": " ".join(str(opp.get("earlier_book") or "").split()).strip(),
-            "what_to_add": " ".join(str(opp.get("what_to_add") or "").split()).strip(),
-        })
+        opportunities.append(
+            {
+                "title": title,
+                "description": " ".join(str(opp.get("description") or "").split()).strip(),
+                "earlier_book": " ".join(str(opp.get("earlier_book") or "").split()).strip(),
+                "what_to_add": " ".join(str(opp.get("what_to_add") or "").split()).strip(),
+            }
+        )
 
-    thematic_fit = parsed.get("thematic_fit") if isinstance(parsed.get("thematic_fit"), dict) else {}
-    overall_verdict = " ".join(str(parsed.get("overall_verdict") or "").split()).strip() or fallback["overall_verdict"]
+    thematic_fit = (
+        parsed.get("thematic_fit") if isinstance(parsed.get("thematic_fit"), dict) else {}
+    )
+    overall_verdict = (
+        " ".join(str(parsed.get("overall_verdict") or "").split()).strip()
+        or fallback["overall_verdict"]
+    )
 
     return {
         "continuity_issues": issues,
         "cross_book_opportunities": opportunities,
         "thematic_fit": {
             "score": str(thematic_fit.get("score") or "moderate"),
-            "notes": " ".join(str(thematic_fit.get("notes") or "").split()).strip() or fallback["thematic_fit"]["notes"],
+            "notes": " ".join(str(thematic_fit.get("notes") or "").split()).strip()
+            or fallback["thematic_fit"]["notes"],
         },
         "overall_verdict": overall_verdict,
     }

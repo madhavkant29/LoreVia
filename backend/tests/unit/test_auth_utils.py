@@ -4,7 +4,10 @@ from app.utils.auth_utils import hash_device_id, normalize_device_id, password_i
 
 
 def test_normalize_device_id_accepts_uuid_style_ids():
-    assert normalize_device_id("550e8400-e29b-41d4-a716-446655440000") == "550e8400-e29b-41d4-a716-446655440000"
+    assert (
+        normalize_device_id("550e8400-e29b-41d4-a716-446655440000")
+        == "550e8400-e29b-41d4-a716-446655440000"
+    )
 
 
 @pytest.mark.parametrize("device_id", ["short-id", "bad spaces here", "symbols!*invalid"])

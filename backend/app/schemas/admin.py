@@ -187,3 +187,21 @@ class RefundReviewOut(BaseModel):
     resolved_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class AdminTaskActionBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class SupportIncidentCreateBody(BaseModel):
+    user_id: uuid.UUID | None = None
+    book_id: uuid.UUID | None = None
+    task_execution_id: uuid.UUID | None = None
+    category: str = Field(min_length=1, max_length=120)
+    feature: str | None = Field(default=None, max_length=120)
+    severity: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    summary: str = Field(min_length=1, max_length=1000)
+
+
+class SupportIncidentResolveBody(BaseModel):
+    resolution: str = Field(min_length=1, max_length=4000)

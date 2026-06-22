@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 
-
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 
@@ -31,9 +30,7 @@ async def get_user_for_auth_subject(db: AsyncSession, subject: str) -> User | No
     if user is not None:
         return user
     return (
-        await db.execute(
-            select(User).where(User.supabase_auth_id == auth_subject_id)
-        )
+        await db.execute(select(User).where(User.supabase_auth_id == auth_subject_id))
     ).scalar_one_or_none()
 
 
@@ -47,7 +44,10 @@ def password_is_valid(password: str, email: str) -> bool:
         any(ch.isdigit() for ch in password),
         any(not ch.isalnum() for ch in password),
         email_local not in password.lower(),
-        not any(password[i] == password[i + 1] == password[i + 2] for i in range(max(0, len(password) - 2))),
+        not any(
+            password[i] == password[i + 1] == password[i + 2]
+            for i in range(max(0, len(password) - 2))
+        ),
     ]
     return all(checks)
 

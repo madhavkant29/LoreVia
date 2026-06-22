@@ -21,7 +21,9 @@ CORE_RUNTIME_COLUMNS: Mapping[str, frozenset[str]] = {
     **AUTH_RUNTIME_COLUMNS,
     Book.__tablename__: frozenset(Book.__table__.columns.keys()),
     BookForumPost.__tablename__: frozenset(BookForumPost.__table__.columns.keys()),
-    PublicBookAnalyticsEvent.__tablename__: frozenset(PublicBookAnalyticsEvent.__table__.columns.keys()),
+    PublicBookAnalyticsEvent.__tablename__: frozenset(
+        PublicBookAnalyticsEvent.__table__.columns.keys()
+    ),
     PublicBookRanking.__tablename__: frozenset(PublicBookRanking.__table__.columns.keys()),
     BetaReadAssignment.__tablename__: frozenset(BetaReadAssignment.__table__.columns.keys()),
     AdvisorJob.__tablename__: frozenset(AdvisorJob.__table__.columns.keys()),

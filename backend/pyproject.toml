@@ -6,6 +6,12 @@ line-length = 100
 select = ["E", "F", "I", "UP"]
 ignore = ["E501", "E402", "F401"]
 
+[tool.ruff.lint.per-file-ignores]
+"app/db/migrations/versions/*.py" = ["I001", "UP"]
+
+[tool.ruff.format]
+exclude = ["app/db/migrations/versions/*.py"]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true

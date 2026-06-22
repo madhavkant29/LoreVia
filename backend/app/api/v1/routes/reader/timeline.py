@@ -28,7 +28,7 @@ from app.models.progress import ReadingProgress
 from app.schemas.books import BookEventsOut, CharacterEventOut, MajorEventOut
 from app.schemas.reader import PlotThreadOut, UpdatePlotThreadBody
 from app.utils.billing_utils import require_author_access
-from app.utils.book_utils import (
+from app.utils.books.collaboration_access import (
     collaboration_allows_chapter,
     get_book_with_collaboration_access,
 )
@@ -45,13 +45,22 @@ from app.utils.reader_utils import (
     timeline_visible_chapter_set,
     update_plot_thread_note,
 )
-from app.utils.sparse_utils import apply_sparse_fields, apply_sparse_includes, include_requested, parse_csv_param
+from app.utils.sparse_utils import (
+    apply_sparse_fields,
+    apply_sparse_includes,
+    include_requested,
+    parse_csv_param,
+)
 
 router = APIRouter()
 
 
-def _normalize_reader_major_event(chapter_number: int, chapter_title: str | None, event: dict, names_by_id: dict[str, str]) -> dict:
-    involved_ids = [str(item).strip() for item in (event.get("involved_characters") or []) if str(item).strip()]
+def _normalize_reader_major_event(
+    chapter_number: int, chapter_title: str | None, event: dict, names_by_id: dict[str, str]
+) -> dict:
+    involved_ids = [
+        str(item).strip() for item in (event.get("involved_characters") or []) if str(item).strip()
+    ]
     return {
         "chapter_number": chapter_number,
         "chapter_title": chapter_title,
@@ -73,14 +82,18 @@ def _normalize_reader_character_event(character: Character, event: dict) -> dict
         "description": str(event.get("description") or event.get("impact") or "").strip(),
         "impact_score": int(event.get("impact_score") or event.get("importance") or 5),
         "role": event.get("role") or character.role,
-        "accomplishments": [str(item).strip() for item in (event.get("accomplishments") or []) if str(item).strip()],
+        "accomplishments": [
+            str(item).strip() for item in (event.get("accomplishments") or []) if str(item).strip()
+        ],
         "growth_direction": str(event.get("growth_direction") or "neutral"),
         "growth_magnitude": int(event.get("growth_magnitude") or event.get("impact_score") or 0),
         "is_major": bool(event.get("is_major", False)),
     }
 
 
-def _build_combined_events(major_events: list[MajorEventOut], character_events: list[CharacterEventOut]) -> list[dict[str, Any]]:
+def _build_combined_events(
+    major_events: list[MajorEventOut], character_events: list[CharacterEventOut]
+) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for e in major_events:
         events.append({"type": "major", **e.model_dump(mode="json")})
@@ -99,7 +112,9 @@ def _build_combined_events(major_events: list[MajorEventOut], character_events: 
     return events
 
 
-def _paginated_events_response(events: list[dict[str, Any]], limit: int, offset: int) -> dict[str, Any]:
+def _paginated_events_response(
+    events: list[dict[str, Any]], limit: int, offset: int
+) -> dict[str, Any]:
     total = len(events)
     paged = events[offset : offset + limit]
     return {
@@ -130,11 +145,15 @@ async def get_reader_events(
     require_author_access(current_user)
 
     progress_result = await db.execute(
-        select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id
+        )
     )
     progress = progress_result.scalar()
     read_set = set(progress.chapters_read or []) if progress else set()
-    max_visible_chapter = chapter or (max(read_set) if read_set else (progress.current_chapter if progress else 1))
+    max_visible_chapter = chapter or (
+        max(read_set) if read_set else (progress.current_chapter if progress else 1)
+    )
     book_version = await get_book_cache_version(str(book_id))
     progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
     cached = await get_reader_events_cache(
@@ -146,14 +165,20 @@ async def get_reader_events(
     )
     if cached is not None:
         cached_payload = BookEventsOut(**cached)
-        all_events = _build_combined_events(cached_payload.major_events, cached_payload.character_events)
+        all_events = _build_combined_events(
+            cached_payload.major_events, cached_payload.character_events
+        )
         return _paginated_events_response(all_events, limit, offset)
 
     chapter_rows = (
         await db.execute(
             select(Chapter.number, Chapter.title, ChapterSummary.key_events)
             .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
-            .where(Chapter.book_id == book_id, ChapterSummary.mode == "detailed", Chapter.number <= max_visible_chapter)
+            .where(
+                Chapter.book_id == book_id,
+                ChapterSummary.mode == "detailed",
+                Chapter.number <= max_visible_chapter,
+            )
             .order_by(Chapter.number)
         )
     ).all()
@@ -165,13 +190,24 @@ async def get_reader_events(
     for chapter_number, chapter_title, key_events in chapter_rows:
         for event in key_events or []:
             if isinstance(event, dict):
-                major_events.append(MajorEventOut(**_normalize_reader_major_event(chapter_number, chapter_title, event, names_by_id)))
+                major_events.append(
+                    MajorEventOut(
+                        **_normalize_reader_major_event(
+                            chapter_number, chapter_title, event, names_by_id
+                        )
+                    )
+                )
 
     character_events: list[CharacterEventOut] = []
     for character in characters:
         for event in character.growth_events or []:
-            if isinstance(event, dict) and int(event.get("chapter_number") or 0) <= max_visible_chapter:
-                character_events.append(CharacterEventOut(**_normalize_reader_character_event(character, event)))
+            if (
+                isinstance(event, dict)
+                and int(event.get("chapter_number") or 0) <= max_visible_chapter
+            ):
+                character_events.append(
+                    CharacterEventOut(**_normalize_reader_character_event(character, event))
+                )
 
     payload = BookEventsOut(major_events=major_events, character_events=character_events)
     await set_reader_events_cache(
@@ -198,23 +234,37 @@ async def get_foreshadowing_highlights(
 
     read_set = await summary_visible_chapter_set(db, book, current_user, collaborator)
     if collaborator is not None:
-        read_set = {chapter for chapter in read_set if collaboration_allows_chapter(collaborator, chapter)}
+        read_set = {
+            chapter for chapter in read_set if collaboration_allows_chapter(collaborator, chapter)
+        }
     if not read_set:
         return {"items": []}
 
-    rows = (await db.execute(
-        select(Chapter.number, Chapter.title, ChapterSummary.clues)
-        .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
-        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)), ChapterSummary.mode == "detailed")
-        .order_by(Chapter.number)
-    )).all()
+    rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, ChapterSummary.clues)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(
+                Chapter.book_id == book_id,
+                Chapter.number.in_(sorted(read_set)),
+                ChapterSummary.mode == "detailed",
+            )
+            .order_by(Chapter.number)
+        )
+    ).all()
 
     items = []
     for number, title, clues in rows:
         for clue in clues or []:
             if isinstance(clue, dict) and clue.get("clue"):
-                items.append({"chapter_number": number, "chapter_title": title,
-                               "clue": clue.get("clue"), "foreshadows": clue.get("foreshadows")})
+                items.append(
+                    {
+                        "chapter_number": number,
+                        "chapter_title": title,
+                        "clue": clue.get("clue"),
+                        "foreshadows": clue.get("foreshadows"),
+                    }
+                )
     if items:
         return {"items": items}
 
@@ -226,8 +276,14 @@ async def get_timeline(
     book_id: uuid.UUID,
     limit: int = 50,
     offset: int = 0,
-    include: str | None = Query(None, description="Comma-separated track types: chapters, events, character_tracks, thread_tracks, relationship_markers"),
-    fields: str | None = Query(None, description="Comma-separated fields per event: chapter_number, chapter_title, kind, title, detail"),
+    include: str | None = Query(
+        None,
+        description="Comma-separated track types: chapters, events, character_tracks, thread_tracks, relationship_markers",
+    ),
+    fields: str | None = Query(
+        None,
+        description="Comma-separated fields per event: chapter_number, chapter_title, kind, title, detail",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -242,7 +298,9 @@ async def get_timeline(
     use_cache = parse_csv_param(include) is None
     if use_cache:
         book_version = await get_book_cache_version(str(book_id))
-        progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
+        progress_version = await get_reader_progress_cache_version(
+            str(book_id), str(current_user.id)
+        )
         cached = await get_reader_timeline_cache(
             str(book_id),
             str(current_user.id),
@@ -263,29 +321,51 @@ async def get_timeline(
 
     read_set = await timeline_visible_chapter_set(db, book, current_user, collaborator)
     if collaborator is not None:
-        read_set = {chapter for chapter in read_set if collaboration_allows_chapter(collaborator, chapter)}
+        read_set = {
+            chapter for chapter in read_set if collaboration_allows_chapter(collaborator, chapter)
+        }
     if not read_set:
         payload = build_timeline_track_payload([], [], [], [], [])
         payload = apply_sparse_includes(payload, include)
         return apply_sparse_fields(payload, fields) if fields else payload
 
-    summary_rows = (await db.execute(
-        select(Chapter.number, Chapter.title, ChapterSummary.key_events)
-        .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
-        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)), ChapterSummary.mode == "short")
-        .order_by(Chapter.number)
-    )).all()
-    character_rows = (await db.execute(
-        select(Character.name, Character.first_chapter, Character.role, Character.aliases, Character.arc_summary)
-        .where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set)))
-        .order_by(Character.first_chapter, Character.name)
-    )).all()
-    chapter_meta_rows = (await db.execute(
-        select(Chapter.number, Chapter.title)
-        .where(Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set)))
-    )).all()
+    summary_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title, ChapterSummary.key_events)
+            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(
+                Chapter.book_id == book_id,
+                Chapter.number.in_(sorted(read_set)),
+                ChapterSummary.mode == "short",
+            )
+            .order_by(Chapter.number)
+        )
+    ).all()
+    character_rows = (
+        await db.execute(
+            select(
+                Character.name,
+                Character.first_chapter,
+                Character.role,
+                Character.aliases,
+                Character.arc_summary,
+            )
+            .where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set)))
+            .order_by(Character.first_chapter, Character.name)
+        )
+    ).all()
+    chapter_meta_rows = (
+        await db.execute(
+            select(Chapter.number, Chapter.title).where(
+                Chapter.book_id == book_id, Chapter.number.in_(sorted(read_set))
+            )
+        )
+    ).all()
     chapter_titles = {number: title for number, title in chapter_meta_rows}
-    chapter_points = [{"number": number, "title": title} for number, title in sorted(chapter_meta_rows, key=lambda item: item[0])]
+    chapter_points = [
+        {"number": number, "title": title}
+        for number, title in sorted(chapter_meta_rows, key=lambda item: item[0])
+    ]
 
     want_events = include_requested(include, "events")
     want_character_tracks = include_requested(include, "character_tracks")
@@ -294,33 +374,39 @@ async def get_timeline(
 
     thread_rows = tuple()  # type: ignore[var-annotated]
     if want_events or want_thread_tracks:
-        thread_rows = (await db.execute(
-            select(
-                PlotThread.id,
-                PlotThread.title,
-                PlotThread.introduced_at,
-                PlotThread.last_mentioned_at,
-                PlotThread.resolved_at,
-                PlotThread.status,
-                PlotThread.note,
-                PlotThread.description,
+        thread_rows = (
+            await db.execute(
+                select(
+                    PlotThread.id,
+                    PlotThread.title,
+                    PlotThread.introduced_at,
+                    PlotThread.last_mentioned_at,
+                    PlotThread.resolved_at,
+                    PlotThread.status,
+                    PlotThread.note,
+                    PlotThread.description,
+                )
+                .where(PlotThread.book_id == book_id)
+                .order_by(PlotThread.introduced_at, PlotThread.importance.desc())
             )
-            .where(PlotThread.book_id == book_id)
-            .order_by(PlotThread.introduced_at, PlotThread.importance.desc())
-        )).all()
+        ).all()
     relationship_rows = tuple()  # type: ignore[var-annotated]
     character_lookup: dict = {}
     if want_events or want_relationship_markers:
-        relationship_rows = (await db.execute(
-            select(CharacterRelationship, Character.name, Character.role)
-            .join(Character, Character.id == CharacterRelationship.character_a_id)
-            .where(
-                CharacterRelationship.book_id == book_id,
-                CharacterRelationship.from_chapter.in_(sorted(read_set)),
+        relationship_rows = (
+            await db.execute(
+                select(CharacterRelationship, Character.name, Character.role)
+                .join(Character, Character.id == CharacterRelationship.character_a_id)
+                .where(
+                    CharacterRelationship.book_id == book_id,
+                    CharacterRelationship.from_chapter.in_(sorted(read_set)),
+                )
+                .order_by(CharacterRelationship.from_chapter)
             )
-            .order_by(CharacterRelationship.from_chapter)
-        )).all()
-        character_lookup_result = await db.execute(select(Character).where(Character.book_id == book_id))
+        ).all()
+        character_lookup_result = await db.execute(
+            select(Character).where(Character.book_id == book_id)
+        )
         character_lookup = {char.id: char.name for char in character_lookup_result.scalars().all()}
 
     events = []
@@ -332,35 +418,66 @@ async def get_timeline(
         for chapter_num, chapter_title, key_events in summary_rows:
             for event in key_events or []:
                 if isinstance(event, dict) and event.get("event"):
-                    events.append({"chapter_number": chapter_num, "chapter_title": chapter_title,
-                                    "kind": "event", "title": event.get("event"), "detail": None})
+                    events.append(
+                        {
+                            "chapter_number": chapter_num,
+                            "chapter_title": chapter_title,
+                            "kind": "event",
+                            "title": event.get("event"),
+                            "detail": None,
+                        }
+                    )
         for name, first_chapter, role, aliases, arc_summary in character_rows:
             if not is_valid_timeline_character(name, role, aliases, arc_summary):
                 continue
-            events.append({"chapter_number": first_chapter, "chapter_title": chapter_titles.get(first_chapter), "kind": "character_entry",
-                            "title": name, "detail": timeline_character_detail(name, role, aliases, arc_summary)})
+            events.append(
+                {
+                    "chapter_number": first_chapter,
+                    "chapter_title": chapter_titles.get(first_chapter),
+                    "kind": "character_entry",
+                    "title": name,
+                    "detail": timeline_character_detail(name, role, aliases, arc_summary),
+                }
+            )
 
     if want_character_tracks:
         visible_characters_result = await db.execute(
-            select(Character).where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set))).order_by(Character.first_chapter, Character.name)
+            select(Character)
+            .where(Character.book_id == book_id, Character.first_chapter.in_(sorted(read_set)))
+            .order_by(Character.first_chapter, Character.name)
         )
         visible_characters = visible_characters_result.scalars().all()
         for char in visible_characters:
-            if not is_valid_timeline_character(char.name, char.role, char.aliases, char.arc_summary):
+            if not is_valid_timeline_character(
+                char.name, char.role, char.aliases, char.arc_summary
+            ):
                 continue
             start_chapter = char.first_chapter
             end_chapter = char.last_seen_chapter or max(read_set)
-            character_tracks.append({
-                "id": str(char.id),
-                "name": char.name,
-                "role": char.role,
-                "start_chapter": start_chapter,
-                "end_chapter": max(start_chapter, min(end_chapter, max(read_set))),
-                "detail": timeline_character_detail(char.name, char.role, char.aliases, char.arc_summary),
-            })
+            character_tracks.append(
+                {
+                    "id": str(char.id),
+                    "name": char.name,
+                    "role": char.role,
+                    "start_chapter": start_chapter,
+                    "end_chapter": max(start_chapter, min(end_chapter, max(read_set))),
+                    "detail": timeline_character_detail(
+                        char.name, char.role, char.aliases, char.arc_summary
+                    ),
+                }
+            )
 
     if want_events or want_thread_tracks:
-        for thread_id, title, introduced_at, last_mentioned_at, resolved_at, status, note, description in thread_rows:
+        for (
+            thread_id,
+            title,
+            introduced_at,
+            last_mentioned_at,
+            resolved_at,
+            status,
+            note,
+            description,
+        ) in thread_rows:
             display_status = derive_plot_thread_status(
                 status,
                 introduced_at=introduced_at,
@@ -370,24 +487,40 @@ async def get_timeline(
             )
             if want_events:
                 if introduced_at and introduced_at in read_set:
-                    events.append({"chapter_number": introduced_at, "chapter_title": chapter_titles.get(introduced_at),
-                                    "kind": "thread_start", "title": title, "detail": display_status})
+                    events.append(
+                        {
+                            "chapter_number": introduced_at,
+                            "chapter_title": chapter_titles.get(introduced_at),
+                            "kind": "thread_start",
+                            "title": title,
+                            "detail": display_status,
+                        }
+                    )
                 if resolved_at and resolved_at in read_set:
-                    events.append({"chapter_number": resolved_at, "chapter_title": chapter_titles.get(int(resolved_at)),
-                                    "kind": "thread_end", "title": title, "detail": "Resolved"})
+                    events.append(
+                        {
+                            "chapter_number": resolved_at,
+                            "chapter_title": chapter_titles.get(int(resolved_at)),
+                            "kind": "thread_end",
+                            "title": title,
+                            "detail": "Resolved",
+                        }
+                    )
             if want_thread_tracks:
                 span = timeline_plot_thread_span(introduced_at, resolved_at, read_set)
                 if span:
                     start_chapter, end_chapter = span
-                    thread_tracks.append({
-                        "id": str(thread_id),
-                        "title": title,
-                        "status": display_status,
-                        "start_chapter": start_chapter,
-                        "end_chapter": end_chapter,
-                        "note": note,
-                        "detail": description,
-                    })
+                    thread_tracks.append(
+                        {
+                            "id": str(thread_id),
+                            "title": title,
+                            "status": display_status,
+                            "start_chapter": start_chapter,
+                            "end_chapter": end_chapter,
+                            "note": note,
+                            "detail": description,
+                        }
+                    )
 
     if want_events or want_relationship_markers:
         for rel, _, _ in relationship_rows:
@@ -405,24 +538,32 @@ async def get_timeline(
                 getattr(rel, "character_b_to_a_labels", None),
             )
             if want_events:
-                events.append({
-                    "chapter_number": rel.from_chapter,
-                    "chapter_title": chapter_titles.get(rel.from_chapter),
-                    "kind": "relationship_shift",
-                    "title": title,
-                    "detail": detail,
-                })
+                events.append(
+                    {
+                        "chapter_number": rel.from_chapter,
+                        "chapter_title": chapter_titles.get(rel.from_chapter),
+                        "kind": "relationship_shift",
+                        "title": title,
+                        "detail": detail,
+                    }
+                )
             if want_relationship_markers:
-                relationship_markers.append({
-                    "id": str(rel.id),
-                    "title": title,
-                    "chapter_number": rel.from_chapter,
-                    "detail": detail,
-                    "type": rel.rel_type,
-                    "shared_labels": list(getattr(rel, "shared_labels", None) or []),
-                    "character_a_to_b_labels": list(getattr(rel, "character_a_to_b_labels", None) or []),
-                    "character_b_to_a_labels": list(getattr(rel, "character_b_to_a_labels", None) or []),
-                })
+                relationship_markers.append(
+                    {
+                        "id": str(rel.id),
+                        "title": title,
+                        "chapter_number": rel.from_chapter,
+                        "detail": detail,
+                        "type": rel.rel_type,
+                        "shared_labels": list(getattr(rel, "shared_labels", None) or []),
+                        "character_a_to_b_labels": list(
+                            getattr(rel, "character_a_to_b_labels", None) or []
+                        ),
+                        "character_b_to_a_labels": list(
+                            getattr(rel, "character_b_to_a_labels", None) or []
+                        ),
+                    }
+                )
 
     if want_events:
         events = dedupe_timeline_events(events)
@@ -430,10 +571,14 @@ async def get_timeline(
     character_tracks.sort(key=lambda item: (item["start_chapter"], item["name"]))
     thread_tracks.sort(key=lambda item: (item["start_chapter"], item["title"]))
     relationship_markers.sort(key=lambda item: (item["chapter_number"], item["title"]))
-    payload = build_timeline_track_payload(chapter_points, events, character_tracks, thread_tracks, relationship_markers)
+    payload = build_timeline_track_payload(
+        chapter_points, events, character_tracks, thread_tracks, relationship_markers
+    )
     if use_cache:
         book_version = await get_book_cache_version(str(book_id))
-        progress_version = await get_reader_progress_cache_version(str(book_id), str(current_user.id))
+        progress_version = await get_reader_progress_cache_version(
+            str(book_id), str(current_user.id)
+        )
         await set_reader_timeline_cache(
             str(book_id),
             str(current_user.id),
@@ -505,32 +650,46 @@ async def memory_recall(
         return {"recall": cached, "cached": True}
 
     progress_result = await db.execute(
-        select(ReadingProgress).where(ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id)
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id, ReadingProgress.book_id == book_id
+        )
     )
     progress = progress_result.scalar()
     if not progress:
         return {"recall": None}
 
     last_chapter = progress.current_chapter
-    chapter_result = await db.execute(select(Chapter).where(Chapter.book_id == book_id, Chapter.number == last_chapter))
+    chapter_result = await db.execute(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.number == last_chapter)
+    )
     chapter = chapter_result.scalar()
 
     recent_summary = ""
     if chapter:
         summ_result = await db.execute(
-            select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id, ChapterSummary.mode == "short")
+            select(ChapterSummary).where(
+                ChapterSummary.chapter_id == chapter.id, ChapterSummary.mode == "short"
+            )
         )
         summ = summ_result.scalar()
         if summ:
             recent_summary = summ.content
 
     chars_result = await db.execute(
-        select(Character.name).where(Character.book_id == book_id, Character.first_chapter <= last_chapter).limit(8)
+        select(Character.name)
+        .where(Character.book_id == book_id, Character.first_chapter <= last_chapter)
+        .limit(8)
     )
     chars = chars_result.scalars().all()
 
     open_threads_result = await db.execute(
-        select(PlotThread.title, PlotThread.status, PlotThread.introduced_at, PlotThread.last_mentioned_at, PlotThread.resolved_at)
+        select(
+            PlotThread.title,
+            PlotThread.status,
+            PlotThread.introduced_at,
+            PlotThread.last_mentioned_at,
+            PlotThread.resolved_at,
+        )
         .where(
             PlotThread.book_id == book_id,
             PlotThread.introduced_at <= last_chapter,
@@ -546,7 +705,8 @@ async def memory_recall(
             last_mentioned_at=last_mentioned_at or introduced_at,
             resolved_at=resolved_at,
             current_chapter=last_chapter,
-        ) not in {"resolved", "abandoned"}
+        )
+        not in {"resolved", "abandoned"}
     ][:3]
 
     # Release the request-scoped connection before the external LLM call.

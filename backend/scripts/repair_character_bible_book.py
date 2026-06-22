@@ -6,6 +6,7 @@ Dry-run by default:
 Apply only after explicit confirmation:
     python scripts/repair_character_bible_book.py --book-id <uuid> --apply --confirm-apply REPAIR_CHARACTER_BIBLE --allow-merge-safe-pairs
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,33 +23,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
-from app.models.book import Book, Chapter
-from app.models.character import Character, CharacterCandidate, CharacterMention, CharacterRelationshipCandidate
 from app.engine.character.extractor import verify_character_candidate_personhood
-from app.utils.character_utils import (
+from app.models.book import Book, Chapter
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterMention,
+    CharacterRelationshipCandidate,
+)
+from app.utils.characters.candidates import (
+    decide_character_candidate_disposition,
+    decide_relationship_candidate_disposition,
+)
+from app.utils.characters.constants import (
     CHARACTER_APPROVAL_REJECTED,
     CHARACTER_APPROVAL_SOURCE_BACKFILL_REVIEW,
-    CHARACTER_CANDIDATE_SUPPRESSED,
-    CHARACTER_TRUST_TIER_REPAIRED_NOISE,
     CHARACTER_CANDIDATE_PENDING,
+    CHARACTER_CANDIDATE_SUPPRESSED,
     CHARACTER_DUPLICATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
+    CHARACTER_TRUST_TIER_REPAIRED_NOISE,
     CHARACTER_VISIBILITY_NOISE,
+)
+from app.utils.characters.duplicates import refresh_character_duplicate_suggestions
+from app.utils.characters.governance import infer_character_trust_tier, is_cast_visible_character
+from app.utils.characters.identity import normalize_character_name
+from app.utils.characters.manual import find_earliest_character_mention_chapters
+from app.utils.characters.merging import merge_characters
+from app.utils.characters.review import record_character_candidate, set_character_review_state
+from app.utils.characters.review_serialization import (
     build_character_review_payload,
-    decide_character_candidate_disposition,
-    decide_relationship_candidate_disposition,
-    find_earliest_character_mention_chapters,
-    infer_character_trust_tier,
-    is_cast_visible_character,
-    merge_characters,
-    normalize_character_name,
-    record_character_candidate,
-    refresh_character_duplicate_suggestions,
-    set_character_review_state,
 )
 from app.utils.logging import get_logger
-
 from scripts.audit_character_bible_noise import _has_meaningful_profile, _is_obvious_noise_character
 
 log = get_logger("lorevia.repair.character_bible")
@@ -117,7 +124,10 @@ def _has_manual_edit_markers(character: Character) -> bool:
     manual_entry = trait_state.get("manual_entry")
     return bool(
         getattr(character, "is_manual", False)
-        or (isinstance(manual_description, dict) and str(manual_description.get("value") or "").strip())
+        or (
+            isinstance(manual_description, dict)
+            and str(manual_description.get("value") or "").strip()
+        )
         or (isinstance(manual_entry, dict) and str(manual_entry.get("value") or "").strip())
     )
 
@@ -136,7 +146,9 @@ def _is_protected_character(character: Character) -> bool:
     )
 
 
-def _auto_mergeable(suggestion, *, primary: Character | None = None, secondary: Character | None = None) -> bool:
+def _auto_mergeable(
+    suggestion, *, primary: Character | None = None, secondary: Character | None = None
+) -> bool:
     reasons = {str(reason).strip().lower() for reason in (suggestion.reasons or [])}
     if primary is not None and _is_protected_character(primary):
         return False
@@ -154,18 +166,22 @@ def _auto_mergeable(suggestion, *, primary: Character | None = None, secondary: 
 
 async def _load_characters(db, book_id: uuid.UUID) -> list[Character]:
     return (
-        await db.execute(
-            select(Character)
-            .options(
-                selectinload(Character.states),
-                selectinload(Character.relationships_as_a),
-                selectinload(Character.relationships_as_b),
-                selectinload(Character.voice_profile),
+        (
+            await db.execute(
+                select(Character)
+                .options(
+                    selectinload(Character.states),
+                    selectinload(Character.relationships_as_a),
+                    selectinload(Character.relationships_as_b),
+                    selectinload(Character.voice_profile),
+                )
+                .where(Character.book_id == book_id)
+                .order_by(Character.first_chapter.asc(), Character.created_at.asc())
             )
-            .where(Character.book_id == book_id)
-            .order_by(Character.first_chapter.asc(), Character.created_at.asc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 async def _load_chapter_rows(db, book_id: uuid.UUID) -> list[tuple[int, str]]:
@@ -195,7 +211,7 @@ async def _load_chapter_rows(db, book_id: uuid.UUID) -> list[tuple[int, str]]:
 
 
 def _chapter_mentions(chapter_rows: list[tuple[int, str]], names: list[str]) -> list[int]:
-    from app.utils.character_utils import _find_name_occurrences
+    from app.utils.characters.manual import _find_name_occurrences
 
     hits: list[int] = []
     for chapter_number, text in chapter_rows:
@@ -204,26 +220,37 @@ def _chapter_mentions(chapter_rows: list[tuple[int, str]], names: list[str]) -> 
     return hits
 
 
-async def _load_pending_relationship_candidates(db, book_id: uuid.UUID) -> list[CharacterRelationshipCandidate]:
+async def _load_pending_relationship_candidates(
+    db, book_id: uuid.UUID
+) -> list[CharacterRelationshipCandidate]:
     return (
-        await db.execute(
-            select(CharacterRelationshipCandidate).where(
-                CharacterRelationshipCandidate.book_id == book_id,
-                CharacterRelationshipCandidate.status == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book_id,
+                    CharacterRelationshipCandidate.status
+                    == CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 async def _load_pending_character_candidates(db, book_id: uuid.UUID) -> list[CharacterCandidate]:
     return (
-        await db.execute(
-            select(CharacterCandidate).where(
-                CharacterCandidate.book_id == book_id,
-                CharacterCandidate.status == CHARACTER_CANDIDATE_PENDING,
+        (
+            await db.execute(
+                select(CharacterCandidate).where(
+                    CharacterCandidate.book_id == book_id,
+                    CharacterCandidate.status == CHARACTER_CANDIDATE_PENDING,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
 
 def _candidate_cleanup_disposition(candidate: CharacterCandidate):
@@ -248,14 +275,23 @@ def _relationship_cleanup_disposition(candidate: CharacterRelationshipCandidate)
     )
 
 
-async def _load_character_mentions(db, book_id: uuid.UUID) -> dict[uuid.UUID, list[CharacterMention]]:
+async def _load_character_mentions(
+    db, book_id: uuid.UUID
+) -> dict[uuid.UUID, list[CharacterMention]]:
     rows = (
-        await db.execute(
-            select(CharacterMention)
-            .where(CharacterMention.book_id == book_id, CharacterMention.matched_character_id.is_not(None))
-            .order_by(CharacterMention.chapter_number.asc(), CharacterMention.created_at.asc())
+        (
+            await db.execute(
+                select(CharacterMention)
+                .where(
+                    CharacterMention.book_id == book_id,
+                    CharacterMention.matched_character_id.is_not(None),
+                )
+                .order_by(CharacterMention.chapter_number.asc(), CharacterMention.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     grouped: dict[uuid.UUID, list[CharacterMention]] = {}
     for row in rows:
         if row.matched_character_id is None:
@@ -265,7 +301,7 @@ async def _load_character_mentions(db, book_id: uuid.UUID) -> dict[uuid.UUID, li
 
 
 def _chapter_excerpt(text: str, names: list[str]) -> str | None:
-    from app.utils.character_utils import _find_name_occurrences
+    from app.utils.characters.manual import _find_name_occurrences
 
     for candidate in names:
         occurrences = _find_name_occurrences(text, candidate)
@@ -274,7 +310,7 @@ def _chapter_excerpt(text: str, names: list[str]) -> str | None:
         index = text.casefold().find(candidate.casefold())
         if index < 0:
             index = 0
-        excerpt = " ".join(text[max(0, index - 90): min(len(text), index + 180)].split()).strip()
+        excerpt = " ".join(text[max(0, index - 90) : min(len(text), index + 180)].split()).strip()
         if excerpt:
             return excerpt
     return None
@@ -359,8 +395,12 @@ async def build_repair_plan(
 
         characters = await _load_characters(session, book_id)
         initial_character_labels = _character_label_map(characters)
-        character_map = {character.id: character for character in characters if character.id is not None}
-        suggestions = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
+        character_map = {
+            character.id: character for character in characters if character.id is not None
+        }
+        suggestions = await refresh_character_duplicate_suggestions(
+            session, book_id=book_id, characters=characters
+        )
         character_candidates = await _load_pending_character_candidates(session, book_id)
         relationship_candidates = await _load_pending_relationship_candidates(session, book_id)
         pending_character_candidates_suppressed = sum(
@@ -371,7 +411,8 @@ async def build_repair_plan(
         pending_relationship_candidates_suppressed = sum(
             1
             for candidate in relationship_candidates
-            if _relationship_cleanup_disposition(candidate).status == CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED
+            if _relationship_cleanup_disposition(candidate).status
+            == CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED
         )
         planned_merges: list[tuple[str, str]] = []
         skipped_protected_merge_pairs: list[tuple[str, str]] = []
@@ -380,11 +421,17 @@ async def build_repair_plan(
             secondary = character_map.get(item.secondary_character_id)
             if _auto_mergeable(item, primary=primary, secondary=secondary):
                 if allow_merge_safe_pairs:
-                    planned_merges.append((str(item.primary_character_id), str(item.secondary_character_id)))
-            elif primary is not None and secondary is not None and (
-                _is_protected_character(primary) or _is_protected_character(secondary)
+                    planned_merges.append(
+                        (str(item.primary_character_id), str(item.secondary_character_id))
+                    )
+            elif (
+                primary is not None
+                and secondary is not None
+                and (_is_protected_character(primary) or _is_protected_character(secondary))
             ):
-                skipped_protected_merge_pairs.append((str(item.primary_character_id), str(item.secondary_character_id)))
+                skipped_protected_merge_pairs.append(
+                    (str(item.primary_character_id), str(item.secondary_character_id))
+                )
 
         planned_demotions: list[str] = []
         skipped_protected_demotions: list[str] = []
@@ -398,7 +445,11 @@ async def build_repair_plan(
             )
             is_noise, _reasons = _is_obvious_noise_character(character)
             trust_tier, _trust_reasons = infer_character_trust_tier(character)
-            if verification["overall_band"] != "reject" and not is_noise and trust_tier == "visible":
+            if (
+                verification["overall_band"] != "reject"
+                and not is_noise
+                and trust_tier == "visible"
+            ):
                 continue
             if _is_protected_character(character):
                 skipped_protected_demotions.append(str(character.id))
@@ -417,7 +468,9 @@ async def build_repair_plan(
             candidates_by_key=candidates_by_key,
             upto_chapter=int(book.total_chapters or 0) or None,
         )
-        first_chapter_updates: dict[str, int] = {str(key): int(value) for key, value in first_chapters.items()}
+        first_chapter_updates: dict[str, int] = {
+            str(key): int(value) for key, value in first_chapters.items()
+        }
         last_seen_updates: dict[str, int] = {}
         for character in characters:
             verification = await _repair_verification(
@@ -446,16 +499,22 @@ async def build_repair_plan(
             updated_first_chapters=first_chapter_updates,
             updated_last_seen_chapters=last_seen_updates,
             character_labels=initial_character_labels,
-            pending_duplicate_suggestions=sum(1 for item in suggestions if item.status == CHARACTER_DUPLICATE_PENDING),
+            pending_duplicate_suggestions=sum(
+                1 for item in suggestions if item.status == CHARACTER_DUPLICATE_PENDING
+            ),
             pending_relationship_candidates=len(relationship_candidates),
             pending_character_candidates_suppressed=pending_character_candidates_suppressed,
-            pending_character_candidates_kept=len(character_candidates) - pending_character_candidates_suppressed,
+            pending_character_candidates_kept=len(character_candidates)
+            - pending_character_candidates_suppressed,
             pending_relationship_candidates_suppressed=pending_relationship_candidates_suppressed,
-            pending_relationship_candidates_kept=len(relationship_candidates) - pending_relationship_candidates_suppressed,
-            protected_manual_records_skipped=len(skipped_protected_demotions) + len(skipped_protected_merge_pairs),
+            pending_relationship_candidates_kept=len(relationship_candidates)
+            - pending_relationship_candidates_suppressed,
+            protected_manual_records_skipped=len(skipped_protected_demotions)
+            + len(skipped_protected_merge_pairs),
             unresolved_relationship_deltas={
                 "before": len(relationship_candidates),
-                "after_if_apply": len(relationship_candidates) - pending_relationship_candidates_suppressed,
+                "after_if_apply": len(relationship_candidates)
+                - pending_relationship_candidates_suppressed,
             },
         )
 
@@ -473,14 +532,22 @@ async def apply_repair_plan(
             raise SystemExit(f"Book not found: {book_id}")
 
         if not allow_merge_safe_pairs and not allow_demote_obvious_noise:
-            raise SystemExit("No repair actions enabled. Pass --allow-merge-safe-pairs and/or --allow-demote-obvious-noise.")
+            raise SystemExit(
+                "No repair actions enabled. Pass --allow-merge-safe-pairs and/or --allow-demote-obvious-noise."
+            )
 
         characters = await _load_characters(session, book_id)
         initial_character_labels = _character_label_map(characters)
-        character_map = {character.id: character for character in characters if character.id is not None}
-        suggestions = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
+        character_map = {
+            character.id: character for character in characters if character.id is not None
+        }
+        suggestions = await refresh_character_duplicate_suggestions(
+            session, book_id=book_id, characters=characters
+        )
         character_candidates_before = await _load_pending_character_candidates(session, book_id)
-        relationship_candidates_before = await _load_pending_relationship_candidates(session, book_id)
+        relationship_candidates_before = await _load_pending_relationship_candidates(
+            session, book_id
+        )
         suppressed_character_candidate_ids: list[str] = []
         kept_character_candidate_ids: list[str] = []
         for candidate in character_candidates_before:
@@ -511,10 +578,17 @@ async def apply_repair_plan(
             primary = character_map.get(suggestion.primary_character_id)
             secondary = character_map.get(suggestion.secondary_character_id)
             if not _auto_mergeable(suggestion, primary=primary, secondary=secondary):
-                if primary is not None and secondary is not None and (
-                    _is_protected_character(primary) or _is_protected_character(secondary)
+                if (
+                    primary is not None
+                    and secondary is not None
+                    and (_is_protected_character(primary) or _is_protected_character(secondary))
                 ):
-                    skipped_protected_merge_pairs.append((str(suggestion.primary_character_id), str(suggestion.secondary_character_id)))
+                    skipped_protected_merge_pairs.append(
+                        (
+                            str(suggestion.primary_character_id),
+                            str(suggestion.secondary_character_id),
+                        )
+                    )
                 continue
             if not allow_merge_safe_pairs or not primary or not secondary:
                 continue
@@ -535,7 +609,11 @@ async def apply_repair_plan(
             )
             is_noise, reasons = _is_obvious_noise_character(character)
             trust_tier, trust_reasons = infer_character_trust_tier(character)
-            if verification["overall_band"] != "reject" and not is_noise and trust_tier == "visible":
+            if (
+                verification["overall_band"] != "reject"
+                and not is_noise
+                and trust_tier == "visible"
+            ):
                 continue
             if _is_protected_character(character):
                 skipped_protected_demotions.append(str(character.id))
@@ -575,10 +653,12 @@ async def apply_repair_plan(
                         "character_id": str(character.id),
                         "mention_count": int(character.mention_count or 0),
                         "first_chapter": int(character.first_chapter or 0),
-                        "last_seen_chapter": int(character.last_seen_chapter or 0) if character.last_seen_chapter else None,
+                        "last_seen_chapter": int(character.last_seen_chapter or 0)
+                        if character.last_seen_chapter
+                        else None,
                         "trust_tier": CHARACTER_TRUST_TIER_REPAIRED_NOISE,
                         "trust_reasons": trust_reasons,
-                    }
+                    },
                 },
                 source_batch_key=f"repair:{book_id}:{character.id}",
             )
@@ -623,7 +703,11 @@ async def apply_repair_plan(
             trust_tier, trust_reasons = infer_character_trust_tier(character)
             metadata["repair_status"] = "recomputed"
             metadata["normalized_name"] = normalize_character_name(character.name)
-            metadata["trust_tier"] = trust_tier if is_cast_visible_character(character) else CHARACTER_TRUST_TIER_REPAIRED_NOISE
+            metadata["trust_tier"] = (
+                trust_tier
+                if is_cast_visible_character(character)
+                else CHARACTER_TRUST_TIER_REPAIRED_NOISE
+            )
             metadata["trust_reasons"] = trust_reasons
             metadata["repair_verifier"] = {
                 "confidence_band": verification["overall_band"],
@@ -641,11 +725,21 @@ async def apply_repair_plan(
                 merged_evidence["repair_verifier"] = item.get("verifier")
                 row.evidence = merged_evidence
 
-        refreshed = await refresh_character_duplicate_suggestions(session, book_id=book_id, characters=characters)
-        relationship_candidates_after = await _load_pending_relationship_candidates(session, book_id)
+        refreshed = await refresh_character_duplicate_suggestions(
+            session, book_id=book_id, characters=characters
+        )
+        relationship_candidates_after = await _load_pending_relationship_candidates(
+            session, book_id
+        )
         candidates = (
-            await session.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book_id))
-        ).scalars().all()
+            (
+                await session.execute(
+                    select(CharacterCandidate).where(CharacterCandidate.book_id == book_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         await session.commit()
         return {
             "book_id": str(book_id),
@@ -655,7 +749,9 @@ async def apply_repair_plan(
             "skipped_protected_demotions": skipped_protected_demotions,
             "pending_character_candidates_suppressed": len(suppressed_character_candidate_ids),
             "pending_character_candidates_kept": len(kept_character_candidate_ids),
-            "pending_relationship_candidates_suppressed": len(suppressed_relationship_candidate_ids),
+            "pending_relationship_candidates_suppressed": len(
+                suppressed_relationship_candidate_ids
+            ),
             "pending_relationship_candidates_kept": len(kept_relationship_candidate_ids),
             "suppressed_character_candidate_ids": suppressed_character_candidate_ids,
             "suppressed_relationship_candidate_ids": suppressed_relationship_candidate_ids,
@@ -663,13 +759,17 @@ async def apply_repair_plan(
             "last_seen_chapter_recomputes": last_seen_recomputes,
             "character_labels": initial_character_labels,
             "duplicate_suggestion_delta": {
-                "pending_after": sum(1 for item in refreshed if item.status == CHARACTER_DUPLICATE_PENDING),
+                "pending_after": sum(
+                    1 for item in refreshed if item.status == CHARACTER_DUPLICATE_PENDING
+                ),
             },
             "unresolved_relationship_deltas": {
                 "before": len(relationship_candidates_before),
                 "after": len(relationship_candidates_after),
             },
-            "review": build_character_review_payload(candidates, refreshed, relationship_candidates_after),
+            "review": build_character_review_payload(
+                candidates, refreshed, relationship_candidates_after
+            ),
         }
 
 
@@ -682,13 +782,32 @@ def _write_output_json(path: str | None, payload: dict[str, Any]) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Repair duplicate/noisy character-bible data for a book.")
+    parser = argparse.ArgumentParser(
+        description="Repair duplicate/noisy character-bible data for a book."
+    )
     parser.add_argument("--book-id", type=uuid.UUID, required=True, help="Target book ID.")
-    parser.add_argument("--apply", action="store_true", help="Apply the repair plan instead of printing a dry run.")
-    parser.add_argument("--confirm-apply", type=str, default="", help=f"Required confirmation token for apply mode: {CONFIRM_TOKEN}")
-    parser.add_argument("--allow-merge-safe-pairs", action="store_true", help="Allow high-confidence duplicate merges.")
-    parser.add_argument("--allow-demote-obvious-noise", action="store_true", help="Allow demotion of obvious noise characters into review candidates.")
-    parser.add_argument("--output-json", type=str, default=None, help="Optional path to write the report JSON.")
+    parser.add_argument(
+        "--apply", action="store_true", help="Apply the repair plan instead of printing a dry run."
+    )
+    parser.add_argument(
+        "--confirm-apply",
+        type=str,
+        default="",
+        help=f"Required confirmation token for apply mode: {CONFIRM_TOKEN}",
+    )
+    parser.add_argument(
+        "--allow-merge-safe-pairs",
+        action="store_true",
+        help="Allow high-confidence duplicate merges.",
+    )
+    parser.add_argument(
+        "--allow-demote-obvious-noise",
+        action="store_true",
+        help="Allow demotion of obvious noise characters into review candidates.",
+    )
+    parser.add_argument(
+        "--output-json", type=str, default=None, help="Optional path to write the report JSON."
+    )
     return parser.parse_args()
 
 

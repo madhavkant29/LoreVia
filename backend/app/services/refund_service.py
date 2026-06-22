@@ -22,7 +22,6 @@ from app.services.paddle_service import (
 )
 from app.utils.logging import redact_sensitive_text
 
-
 REFUND_STATUS_PENDING_EVALUATION = "pending_evaluation"
 REFUND_STATUS_MANUAL_REVIEW_REQUIRED = "manual_review_required"
 REFUND_STATUS_APPROVED_PENDING_PROVIDER = "approved_pending_provider"
@@ -44,13 +43,11 @@ APPROVED_ADJUSTMENT_STATUSES = {"approved"}
 AUTO_REFUND_WINDOW = timedelta(hours=24)
 AUTO_REFUND_MAX_APPROVED_HISTORY = 2
 AUTO_REFUND_MIN_ACCOUNT_AGE = timedelta(days=7)
-ADJUSTMENT_CREATE_ERROR_MESSAGE = "Provider refund creation failed. Manual provider follow-up is required."
-CANCEL_SUBSCRIPTION_ERROR_MESSAGE = (
-    "Refund was created, but provider subscription cancellation failed. Manual provider follow-up is required."
+ADJUSTMENT_CREATE_ERROR_MESSAGE = (
+    "Provider refund creation failed. Manual provider follow-up is required."
 )
-AUTO_REFUND_SUBSCRIPTION_LINKAGE_ERROR_MESSAGE = (
-    "This monthly charge requires manual review because the active local subscription could not be safely linked for immediate cancellation."
-)
+CANCEL_SUBSCRIPTION_ERROR_MESSAGE = "Refund was created, but provider subscription cancellation failed. Manual provider follow-up is required."
+AUTO_REFUND_SUBSCRIPTION_LINKAGE_ERROR_MESSAGE = "This monthly charge requires manual review because the active local subscription could not be safely linked for immediate cancellation."
 
 
 @dataclass(frozen=True)
@@ -108,7 +105,8 @@ async def create_refund_review_request(
             paddle_transaction_id=normalized_transaction_id,
             paddle_adjustment_id=latest_review.paddle_adjustment_id,
             charge_at=summary.charge_at,
-            plan_code=summary.plan or (subscription.plan if subscription is not None else "unknown"),
+            plan_code=summary.plan
+            or (subscription.plan if subscription is not None else "unknown"),
             billing_interval=summary.billing_interval or "unknown",
             request_source=request_source.strip(),
             support_reference=(support_reference or None),
@@ -218,7 +216,9 @@ async def approve_refund_review(
     }:
         raise HTTPException(409, "This refund review cannot be manually approved.")
 
-    subscription = await db.get(Subscription, review.subscription_id) if review.subscription_id else None
+    subscription = (
+        await db.get(Subscription, review.subscription_id) if review.subscription_id else None
+    )
     if not _can_auto_refund_with_subscription_linkage(review, subscription):
         if not provider_followup_only:
             raise HTTPException(
@@ -265,9 +265,15 @@ async def deny_refund_review(
     if review.status in {REFUND_STATUS_APPROVED, REFUND_STATUS_DENIED}:
         raise HTTPException(409, "This refund review is already closed.")
     if review.status == REFUND_STATUS_APPROVED_PENDING_PROVIDER:
-        raise HTTPException(409, "This refund review has already been submitted to the provider and cannot be denied locally.")
+        raise HTTPException(
+            409,
+            "This refund review has already been submitted to the provider and cannot be denied locally.",
+        )
     if review.status == REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED and review.paddle_adjustment_id:
-        raise HTTPException(409, "This refund review already has a provider refund in flight and cannot be denied locally.")
+        raise HTTPException(
+            409,
+            "This refund review already has a provider refund in flight and cannot be denied locally.",
+        )
 
     review.status = REFUND_STATUS_DENIED
     review.auto_decision = False if review.auto_decision is None else review.auto_decision
@@ -392,17 +398,23 @@ async def apply_adjustment_webhook(
 
     adjustment_id = _normalized_text(data.get("id"))
     transaction = data.get("transaction") or {}
-    transaction_id = _normalized_text(data.get("transaction_id")) or _normalized_text(transaction.get("id"))
+    transaction_id = _normalized_text(data.get("transaction_id")) or _normalized_text(
+        transaction.get("id")
+    )
 
     review = None
     if adjustment_id:
         review = (
-            await db.execute(
-                select(RefundReview)
-                .where(RefundReview.paddle_adjustment_id == adjustment_id)
-                .order_by(RefundReview.created_at.desc())
+            (
+                await db.execute(
+                    select(RefundReview)
+                    .where(RefundReview.paddle_adjustment_id == adjustment_id)
+                    .order_by(RefundReview.created_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     if review is None and transaction_id:
         review = await _find_latest_review_for_transaction(db, transaction_id)
@@ -434,6 +446,15 @@ async def apply_adjustment_webhook(
         if review.status != REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED:
             review.status = REFUND_STATUS_APPROVED
         review.resolved_at = review.resolved_at or datetime.now(UTC)
+        if adjustment_id and transaction_id:
+            from app.services.revenue_ledger_service import record_refund_revenue
+
+            await record_refund_revenue(
+                db,
+                source_event_id=f"refund:{adjustment_id}",
+                user_id=review.user_id,
+                transaction_id=transaction_id,
+            )
         return
 
     if provider_status in REJECTED_ADJUSTMENT_STATUSES:
@@ -504,32 +525,45 @@ async def _resolve_local_transaction_context(
 
     if summary.subscription_id:
         subscription = (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.paddle_sub_id == summary.subscription_id)
-                .order_by(Subscription.created_at.desc())
+            (
+                await db.execute(
+                    select(Subscription)
+                    .where(Subscription.paddle_sub_id == summary.subscription_id)
+                    .order_by(Subscription.created_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     if subscription is None:
         subscription = (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.paddle_transaction_id == transaction_id)
-                .order_by(Subscription.created_at.desc())
+            (
+                await db.execute(
+                    select(Subscription)
+                    .where(Subscription.paddle_transaction_id == transaction_id)
+                    .order_by(Subscription.created_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     if subscription is not None:
         user = await db.get(User, subscription.user_id)
 
     if user is None and summary.customer_email:
         user = (
-            await db.execute(
-                select(User)
-                .where(func.lower(User.email) == summary.customer_email.strip().lower())
+            (
+                await db.execute(
+                    select(User).where(
+                        func.lower(User.email) == summary.customer_email.strip().lower()
+                    )
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     if user is None:
         raise HTTPException(409, "Unable to link this Paddle transaction to a LoreVia user.")
@@ -537,27 +571,39 @@ async def _resolve_local_transaction_context(
     return user, subscription
 
 
-async def _find_active_review_for_transaction(db: AsyncSession, transaction_id: str) -> RefundReview | None:
+async def _find_active_review_for_transaction(
+    db: AsyncSession, transaction_id: str
+) -> RefundReview | None:
     return (
-        await db.execute(
-            select(RefundReview)
-            .where(
-                RefundReview.paddle_transaction_id == transaction_id,
-                RefundReview.status.in_(ACTIVE_REFUND_REVIEW_STATUSES),
+        (
+            await db.execute(
+                select(RefundReview)
+                .where(
+                    RefundReview.paddle_transaction_id == transaction_id,
+                    RefundReview.status.in_(ACTIVE_REFUND_REVIEW_STATUSES),
+                )
+                .order_by(RefundReview.created_at.desc())
             )
-            .order_by(RefundReview.created_at.desc())
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
 
-async def _find_latest_review_for_transaction(db: AsyncSession, transaction_id: str) -> RefundReview | None:
+async def _find_latest_review_for_transaction(
+    db: AsyncSession, transaction_id: str
+) -> RefundReview | None:
     return (
-        await db.execute(
-            select(RefundReview)
-            .where(RefundReview.paddle_transaction_id == transaction_id)
-            .order_by(RefundReview.created_at.desc())
+        (
+            await db.execute(
+                select(RefundReview)
+                .where(RefundReview.paddle_transaction_id == transaction_id)
+                .order_by(RefundReview.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
 
 async def _count_refunds_counted_toward_auto_limit(db: AsyncSession, user_id: uuid.UUID) -> int:

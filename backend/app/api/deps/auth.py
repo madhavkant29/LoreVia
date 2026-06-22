@@ -19,15 +19,15 @@ from app.services.admin_service import (
     principal_scope_snapshot,
     record_admin_audit_event,
 )
-from app.utils.auth_utils import current_token_version, get_user_for_auth_subject
-from app.utils.privacy_utils import user_is_deleted
+from app.utils.admin_security import validate_admin_csrf_token
 from app.utils.auth_cookies import (
     REFRESH_TOKEN_COOKIE_NAME,
     get_auth_token,
     set_access_cookie,
 )
 from app.utils.auth_csrf import _has_valid_bearer_access_token, enforce_cookie_csrf
-from app.utils.admin_security import validate_admin_csrf_token
+from app.utils.auth_utils import current_token_version, get_user_for_auth_subject
+from app.utils.privacy_utils import user_is_deleted
 from app.utils.request_context import set_request_user_id
 
 bearer = HTTPBearer(auto_error=False)
@@ -108,7 +108,9 @@ async def get_current_user(
     access_payload = _decode_access_payload(access_token)
     if access_payload:
         try:
-            return await _load_user_from_claims(access_payload["sub"], _claim_version(access_payload), db)
+            return await _load_user_from_claims(
+                access_payload["sub"], _claim_version(access_payload), db
+            )
         except HTTPException as exc:
             # Some browsers can retain a stale access cookie alongside a newer
             # refresh cookie when users switch accounts or a cookie path changes.
@@ -116,7 +118,9 @@ async def get_current_user(
             # refresh token before failing the request.
             if exc.status_code != 401:
                 raise
-            log.debug("access_token_fallback_to_refresh", extra={"user_id": access_payload.get("sub")})
+            log.debug(
+                "access_token_fallback_to_refresh", extra={"user_id": access_payload.get("sub")}
+            )
 
     refresh_token = get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
     refresh_payload = _decode_refresh_payload(refresh_token)
@@ -134,7 +138,9 @@ async def get_current_user(
     try:
         session_active = await refresh_session_active(user_id, session_id)
     except Exception:
-        log.exception("redis_unavailable_during_auth", extra={"user_id": user_id, "session_id": session_id})
+        log.exception(
+            "redis_unavailable_during_auth", extra={"user_id": user_id, "session_id": session_id}
+        )
         raise HTTPException(503, "Authentication service temporarily unavailable")
 
     if not session_active:
@@ -151,7 +157,9 @@ async def get_optional_current_user(
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
     try:
-        return await get_current_user(request=request, response=response, credentials=credentials, db=db)
+        return await get_current_user(
+            request=request, response=response, credentials=credentials, db=db
+        )
     except HTTPException as exc:
         if exc.status_code in {401, 503}:
             return None
@@ -280,14 +288,18 @@ async def require_admin_csrf(request: Request) -> None:
 
 
 def _current_admin_session_id(request: Request) -> str:
-    refresh_payload = _decode_refresh_payload(get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME))
+    refresh_payload = _decode_refresh_payload(
+        get_auth_token(request, cookie_name=REFRESH_TOKEN_COOKIE_NAME)
+    )
     if refresh_payload and refresh_payload.get("sid"):
         return str(refresh_payload["sid"])
     log.warning("admin_session_fallback_no_refresh_cookie")
     return "access"
 
 
-async def mark_admin_step_up(request: Request, user_id: uuid.UUID, ttl_seconds: int = 10 * 60) -> None:
+async def mark_admin_step_up(
+    request: Request, user_id: uuid.UUID, ttl_seconds: int = 10 * 60
+) -> None:
     session_id = _current_admin_session_id(request)
     r = await get_redis()
     await r.setex(key_admin_step_up(str(user_id), session_id), ttl_seconds, "1")

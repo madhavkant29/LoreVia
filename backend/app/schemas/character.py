@@ -6,8 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class TraitOut(BaseModel):
     value: str
-    confidence: float   # 0.0–1.0
-    type: str           # objective | subjective | abstract
+    confidence: float  # 0.0–1.0
+    type: str  # objective | subjective | abstract
 
 
 class CharacterOut(BaseModel):

@@ -2,6 +2,7 @@
 Confidence-weighted character profile builder.
 Merges new trait info without overwriting and handles subjective narration.
 """
+
 import re
 import uuid
 from collections.abc import Iterable
@@ -80,16 +81,16 @@ def build_description(trait_state: dict, archetype: str | None) -> str:
             if t.get("type") == "subjective":
                 v = SUBJECTIVE_TRANSLATIONS.get(v.lower(), v)
             traits[key] = v
-    
+
     # If no traits found, use archetype fallback
     if not traits and archetype:
         return ARCHETYPE_PROMPTS.get(archetype.lower(), archetype)
     elif not traits:
         return ""
-    
+
     # Build natural sentences
     sentences = []
-    
+
     # Age description
     if "age" in traits:
         age = traits["age"]
@@ -99,28 +100,28 @@ def build_description(trait_state: dict, archetype: str | None) -> str:
             sentences.append(f"A {age}")
     elif "build" in traits:
         sentences.append(f"Has a {traits['build']} build")
-    
+
     # Hair and eyes description
     hair_eyes_parts = []
     if "hair" in traits:
         hair_eyes_parts.append(f"{traits['hair']} hair")
     if "eyes" in traits:
         hair_eyes_parts.append(f"{traits['eyes']} eyes")
-    
+
     if hair_eyes_parts:
         if len(hair_eyes_parts) == 1:
             sentences.append(f"Has {hair_eyes_parts[0]}")
         else:
             sentences.append(f"Has {hair_eyes_parts[0]} and {hair_eyes_parts[1]}")
-    
+
     # Face description
     if "face" in traits:
         sentences.append(f"Features {traits['face']}")
-    
+
     # Distinguishing features
     if "distinguishing" in traits:
         sentences.append(f"Notable for {traits['distinguishing']}")
-    
+
     # Combine sentences into natural paragraph
     if len(sentences) == 1:
         return sentences[0]
@@ -190,30 +191,41 @@ def _clean_line(value: str | None) -> str:
     if not value:
         return ""
     # Remove special characters including Unicode symbols
-    cleaned = re.sub(r"[\u2726\u2318\u2600-\u26FF\u2700-\u27BF]", "", value)  # Remove misc symbols and dingbats
+    cleaned = re.sub(
+        r"[\u2726\u2318\u2600-\u26FF\u2700-\u27BF]", "", value
+    )  # Remove misc symbols and dingbats
     cleaned = re.sub(r"[^\w\s.,!?;:'\"-]", " ", cleaned)  # Replace other special chars with space
     return " ".join(cleaned.split()).strip()
 
 
 def choose_richer_text(*values: str | None) -> str | None:
     cleaned = [_clean_line(value) for value in values if value and value.strip()]
-    cleaned = [value for value in cleaned if value and value.casefold() not in GENERIC_SUMMARY_PHRASES]
+    cleaned = [
+        value for value in cleaned if value and value.casefold() not in GENERIC_SUMMARY_PHRASES
+    ]
     if not cleaned:
         return None
     return max(cleaned, key=len)
 
 
-def build_character_analysis_metadata(extracted: dict, *, persistence_reason: str | None = None) -> dict:
+def build_character_analysis_metadata(
+    extracted: dict, *, persistence_reason: str | None = None
+) -> dict:
     evidence = extracted.get("evidence") if isinstance(extracted.get("evidence"), dict) else {}
     mention_count = int(evidence.get("mention_count") or 0)
     strong_mentions = int(evidence.get("strong_mention_count") or 0)
     grounding_passage_count = max(mention_count, strong_mentions)
     cluster_size = int(evidence.get("cluster_size") or 1)
     cluster_mention_count = int(evidence.get("cluster_mention_count") or mention_count or 0)
-    canonical_confidence = float(extracted.get("canonical_confidence") or extracted.get("confidence") or 0.0)
+    canonical_confidence = float(
+        extracted.get("canonical_confidence") or extracted.get("confidence") or 0.0
+    )
     grounding_coverage = round(strong_mentions / max(1, mention_count), 3) if mention_count else 0.0
     quality_flags: list[str] = []
-    if not extracted.get("arc_summary") or str(extracted.get("arc_summary")).strip().casefold() in GENERIC_SUMMARY_PHRASES:
+    if (
+        not extracted.get("arc_summary")
+        or str(extracted.get("arc_summary")).strip().casefold() in GENERIC_SUMMARY_PHRASES
+    ):
         quality_flags.append("generic_summary")
     if grounding_passage_count <= 1:
         quality_flags.append("light_grounding")
@@ -226,7 +238,11 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
         confidence_band = "medium"
     else:
         confidence_band = "low"
-    summary_quality = "generic" if "generic_summary" in quality_flags else ("grounded" if grounding_passage_count >= 2 else "thin")
+    summary_quality = (
+        "generic"
+        if "generic_summary" in quality_flags
+        else ("grounded" if grounding_passage_count >= 2 else "thin")
+    )
     trust_tier = str(extracted.get("trust_tier") or "visible").strip() or "visible"
     trust_reasons = [
         str(reason).strip()
@@ -251,12 +267,19 @@ def build_character_analysis_metadata(extracted: dict, *, persistence_reason: st
         "grounding_coverage": grounding_coverage,
         "cluster_size": cluster_size,
         "cluster_mention_count": cluster_mention_count,
-        "resolver_status": str(extracted.get("resolver_status") or evidence.get("resolver_status") or "").strip() or None,
-        "visibility_state": str(extracted.get("visibility_state") or "visible").strip() or "visible",
+        "resolver_status": str(
+            extracted.get("resolver_status") or evidence.get("resolver_status") or ""
+        ).strip()
+        or None,
+        "visibility_state": str(extracted.get("visibility_state") or "visible").strip()
+        or "visible",
         "approval_state": str(extracted.get("approval_state") or "approved").strip() or "approved",
-        "approval_source": str(extracted.get("approval_source") or "deterministic_auto").strip() or "deterministic_auto",
+        "approval_source": str(extracted.get("approval_source") or "deterministic_auto").strip()
+        or "deterministic_auto",
         "approval_reason_codes": approval_reason_codes,
-        "dossier_summary": extracted.get("dossier_summary") if isinstance(extracted.get("dossier_summary"), dict) else None,
+        "dossier_summary": extracted.get("dossier_summary")
+        if isinstance(extracted.get("dossier_summary"), dict)
+        else None,
         "trust_tier": trust_tier,
         "trust_reasons": trust_reasons,
     }
@@ -279,7 +302,7 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "aliases": extracted.get("aliases", []),
         "role": extracted.get("role"),
         "first_chapter": first_chapter,
-        "last_seen_chapter": first_chapter,   # set on first appearance
+        "last_seen_chapter": first_chapter,  # set on first appearance
         "mention_count": mention_weight,
         "trait_state": trait_state,
         "hair": flat(trait_state, "hair"),
@@ -298,9 +321,11 @@ def build_character_profile(extracted: dict, book_id: uuid.UUID, first_chapter: 
         "archetype": archetype,
         "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
         "analysis_metadata": build_character_analysis_metadata(extracted),
-        "visibility_state": str(extracted.get("visibility_state") or "visible").strip() or "visible",
+        "visibility_state": str(extracted.get("visibility_state") or "visible").strip()
+        or "visible",
         "approval_state": str(extracted.get("approval_state") or "approved").strip() or "approved",
-        "approval_source": str(extracted.get("approval_source") or "deterministic_auto").strip() or "deterministic_auto",
+        "approval_source": str(extracted.get("approval_source") or "deterministic_auto").strip()
+        or "deterministic_auto",
         "approval_reason_codes": [
             str(reason).strip()
             for reason in (extracted.get("approval_reason_codes") or [])
@@ -319,29 +344,73 @@ def merge_profile_fields(existing, incoming) -> dict:
     merged_traits = merge_trait_states(existing_trait_state, incoming_trait_state)
 
     existing_aliases = existing.aliases or []
-    incoming_aliases = incoming.get("aliases", []) if isinstance(incoming, dict) else incoming.aliases or []
+    incoming_aliases = (
+        incoming.get("aliases", []) if isinstance(incoming, dict) else incoming.aliases or []
+    )
     incoming_name = incoming.get("name") if isinstance(incoming, dict) else incoming.name
     incoming_role = incoming.get("role") if isinstance(incoming, dict) else incoming.role
-    incoming_first_chapter = incoming.get("first_chapter", existing.first_chapter) if isinstance(incoming, dict) else incoming.first_chapter
-    incoming_personality = incoming.get("personality_tags") if isinstance(incoming, dict) else incoming.personality_tags
-    incoming_goal = incoming.get("goal") if isinstance(incoming, dict) else getattr(incoming, "goal", None)
-    incoming_motivations = incoming.get("motivations") if isinstance(incoming, dict) else incoming.motivations
+    incoming_first_chapter = (
+        incoming.get("first_chapter", existing.first_chapter)
+        if isinstance(incoming, dict)
+        else incoming.first_chapter
+    )
+    incoming_personality = (
+        incoming.get("personality_tags")
+        if isinstance(incoming, dict)
+        else incoming.personality_tags
+    )
+    incoming_goal = (
+        incoming.get("goal") if isinstance(incoming, dict) else getattr(incoming, "goal", None)
+    )
+    incoming_motivations = (
+        incoming.get("motivations") if isinstance(incoming, dict) else incoming.motivations
+    )
     incoming_fears = incoming.get("fears") if isinstance(incoming, dict) else incoming.fears
-    incoming_lie = incoming.get("lie_they_believe") if isinstance(incoming, dict) else getattr(incoming, "lie_they_believe", None)
-    incoming_wound = incoming.get("backstory_wound") if isinstance(incoming, dict) else getattr(incoming, "backstory_wound", None)
-    incoming_arc_type = incoming.get("arc_type") if isinstance(incoming, dict) else getattr(incoming, "arc_type", None)
-    incoming_arc = incoming.get("arc_summary") if isinstance(incoming, dict) else incoming.arc_summary
-    incoming_archetype = incoming.get("archetype") if isinstance(incoming, dict) else incoming.archetype
-    incoming_last_seen = incoming.get("last_seen_chapter") if isinstance(incoming, dict) else getattr(incoming, "last_seen_chapter", None)
-    incoming_growth_events = incoming.get("growth_events") if isinstance(incoming, dict) else getattr(incoming, "growth_events", None)
-    incoming_evidence = incoming.get("evidence") if isinstance(incoming, dict) and isinstance(incoming.get("evidence"), dict) else {}
+    incoming_lie = (
+        incoming.get("lie_they_believe")
+        if isinstance(incoming, dict)
+        else getattr(incoming, "lie_they_believe", None)
+    )
+    incoming_wound = (
+        incoming.get("backstory_wound")
+        if isinstance(incoming, dict)
+        else getattr(incoming, "backstory_wound", None)
+    )
+    incoming_arc_type = (
+        incoming.get("arc_type")
+        if isinstance(incoming, dict)
+        else getattr(incoming, "arc_type", None)
+    )
+    incoming_arc = (
+        incoming.get("arc_summary") if isinstance(incoming, dict) else incoming.arc_summary
+    )
+    incoming_archetype = (
+        incoming.get("archetype") if isinstance(incoming, dict) else incoming.archetype
+    )
+    incoming_last_seen = (
+        incoming.get("last_seen_chapter")
+        if isinstance(incoming, dict)
+        else getattr(incoming, "last_seen_chapter", None)
+    )
+    incoming_growth_events = (
+        incoming.get("growth_events")
+        if isinstance(incoming, dict)
+        else getattr(incoming, "growth_events", None)
+    )
+    incoming_evidence = (
+        incoming.get("evidence")
+        if isinstance(incoming, dict) and isinstance(incoming.get("evidence"), dict)
+        else {}
+    )
     mention_weight = max(
         1,
         int(incoming_evidence.get("cluster_size") or 0),
         int(incoming.get("cluster_size") or 0) if isinstance(incoming, dict) else 0,
     )
 
-    aliases = merge_list_values(existing_aliases, incoming_aliases, [incoming_name] if incoming_name else [])
+    aliases = merge_list_values(
+        existing_aliases, incoming_aliases, [incoming_name] if incoming_name else []
+    )
     aliases = [alias for alias in aliases if alias.lower() != existing.name.lower()]
 
     # last_seen_chapter: take the highest chapter number seen so far
@@ -364,8 +433,12 @@ def merge_profile_fields(existing, incoming) -> dict:
         "goal": choose_richer_text(getattr(existing, "goal", None), incoming_goal),
         "motivations": merge_list_values(existing.motivations, incoming_motivations),
         "fears": merge_list_values(existing.fears, incoming_fears),
-        "lie_they_believe": choose_richer_text(getattr(existing, "lie_they_believe", None), incoming_lie),
-        "backstory_wound": choose_richer_text(getattr(existing, "backstory_wound", None), incoming_wound),
+        "lie_they_believe": choose_richer_text(
+            getattr(existing, "lie_they_believe", None), incoming_lie
+        ),
+        "backstory_wound": choose_richer_text(
+            getattr(existing, "backstory_wound", None), incoming_wound
+        ),
         "arc_type": choose_richer_text(getattr(existing, "arc_type", None), incoming_arc_type),
         "arc_summary": choose_richer_text(existing.arc_summary, incoming_arc),
         "archetype": choose_richer_text(existing.archetype, incoming_archetype),
@@ -374,29 +447,40 @@ def merge_profile_fields(existing, incoming) -> dict:
             **(existing.analysis_metadata or {}),
             **build_character_analysis_metadata(
                 incoming if isinstance(incoming, dict) else {},
-                persistence_reason=str((existing.analysis_metadata or {}).get("persistence_reason") or "updated_character"),
+                persistence_reason=str(
+                    (existing.analysis_metadata or {}).get("persistence_reason")
+                    or "updated_character"
+                ),
             ),
-            "rejected_duplicate_candidates": list((existing.analysis_metadata or {}).get("rejected_duplicate_candidates") or []),
+            "rejected_duplicate_candidates": list(
+                (existing.analysis_metadata or {}).get("rejected_duplicate_candidates") or []
+            ),
         },
     }
 
+
 def update_profile(existing, extracted: dict) -> dict:
     chapter = extracted.get("first_chapter", existing.first_chapter)
-    return merge_profile_fields(existing, {
-        "name": extracted.get("name"),
-        "aliases": extracted.get("aliases", []),
-        "role": extracted.get("role"),
-        "first_chapter": chapter,
-        "last_seen_chapter": chapter,   # chapter currently being processed
-        "trait_state": extracted.get("traits", {}),
-        "personality_tags": extracted.get("personality_tags", []),
-        "goal": extracted.get("goal"),
-        "motivations": extracted.get("motivations", []),
-        "fears": extracted.get("fears", []),
-        "lie_they_believe": extracted.get("lie_they_believe"),
-        "backstory_wound": extracted.get("backstory_wound"),
-        "arc_type": extracted.get("arc_type"),
-        "arc_summary": extracted.get("arc_summary"),
-        "archetype": extracted.get("archetype"),
-        "growth_events": merge_growth_events(_growth_event_group(extracted.get("growth_event"))),
-    })
+    return merge_profile_fields(
+        existing,
+        {
+            "name": extracted.get("name"),
+            "aliases": extracted.get("aliases", []),
+            "role": extracted.get("role"),
+            "first_chapter": chapter,
+            "last_seen_chapter": chapter,  # chapter currently being processed
+            "trait_state": extracted.get("traits", {}),
+            "personality_tags": extracted.get("personality_tags", []),
+            "goal": extracted.get("goal"),
+            "motivations": extracted.get("motivations", []),
+            "fears": extracted.get("fears", []),
+            "lie_they_believe": extracted.get("lie_they_believe"),
+            "backstory_wound": extracted.get("backstory_wound"),
+            "arc_type": extracted.get("arc_type"),
+            "arc_summary": extracted.get("arc_summary"),
+            "archetype": extracted.get("archetype"),
+            "growth_events": merge_growth_events(
+                _growth_event_group(extracted.get("growth_event"))
+            ),
+        },
+    )

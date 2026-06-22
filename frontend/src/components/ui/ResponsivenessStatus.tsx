@@ -16,6 +16,8 @@ type ProcessingStatusProps = {
 export function ProcessingStatusStrip({ status, onRetry, retrying = false, className }: ProcessingStatusProps) {
   if (!status || status.ready) return null
   const progress = status.progressPct ?? (status.partialReady ? 35 : 8)
+  const actionLabel = status.resumeAvailable ? "Continue processing" : "Retry"
+  const pendingLabel = status.resumeAvailable ? "Continuing..." : "Retrying..."
 
   return (
     <div className={cn("rounded-md border border-border bg-card/60 p-3", className)} role="status">
@@ -26,7 +28,7 @@ export function ProcessingStatusStrip({ status, onRetry, retrying = false, class
         </div>
         {status.retryAvailable && onRetry ? (
           <button type="button" className="app-button-secondary min-h-9 px-3 text-xs" onClick={onRetry} disabled={retrying}>
-            {retrying ? "Retrying..." : "Retry"}
+            {retrying ? pendingLabel : actionLabel}
           </button>
         ) : null}
       </div>
@@ -39,6 +41,8 @@ export function ProcessingStatusStrip({ status, onRetry, retrying = false, class
 
 export function ProcessingStatusPanel({ status, onRetry, retrying = false, className }: ProcessingStatusProps) {
   if (!status || status.ready) return null
+  const actionLabel = status.resumeAvailable ? "Continue processing" : "Retry processing"
+  const pendingLabel = status.resumeAvailable ? "Continuing..." : "Retrying..."
 
   return (
     <section className={cn("app-panel app-panel--subtle p-4", className)} role="status" aria-live="polite">
@@ -52,7 +56,7 @@ export function ProcessingStatusPanel({ status, onRetry, retrying = false, class
         </div>
         {status.retryAvailable && onRetry ? (
           <button type="button" className="app-button-secondary shrink-0" onClick={onRetry} disabled={retrying}>
-            {retrying ? "Retrying..." : "Retry processing"}
+            {retrying ? pendingLabel : actionLabel}
           </button>
         ) : null}
       </div>

@@ -16,9 +16,19 @@ INDEX_FORMATS = frozenset({"arabic", "roman-upper", "roman-lower", "alpha-upper"
 # ── Roman numeral conversion ────────────────────────────────────────────────
 
 _ROMAN_MAP: list[tuple[int, str]] = [
-    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-    (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-    (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    (1000, "M"),
+    (900, "CM"),
+    (500, "D"),
+    (400, "CD"),
+    (100, "C"),
+    (90, "XC"),
+    (50, "L"),
+    (40, "XL"),
+    (10, "X"),
+    (9, "IX"),
+    (5, "V"),
+    (4, "IV"),
+    (1, "I"),
 ]
 
 
@@ -36,6 +46,7 @@ def _to_roman(n: int) -> str:
 
 # ── Alphabetic conversion ───────────────────────────────────────────────────
 
+
 def _to_alpha(n: int) -> str:
     """Convert 1 → a, 2 → b, … 26 → z, 27 → aa, 28 → ab, etc."""
     if n < 1:
@@ -50,6 +61,7 @@ def _to_alpha(n: int) -> str:
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
+
 
 def format_index(n: int, fmt: str = "arabic") -> str:
     """Format an integer index into the chosen style.

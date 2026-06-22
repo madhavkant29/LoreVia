@@ -38,24 +38,21 @@ const marketingPricingContent = pricingTiers.map((tier) => ({
       : tier.name === "Author"
         ? [
             "Everything in Free",
-            "15 uploads",
+            "2M active words and 1M processed words monthly",
+            "5 GB source storage",
             "30 Story Advisor turns per day",
             "30 continuity and editorial scans per day",
             "Manuscript editor, notes, summaries, and search",
           ]
         : [
             "Everything in Author",
-            "Unlimited uploads",
+            "8M active words and 4M processed words monthly",
+            "25 GB source storage",
             "60 Story Advisor turns per day",
             "60 continuity and editorial scans per day",
             "Multi-book continuity",
           ],
-  cta:
-    tier.name === "Free"
-      ? "Get started free"
-      : tier.name === "Author"
-        ? "Start free trial"
-        : "Start architect trial",
+  cta: "Analyze my manuscript",
 }))
 
 export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
@@ -93,7 +90,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
       </div>
 
       <p className="mt-5 text-center text-sm text-[#8fa19a]">
-        Free stays available. Paid plans include a 10-day trial. Cancel anytime.
+        Includes a 10-day Author trial. No payment required.
       </p>
 
       <div className="mt-10 grid gap-5 xl:grid-cols-3">

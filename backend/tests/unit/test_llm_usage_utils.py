@@ -21,7 +21,9 @@ from app.utils.llm_usage_utils import (
 
 @pytest.mark.asyncio
 async def test_summarize_llm_usage_for_user_returns_totals(db):
-    user = User(email="llm-usage@lorevia.app", username="llmusage", password_hash="hash", tier="author")
+    user = User(
+        email="llm-usage@lorevia.app", username="llmusage", password_hash="hash", tier="author"
+    )
     db.add(user)
     await db.flush()
 
@@ -70,8 +72,15 @@ async def test_summarize_llm_usage_for_user_handles_unknown_user(db):
 
 
 @pytest.mark.asyncio
-async def test_create_tracked_chat_completion_returns_response_when_usage_recording_fails(db, monkeypatch):
-    user = User(email="tracked-recording@lorevia.app", username="trackedrecording", password_hash="hash", tier="author")
+async def test_create_tracked_chat_completion_returns_response_when_usage_recording_fails(
+    db, monkeypatch
+):
+    user = User(
+        email="tracked-recording@lorevia.app",
+        username="trackedrecording",
+        password_hash="hash",
+        tier="author",
+    )
     db.add(user)
     await db.commit()
     response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))])
@@ -80,11 +89,15 @@ async def test_create_tracked_chat_completion_returns_response_when_usage_record
     async def _fake_create(**_kwargs):
         return response
 
-    async def _fail_record(**_kwargs):
-        raise TimeoutError("usage table unavailable")
+    async def _reserve(**kwargs):
+        return SimpleNamespace(id="tracked-reservation", operation="chat", user_id=kwargs["user_id"])
+
+    async def _finish(*_args, **_kwargs):
+        return None
 
     client.chat.completions.create = _fake_create
-    monkeypatch.setattr(llm_usage_utils, "record_llm_usage_event", _fail_record)
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", _reserve)
+    monkeypatch.setattr("app.services.llm_control_service.finish_llm_reservation", _finish)
 
     result = await create_tracked_chat_completion(
         client=client,
@@ -103,9 +116,15 @@ def test_llm_token_caps_select_tier_limits(monkeypatch):
     monkeypatch.setattr(llm_usage_utils.settings, "AUTHOR_LLM_TOKENS_5H", 150, raising=False)
     monkeypatch.setattr(llm_usage_utils.settings, "ARCHITECT_LLM_TOKENS_5H", 500, raising=False)
 
-    free_caps = llm_token_caps_for_user(SimpleNamespace(tier="free", created_at=datetime(2020, 1, 1, tzinfo=UTC)))
-    author_caps = llm_token_caps_for_user(SimpleNamespace(tier="author", created_at=datetime(2020, 1, 1, tzinfo=UTC)))
-    architect_caps = llm_token_caps_for_user(SimpleNamespace(tier="architect", created_at=datetime(2020, 1, 1, tzinfo=UTC)))
+    free_caps = llm_token_caps_for_user(
+        SimpleNamespace(tier="free", created_at=datetime(2020, 1, 1, tzinfo=UTC))
+    )
+    author_caps = llm_token_caps_for_user(
+        SimpleNamespace(tier="author", created_at=datetime(2020, 1, 1, tzinfo=UTC))
+    )
+    architect_caps = llm_token_caps_for_user(
+        SimpleNamespace(tier="architect", created_at=datetime(2020, 1, 1, tzinfo=UTC))
+    )
 
     assert free_caps.five_hour == 25
     assert author_caps.five_hour == 150
@@ -119,7 +138,12 @@ def test_llm_token_caps_treat_trial_as_author(monkeypatch):
     caps = llm_token_caps_for_user(SimpleNamespace(tier="free", created_at=now - timedelta(days=2)))
 
     assert caps.weekly == 700
-    assert manual_reprocess_token_caps_for_user(SimpleNamespace(tier="free", created_at=now - timedelta(days=2))).weekly == 700
+    assert (
+        manual_reprocess_token_caps_for_user(
+            SimpleNamespace(tier="free", created_at=now - timedelta(days=2))
+        ).weekly
+        == 700
+    )
 
 
 @pytest.mark.parametrize(
@@ -173,8 +197,15 @@ async def test_manual_reprocess_token_capacity_blocks_window_overage(
 
 
 @pytest.mark.asyncio
-async def test_tracked_chat_completion_blocks_before_openai_call_when_token_cap_exceeded(db, monkeypatch):
-    user = User(email="tracked-block@lorevia.app", username="trackedblock", password_hash="hash", tier="free")
+async def test_tracked_chat_completion_blocks_before_openai_call_when_token_cap_exceeded(
+    db, monkeypatch
+):
+    user = User(
+        email="tracked-block@lorevia.app",
+        username="trackedblock",
+        password_hash="hash",
+        tier="free",
+    )
     db.add(user)
     await db.flush()
     user.created_at = datetime.now(UTC) - timedelta(days=60)
@@ -203,6 +234,11 @@ async def test_tracked_chat_completion_blocks_before_openai_call_when_token_cap_
 
     client.chat.completions.create = _fake_create
 
+    async def _blocked(**_kwargs):
+        raise HTTPException(429, "5-hour LLM token allowance reached")
+
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", _blocked)
+
     with pytest.raises(HTTPException) as exc:
         await create_tracked_chat_completion(
             client=client,
@@ -220,7 +256,9 @@ async def test_tracked_chat_completion_blocks_before_openai_call_when_token_cap_
 
 @pytest.mark.asyncio
 async def test_tracked_embedding_blocks_before_openai_call_when_token_cap_exceeded(db, monkeypatch):
-    user = User(email="embed-block@lorevia.app", username="embedblock", password_hash="hash", tier="free")
+    user = User(
+        email="embed-block@lorevia.app", username="embedblock", password_hash="hash", tier="free"
+    )
     db.add(user)
     await db.flush()
     user.created_at = datetime.now(UTC) - timedelta(days=60)
@@ -248,6 +286,11 @@ async def test_tracked_embedding_blocks_before_openai_call_when_token_cap_exceed
         return SimpleNamespace()
 
     client.embeddings.create = _fake_create
+
+    async def _blocked(**_kwargs):
+        raise HTTPException(429, "5-hour LLM token allowance reached")
+
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", _blocked)
 
     with pytest.raises(HTTPException) as exc:
         await create_tracked_embedding(

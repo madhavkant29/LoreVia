@@ -16,7 +16,10 @@ from app.engine.character.adjudicator import (
     ENTITY_TITLE_OR_ROLE,
     adjudicate_character_candidate,
 )
-from app.services.character_identity.normalization import display_name_form, normalized_comparison_name
+from app.services.character_identity.normalization import (
+    display_name_form,
+    normalized_comparison_name,
+)
 
 
 def test_normalization_preserves_display_and_expands_honorifics_for_comparison():
@@ -165,7 +168,7 @@ def test_group_descriptors_do_not_promote_as_characters(name):
             "chapter_numbers": [1, 2],
             "snippets": [
                 f'"Stop there," said {name}. They gathered at the gate.',
-                f'{name} shouted that they would not leave.',
+                f"{name} shouted that they would not leave.",
             ],
         },
     )

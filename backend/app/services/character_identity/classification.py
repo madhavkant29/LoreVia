@@ -3,8 +3,12 @@ from __future__ import annotations
 from enum import StrEnum
 
 from app.engine.character.extractor import _is_title_only_name
-from app.services.character_identity.normalization import first_name_token, name_tokens, normalize_name
-from app.utils.character_utils import family_role_reference
+from app.services.character_identity.normalization import (
+    first_name_token,
+    name_tokens,
+    normalize_name,
+)
+from app.utils.characters.identity import family_role_reference
 
 
 class CandidateKind(StrEnum):
@@ -124,14 +128,18 @@ TITLE_PREFIXES = {
 }
 
 
-def classify_candidate_kind(surface_text: str | None, *, ner_label: str | None = None) -> CandidateKind:
+def classify_candidate_kind(
+    surface_text: str | None, *, ner_label: str | None = None
+) -> CandidateKind:
     text = " ".join(str(surface_text or "").split()).strip()
     if not text:
         return CandidateKind.FRAGMENT
     normalized = normalize_name(text)
     tokens = name_tokens(text)
     lowered = text.casefold().strip(" .,!?:;\"'")
-    raw_tokens = [token.strip(" .,!?:;\"'").casefold() for token in text.split() if token.strip(" .,!?:;\"'")]
+    raw_tokens = [
+        token.strip(" .,!?:;\"'").casefold() for token in text.split() if token.strip(" .,!?:;\"'")
+    ]
 
     if _is_title_only_name(text) or lowered in TITLE_PREFIXES:
         return CandidateKind.FRAGMENT

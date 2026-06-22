@@ -1,5 +1,5 @@
-import uuid
 import os
+import uuid
 from pathlib import Path
 from typing import BinaryIO
 from urllib.parse import urlparse
@@ -39,6 +39,14 @@ def _get_s3_client():
         aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
         config=Config(signature_version="s3v4"),
     )
+
+
+def get_object_size(key: str) -> int:
+    """Return the stored byte size without downloading a remote object."""
+    if is_local_storage():
+        return _local_path(key).stat().st_size
+    response = _get_s3_client().head_object(Bucket=settings.S3_BUCKET, Key=key)
+    return int(response["ContentLength"])
 
 
 def _storage_owner_ids() -> tuple[int, int]:
@@ -95,6 +103,7 @@ def upload_book(file: BinaryIO, user_id: str, filename: str) -> str:
         except PermissionError:
             # Fallback: create directories with 777 permissions if initial mkdir fails
             import os
+
             parent = path.parent
             while parent != _local_storage_root() and not parent.exists():
                 try:
@@ -118,6 +127,7 @@ def upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
             path.parent.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             import os
+
             parent = path.parent
             while parent != _local_storage_root() and not parent.exists():
                 try:
@@ -143,6 +153,7 @@ def upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
             path.parent.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             import os
+
             parent = path.parent
             while parent != _local_storage_root() and not parent.exists():
                 try:
@@ -167,6 +178,7 @@ def upload_text(key: str, content: str) -> str:
             path.parent.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             import os
+
             parent = path.parent
             while parent != _local_storage_root() and not parent.exists():
                 try:

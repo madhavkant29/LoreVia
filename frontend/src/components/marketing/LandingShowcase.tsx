@@ -160,6 +160,7 @@ export function LandingShowcase() {
 
   return (
     <section id="features" className="mx-auto max-w-[1600px] px-5 py-20 md:px-8">
+      <span id="sample-finding" className="block scroll-mt-24" aria-hidden="true" />
       <div className="max-w-3xl">
         <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#d6a84f]">
           Product walkthrough
@@ -176,7 +177,7 @@ export function LandingShowcase() {
       <div className="mt-14 grid gap-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)] lg:gap-14 2xl:grid-cols-[minmax(720px,1.3fr)_minmax(440px,0.7fr)]">
         <div className="hidden lg:block">
           <div className="sticky top-24">
-            <ProductFrame step={activeStep} priority />
+            <ProductFrame step={activeStep} />
           </div>
         </div>
 
@@ -191,7 +192,7 @@ export function LandingShowcase() {
               className="min-h-[auto] border-t border-white/[0.08] py-10 lg:min-h-[78vh] lg:py-16"
             >
               <div className="mb-7 lg:hidden">
-                <ProductFrame step={step} priority={step.id === showcaseSteps[0].id} />
+                <ProductFrame step={step} />
               </div>
               <p className="text-3xs font-semibold uppercase tracking-[0.24em] text-[#d6a84f]">
                 {step.caption}
@@ -219,7 +220,7 @@ export function LandingShowcase() {
   )
 }
 
-function ProductFrame({ step, priority = false }: { step: ShowcaseStep; priority?: boolean }) {
+function ProductFrame({ step }: { step: ShowcaseStep }) {
   const hasPairedVisuals = step.visuals.length > 1
   const [activeVisualIndex, setActiveVisualIndex] = useState(0)
   const [isPreviewHovered, setIsPreviewHovered] = useState(false)
@@ -263,9 +264,7 @@ function ProductFrame({ step, priority = false }: { step: ShowcaseStep; priority
                 src={visual}
                 alt={`${step.title} product screenshot ${index + 1}`}
                 fill
-                priority={priority && index === 0}
-                fetchPriority={priority && index === 0 ? "high" : undefined}
-                loading={priority && index === 0 ? undefined : "lazy"}
+                loading="lazy"
                 sizes="(min-width: 1024px) 58vw, 100vw"
                 className={`object-contain transition-opacity duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
                   activeVisualIndex === index ? "opacity-100" : "opacity-0"
@@ -306,9 +305,7 @@ function ProductFrame({ step, priority = false }: { step: ShowcaseStep; priority
                 src={visual}
                 alt={`${step.title} product screenshot`}
                 fill
-                priority={priority}
-                fetchPriority={priority ? "high" : undefined}
-                loading={priority ? undefined : "lazy"}
+                loading="lazy"
                 sizes="(min-width: 1024px) 58vw, 100vw"
                 className="object-contain"
               />

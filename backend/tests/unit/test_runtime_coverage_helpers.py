@@ -1,34 +1,68 @@
 from __future__ import annotations
 
-import importlib
 import hashlib
+import importlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from app.core.config import settings
 from app.engine.analysis import plot_tracker, recall, summariser
 from app.engine.intelligence import predictor
 from app.engine.world.integration_mapper import detect_integration_opportunities
+from app.models.beta_read import BetaReadAssignmentState, BetaReadScopeKind
 from app.schemas.book import BookOut, BookStatusOut, BookUpload
 from app.schemas.public import PublicBookManualIn, PublicChapterIn
 from app.schemas.user import UserCreate, UserLogin, UserOut
 from app.services import character_service
-from app.models.beta_read import BetaReadAssignmentState, BetaReadScopeKind
 from app.utils import (
     advisor_utils,
     beta_read_utils,
-    book_utils,
     export_utils,
     intelligence_utils,
     public_utils,
     reader_utils,
     world_building_utils,
 )
+from app.utils.books import (
+    book_text,
+    chapter_titles,
+    character_cards,
+    collaboration,
+    collaboration_access,
+    continuity,
+    manuscript,
+    normalization,
+    notes,
+    processing,
+    revision_analysis,
+    revision_decisions,
+    scene_metadata,
+    scene_ordering,
+    scene_serialization,
+    story_health,
+    vault,
+    writer_workspace,
+)
+from app.utils.books import (
+    imports as book_imports,
+)
 from app.utils.index_format import format_index
+from app.utils.public import (
+    catalog,
+    content,
+    forum_engagement,
+    forum_foundation,
+    moderation,
+    ranking_constants,
+    ranking_core,
+    requests,
+    serialization,
+)
 
 
 @pytest.mark.parametrize(
@@ -60,21 +94,21 @@ def test_public_forum_request_parsing_helpers_and_image_validation():
         "empty": "",
     }
 
-    assert public_utils.hash_text("  reader  ") == hashlib.sha256(b"reader").hexdigest()
-    assert public_utils.hash_text("   ") is None
-    assert public_utils._form_text(form, "headline") == "  Beta readers wanted  "
-    assert public_utils._form_text(form, "missing", "fallback") == "fallback"
-    assert public_utils._form_bool(form, "allow_contact_requests") is True
-    assert public_utils._form_bool({}, "missing", True) is True
-    assert public_utils._form_int(form, "desired_beta_reader_count") == 3
-    assert public_utils._form_int(form, "empty") is None
+    assert requests.hash_text("  reader  ") == hashlib.sha256(b"reader").hexdigest()
+    assert requests.hash_text("   ") is None
+    assert requests._form_text(form, "headline") == "  Beta readers wanted  "
+    assert requests._form_text(form, "missing", "fallback") == "fallback"
+    assert requests._form_bool(form, "allow_contact_requests") is True
+    assert requests._form_bool({}, "missing", True) is True
+    assert requests._form_int(form, "desired_beta_reader_count") == 3
+    assert requests._form_int(form, "empty") is None
 
     with pytest.raises(HTTPException) as invalid_number:
-        public_utils._form_int({"desired_beta_reader_count": "many"}, "desired_beta_reader_count")
+        requests._form_int({"desired_beta_reader_count": "many"}, "desired_beta_reader_count")
     assert invalid_number.value.status_code == 422
 
     with pytest.raises(HTTPException) as invalid_json:
-        public_utils._json_payload_dict(["not", "object"])
+        requests._json_payload_dict(["not", "object"])
     assert invalid_json.value.status_code == 422
 
 
@@ -87,19 +121,20 @@ async def test_public_forum_image_helpers_accept_supported_magic_and_reject_bad_
         return chunks.pop(0)
 
     seek_calls: list[int] = []
+
     async def seek_png(offset):
         seek_calls.append(offset)
 
     png_upload.read = read_png
     png_upload.seek = seek_png
 
-    raw, suffix, mime = await public_utils._read_public_forum_image(png_upload)
+    raw, suffix, mime = await requests._read_public_forum_image(png_upload)
 
     assert raw.startswith(b"\x89PNG")
     assert suffix == "png"
     assert mime == "image/png"
     assert seek_calls == [0]
-    assert public_utils._safe_forum_image_filename(png_upload, suffix) == "cover.png"
+    assert requests._safe_forum_image_filename(png_upload, suffix) == "cover.png"
 
     bad_upload = SimpleNamespace(filename="bad.txt")
     bad_chunks = [b"plain text", b""]
@@ -114,7 +149,7 @@ async def test_public_forum_image_helpers_accept_supported_magic_and_reject_bad_
     bad_upload.seek = seek_bad
 
     with pytest.raises(HTTPException) as invalid_image:
-        await public_utils._read_public_forum_image(bad_upload)
+        await requests._read_public_forum_image(bad_upload)
     assert invalid_image.value.status_code == 400
 
 
@@ -135,49 +170,66 @@ def test_public_visibility_forum_and_ranking_helpers(monkeypatch):
         public_description="A public beta novel.",
     )
 
-    assert public_utils.can_view_public_book(book) is True
-    assert public_utils.can_owner_or_admin_view_hidden_book(SimpleNamespace(id=owner_id), book) is True
-    assert public_utils.public_visibility_notice(SimpleNamespace(public_status="pending_review", moderation_status="clean")) == (
-        "This book is waiting for review before it can appear publicly."
+    assert serialization.can_view_public_book(book) is True
+    assert (
+        serialization.can_owner_or_admin_view_hidden_book(SimpleNamespace(id=owner_id), book)
+        is True
     )
-    assert public_utils.normalize_public_analytics_event_type(" BOOK_VIEW ") == "book_view"
-    assert public_utils.public_forum_discoverability_score(
-        average_rating=0.8,
-        rating_count=20,
-        positive_rating_count=4,
-        negative_rating_count=1,
-        interest_count=30,
-    ) == 207.0
-    assert public_utils.reputation_trust_level(-12) == "Low trust"
-    assert public_utils.reputation_trust_level(4) == "New member"
-    assert public_utils.reputation_trust_level(24) == "Trusted"
-    assert public_utils.reputation_trust_level(25) == "Highly trusted"
-    assert public_utils._normalize_forum_status(None) == public_utils.FORUM_POST_OPEN
-    assert public_utils._normalize_forum_thread_type("GENERAL") == public_utils.FORUM_THREAD_TYPE_GENERAL
-    assert public_utils._normalize_forum_comment_reaction(" Like ") == public_utils.FORUM_COMMENT_REACTION_LIKE
-    assert public_utils._reaction_delta("like", "dislike") == (-1, 1, -2)
-    assert public_utils._book_is_forum_eligible(book) is True
-    assert public_utils._forum_post_thread_type(SimpleNamespace(thread_type="general")) == "general"
-    assert public_utils._is_general_forum_post(SimpleNamespace(thread_type="general")) is True
-    public_utils._validate_forum_book_metadata(book)
+    assert serialization.public_visibility_notice(
+        SimpleNamespace(public_status="pending_review", moderation_status="clean")
+    ) == ("This book is waiting for review before it can appear publicly.")
+    assert serialization.normalize_public_analytics_event_type(" BOOK_VIEW ") == "book_view"
+    assert (
+        forum_foundation.public_forum_discoverability_score(
+            average_rating=0.8,
+            rating_count=20,
+            positive_rating_count=4,
+            negative_rating_count=1,
+            interest_count=30,
+        )
+        == 207.0
+    )
+    assert forum_foundation.reputation_trust_level(-12) == "Low trust"
+    assert forum_foundation.reputation_trust_level(4) == "New member"
+    assert forum_foundation.reputation_trust_level(24) == "Trusted"
+    assert forum_foundation.reputation_trust_level(25) == "Highly trusted"
+    assert forum_foundation._normalize_forum_status(None) == forum_foundation.FORUM_POST_OPEN
+    assert (
+        forum_foundation._normalize_forum_thread_type("GENERAL")
+        == forum_foundation.FORUM_THREAD_TYPE_GENERAL
+    )
+    assert (
+        forum_foundation._normalize_forum_comment_reaction(" Like ")
+        == forum_foundation.FORUM_COMMENT_REACTION_LIKE
+    )
+    assert forum_foundation._reaction_delta("like", "dislike") == (-1, 1, -2)
+    assert forum_foundation._book_is_forum_eligible(book) is True
+    assert (
+        forum_foundation._forum_post_thread_type(SimpleNamespace(thread_type="general"))
+        == "general"
+    )
+    assert forum_foundation._is_general_forum_post(SimpleNamespace(thread_type="general")) is True
+    forum_foundation._validate_forum_book_metadata(book)
 
-    monkeypatch.setattr(public_utils.settings, "PUBLIC_FORUM_STATUS", "beta", raising=False)
-    assert public_utils.get_public_forum_status() == "beta"
+    monkeypatch.setattr(settings, "PUBLIC_FORUM_STATUS", "beta", raising=False)
+    assert forum_foundation.get_public_forum_status() == "beta"
     with pytest.raises(HTTPException) as write_disabled:
-        public_utils.ensure_public_forum_write_enabled()
+        forum_foundation.ensure_public_forum_write_enabled()
     assert write_disabled.value.status_code == 403
 
     with pytest.raises(HTTPException):
-        public_utils._normalize_forum_status("closed-ish")
+        forum_foundation._normalize_forum_status("closed-ish")
     with pytest.raises(HTTPException):
-        public_utils._validate_forum_book_metadata(SimpleNamespace(title="", genre="Fantasy", public_description="Desc"))
+        forum_foundation._validate_forum_book_metadata(
+            SimpleNamespace(title="", genre="Fantasy", public_description="Desc")
+        )
 
 
 def test_annotation_vault_and_scene_workspace_helpers():
     user_id = uuid.uuid4()
     owner_id = uuid.uuid4()
     book_id = uuid.uuid4()
-    created_at = datetime.now(timezone.utc)
+    created_at = datetime.now(UTC)
     annotation = SimpleNamespace(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -198,11 +250,14 @@ def test_annotation_vault_and_scene_workspace_helpers():
     )
     book = SimpleNamespace(id=book_id, title="Novel", user_id=owner_id)
 
-    assert book_utils._annotation_category("Line edit") == "line_edit"
-    assert book_utils._annotation_status(None) == "open"
-    assert book_utils._annotation_visibility("PRIVATE") == "private"
-    assert book_utils._annotation_actor_label(SimpleNamespace(username="", email="reader@example.com")) == "reader"
-    serialized = book_utils._serialize_manuscript_annotation(
+    assert notes._annotation_category("Line edit") == "line_edit"
+    assert notes._annotation_status(None) == "open"
+    assert notes._annotation_visibility("PRIVATE") == "private"
+    assert (
+        notes._annotation_actor_label(SimpleNamespace(username="", email="reader@example.com"))
+        == "reader"
+    )
+    serialized = notes._serialize_manuscript_annotation(
         annotation,
         book=book,
         chapter_title="The Gate",
@@ -213,22 +268,22 @@ def test_annotation_vault_and_scene_workspace_helpers():
     assert serialized["chapter_title"] == "The Gate"
 
     with pytest.raises(HTTPException):
-        book_utils._annotation_category("invented")
+        notes._annotation_category("invented")
     with pytest.raises(HTTPException):
-        book_utils._annotation_status("stale")
+        notes._annotation_status("stale")
     with pytest.raises(HTTPException):
-        book_utils._annotation_visibility("team")
+        notes._annotation_visibility("team")
 
-    assert book_utils.normalize_vault_note_source(" user_notes ") == "user_notes"
-    assert book_utils.normalize_vault_note_path(r" Characters\\Mara.md ") == "Characters/Mara.md"
-    assert book_utils.vault_note_title("Characters/Mara.md") == "Mara"
-    assert book_utils.vault_note_folder("Characters/Mara.md") == "Characters"
-    assert book_utils.extract_wiki_references("See [[Mara|the guard]] and ![[Gate#Lore]]") == [
+    assert vault.normalize_vault_note_source(" user_notes ") == "user_notes"
+    assert vault.normalize_vault_note_path(r" Characters\\Mara.md ") == "Characters/Mara.md"
+    assert vault.vault_note_title("Characters/Mara.md") == "Mara"
+    assert vault.vault_note_folder("Characters/Mara.md") == "Characters"
+    assert vault.extract_wiki_references("See [[Mara|the guard]] and ![[Gate#Lore]]") == [
         {"target": "Mara", "alias": "the guard", "link_type": "reference"},
         {"target": "Gate", "alias": "Gate", "link_type": "embed"},
     ]
-    assert book_utils.extract_wiki_tags("#Magic #magic #Gate_Lore") == ["magic", "gate-lore"]
-    graph = book_utils.build_vault_graph(
+    assert vault.extract_wiki_tags("#Magic #magic #Gate_Lore") == ["magic", "gate-lore"]
+    graph = vault.build_vault_graph(
         [
             {"path": "Characters/Mara.md", "content": "[[Gate|the gate]] #hero"},
             {"path": "World/Gate.md", "content": "[[Mara]]"},
@@ -251,13 +306,24 @@ def test_annotation_vault_and_scene_workspace_helpers():
 
     Mara turned the brass key.
     """
-    metadata = book_utils.extract_scene_metadata(scene_text)
+    metadata = scene_metadata.extract_scene_metadata(scene_text)
     assert metadata["pov"] == "Mara"
     assert metadata["characters"] == ["Mara", "Theo"]
-    assert book_utils.normalize_scene_metadata({"tags": "key, gate", "summary": "Location: North Gate"}, description="Fallback")["location"] == "North Gate"
-    assert book_utils.build_novel_scene_path(chapter_number=3, sort_order=2, title="Gate Opens!") == "scenes/chapter-03/002-gate-opens.md"
-    assert book_utils.strip_scene_planning_block(scene_text, title="Gate opens") == "Mara turned the brass key."
-    imported = book_utils.build_scene_chapter_import_text(
+    assert (
+        scene_metadata.normalize_scene_metadata(
+            {"tags": "key, gate", "summary": "Location: North Gate"}, description="Fallback"
+        )["location"]
+        == "North Gate"
+    )
+    assert (
+        scene_metadata.build_novel_scene_path(chapter_number=3, sort_order=2, title="Gate Opens!")
+        == "scenes/chapter-03/002-gate-opens.md"
+    )
+    assert (
+        scene_metadata.strip_scene_planning_block(scene_text, title="Gate opens")
+        == "Mara turned the brass key."
+    )
+    imported = scene_metadata.build_scene_chapter_import_text(
         {
             "title": "Gate opens",
             "body": scene_text,
@@ -267,14 +333,24 @@ def test_annotation_vault_and_scene_workspace_helpers():
     )
     assert "## Scene 7 - Gate opens" in imported
     assert "POV: Mara" in imported
-    assert book_utils.chapter_body_needs_scene_workspace_fallback("III", chapter_number=3) is True
-    assert book_utils.strip_scene_metadata_from_manuscript_text(imported) == "Mara turned the brass key."
+    assert (
+        scene_metadata.chapter_body_needs_scene_workspace_fallback("III", chapter_number=3) is True
+    )
+    assert (
+        scene_metadata.strip_scene_metadata_from_manuscript_text(imported)
+        == "Mara turned the brass key."
+    )
 
 
 def test_detect_integration_opportunities_flags_lightly_used_elements():
     opportunities = detect_integration_opportunities(
         [
-            {"name": "Moon Court", "element_type": "culture", "usage_count": 1, "chapter_number": 4},
+            {
+                "name": "Moon Court",
+                "element_type": "culture",
+                "usage_count": 1,
+                "chapter_number": 4,
+            },
             {"name": "Storm Roads", "usage_count": 2},
             {"name": "  ", "usage_count": 1},
         ]
@@ -299,35 +375,43 @@ def test_detect_integration_opportunities_flags_lightly_used_elements():
 def test_schema_models_validate_runtime_payloads():
     book_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    created_at = datetime.now(timezone.utc)
+    created_at = datetime.now(UTC)
 
     assert BookUpload(title="Novel", genre="Fantasy", author="A Writer").title == "Novel"
     assert BookStatusOut(status="ready", total_chapters=12).total_chunks is None
-    assert BookOut(
-        id=book_id,
-        title="Novel",
-        author=None,
-        genre=None,
-        format="txt",
-        status="ready",
-        total_chapters=12,
-        created_at=created_at,
-    ).id == book_id
-    assert UserCreate(email="reader@example.com", password="long-enough").email == "reader@example.com"
+    assert (
+        BookOut(
+            id=book_id,
+            title="Novel",
+            author=None,
+            genre=None,
+            format="txt",
+            status="ready",
+            total_chapters=12,
+            created_at=created_at,
+        ).id
+        == book_id
+    )
+    assert (
+        UserCreate(email="reader@example.com", password="long-enough").email == "reader@example.com"
+    )
     assert UserLogin(email="reader@example.com", password="secret").password == "secret"
-    assert UserOut(
-        id=user_id,
-        email="reader@example.com",
-        username=None,
-        tier="free",
-        reading_mode="casual",
-        daily_word_goal=1000,
-        today_word_count=0,
-        last_login_at=None,
-        login_streak_days=0,
-        longest_login_streak_days=0,
-        created_at=created_at,
-    ).login_activity_dates == []
+    assert (
+        UserOut(
+            id=user_id,
+            email="reader@example.com",
+            username=None,
+            tier="free",
+            reading_mode="casual",
+            daily_word_goal=1000,
+            today_word_count=0,
+            last_login_at=None,
+            login_streak_days=0,
+            longest_login_streak_days=0,
+            created_at=created_at,
+        ).login_activity_dates
+        == []
+    )
 
     with pytest.raises(ValidationError):
         BookUpload(title="")
@@ -384,7 +468,9 @@ async def test_predict_returns_empty_list_for_malformed_model_json(monkeypatch):
         return [{"text": "Context"}]
 
     async def fake_chat_completion(**kwargs):
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))]
+        )
 
     monkeypatch.setattr(predictor, "get_client", lambda: FakeClient())
     monkeypatch.setattr(predictor, "semantic_search", fake_semantic_search)
@@ -409,13 +495,17 @@ def test_summary_derivation_uses_detailed_events_and_sentence_fallback():
         }
     )
 
-    assert derived["short"]["content"] == "Mira found the gate. Joren broke the seal. The city woke."
+    assert (
+        derived["short"]["content"] == "Mira found the gate. Joren broke the seal. The city woke."
+    )
     assert derived["key_points"]["content"].splitlines() == [
         "1. Gate opens: Mira opens the ash gate.",
         "2. Seal breaks: Joren breaks the old seal.",
     ]
 
-    fallback = summariser.derive_summary_modes_from_detailed({"content": "One. Two. Three. Four. Five. Six."})
+    fallback = summariser.derive_summary_modes_from_detailed(
+        {"content": "One. Two. Three. Four. Five. Six."}
+    )
     assert fallback["key_points"]["content"].splitlines() == [
         "1. One.",
         "2. Two.",
@@ -527,7 +617,9 @@ async def test_character_service_uses_cache_and_populates_character_profile(monk
 
     monkeypatch.setattr(character_service, "cache_get", fake_cache_get)
     monkeypatch.setattr(character_service, "cache_set", fake_cache_set)
-    monkeypatch.setattr(character_service, "key_character_profile", lambda value: f"profile:{value}")
+    monkeypatch.setattr(
+        character_service, "key_character_profile", lambda value: f"profile:{value}"
+    )
     monkeypatch.setattr(character_service.settings, "REDIS_TTL_CHARACTER_PROFILE", 123)
 
     class FakeDb:
@@ -626,32 +718,44 @@ def test_public_utils_validate_visibility_rankings_and_forum_signals(monkeypatch
         archived_at=None,
     )
 
-    monkeypatch.setattr(public_utils.settings, "APP_URL", "https://www.getlorevia.com")
+    monkeypatch.setattr(settings, "APP_URL", "https://www.getlorevia.com")
 
-    assert public_utils.normalize_public_analytics_event_type(" BOOK_VIEW ") == "book_view"
-    assert public_utils.can_view_public_book(visible_book) is True
-    assert public_utils.can_view_public_book(hidden_book) is False
-    assert public_utils.public_visibility_notice(hidden_book) == (
+    assert serialization.normalize_public_analytics_event_type(" BOOK_VIEW ") == "book_view"
+    assert serialization.can_view_public_book(visible_book) is True
+    assert serialization.can_view_public_book(hidden_book) is False
+    assert serialization.public_visibility_notice(hidden_book) == (
         "This book is currently hidden from public view due to a policy or copyright report."
     )
-    assert public_utils.validate_public_content_report_target(
-        visible_book,
-        "https://getlorevia.com/public/ember-gate",
-    ) == "https://getlorevia.com/public/ember-gate"
-    assert public_utils.ensure_content_source_allowed_for_user(SimpleNamespace(), " user_original ") == "user_original"
-    assert public_utils.ensure_report_type_supported("SPAM") == "spam"
-    assert public_utils.normalize_public_ranking_key("top_rated") == "top_rated"
-    assert public_utils.normalize_public_ranking_window("weekly") == "weekly"
-    assert public_utils.public_ranking_window_start(
-        time_window="all_time",
-        now=datetime(2026, 1, 10, tzinfo=timezone.utc),
-    ) is None
-    assert public_utils.public_ranking_window_start(
+    assert (
+        moderation.validate_public_content_report_target(
+            visible_book,
+            "https://getlorevia.com/public/ember-gate",
+        )
+        == "https://getlorevia.com/public/ember-gate"
+    )
+    assert (
+        moderation.ensure_content_source_allowed_for_user(SimpleNamespace(), " user_original ")
+        == "user_original"
+    )
+    assert moderation.ensure_report_type_supported("SPAM") == "spam"
+    assert ranking_core.normalize_public_ranking_key("top_rated") == "top_rated"
+    assert ranking_core.normalize_public_ranking_window("weekly") == "weekly"
+    assert (
+        ranking_core.public_ranking_window_start(
+            time_window="all_time",
+            now=datetime(2026, 1, 10, tzinfo=UTC),
+        )
+        is None
+    )
+    assert ranking_core.public_ranking_window_start(
         time_window="weekly",
-        now=datetime(2026, 1, 10, tzinfo=timezone.utc),
-    ) == datetime(2026, 1, 3, tzinfo=timezone.utc)
-    assert public_utils.public_ranking_label(ranking_key="top_rated", time_window="weekly") == "Top rated this week"
-    metadata = public_utils.build_public_ranking_metadata(
+        now=datetime(2026, 1, 10, tzinfo=UTC),
+    ) == datetime(2026, 1, 3, tzinfo=UTC)
+    assert (
+        ranking_core.public_ranking_label(ranking_key="top_rated", time_window="weekly")
+        == "Top rated this week"
+    )
+    metadata = ranking_core.build_public_ranking_metadata(
         surface="creator_uploads",
         ranking_key="most_popular",
         time_window="monthly",
@@ -660,50 +764,65 @@ def test_public_utils_validate_visibility_rankings_and_forum_signals(monkeypatch
     )
     assert metadata.label == "Most popular this month"
     assert metadata.supporting_note.startswith("Weighted by recent reader activity")
-    assert public_utils.public_forum_discoverability_score(
-        average_rating=4.2,
-        rating_count=20,
-        positive_rating_count=3,
-        negative_rating_count=1,
-        interest_count=30,
-    ) == 535.0
-    assert public_utils.reputation_trust_level(-12) == "Low trust"
-    assert public_utils.reputation_trust_level(8) == "Trusted"
-    assert public_utils.reputation_trust_level(30) == "Highly trusted"
-    assert public_utils._reaction_delta("like", "dislike") == (-1, 1, -2)
-    assert public_utils.forum_post_is_publicly_interactive(SimpleNamespace(status=" open ")) is True
-    assert public_utils.forum_post_is_publicly_interactive(SimpleNamespace(status="closed")) is False
+    assert (
+        forum_foundation.public_forum_discoverability_score(
+            average_rating=4.2,
+            rating_count=20,
+            positive_rating_count=3,
+            negative_rating_count=1,
+            interest_count=30,
+        )
+        == 535.0
+    )
+    assert forum_foundation.reputation_trust_level(-12) == "Low trust"
+    assert forum_foundation.reputation_trust_level(8) == "Trusted"
+    assert forum_foundation.reputation_trust_level(30) == "Highly trusted"
+    assert forum_foundation._reaction_delta("like", "dislike") == (-1, 1, -2)
+    assert (
+        forum_engagement.forum_post_is_publicly_interactive(SimpleNamespace(status=" open "))
+        is True
+    )
+    assert (
+        forum_engagement.forum_post_is_publicly_interactive(SimpleNamespace(status="closed"))
+        is False
+    )
 
     with pytest.raises(HTTPException):
-        public_utils.normalize_public_analytics_event_type("unknown")
+        serialization.normalize_public_analytics_event_type("unknown")
     with pytest.raises(HTTPException):
-        public_utils.ensure_content_source_allowed_for_user(SimpleNamespace(), "licensed")
+        moderation.ensure_content_source_allowed_for_user(SimpleNamespace(), "licensed")
     with pytest.raises(HTTPException):
-        public_utils.validate_public_content_report_target(
+        moderation.validate_public_content_report_target(
             visible_book,
             "https://evil.example/public/ember-gate",
         )
 
 
 def test_public_utils_form_slug_forum_and_ranking_helpers(monkeypatch):
-    monkeypatch.setattr(public_utils.settings, "PUBLIC_MODE_ENABLED", True)
-    monkeypatch.setattr(public_utils.settings, "PUBLIC_FORUM_STATUS", "public")
-    monkeypatch.setattr(public_utils.settings, "API_V1_PREFIX", "/api/v1")
-    monkeypatch.setattr(public_utils, "get_presigned_url", lambda storage_key: None)
-    monkeypatch.setattr(public_utils, "create_asset_token", lambda subject, resource, expires_minutes: f"token:{subject}:{resource}:{expires_minutes}")
+    monkeypatch.setattr(settings, "PUBLIC_MODE_ENABLED", True)
+    monkeypatch.setattr(settings, "PUBLIC_FORUM_STATUS", "public")
+    monkeypatch.setattr(settings, "API_V1_PREFIX", "/api/v1")
+    monkeypatch.setattr(requests, "get_presigned_url", lambda storage_key: None)
+    monkeypatch.setattr(
+        requests,
+        "create_asset_token",
+        lambda subject, resource, expires_minutes: f"token:{subject}:{resource}:{expires_minutes}",
+    )
 
-    assert public_utils.normalize_public_slug("  The Ember Gate!! ") == "the-ember-gate"
+    assert content.normalize_public_slug("  The Ember Gate!! ") == "the-ember-gate"
     with pytest.raises(HTTPException):
-        public_utils.normalize_public_slug("no")
+        content.normalize_public_slug("no")
 
-    assert public_utils.hash_text(" reader ") == public_utils.hash_text("reader")
-    assert public_utils.hash_text("   ") is None
+    assert requests.hash_text(" reader ") == requests.hash_text("reader")
+    assert requests.hash_text("   ") is None
     request = SimpleNamespace(
         headers={"x-forwarded-for": "203.0.113.5, 10.0.0.2", "user-agent": " Test   Agent "},
         client=SimpleNamespace(host="198.51.100.9"),
     )
-    assert public_utils.build_public_visitor_fingerprint(request) == public_utils.hash_text("203.0.113.5|test agent")
-    assert public_utils.build_public_visitor_fingerprint(None) is None
+    assert requests.build_public_visitor_fingerprint(request) == requests.hash_text(
+        "203.0.113.5|test agent"
+    )
+    assert requests.build_public_visitor_fingerprint(None) is None
 
     form = {
         "title": "  Story  ",
@@ -712,22 +831,22 @@ def test_public_utils_form_slug_forum_and_ranking_helpers(monkeypatch):
         "upload": SimpleNamespace(filename="cover.png"),
         "empty_upload": SimpleNamespace(filename=""),
     }
-    assert public_utils._form_text(form, "title") == "  Story  "
-    assert public_utils._form_text(form, "missing", "fallback") == "fallback"
-    assert public_utils._form_bool(form, "enabled") is True
-    assert public_utils._form_bool({}, "enabled", True) is True
-    assert public_utils._form_int(form, "count") == 7
-    assert public_utils._form_upload(form, "upload").filename == "cover.png"
-    assert public_utils._form_upload(form, "empty_upload") is None
-    assert public_utils._json_payload_dict({"ok": True}) == {"ok": True}
+    assert requests._form_text(form, "title") == "  Story  "
+    assert requests._form_text(form, "missing", "fallback") == "fallback"
+    assert requests._form_bool(form, "enabled") is True
+    assert requests._form_bool({}, "enabled", True) is True
+    assert requests._form_int(form, "count") == 7
+    assert requests._form_upload(form, "upload").filename == "cover.png"
+    assert requests._form_upload(form, "empty_upload") is None
+    assert requests._json_payload_dict({"ok": True}) == {"ok": True}
     with pytest.raises(HTTPException):
-        public_utils._form_int({"count": "bad"}, "count")
+        requests._form_int({"count": "bad"}, "count")
     with pytest.raises(HTTPException):
-        public_utils._json_payload_dict(["not", "a", "dict"])
+        requests._json_payload_dict(["not", "a", "dict"])
 
     upload = SimpleNamespace(filename="../unsafe name.png")
-    assert public_utils._safe_forum_image_filename(upload, "jpg") == "unsafe name.jpg"
-    image_url = public_utils.public_forum_image_url(
+    assert requests._safe_forum_image_filename(upload, "jpg") == "unsafe name.jpg"
+    image_url = requests.public_forum_image_url(
         storage_key="forum/image.jpg",
         owner_user_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         target_kind="post",
@@ -738,17 +857,20 @@ def test_public_utils_form_slug_forum_and_ranking_helpers(monkeypatch):
         "token=token:00000000-0000-0000-0000-000000000001:"
         "public-forum-post-image:00000000-0000-0000-0000-000000000002:120"
     )
-    assert public_utils.public_forum_image_url(
-        storage_key=None,
-        owner_user_id=uuid.uuid4(),
-        target_kind="post",
-        target_id=uuid.uuid4(),
-    ) is None
+    assert (
+        requests.public_forum_image_url(
+            storage_key=None,
+            owner_user_id=uuid.uuid4(),
+            target_kind="post",
+            target_id=uuid.uuid4(),
+        )
+        is None
+    )
 
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()
-    published_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    updated_at = datetime(2026, 1, 12, tzinfo=timezone.utc)
+    published_at = datetime(2026, 1, 1, tzinfo=UTC)
+    updated_at = datetime(2026, 1, 12, tzinfo=UTC)
     book = SimpleNamespace(
         id=book_id,
         user_id=user_id,
@@ -780,34 +902,44 @@ def test_public_utils_form_slug_forum_and_ranking_helpers(monkeypatch):
     )
     owner = SimpleNamespace(id=user_id)
     stranger = SimpleNamespace(id=uuid.uuid4())
-    assert public_utils.can_owner_or_admin_view_hidden_book(owner, book) is True
-    assert public_utils.can_owner_or_admin_view_hidden_book(stranger, book) is False
-    assert public_utils.public_catalog_kind(book) == public_utils.USER_PUBLIC_SHARE_SOURCE_KIND
-    assert public_utils.is_user_public_share_book(book) is True
-    assert public_utils.is_visible_creator_public_book(book) is True
-    assert public_utils.is_catalog_visible_public_book(book) is True
-    assert public_utils.get_public_share_status(book) == public_utils.PUBLIC_SHARE_STATUS_APPROVED
+    assert serialization.can_owner_or_admin_view_hidden_book(owner, book) is True
+    assert serialization.can_owner_or_admin_view_hidden_book(stranger, book) is False
+    assert serialization.public_catalog_kind(book) == public_utils.USER_PUBLIC_SHARE_SOURCE_KIND
+    assert serialization.is_user_public_share_book(book) is True
+    assert serialization.is_visible_creator_public_book(book) is True
+    assert catalog.is_catalog_visible_public_book(book) is True
+    assert serialization.get_public_share_status(book) == public_utils.PUBLIC_SHARE_STATUS_APPROVED
 
-    book_out = public_utils.build_public_book_out(
+    book_out = serialization.build_public_book_out(
         book,
         author_username="emberwriter",
         active_forum_post_id="post-1",
     )
     assert book_out.creator_display_name == "emberwriter"
     assert book_out.active_forum_post_id == "post-1"
-    assert public_utils._search_matches_public_book(book_out, "ash") is True
-    assert public_utils._search_matches_public_book(book_out, "missing") is False
+    assert ranking_core._search_matches_public_book(book_out, "ash") is True
+    assert ranking_core._search_matches_public_book(book_out, "missing") is False
 
-    assert public_utils._safe_average([1, 2, 4]) == 2.33
-    assert public_utils._timestamp_score(updated_at) == updated_at.timestamp()
-    assert public_utils._timestamp_score(None) == 0.0
-    assert public_utils._book_public_activity_timestamp(book) == updated_at
-    assert public_utils._public_ranking_supporting_note(
-        ranking_key=public_utils.PUBLIC_RANKING_MOST_COMPLEX,
-        time_window=public_utils.PUBLIC_RANKING_WINDOW_MONTHLY,
+    assert ranking_core._safe_average([1, 2, 4]) == 2.33
+    assert ranking_core._timestamp_score(updated_at) == updated_at.timestamp()
+    assert ranking_core._timestamp_score(None) == 0.0
+    assert ranking_core._book_public_activity_timestamp(book) == updated_at
+    assert ranking_core._public_ranking_supporting_note(
+        ranking_key=ranking_constants.PUBLIC_RANKING_MOST_COMPLEX,
+        time_window=ranking_constants.PUBLIC_RANKING_WINDOW_MONTHLY,
     ).startswith("Weighted by LoreVia craft-analysis")
-    assert public_utils._structural_ranking_is_eligible(book=book, window_start=datetime(2026, 1, 10, tzinfo=timezone.utc)) is True
-    assert public_utils._structural_ranking_is_eligible(book=book, window_start=datetime(2026, 2, 1, tzinfo=timezone.utc)) is False
+    assert (
+        ranking_core._structural_ranking_is_eligible(
+            book=book, window_start=datetime(2026, 1, 10, tzinfo=UTC)
+        )
+        is True
+    )
+    assert (
+        ranking_core._structural_ranking_is_eligible(
+            book=book, window_start=datetime(2026, 2, 1, tzinfo=UTC)
+        )
+        is False
+    )
 
     craft_profile = {
         "complexity_score": 77.5,
@@ -820,127 +952,196 @@ def test_public_utils_form_slug_forum_and_ranking_helpers(monkeypatch):
         "rating_count": 10,
         "positive_rating_count": 7,
         "negative_rating_count": 1,
-        "latest_rating_at": datetime(2026, 1, 11, tzinfo=timezone.utc),
+        "latest_rating_at": datetime(2026, 1, 11, tzinfo=UTC),
     }
     view_stats = {"book_view_count": 2, "unique_reader_count": 3, "chapter_view_count": 8}
     forum_stats = {
         "discussion_interest_count": 4,
         "discussion_comment_count": 5,
         "open_discussion_count": 1,
-        "latest_activity_at": datetime(2026, 1, 12, tzinfo=timezone.utc),
+        "latest_activity_at": datetime(2026, 1, 12, tzinfo=UTC),
     }
-    assert public_utils._compute_public_ranking_score(
-        surface=public_utils.PUBLIC_RANKING_SURFACE_UPLOADS,
-        ranking_key=public_utils.PUBLIC_RANKING_TOP_RATED,
-        book=book,
-        craft_profile=craft_profile,
-        rating_stats=rating_stats,
-        view_stats=view_stats,
-        forum_stats=forum_stats,
-        window_start=None,
-    )[0] == 509.0
-    assert public_utils._compute_public_ranking_score(
-        surface=public_utils.PUBLIC_RANKING_SURFACE_UPLOADS,
-        ranking_key=public_utils.PUBLIC_RANKING_MOST_POPULAR,
-        book=book,
-        craft_profile=craft_profile,
-        rating_stats=rating_stats,
-        view_stats=view_stats,
-        forum_stats=forum_stats,
-        window_start=None,
-    )[0] == 134.0
-    assert public_utils._compute_public_ranking_score(
-        surface=public_utils.PUBLIC_RANKING_SURFACE_UPLOADS,
-        ranking_key=public_utils.PUBLIC_RANKING_BIG_CAST,
-        book=book,
-        craft_profile=craft_profile,
-        rating_stats=rating_stats,
-        view_stats=view_stats,
-        forum_stats=forum_stats,
-        window_start=None,
-    )[0] == 18.0
-    assert public_utils._compute_public_ranking_score(
-        surface=public_utils.PUBLIC_RANKING_SURFACE_UPLOADS,
-        ranking_key=public_utils.PUBLIC_RANKING_RECENTLY_UPDATED,
-        book=book,
-        craft_profile=craft_profile,
-        rating_stats=rating_stats,
-        view_stats=view_stats,
-        forum_stats=forum_stats,
-        window_start=datetime(2026, 1, 10, tzinfo=timezone.utc),
-    )[0] == updated_at.timestamp()
+    assert (
+        ranking_core._compute_public_ranking_score(
+            surface=ranking_constants.PUBLIC_RANKING_SURFACE_UPLOADS,
+            ranking_key=ranking_constants.PUBLIC_RANKING_TOP_RATED,
+            book=book,
+            craft_profile=craft_profile,
+            rating_stats=rating_stats,
+            view_stats=view_stats,
+            forum_stats=forum_stats,
+            window_start=None,
+        )[0]
+        == 509.0
+    )
+    assert (
+        ranking_core._compute_public_ranking_score(
+            surface=ranking_constants.PUBLIC_RANKING_SURFACE_UPLOADS,
+            ranking_key=ranking_constants.PUBLIC_RANKING_MOST_POPULAR,
+            book=book,
+            craft_profile=craft_profile,
+            rating_stats=rating_stats,
+            view_stats=view_stats,
+            forum_stats=forum_stats,
+            window_start=None,
+        )[0]
+        == 134.0
+    )
+    assert (
+        ranking_core._compute_public_ranking_score(
+            surface=ranking_constants.PUBLIC_RANKING_SURFACE_UPLOADS,
+            ranking_key=ranking_constants.PUBLIC_RANKING_BIG_CAST,
+            book=book,
+            craft_profile=craft_profile,
+            rating_stats=rating_stats,
+            view_stats=view_stats,
+            forum_stats=forum_stats,
+            window_start=None,
+        )[0]
+        == 18.0
+    )
+    assert (
+        ranking_core._compute_public_ranking_score(
+            surface=ranking_constants.PUBLIC_RANKING_SURFACE_UPLOADS,
+            ranking_key=ranking_constants.PUBLIC_RANKING_RECENTLY_UPDATED,
+            book=book,
+            craft_profile=craft_profile,
+            rating_stats=rating_stats,
+            view_stats=view_stats,
+            forum_stats=forum_stats,
+            window_start=datetime(2026, 1, 10, tzinfo=UTC),
+        )[0]
+        == updated_at.timestamp()
+    )
 
-    assert public_utils.get_public_forum_status() == "public"
-    public_utils.ensure_public_forum_read_enabled()
-    public_utils.ensure_public_forum_write_enabled()
-    monkeypatch.setattr(public_utils.settings, "PUBLIC_FORUM_STATUS", "beta")
-    public_utils.ensure_public_forum_read_enabled()
+    assert forum_foundation.get_public_forum_status() == "public"
+    forum_foundation.ensure_public_forum_read_enabled()
+    forum_foundation.ensure_public_forum_write_enabled()
+    monkeypatch.setattr(settings, "PUBLIC_FORUM_STATUS", "beta")
+    forum_foundation.ensure_public_forum_read_enabled()
     with pytest.raises(HTTPException):
-        public_utils.ensure_public_forum_write_enabled()
-    monkeypatch.setattr(public_utils.settings, "PUBLIC_FORUM_STATUS", "bad")
+        forum_foundation.ensure_public_forum_write_enabled()
+    monkeypatch.setattr(settings, "PUBLIC_FORUM_STATUS", "bad")
     with pytest.raises(HTTPException):
-        public_utils.get_public_forum_status()
-    monkeypatch.setattr(public_utils.settings, "PUBLIC_FORUM_STATUS", "public")
+        forum_foundation.get_public_forum_status()
+    monkeypatch.setattr(settings, "PUBLIC_FORUM_STATUS", "public")
 
-    assert public_utils._normalize_forum_status(" closed ") == public_utils.FORUM_POST_CLOSED
-    assert public_utils._normalize_forum_thread_type(None) == public_utils.FORUM_THREAD_TYPE_NOVEL
-    assert public_utils._normalize_forum_comment_reaction(" LIKE ") == public_utils.FORUM_COMMENT_REACTION_LIKE
-    assert public_utils._reaction_score("like") == 1
-    assert public_utils._reaction_score("dislike") == -1
+    assert (
+        forum_foundation._normalize_forum_status(" closed ") == forum_foundation.FORUM_POST_CLOSED
+    )
+    assert (
+        forum_foundation._normalize_forum_thread_type(None)
+        == forum_foundation.FORUM_THREAD_TYPE_NOVEL
+    )
+    assert (
+        forum_foundation._normalize_forum_comment_reaction(" LIKE ")
+        == forum_foundation.FORUM_COMMENT_REACTION_LIKE
+    )
+    assert forum_foundation._reaction_score("like") == 1
+    assert forum_foundation._reaction_score("dislike") == -1
     with pytest.raises(HTTPException):
-        public_utils._normalize_forum_status("archived")
+        forum_foundation._normalize_forum_status("archived")
     with pytest.raises(HTTPException):
-        public_utils._normalize_forum_thread_type("review")
+        forum_foundation._normalize_forum_thread_type("review")
     with pytest.raises(HTTPException):
-        public_utils._normalize_forum_comment_reaction("heart")
+        forum_foundation._normalize_forum_comment_reaction("heart")
 
-    private_book = SimpleNamespace(is_public=False, mode="author", hidden_at=None, archived_at=None, public_status="draft", moderation_status="clean")
-    reader_book = SimpleNamespace(is_public=False, mode="reader", hidden_at=None, archived_at=None, public_status="draft", moderation_status="clean")
-    hidden_public_book = SimpleNamespace(is_public=True, mode="author", hidden_at=None, archived_at=None, public_status="hidden", moderation_status="clean")
-    assert public_utils._book_is_forum_eligible(private_book) is True
-    assert public_utils._book_is_forum_eligible(reader_book) is False
-    assert public_utils._book_is_forum_eligible(hidden_public_book) is False
-    assert public_utils._forum_post_thread_type(SimpleNamespace(thread_type="general")) == "general"
-    assert public_utils._is_general_forum_post(SimpleNamespace(thread_type="general")) is True
-    public_utils._validate_forum_book_metadata(book)
+    private_book = SimpleNamespace(
+        is_public=False,
+        mode="author",
+        hidden_at=None,
+        archived_at=None,
+        public_status="draft",
+        moderation_status="clean",
+    )
+    reader_book = SimpleNamespace(
+        is_public=False,
+        mode="reader",
+        hidden_at=None,
+        archived_at=None,
+        public_status="draft",
+        moderation_status="clean",
+    )
+    hidden_public_book = SimpleNamespace(
+        is_public=True,
+        mode="author",
+        hidden_at=None,
+        archived_at=None,
+        public_status="hidden",
+        moderation_status="clean",
+    )
+    assert forum_foundation._book_is_forum_eligible(private_book) is True
+    assert forum_foundation._book_is_forum_eligible(reader_book) is False
+    assert forum_foundation._book_is_forum_eligible(hidden_public_book) is False
+    assert (
+        forum_foundation._forum_post_thread_type(SimpleNamespace(thread_type="general"))
+        == "general"
+    )
+    assert forum_foundation._is_general_forum_post(SimpleNamespace(thread_type="general")) is True
+    forum_foundation._validate_forum_book_metadata(book)
     with pytest.raises(HTTPException):
-        public_utils._validate_forum_book_metadata(SimpleNamespace(title="", genre="Fantasy", public_description="Desc"))
-    assert public_utils._normalize_public_forum_pagination(0, 1000) == (1, public_utils.MAX_PUBLIC_FORUM_PAGE_SIZE)
+        forum_foundation._validate_forum_book_metadata(
+            SimpleNamespace(title="", genre="Fantasy", public_description="Desc")
+        )
+    assert forum_foundation._normalize_public_forum_pagination(0, 1000) == (
+        1,
+        forum_foundation.MAX_PUBLIC_FORUM_PAGE_SIZE,
+    )
 
 
 def test_advisor_utils_normalize_modes_mentions_and_structured_results(monkeypatch):
     monkeypatch.setattr(advisor_utils, "classify_world_intent", lambda message: "story_integration")
 
-    assert advisor_utils.detect_advisor_world_mode("Does this world rule contradict the canon?", "consistency") == "gap_detection"
-    assert advisor_utils.detect_advisor_world_mode("How can I integrate this kingdom lore?", "general") == "story_integration"
+    assert (
+        advisor_utils.detect_advisor_world_mode(
+            "Does this world rule contradict the canon?", "consistency"
+        )
+        == "gap_detection"
+    )
+    assert (
+        advisor_utils.detect_advisor_world_mode("How can I integrate this kingdom lore?", "general")
+        == "story_integration"
+    )
     assert advisor_utils.detect_advisor_world_mode("What should Mira do next?", "general") is None
-    assert advisor_utils.advisor_retrieval_settings("general", "gap_detection")[0] == advisor_utils.settings.ADVISOR_CONTINUITY_SEARCH_CHUNKS
-    assert advisor_utils.normalize_whats_the_word_result('{"word":"Luminous","gloss":"  softly bright  "}') == {
+    assert (
+        advisor_utils.advisor_retrieval_settings("general", "gap_detection")[0]
+        == advisor_utils.settings.ADVISOR_CONTINUITY_SEARCH_CHUNKS
+    )
+    assert advisor_utils.normalize_whats_the_word_result(
+        '{"word":"Luminous","gloss":"  softly bright  "}'
+    ) == {
         "word": "luminous",
         "gloss": "softly bright",
     }
     assert advisor_utils.normalize_whats_the_word_result("storm-lit")["word"] == "storm-lit"
-    assert advisor_utils.classify_intent_fast("There is a contradiction in chapter seven") == "plothole"
+    assert (
+        advisor_utils.classify_intent_fast("There is a contradiction in chapter seven")
+        == "plothole"
+    )
 
     character_rows = [
         {"name": "Mira Vale", "aliases": ["Mira"], "first_chapter": 1},
         {"name": "Joren", "aliases": [], "first_chapter": 2},
     ]
-    mentions = advisor_utils.identify_character_mentions("Mira's choice makes Mira Vale doubt Joren.", character_rows)
+    mentions = advisor_utils.identify_character_mentions(
+        "Mira's choice makes Mira Vale doubt Joren.", character_rows
+    )
     assert [item["name"] for item in mentions] == ["Mira Vale", "Joren"]
 
-    context = advisor_utils.build_character_voice_context([
-        {
-            "name": "Mira",
-            "first_chapter": 1,
-            "role": "protagonist",
-            "arc_summary": "Learns to lead.",
-            "personality_tags": ["guarded", "precise"],
-            "motivations": ["save the gate"],
-            "fears": ["failure"],
-            "trait_state": {"eyes": {"value": "gray"}, "hair": "black"},
-        }
-    ])
+    context = advisor_utils.build_character_voice_context(
+        [
+            {
+                "name": "Mira",
+                "first_chapter": 1,
+                "role": "protagonist",
+                "arc_summary": "Learns to lead.",
+                "personality_tags": ["guarded", "precise"],
+                "motivations": ["save the gate"],
+                "fears": ["failure"],
+                "trait_state": {"eyes": {"value": "gray"}, "hair": "black"},
+            }
+        ]
+    )
     assert "Mira (first chapter 1, role protagonist)" in context
     assert "eyes=gray" in context
     assert advisor_utils.build_character_voice_context([]).startswith("No obvious named characters")
@@ -950,7 +1151,10 @@ def test_advisor_utils_normalize_modes_mentions_and_structured_results(monkeypat
     )
     assert voice["issues"][0]["character_name"] == "Mira"
     assert voice["overall_verdict"] == "usable"
-    assert advisor_utils.normalize_voice_consistency_result("not json")["overall_verdict"] == "not json"
+    assert (
+        advisor_utils.normalize_voice_consistency_result("not json")["overall_verdict"]
+        == "not json"
+    )
 
     editorial = advisor_utils.normalize_editorial_review_result(
         '{"continuity_issues":[{"title":"Gate","description":"Mismatch"}],'
@@ -964,7 +1168,9 @@ def test_advisor_utils_normalize_modes_mentions_and_structured_results(monkeypat
     assert editorial["insertion_opportunities"][0]["target_chapter"] == 2
     assert editorial["grammar_issues"][0]["fix"] == "better"
 
-    assert advisor_utils.normalize_synopsis_result('{"synopsis":" A tale ","focus_points":["gate"," debt "]}', "low") == {
+    assert advisor_utils.normalize_synopsis_result(
+        '{"synopsis":" A tale ","focus_points":["gate"," debt "]}', "low"
+    ) == {
         "spoiler_level": "low",
         "synopsis": "A tale",
         "focus_points": ["gate", "debt"],
@@ -986,8 +1192,14 @@ def test_advisor_utils_normalize_modes_mentions_and_structured_results(monkeypat
 
 def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
     assert advisor_utils.classify_intent_fast("") == "general"
-    assert advisor_utils.classify_intent_fast("Where can I add foreshadowing for the dagger?") == "opportunity"
-    assert advisor_utils.classify_intent_fast("Make this paragraph tighter and less wordy.") == "general"
+    assert (
+        advisor_utils.classify_intent_fast("Where can I add foreshadowing for the dagger?")
+        == "opportunity"
+    )
+    assert (
+        advisor_utils.classify_intent_fast("Make this paragraph tighter and less wordy.")
+        == "general"
+    )
 
     mixed_voice = advisor_utils.normalize_voice_consistency_result(
         '{"issues":["skip",{"character_name":"","title":"Missing name","description":"skip"},'
@@ -1001,7 +1213,10 @@ def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
     assert mixed_voice["issues"][0]["intentionality_prompt"] == ""
     assert mixed_voice["overall_verdict"] == "Voice consistency review could not be parsed."
 
-    assert advisor_utils.normalize_editorial_review_result("plain review")["overall_verdict"] == "plain review"
+    assert (
+        advisor_utils.normalize_editorial_review_result("plain review")["overall_verdict"]
+        == "plain review"
+    )
     filtered_editorial = advisor_utils.normalize_editorial_review_result(
         '{"continuity_issues":["skip",{"title":"","description":"missing"},'
         '{"title":"Gate","description":"Mismatch","suggestion":"Seed earlier"}],'
@@ -1014,7 +1229,9 @@ def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
     )
     assert [item["title"] for item in filtered_editorial["continuity_issues"]] == ["Gate"]
     assert [item["title"] for item in filtered_editorial["insertion_opportunities"]] == ["Seed key"]
-    assert filtered_editorial["grammar_issues"] == [{"original": "was", "issue": "tense", "fix": "is"}]
+    assert filtered_editorial["grammar_issues"] == [
+        {"original": "was", "issue": "tense", "fix": "is"}
+    ]
     assert filtered_editorial["formatting_notes"] == ["indent dialogue"]
     assert filtered_editorial["overall_verdict"] == "Editorial review could not be parsed."
 
@@ -1023,7 +1240,9 @@ def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
         "synopsis": "Loose synopsis text",
         "focus_points": ["premise", "tone", "main conflict"],
     }
-    assert advisor_utils.normalize_synopsis_result('{"synopsis":"","focus_points":[]}', "high")["focus_points"] == [
+    assert advisor_utils.normalize_synopsis_result('{"synopsis":"","focus_points":[]}', "high")[
+        "focus_points"
+    ] == [
         "premise",
         "tone",
         "main conflict",
@@ -1034,16 +1253,23 @@ def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
         "rationale": ["LoreVia could not safely tighten this selection yet."],
         "changed": False,
     }
-    assert advisor_utils.normalize_prose_tighten_result('{"tightened_text":"","rationale":[]}', "Original")[
-        "changed"
-    ] is False
-    assert advisor_utils.normalize_prose_tighten_result('{"tightened_text":"Original","rationale":[]}', "Original") == {
+    assert (
+        advisor_utils.normalize_prose_tighten_result(
+            '{"tightened_text":"","rationale":[]}', "Original"
+        )["changed"]
+        is False
+    )
+    assert advisor_utils.normalize_prose_tighten_result(
+        '{"tightened_text":"Original","rationale":[]}', "Original"
+    ) == {
         "tightened_text": "Original",
         "rationale": ["Trimmed repetition and sharpened sentence flow."],
         "changed": False,
     }
 
-    assert advisor_utils.normalize_proactive_scan_result("plain scan")["overall_note"] == "plain scan"
+    assert (
+        advisor_utils.normalize_proactive_scan_result("plain scan")["overall_note"] == "plain scan"
+    )
     scan = advisor_utils.normalize_proactive_scan_result(
         '{"findings":["skip",{"title":"No action","description":"skip"},'
         '{"title":"Bad chapter","description":"Ref is invalid","action_label":"Ask","ask_prompt":"What now?","chapter_ref":"2"}],'
@@ -1064,7 +1290,10 @@ def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
         "overall_note": "Proactive continuity scan could not be parsed.",
     }
 
-    assert advisor_utils.normalize_series_continuity_result("series text")["overall_verdict"] == "series text"
+    assert (
+        advisor_utils.normalize_series_continuity_result("series text")["overall_verdict"]
+        == "series text"
+    )
     series = advisor_utils.normalize_series_continuity_result(
         '{"continuity_issues":["skip",{"title":"","description":"skip"},'
         '{"title":"Trait shift","description":"Mira changes without setup","source_book":" Book One "}],'
@@ -1106,7 +1335,9 @@ def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
             "grammar_issues": [{"issue": "tense", "original": "was", "fix": "is"}],
             "formatting_notes": ["Indent dialogue consistently."],
         },
-        retrieved_passages=[{"chapter_num": 2, "chapter_title": "Market", "excerpt": "Mira sees ash."}],
+        retrieved_passages=[
+            {"chapter_num": 2, "chapter_title": "Market", "excerpt": "Mira sees ash."}
+        ],
         open_threads=[{"title": "Missing oath", "description": "The vow needs payoff."}],
     )
     assert "# LoreVia Continuity Review Report" in markdown
@@ -1132,13 +1363,19 @@ def test_advisor_utils_result_fallbacks_and_continuity_report_exports():
 
 
 def test_intelligence_utils_extract_voice_metrics_and_score_matches():
-    assert intelligence_utils.flatten_key_events({"a": ["First", "Second"], "b": "Third"}) == "First; Second; Third"
+    assert (
+        intelligence_utils.flatten_key_events({"a": ["First", "Second"], "b": "Third"})
+        == "First; Second; Third"
+    )
 
     rows = [
         {"name": "Mira", "aliases": ["Captain Vale"]},
         {"name": "", "aliases": []},
     ]
-    assert intelligence_utils.build_character_name_candidates(rows)[0]["name_candidates"] == ["Mira", "Captain Vale"]
+    assert intelligence_utils.build_character_name_candidates(rows)[0]["name_candidates"] == [
+        "Mira",
+        "Captain Vale",
+    ]
 
     samples = intelligence_utils.extract_dialogue_samples_by_character(
         'Mira whispered, "I can\'t stop now." Joren said, "Perhaps we shall wait?"',
@@ -1159,7 +1396,10 @@ def test_intelligence_utils_extract_voice_metrics_and_score_matches():
 
     merged = intelligence_utils.merge_voice_profile_metrics(mira_metrics, joren_metrics)
     assert merged["sample_dialogue_count"] == 3
-    assert merged["sample_word_count"] == mira_metrics["sample_word_count"] + joren_metrics["sample_word_count"]
+    assert (
+        merged["sample_word_count"]
+        == mira_metrics["sample_word_count"] + joren_metrics["sample_word_count"]
+    )
 
     score, signals = intelligence_utils.score_voice_match(mira_metrics, joren_metrics)
     assert 0 <= score <= 100
@@ -1171,13 +1411,21 @@ def test_reader_utils_timeline_graph_summary_and_media_helpers():
     assert reader_utils.normalize_timeline_label("  Mira   Vale ") == "mira vale"
     assert reader_utils.is_valid_timeline_character("Mira Vale", "mc", [], "Lead character") is True
     assert reader_utils.is_valid_timeline_character("the castle", None, [], None) is False
-    assert reader_utils.timeline_character_detail("Mira", "mc", [], None) == "Major character becomes part of the story."
-    assert reader_utils.timeline_character_detail("Ash", None, ["The Ash"], None) == "Also referred to as The Ash."
-    assert reader_utils.dedupe_timeline_events([
-        {"chapter_number": 1, "kind": "event", "title": "Gate opens"},
-        {"chapter_number": 1, "kind": "event", "title": " gate opens "},
-        {"chapter_number": 2, "kind": "event", "title": "Gate opens"},
-    ]) == [
+    assert (
+        reader_utils.timeline_character_detail("Mira", "mc", [], None)
+        == "Major character becomes part of the story."
+    )
+    assert (
+        reader_utils.timeline_character_detail("Ash", None, ["The Ash"], None)
+        == "Also referred to as The Ash."
+    )
+    assert reader_utils.dedupe_timeline_events(
+        [
+            {"chapter_number": 1, "kind": "event", "title": "Gate opens"},
+            {"chapter_number": 1, "kind": "event", "title": " gate opens "},
+            {"chapter_number": 2, "kind": "event", "title": "Gate opens"},
+        ]
+    ) == [
         {"chapter_number": 1, "kind": "event", "title": "Gate opens"},
         {"chapter_number": 2, "kind": "event", "title": "Gate opens"},
     ]
@@ -1215,11 +1463,16 @@ def test_reader_utils_timeline_graph_summary_and_media_helpers():
         graph_visibility=None,
         first_chapter=99,
     )
-    assert reader_utils.relationship_node_description(char, {"hair": "black"}, ["Trusts Joren."]) == (
-        "guardian Learns command. Disposition: precise. Wants: protect the gate. Trusts Joren."
+    assert reader_utils.relationship_node_description(
+        char, {"hair": "black"}, ["Trusts Joren."]
+    ) == ("guardian Learns command. Disposition: precise. Wants: protect the gate. Trusts Joren.")
+    assert (
+        reader_utils.graph_character_visibility_analysis(char, relationship_count=2)["visible"]
+        is True
     )
-    assert reader_utils.graph_character_visibility_analysis(char, relationship_count=2)["visible"] is True
-    assert reader_utils.graph_character_visibility_analysis(hidden_char)["reasons"] == ["missing_name"]
+    assert reader_utils.graph_character_visibility_analysis(hidden_char)["reasons"] == [
+        "missing_name"
+    ]
     assert reader_utils.character_evidence_score(char)[0] >= 6
 
     duplicate = SimpleNamespace(
@@ -1249,14 +1502,22 @@ def test_reader_utils_timeline_graph_summary_and_media_helpers():
     )
     assert summary["content"] == " The gate opens. "
     assert summary["key_events"][1]["impact"] == "Danger rises"
-    assert reader_utils.strip_json_fence("```json\n{\"ok\": true}\n```") == '{"ok": true}'
+    assert reader_utils.strip_json_fence('```json\n{"ok": true}\n```') == '{"ok": true}'
     assert reader_utils.chapter_analysis_status(None) is None
     assert reader_utils.chapter_source_integrity(None) is None
-    assert reader_utils.serialize_inline_images([
-        {"marker": "[[IMAGE:1]]", "bytes": b"abc", "content_type": "image/png"},
-        {"marker": "", "bytes": b"skip"},
-    ])[0]["content_base64"] == "YWJj"
-    assert reader_utils.extract_media_markers("A [[IMAGE:1]] and [[IMAGE:2]]") == ["[[IMAGE:1]]", "[[IMAGE:2]]"]
+    assert (
+        reader_utils.serialize_inline_images(
+            [
+                {"marker": "[[IMAGE:1]]", "bytes": b"abc", "content_type": "image/png"},
+                {"marker": "", "bytes": b"skip"},
+            ]
+        )[0]["content_base64"]
+        == "YWJj"
+    )
+    assert reader_utils.extract_media_markers("A [[IMAGE:1]] and [[IMAGE:2]]") == [
+        "[[IMAGE:1]]",
+        "[[IMAGE:2]]",
+    ]
     assert reader_utils.merge_media_items(
         [{"marker": "[[IMAGE:1]]", "sort_order": 2}],
         [{"marker": "[[IMAGE:2]]", "sort_order": 1}, {"marker": "[[IMAGE:1]]", "sort_order": 0}],
@@ -1267,7 +1528,9 @@ def test_reader_utils_timeline_graph_summary_and_media_helpers():
     assert reader_utils.timeline_relationship_detail("Mira", "Joren", "ally", None)[1] == (
         "Their ally dynamic shifts here."
     )
-    assert reader_utils.build_timeline_track_payload([{"n": 1}], [], [], [], [])["chapters"] == [{"n": 1}]
+    assert reader_utils.build_timeline_track_payload([{"n": 1}], [], [], [], [])["chapters"] == [
+        {"n": 1}
+    ]
 
 
 def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
@@ -1297,7 +1560,9 @@ def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
         section_label="  Act Two  ",
     ) == (BetaReadScopeKind.SECTION.value, 2, 5, "Act Two")
     with pytest.raises(HTTPException):
-        beta_read_utils.validate_beta_read_scope(book, scope_kind="bad", chapter_start=1, chapter_end=2, section_label=None)
+        beta_read_utils.validate_beta_read_scope(
+            book, scope_kind="bad", chapter_start=1, chapter_end=2, section_label=None
+        )
     with pytest.raises(HTTPException):
         beta_read_utils.validate_beta_read_scope(
             book,
@@ -1323,7 +1588,7 @@ def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
         submitted_before_deadline=True,
         late_feedback=False,
         state=BetaReadAssignmentState.ACTIVE.value,
-        expires_at=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 1, 10, tzinfo=UTC),
         revoked_at=None,
         revoked_reason=None,
         started_at=None,
@@ -1334,7 +1599,10 @@ def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
         missed_at=None,
     )
     assert beta_read_utils.assignment_scope_bounds(assignment, 12) == (2, 12)
-    assert beta_read_utils.normalize_beta_read_questions([" First? ", "first?", "", "Second?"]) == ["First?", "Second?"]
+    assert beta_read_utils.normalize_beta_read_questions([" First? ", "first?", "", "Second?"]) == [
+        "First?",
+        "Second?",
+    ]
     assert beta_read_utils.normalize_feedback_kind("scene reaction") == "scene_reaction"
     assert beta_read_utils.normalize_author_feedback_item_status("task created") == "task_created"
     assert beta_read_utils.normalize_beta_read_rating(4.5) == 4.5
@@ -1351,22 +1619,26 @@ def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
         beta_read_utils.normalize_beta_read_rating(4.25)
 
     metadata = beta_read_utils.beta_feedback_item_author_metadata(
-        SimpleNamespace(metadata_json={
-            "author_status": "resolved",
-            "author_task_id": " task-1 ",
-            "author_updated_at": "2026-01-01T00:00:00Z",
-        })
+        SimpleNamespace(
+            metadata_json={
+                "author_status": "resolved",
+                "author_task_id": " task-1 ",
+                "author_updated_at": "2026-01-01T00:00:00Z",
+            }
+        )
     )
     assert metadata["author_status"] == "resolved"
     assert metadata["author_task_id"] == "task-1"
 
     snapshot = beta_read_utils.beta_submission_snapshot(assignment)
     assert snapshot["progress_pct"] == 80.0
-    beta_read_utils.apply_beta_submission_snapshot(assignment, {"progress_pct": 100, "late_feedback": True})
+    beta_read_utils.apply_beta_submission_snapshot(
+        assignment, {"progress_pct": 100, "late_feedback": True}
+    )
     assert assignment.submitted_progress_pct == 100.0
     assert assignment.late_feedback is True
 
-    now = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 5, tzinfo=UTC)
     assert beta_read_utils.submission_is_late(assignment, now=now) is False
     beta_read_utils.assert_valid_beta_transition(
         BetaReadAssignmentState.ACTIVE.value,
@@ -1389,100 +1661,142 @@ def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
 
 
 def test_book_utils_runtime_normalizers_and_workspace_helpers():
-    assert book_utils._normalize_unicode_replacements("A\u2014B\u2026") == "A--B..."
-    assert book_utils._clean_text("<b>Mira</b>") == "Mira"
-    assert book_utils._clean_optional_text("  ") is None
-    assert book_utils._count_words("one  two\nthree") == 3
-    assert book_utils.normalize_chapter_title(" The Gate ") == "The Gate"
-    assert book_utils.chapter_title_is_placeholder("Chapter IX") is True
-    assert book_utils.chapter_title_is_placeholder("The Ash Gate", chapter_number=3) is False
-    assert book_utils.build_chapter_title_from_summary(
-        "The ash gate opens under the city.",
-        key_events=[{"event_title": "Ward breaks below"}],
-    ) == "Ward Breaks Below"
+    assert book_text._normalize_unicode_replacements("A\u2014B\u2026") == "A--B..."
+    assert book_text._clean_text("<b>Mira</b>") == "Mira"
+    assert book_text._clean_optional_text("  ") is None
+    assert chapter_titles._count_words("one  two\nthree") == 3
+    assert chapter_titles.normalize_chapter_title(" The Gate ") == "The Gate"
+    assert chapter_titles.chapter_title_is_placeholder("Chapter IX") is True
+    assert chapter_titles.chapter_title_is_placeholder("The Ash Gate", chapter_number=3) is False
+    assert (
+        chapter_titles.build_chapter_title_from_summary(
+            "The ash gate opens under the city.",
+            key_events=[{"event_title": "Ward breaks below"}],
+        )
+        == "Ward Breaks Below"
+    )
     with pytest.raises(HTTPException):
-        book_utils.normalize_chapter_title("one two three four five")
+        chapter_titles.normalize_chapter_title("one two three four five")
 
-    assert book_utils.normalize_book_work_type(" SCREENPLAY ") == "screenplay"
-    assert book_utils.normalize_book_work_type(None, default="other") == "other"
+    assert normalization.normalize_book_work_type(" SCREENPLAY ") == "screenplay"
+    assert normalization.normalize_book_work_type(None, default="other") == "other"
     with pytest.raises(HTTPException):
-        book_utils.normalize_book_work_type("unknown", default="other")
-    assert book_utils.detect_upload_format("draft.FOUNTAIN") == "fountain"
-    assert book_utils.infer_work_type_from_filename("draft.fountain") == "screenplay"
-    assert book_utils.resolve_upload_format_and_work_type("novel.docx", None) == ("docx", "novel")
-    assert book_utils.resolve_upload_format_and_work_type("script.pdf", "screenplay") == ("pdf", "screenplay")
+        normalization.normalize_book_work_type("unknown", default="other")
+    assert normalization.detect_upload_format("draft.FOUNTAIN") == "fountain"
+    assert normalization.infer_work_type_from_filename("draft.fountain") == "screenplay"
+    assert normalization.resolve_upload_format_and_work_type("novel.docx", None) == (
+        "docx",
+        "novel",
+    )
+    assert normalization.resolve_upload_format_and_work_type("script.pdf", "screenplay") == (
+        "pdf",
+        "screenplay",
+    )
     with pytest.raises(HTTPException):
-        book_utils.resolve_upload_format_and_work_type("novel.docx", "screenplay")
-    assert book_utils.upload_filename_for_format("txt") == "upload.txt"
-    assert book_utils.story_unit_name("screenplay", plural=True, lowercase=True) == "scenes"
-    assert book_utils.story_unit_label("screenplay", 4, index_format="roman-upper") == "Scene IV"
-    assert book_utils.chapter_kind_label("part", 2) == "Part"
-    assert book_utils.normalize_chapter_kind(" ACT ") == "chapter"
+        normalization.resolve_upload_format_and_work_type("novel.docx", "screenplay")
+    assert normalization.upload_filename_for_format("txt") == "upload.txt"
+    assert normalization.story_unit_name("screenplay", plural=True, lowercase=True) == "scenes"
+    assert normalization.story_unit_label("screenplay", 4, index_format="roman-upper") == "Scene IV"
+    assert normalization.chapter_kind_label("part", 2) == "Part"
+    assert normalization.normalize_chapter_kind(" ACT ") == "chapter"
 
-    assert book_utils.normalize_processing_timestamp(datetime(2026, 1, 1, tzinfo=timezone.utc)).startswith("2026-01-01")
-    assert book_utils.normalize_public_processing_stage("ready", None, is_fully_ready=True) == "ready"
-    assert book_utils.normalize_public_processing_stage("processing", "extracting") == "extracting"
-    assert book_utils.processing_retry_available("failed", None, [], "boom") is True
-    assert book_utils.normalize_reprocess_metadata({
-        "auto_reprocess_enabled": True,
-        "pending_chapters": ["1", 2, "bad", 2],
-        "last_manual_chapter_number": "4",
-    })["pending_chapters"] == [2]
+    assert processing.normalize_processing_timestamp(datetime(2026, 1, 1, tzinfo=UTC)).startswith(
+        "2026-01-01"
+    )
+    assert (
+        processing.normalize_public_processing_stage("ready", None, is_fully_ready=True) == "ready"
+    )
+    assert processing.normalize_public_processing_stage("processing", "extracting") == "extracting"
+    assert processing.processing_retry_available("failed", None, [], "boom") is True
+    assert processing.normalize_reprocess_metadata(
+        {
+            "auto_reprocess_enabled": True,
+            "pending_chapters": ["1", 2, "bad", 2],
+            "last_manual_chapter_number": "4",
+        }
+    )["pending_chapters"] == [2]
 
-    workspace = book_utils.normalize_writer_workspace({
-        "word_count_goals": {"book_target": "90000", "chapter_target": "bad", "session_target": 1200},
-        "goal_calendar": [
-            {"id": "g1", "title": " Draft midpoint ", "due_date": "2026-06-15", "quota_value": "500", "quota_unit": "words"},
-            {"title": "", "due_date": "bad"},
-        ],
-        "revision_board": {"items": [{"item_id": "a", "status": "fixed"}]},
-    })
+    workspace = writer_workspace.normalize_writer_workspace(
+        {
+            "word_count_goals": {
+                "book_target": "90000",
+                "chapter_target": "bad",
+                "session_target": 1200,
+            },
+            "goal_calendar": [
+                {
+                    "id": "g1",
+                    "title": " Draft midpoint ",
+                    "due_date": "2026-06-15",
+                    "quota_value": "500",
+                    "quota_unit": "words",
+                },
+                {"title": "", "due_date": "bad"},
+            ],
+            "revision_board": {"items": [{"item_id": "a", "status": "fixed"}]},
+        }
+    )
     assert workspace["word_count_goals"]["book_target"] is None
     assert workspace["word_count_goals"]["chapter_target"] is None
     assert workspace["word_count_goals"]["session_target"] == 1200
     assert workspace["goal_calendar"][0]["title"] == "Draft midpoint"
     assert workspace["revision_board"]["items"][0]["status"] == "fixed"
 
-    assert book_utils.estimate_readability("Short sentence. Another short sentence.")["words"] == 5
-    assert book_utils.normalize_collaboration_email(" USER@Example.COM ") == "user@example.com"
-    assert book_utils.normalize_collaboration_role("co_writer") == "co_writer"
+    assert (
+        story_health.estimate_readability("Short sentence. Another short sentence.")["words"] == 5
+    )
+    assert collaboration.normalize_collaboration_email(" USER@Example.COM ") == "user@example.com"
+    assert collaboration.normalize_collaboration_role("co_writer") == "co_writer"
     with pytest.raises(HTTPException):
-        book_utils.normalize_collaboration_role("co writer")
-    assert book_utils.collaboration_role_workspace_shell("reader_only") == "reader"
-    assert book_utils.normalize_vault_note_source("character_bible") == "character_bible"
-    assert book_utils.normalize_vault_note_path(" Folder / Note.md ") == "Folder/Note.md"
-    assert book_utils.vault_note_title("Folder/Note.md") == "Note"
-    assert book_utils.vault_note_folder("Folder/Note.md") == "Folder"
-    assert book_utils.extract_wiki_links("See [[Mira Vale|Mira]] and [[Joren]].") == [
+        collaboration.normalize_collaboration_role("co writer")
+    assert collaboration.collaboration_role_workspace_shell("reader_only") == "reader"
+    assert vault.normalize_vault_note_source("character_bible") == "character_bible"
+    assert vault.normalize_vault_note_path(" Folder / Note.md ") == "Folder/Note.md"
+    assert vault.vault_note_title("Folder/Note.md") == "Note"
+    assert vault.vault_note_folder("Folder/Note.md") == "Folder"
+    assert vault.extract_wiki_links("See [[Mira Vale|Mira]] and [[Joren]].") == [
         {"target": "Mira Vale", "alias": "Mira"},
         {"target": "Joren", "alias": "Joren"},
     ]
-    assert book_utils.extract_wiki_tags("#World/City #bad") == ["world/city", "bad"]
+    assert vault.extract_wiki_tags("#World/City #bad") == ["world/city", "bad"]
 
 
 def test_book_utils_revision_vault_scene_and_collaboration_branches():
-    state_map = book_utils._revision_board_state_map({
-        "revision_board": {
-            "items": [
-                {"item_id": "rev-1", "status": "fixed", "assigned_version_id": "v1", "task_id": "task-9"},
-                {"item_id": "", "status": "ignored"},
-                "bad",
-            ]
+    state_map = revision_decisions._revision_board_state_map(
+        {
+            "revision_board": {
+                "items": [
+                    {
+                        "item_id": "rev-1",
+                        "status": "fixed",
+                        "assigned_version_id": "v1",
+                        "task_id": "task-9",
+                    },
+                    {"item_id": "", "status": "ignored"},
+                    "bad",
+                ]
+            }
         }
-    })
-    overlay = book_utils._overlay_revision_state(
+    )
+    overlay = revision_decisions._overlay_revision_state(
         {"id": "rev-1", "status": "pending", "assigned_version_id": None, "task_id": None},
         state_map,
     )
     assert overlay["status"] == "fixed"
     assert overlay["assigned_version_id"] == "v1"
-    assert book_utils._severity_from_text("This contradiction breaks earlier evidence") == "high"
-    assert book_utils._severity_from_text("A subtle inconsistent reference") == "medium"
-    assert book_utils._flatten_summary_points({"a": [" one ", {"nested": "two"}]}) == ["one", "{'nested': 'two'}"]
+    assert (
+        revision_analysis._severity_from_text("This contradiction breaks earlier evidence")
+        == "high"
+    )
+    assert revision_analysis._severity_from_text("A subtle inconsistent reference") == "medium"
+    assert revision_analysis._flatten_summary_points({"a": [" one ", {"nested": "two"}]}) == [
+        "one",
+        "{'nested': 'two'}",
+    ]
 
     before = "Mira carries the ash key through the gate. Joren watches."
     after = "Joren carries the glass map through the tower."
-    summary, terms = book_utils._build_revision_change_summary(
+    summary, terms = revision_analysis._build_revision_change_summary(
         before_text=before,
         after_text=after,
         unit_label="Chapter 2",
@@ -1492,16 +1806,42 @@ def test_book_utils_revision_vault_scene_and_collaboration_branches():
     )
     assert "removed or weakened" in summary
     assert "ash key" in terms
-    assert book_utils._describe_narration_shift(
-        {"pov_mode": "first-person", "avg_sentence_length": 8, "exclamation_rate": 0, "semicolon_rate": 0},
-        {"pov_mode": "third-person", "avg_sentence_length": 8, "exclamation_rate": 0, "semicolon_rate": 0},
-    ) == "Narration shifts from first-person anchoring into third-person anchoring."
-    assert book_utils._describe_narration_shift(
-        {"pov_mode": "mixed", "avg_sentence_length": 4, "exclamation_rate": 0, "semicolon_rate": 0},
-        {"pov_mode": "mixed", "avg_sentence_length": 15, "exclamation_rate": 0, "semicolon_rate": 0},
-    ) == "Narration suddenly becomes much denser or much shorter than the surrounding chapters."
+    assert (
+        revision_analysis._describe_narration_shift(
+            {
+                "pov_mode": "first-person",
+                "avg_sentence_length": 8,
+                "exclamation_rate": 0,
+                "semicolon_rate": 0,
+            },
+            {
+                "pov_mode": "third-person",
+                "avg_sentence_length": 8,
+                "exclamation_rate": 0,
+                "semicolon_rate": 0,
+            },
+        )
+        == "Narration shifts from first-person anchoring into third-person anchoring."
+    )
+    assert (
+        revision_analysis._describe_narration_shift(
+            {
+                "pov_mode": "mixed",
+                "avg_sentence_length": 4,
+                "exclamation_rate": 0,
+                "semicolon_rate": 0,
+            },
+            {
+                "pov_mode": "mixed",
+                "avg_sentence_length": 15,
+                "exclamation_rate": 0,
+                "semicolon_rate": 0,
+            },
+        )
+        == "Narration suddenly becomes much denser or much shorter than the surrounding chapters."
+    )
 
-    timeline = book_utils._build_knowledge_timeline(
+    timeline = revision_analysis._build_knowledge_timeline(
         knowledge_matrix=[
             {
                 "fact": "Ash key exists",
@@ -1521,44 +1861,61 @@ def test_book_utils_revision_vault_scene_and_collaboration_branches():
     ]
 
     items = [
-        {"category": "confusion", "title": "Lore term unclear", "description": "world magic term lacks setup"},
-        {"category": "voice", "title": "Chemistry weak", "description": "relationship emotion falls flat"},
+        {
+            "category": "confusion",
+            "title": "Lore term unclear",
+            "description": "world magic term lacks setup",
+        },
+        {
+            "category": "voice",
+            "title": "Chemistry weak",
+            "description": "relationship emotion falls flat",
+        },
     ]
-    genre_checks = book_utils._select_genre_checks("Epic Fantasy Romance", items)
+    genre_checks = revision_analysis._select_genre_checks("Epic Fantasy Romance", items)
     assert [check["label"] for check in genre_checks] == ["Fantasy", "Romance", "Epic Series"]
     assert genre_checks[0]["findings"][0]["title"] == "Lore term unclear"
 
-    graph = book_utils.build_vault_graph([
-        {"path": "Characters/Mira.md", "content": "Links to [[Ash Gate|the gate]] #Cast"},
-        {"path": "Places/Ash Gate.md", "content": "Backlink to [[Mira]]."},
-        {"path": "Loose.md", "content": "[[Missing]] [[Ash Gate|the gate]]"},
-    ])
+    graph = vault.build_vault_graph(
+        [
+            {"path": "Characters/Mira.md", "content": "Links to [[Ash Gate|the gate]] #Cast"},
+            {"path": "Places/Ash Gate.md", "content": "Backlink to [[Mira]]."},
+            {"path": "Loose.md", "content": "[[Missing]] [[Ash Gate|the gate]]"},
+        ]
+    )
     assert {node["title"]: node["folder"] for node in graph["nodes"]}["Mira"] == "Characters"
-    assert {edge["source"] for edge in graph["edges"]} == {"Characters/Mira.md", "Places/Ash Gate.md", "Loose.md"}
-    assert book_utils.extract_wiki_references("![[Scene One#Beat|Opening]] [[Target]]") == [
+    assert {edge["source"] for edge in graph["edges"]} == {
+        "Characters/Mira.md",
+        "Places/Ash Gate.md",
+        "Loose.md",
+    }
+    assert vault.extract_wiki_references("![[Scene One#Beat|Opening]] [[Target]]") == [
         {"target": "Scene One", "alias": "Opening", "link_type": "embed"},
         {"target": "Target", "alias": "Target", "link_type": "reference"},
     ]
     with pytest.raises(HTTPException):
-        book_utils.normalize_vault_note_path("../bad.md")
+        vault.normalize_vault_note_path("../bad.md")
     with pytest.raises(HTTPException):
-        book_utils.normalize_vault_note_source("drafts")
+        vault.normalize_vault_note_source("drafts")
 
-    assert book_utils._annotation_category(None) == "general"
-    assert book_utils._annotation_status(None) == "open"
-    assert book_utils._annotation_visibility(None) == "shared"
-    assert book_utils._annotation_actor_label(SimpleNamespace(username="", email="writer@example.com")) == "writer"
+    assert notes._annotation_category(None) == "general"
+    assert notes._annotation_status(None) == "open"
+    assert notes._annotation_visibility(None) == "shared"
+    assert (
+        notes._annotation_actor_label(SimpleNamespace(username="", email="writer@example.com"))
+        == "writer"
+    )
     with pytest.raises(HTTPException):
-        book_utils._annotation_category("not-a-real-category")
+        notes._annotation_category("not-a-real-category")
     with pytest.raises(HTTPException):
-        book_utils._annotation_status("closed")
+        notes._annotation_status("closed")
     with pytest.raises(HTTPException):
-        book_utils._annotation_visibility("public")
+        notes._annotation_visibility("public")
 
-    scope = book_utils.normalize_collaboration_scope({"chapter_start": "2", "chapter_end": "4"})
+    scope = collaboration.normalize_collaboration_scope({"chapter_start": "2", "chapter_end": "4"})
     assert scope["chapter_start"] == 2
     assert scope["chapter_end"] == 4
-    permissions = book_utils.normalize_collaboration_permissions(
+    permissions = collaboration.normalize_collaboration_permissions(
         {"can_export": True},
         role="commenter",
         scope=scope,
@@ -1571,15 +1928,15 @@ def test_book_utils_revision_vault_scene_and_collaboration_branches():
         scope={"chapter_start": 2, "chapter_end": 4, "character_bible": True},
         permissions={"can_export": True, "can_comment": True},
     )
-    payload = book_utils.collaboration_scope_payload(collaborator)
+    payload = collaboration.collaboration_scope_payload(collaborator)
     assert payload["character_bible"] is True
-    assert book_utils.collaboration_allows_chapter(collaborator, 3) is True
-    assert book_utils.collaboration_allows_chapter(collaborator, 5) is False
-    assert book_utils.collaboration_can_export(collaborator) is True
+    assert collaboration_access.collaboration_allows_chapter(collaborator, 3) is True
+    assert collaboration_access.collaboration_allows_chapter(collaborator, 5) is False
+    assert collaboration_access.collaboration_can_export(collaborator) is True
     with pytest.raises(HTTPException):
-        book_utils.normalize_collaboration_email("bad")
+        collaboration.normalize_collaboration_email("bad")
     with pytest.raises(HTTPException):
-        book_utils.normalize_collaboration_scope({"chapter_start": 5, "chapter_end": 2})
+        collaboration.normalize_collaboration_scope({"chapter_start": 5, "chapter_end": 2})
 
     scene_text = """## Scene 1 - Gate opens
 
@@ -1595,22 +1952,28 @@ Summary: The team reaches the threshold.
 ---
 
 Mira raises the ash key."""
-    metadata = book_utils.extract_scene_metadata(scene_text)
+    metadata = scene_metadata.extract_scene_metadata(scene_text)
     assert metadata["characters"] == ["Mira", "Joren"]
     assert metadata["goals"] == ["Open the lock"]
-    normalized_metadata = book_utils.normalize_scene_metadata(
+    normalized_metadata = scene_metadata.normalize_scene_metadata(
         {"tags": [" Gate ", "Gate"], "mood": "tense", "summary": "Location: Tower"},
         description="Fallback summary",
     )
     assert normalized_metadata["tags"] == ["Gate"]
     assert normalized_metadata["mood"] == ["tense"]
     assert normalized_metadata["location"] == "Tower"
-    assert book_utils.build_novel_scene_path(chapter_number=3, sort_order=7, title="Gate Opens!") == "scenes/chapter-03/007-gate-opens.md"
-    assert book_utils.build_novel_scene_path(chapter_number=None, sort_order=1, title="") == "scenes/unassigned/001-scene.md"
-    stripped_planning = book_utils.strip_scene_planning_block(scene_text, title="Gate opens")
+    assert (
+        scene_metadata.build_novel_scene_path(chapter_number=3, sort_order=7, title="Gate Opens!")
+        == "scenes/chapter-03/007-gate-opens.md"
+    )
+    assert (
+        scene_metadata.build_novel_scene_path(chapter_number=None, sort_order=1, title="")
+        == "scenes/unassigned/001-scene.md"
+    )
+    stripped_planning = scene_metadata.strip_scene_planning_block(scene_text, title="Gate opens")
     assert "POV:" not in stripped_planning
     assert stripped_planning.endswith("Mira raises the ash key.")
-    import_text = book_utils.build_scene_chapter_import_text(
+    import_text = scene_metadata.build_scene_chapter_import_text(
         {
             "title": "Gate opens",
             "description": "A threshold scene",
@@ -1622,16 +1985,37 @@ Mira raises the ash key."""
     assert "## Scene 2 - Gate opens" in import_text
     assert "Characters:\n- Mira\n- Joren" in import_text
     assert import_text.endswith("Mira raises the ash key.")
-    assert book_utils.build_workspace_chapter_text_from_scenes([
-        {"title": "Gate opens", "description": "A threshold scene", "body": scene_text, "metadata": metadata},
-        SimpleNamespace(title="Aftermath", description=None, body="They cross.", scene_metadata={}),
-    ]).count("***") == 1
-    assert book_utils.chapter_body_needs_scene_workspace_fallback("III", chapter_number=3) is True
-    assert book_utils.chapter_body_needs_scene_workspace_fallback("A real scene unfolds here.", chapter_number=3) is False
-    stripped = book_utils.strip_scene_metadata_from_manuscript_text(scene_text + "\n\n***\n\nSecond body.")
+    assert (
+        scene_metadata.build_workspace_chapter_text_from_scenes(
+            [
+                {
+                    "title": "Gate opens",
+                    "description": "A threshold scene",
+                    "body": scene_text,
+                    "metadata": metadata,
+                },
+                SimpleNamespace(
+                    title="Aftermath", description=None, body="They cross.", scene_metadata={}
+                ),
+            ]
+        ).count("***")
+        == 1
+    )
+    assert (
+        scene_metadata.chapter_body_needs_scene_workspace_fallback("III", chapter_number=3) is True
+    )
+    assert (
+        scene_metadata.chapter_body_needs_scene_workspace_fallback(
+            "A real scene unfolds here.", chapter_number=3
+        )
+        is False
+    )
+    stripped = scene_metadata.strip_scene_metadata_from_manuscript_text(
+        scene_text + "\n\n***\n\nSecond body."
+    )
     assert "POV:" not in stripped
     assert stripped.endswith("Mira raises the ash key.\n\n***\n\nSecond body.")
-    candidates = book_utils.extract_novel_scene_candidates(
+    candidates = scene_metadata.extract_novel_scene_candidates(
         text="# Opening\nMira enters.\n\n***\n\nJoren follows.",
         chapter_number=4,
         source="unit",
@@ -1640,13 +2024,16 @@ Mira raises the ash key."""
     assert candidates[0]["status"] == "assigned"
     first_id = str(uuid.uuid4())
     second_id = str(uuid.uuid4())
-    assert book_utils.normalize_scene_reorder_ids([first_id, second_id]) == [uuid.UUID(first_id), uuid.UUID(second_id)]
+    assert scene_ordering.normalize_scene_reorder_ids([first_id, second_id]) == [
+        uuid.UUID(first_id),
+        uuid.UUID(second_id),
+    ]
     with pytest.raises(HTTPException):
-        book_utils.normalize_scene_reorder_ids([first_id, first_id])
+        scene_ordering.normalize_scene_reorder_ids([first_id, first_id])
     scenes = [SimpleNamespace(sort_order=10), SimpleNamespace(sort_order=20)]
-    book_utils._apply_sequential_scene_sort_order(scenes)
+    scene_ordering._apply_sequential_scene_sort_order(scenes)
     assert [scene.sort_order for scene in scenes] == [1, 2]
-    scene_out = book_utils._scene_out(
+    scene_out = scene_serialization._scene_out(
         SimpleNamespace(
             id=uuid.uuid4(),
             book_id=uuid.uuid4(),
@@ -1662,8 +2049,8 @@ Mira raises the ash key."""
             sort_order=1,
             source="manual",
             origin_chapter_number=None,
-            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-            updated_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2026, 1, 2, tzinfo=UTC),
         ),
         tags=["draft", "important"],
     )
@@ -1671,7 +2058,7 @@ Mira raises the ash key."""
 
 
 def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monkeypatch):
-    now = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 10, tzinfo=UTC)
     owner_id = uuid.uuid4()
     book_id = uuid.uuid4()
     public_book = SimpleNamespace(
@@ -1704,46 +2091,61 @@ def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monke
         public_updated_at=now,
     )
 
-    assert public_utils.can_view_public_book(public_book) is True
+    assert serialization.can_view_public_book(public_book) is True
     public_book.public_status = "pending_review"
-    assert public_utils.can_view_public_book(public_book) is False
-    assert "waiting for review" in public_utils.public_visibility_notice(public_book)
+    assert serialization.can_view_public_book(public_book) is False
+    assert "waiting for review" in serialization.public_visibility_notice(public_book)
     public_book.public_status = "published"
     public_book.moderation_status = "under_review"
-    assert "hidden from public view" in public_utils.public_visibility_notice(public_book)
+    assert "hidden from public view" in serialization.public_visibility_notice(public_book)
     public_book.moderation_status = "clean"
-    assert public_utils.can_owner_or_admin_view_hidden_book(SimpleNamespace(id=owner_id), public_book) is True
-    assert public_utils.public_catalog_kind(public_book) == public_utils.USER_PUBLIC_SHARE_SOURCE_KIND
-    assert public_utils.get_public_share_status(public_book) == public_utils.PUBLIC_SHARE_STATUS_APPROVED
+    assert (
+        serialization.can_owner_or_admin_view_hidden_book(SimpleNamespace(id=owner_id), public_book)
+        is True
+    )
+    assert (
+        serialization.public_catalog_kind(public_book) == public_utils.USER_PUBLIC_SHARE_SOURCE_KIND
+    )
+    assert (
+        serialization.get_public_share_status(public_book)
+        == public_utils.PUBLIC_SHARE_STATUS_APPROVED
+    )
 
-    monkeypatch.setattr(public_utils.settings, "APP_URL", "https://www.lorevia.example")
-    assert public_utils.validate_public_content_report_target(
-        public_book,
-        f"https://lorevia.example/books/{public_book.public_slug}",
-    ) == f"https://lorevia.example/books/{public_book.public_slug}"
+    monkeypatch.setattr(settings, "APP_URL", "https://www.lorevia.example")
+    assert (
+        moderation.validate_public_content_report_target(
+            public_book,
+            f"https://lorevia.example/books/{public_book.public_slug}",
+        )
+        == f"https://lorevia.example/books/{public_book.public_slug}"
+    )
     with pytest.raises(HTTPException):
-        public_utils.validate_public_content_report_target(public_book, "https://evil.example/books/lantern-gate")
+        moderation.validate_public_content_report_target(
+            public_book, "https://evil.example/books/lantern-gate"
+        )
     with pytest.raises(HTTPException):
-        public_utils.ensure_content_source_allowed_for_user(SimpleNamespace(), "licensed")
+        moderation.ensure_content_source_allowed_for_user(SimpleNamespace(), "licensed")
     with pytest.raises(HTTPException):
-        public_utils.ensure_report_type_supported("bad")
+        moderation.ensure_report_type_supported("bad")
 
-    public_out = public_utils.build_public_book_out(public_book, author_username="mira", active_forum_post_id="post-1")
+    public_out = serialization.build_public_book_out(
+        public_book, author_username="mira", active_forum_post_id="post-1"
+    )
     assert public_out.creator_display_name == "mira"
     assert public_out.active_forum_post_id == "post-1"
-    metadata = public_utils.build_public_ranking_metadata(
-        surface=public_utils.PUBLIC_RANKING_SURFACE_BETA,
-        ranking_key=public_utils.PUBLIC_RANKING_MOST_POPULAR,
-        time_window=public_utils.PUBLIC_RANKING_WINDOW_WEEKLY,
+    metadata = ranking_core.build_public_ranking_metadata(
+        surface=ranking_constants.PUBLIC_RANKING_SURFACE_BETA,
+        ranking_key=ranking_constants.PUBLIC_RANKING_MOST_POPULAR,
+        time_window=ranking_constants.PUBLIC_RANKING_WINDOW_WEEKLY,
         position=2,
         score=8.5,
         primary_timestamp=now,
     )
     assert metadata.label == "Most popular this week"
     assert "reader activity" in metadata.supporting_note
-    assert public_utils.public_ranking_window_start(time_window="all_time", now=now) is None
+    assert ranking_core.public_ranking_window_start(time_window="all_time", now=now) is None
     with pytest.raises(HTTPException):
-        public_utils.normalize_public_ranking_key("unknown")
+        ranking_core.normalize_public_ranking_key("unknown")
 
     beta_book = SimpleNamespace(total_chapters=8)
     assert beta_read_utils.validate_beta_read_scope(
@@ -1754,8 +2156,12 @@ def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monke
         section_label=" Act Two ",
     ) == ("section", 2, 4, "Act Two")
     with pytest.raises(HTTPException):
-        beta_read_utils.validate_beta_read_scope(beta_book, scope_kind="bad", chapter_start=None, chapter_end=None, section_label=None)
-    questions = beta_read_utils.normalize_beta_read_questions(["What confused you?", " what confused you? ", "", "Favorite beat?"])
+        beta_read_utils.validate_beta_read_scope(
+            beta_book, scope_kind="bad", chapter_start=None, chapter_end=None, section_label=None
+        )
+    questions = beta_read_utils.normalize_beta_read_questions(
+        ["What confused you?", " what confused you? ", "", "Favorite beat?"]
+    )
     assert questions == ["What confused you?", "Favorite beat?"]
     with pytest.raises(HTTPException):
         beta_read_utils.normalize_beta_read_rating(4.25)
@@ -1784,13 +2190,17 @@ def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monke
     assert beta_read_utils.assignment_scope_bounds(assignment, 8) == (2, 8)
     snapshot = beta_read_utils.beta_submission_snapshot(assignment)
     assert snapshot["progress_pct"] == 75.0
-    beta_read_utils.apply_beta_submission_snapshot(assignment, {"progress_pct": 100, "late_feedback": True})
+    beta_read_utils.apply_beta_submission_snapshot(
+        assignment, {"progress_pct": 100, "late_feedback": True}
+    )
     assert assignment.submitted_progress_pct == 100
     assert assignment.late_feedback is True
     assert beta_read_utils.beta_view_bucket(assignment, now=now) == "scheduled"
     assert beta_read_utils.beta_status_label(assignment, now=now) == "Scheduled"
     assert beta_read_utils.beta_primary_action(assignment, now=now) == "View"
-    beta_read_utils.set_beta_assignment_state(assignment, BetaReadAssignmentState.REVOKED.value, now=now, revoked_reason="scope_changed")
+    beta_read_utils.set_beta_assignment_state(
+        assignment, BetaReadAssignmentState.REVOKED.value, now=now, revoked_reason="scope_changed"
+    )
     assert assignment.revoked_reason == "scope_changed"
     user = SimpleNamespace(consecutive_missed_beta_reads=2)
     assert "2 beta reads" in beta_read_utils.penalty_warning_for_user(user)
@@ -1805,7 +2215,12 @@ def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monke
     front = export_utils._manuscript_front_matter(
         "Lantern Gate",
         chapters,
-        {"pen_name": "M. Vale", "header_title": "", "include_epigraph": True, "epigraph": "A line."},
+        {
+            "pen_name": "M. Vale",
+            "header_title": "",
+            "include_epigraph": True,
+            "epigraph": "A line.",
+        },
     )
     assert front["display_author"] == "M. Vale"
     assert front["header_last_name"] == "Vale"
@@ -1817,13 +2232,15 @@ def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monke
     ]
     assert export_utils._chapter_heading_lines(chapters[0], "roman-upper") == ("Prologue", None)
     assert export_utils._manuscript_toc_label(chapters[1], "roman-upper") == "Chapter II: Chapter 2"
-    assert export_utils._scene_heading_lines({"chapter_number": 3, "title": "Gate opens"}, 2, "alpha-upper") == (
+    assert export_utils._scene_heading_lines(
+        {"chapter_number": 3, "title": "Gate opens"}, 2, "alpha-upper"
+    ) == (
         "Scene #2 (Chapter C)",
         "Gate opens",
     )
 
     long_text = " ".join(["word"] * 6)
-    normalized = book_utils.normalize_imported_chapters(
+    normalized = book_imports.normalize_imported_chapters(
         [
             {
                 "title": " Long Chapter ",
@@ -1839,9 +2256,11 @@ def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monke
     )
     assert normalized[0]["number"] == 5
     assert normalized[0]["title"] == "Long Chapter"
-    assert book_utils._filter_import_images_for_text("Text [[IMAGE:one]]", normalized[0]["images"]) == [{"marker": "[[IMAGE:one]]"}]
-    assert len(book_utils.split_long_document("one two", max_words=10)) == 1
-    assert book_utils.as_bool(" yes ") is True
+    assert book_imports._filter_import_images_for_text(
+        "Text [[IMAGE:one]]", normalized[0]["images"]
+    ) == [{"marker": "[[IMAGE:one]]"}]
+    assert len(book_imports.split_long_document("one two", max_words=10)) == 1
+    assert continuity.as_bool(" yes ") is True
 
 
 def test_book_utils_continuity_flag_helpers_detect_trait_changes():
@@ -1857,23 +2276,23 @@ def test_book_utils_continuity_flag_helpers_detect_trait_changes():
         trait_snapshot={"eyes": {"value": "blue"}, "hair": "black"},
     )
 
-    chapter_numbers, states = book_utils._map_chapter_consistency_state_history([previous])
+    chapter_numbers, states = continuity._map_chapter_consistency_state_history([previous])
     assert chapter_numbers == [2]
-    assert book_utils._latest_state_before_chapter(chapter_numbers, states, 5) is previous
-    assert book_utils._latest_state_before_chapter(chapter_numbers, states, 1) is None
-    flags = book_utils._detect_continuity_flags_from_rows(
+    assert continuity._latest_state_before_chapter(chapter_numbers, states, 5) is previous
+    assert continuity._latest_state_before_chapter(chapter_numbers, states, 1) is None
+    flags = continuity._detect_continuity_flags_from_rows(
         work_type="novel",
         chapter_number=5,
         rows=[(current, "Mara")],
         prior_states_by_character={character_id: (chapter_numbers, states)},
     )
     assert flags == ["Mara: eye description changed from 'green' to 'blue' since chapter 2."]
-    assert book_utils._trait_value({"value": "  silver "}) == "silver"
-    assert book_utils._trait_value(["bad"]) is None
+    assert character_cards._trait_value({"value": "  silver "}) == "silver"
+    assert character_cards._trait_value(["bad"]) is None
 
 
 def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
-    now = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 10, tzinfo=UTC)
     book = SimpleNamespace(total_chapters=5)
 
     assert beta_read_utils.validate_beta_read_scope(
@@ -1892,13 +2311,21 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
     ) == ("chapter_range", 2, 4, None)
 
     with pytest.raises(HTTPException):
-        beta_read_utils.validate_beta_read_scope(book, scope_kind="chapter_range", chapter_start=None, chapter_end=4, section_label=None)
+        beta_read_utils.validate_beta_read_scope(
+            book, scope_kind="chapter_range", chapter_start=None, chapter_end=4, section_label=None
+        )
     with pytest.raises(HTTPException):
-        beta_read_utils.validate_beta_read_scope(book, scope_kind="chapter_range", chapter_start=4, chapter_end=2, section_label=None)
+        beta_read_utils.validate_beta_read_scope(
+            book, scope_kind="chapter_range", chapter_start=4, chapter_end=2, section_label=None
+        )
     with pytest.raises(HTTPException):
-        beta_read_utils.validate_beta_read_scope(book, scope_kind="chapter_range", chapter_start=1, chapter_end=7, section_label=None)
+        beta_read_utils.validate_beta_read_scope(
+            book, scope_kind="chapter_range", chapter_start=1, chapter_end=7, section_label=None
+        )
     with pytest.raises(HTTPException):
-        beta_read_utils.validate_beta_read_scope(book, scope_kind="section", chapter_start=1, chapter_end=2, section_label=" ")
+        beta_read_utils.validate_beta_read_scope(
+            book, scope_kind="section", chapter_start=1, chapter_end=2, section_label=" "
+        )
 
     with pytest.raises(HTTPException):
         beta_read_utils.normalize_beta_read_questions(["x" * 301])
@@ -1911,7 +2338,13 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
     with pytest.raises(HTTPException):
         beta_read_utils.normalize_author_feedback_item_status("bad")
     assert beta_read_utils.beta_feedback_item_author_metadata(
-        SimpleNamespace(metadata_json={"author_status": "resolved", "author_task_id": " task-1 ", "author_updated_at": "bad"})
+        SimpleNamespace(
+            metadata_json={
+                "author_status": "resolved",
+                "author_task_id": " task-1 ",
+                "author_updated_at": "bad",
+            }
+        )
     ) == {"author_status": "resolved", "author_task_id": "task-1", "author_updated_at": None}
 
     with pytest.raises(HTTPException):
@@ -1932,7 +2365,9 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
     assert beta_read_utils.beta_status_label(assignment, now=now) == "Expired"
     assert beta_read_utils.beta_primary_action(assignment, now=now) == "View"
     with pytest.raises(HTTPException):
-        beta_read_utils.assert_valid_beta_transition(BetaReadAssignmentState.ACTIVE.value, BetaReadAssignmentState.COMPLETED.value)
+        beta_read_utils.assert_valid_beta_transition(
+            BetaReadAssignmentState.ACTIVE.value, BetaReadAssignmentState.COMPLETED.value
+        )
 
     scheduled = SimpleNamespace(
         state=BetaReadAssignmentState.ACTIVE.value,
@@ -1946,7 +2381,12 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
     for state, expected_label, expected_action, expected_bucket in [
         (BetaReadAssignmentState.ACTIVE.value, "Not started", "Start", "active"),
         (BetaReadAssignmentState.IN_PROGRESS.value, "In progress", "Continue", "active"),
-        (BetaReadAssignmentState.READY_TO_SUBMIT.value, "Ready to submit", "Submit feedback", "active"),
+        (
+            BetaReadAssignmentState.READY_TO_SUBMIT.value,
+            "Ready to submit",
+            "Submit feedback",
+            "active",
+        ),
         (BetaReadAssignmentState.SUBMITTED.value, "Submitted", "View", "completed"),
         (BetaReadAssignmentState.COMPLETED.value, "Completed", "View", "completed"),
         (BetaReadAssignmentState.REVOKED.value, "Revoked", "View", "missed"),
@@ -1962,21 +2402,33 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
         assert beta_read_utils.beta_status_label(item, now=now) == expected_label
         assert beta_read_utils.beta_primary_action(item, now=now) == expected_action
         assert beta_read_utils.beta_view_bucket(item, now=now) == expected_bucket
-    unknown = SimpleNamespace(state="custom_state", starts_at=now, expires_at=now + timedelta(days=1))
+    unknown = SimpleNamespace(
+        state="custom_state", starts_at=now, expires_at=now + timedelta(days=1)
+    )
     assert beta_read_utils.beta_status_label(unknown, now=now) == "Custom State"
 
     stateful = SimpleNamespace(state=BetaReadAssignmentState.ACTIVE.value)
-    beta_read_utils.set_beta_assignment_state(stateful, BetaReadAssignmentState.EXPIRED.value, now=now)
+    beta_read_utils.set_beta_assignment_state(
+        stateful, BetaReadAssignmentState.EXPIRED.value, now=now
+    )
     assert stateful.missed_reason == "deadline_expired"
     stateful = SimpleNamespace(state=BetaReadAssignmentState.SUBMITTED.value)
-    beta_read_utils.set_beta_assignment_state(stateful, BetaReadAssignmentState.DISQUALIFIED.value, now=now)
+    beta_read_utils.set_beta_assignment_state(
+        stateful, BetaReadAssignmentState.DISQUALIFIED.value, now=now
+    )
     assert stateful.disqualified_reason == "submission_ineligible"
     stateful = SimpleNamespace(state=BetaReadAssignmentState.SUBMITTED.value)
-    beta_read_utils.set_beta_assignment_state(stateful, BetaReadAssignmentState.COMPLETED.value, now=now)
+    beta_read_utils.set_beta_assignment_state(
+        stateful, BetaReadAssignmentState.COMPLETED.value, now=now
+    )
     assert stateful.completed_at == now
 
     monkeypatch.setattr(beta_read_utils.settings, "BETA_READ_MISSED_PENALTY_THRESHOLD", 3)
-    user = SimpleNamespace(consecutive_missed_beta_reads=0, beta_read_penalty_status=None, beta_read_penalty_required_at=None)
+    user = SimpleNamespace(
+        consecutive_missed_beta_reads=0,
+        beta_read_penalty_status=None,
+        beta_read_penalty_required_at=None,
+    )
     assert beta_read_utils.penalty_warning_for_user(user) is None
     beta_read_utils.apply_missed_beta_read_penalty(user, now=now)
     assert user.beta_read_penalty_status == beta_read_utils.PENALTY_STATUS_WARNING
@@ -2088,7 +2540,9 @@ async def test_beta_read_progress_feedback_and_question_helpers(monkeypatch):
     with pytest.raises(HTTPException):
         await beta_read_utils.append_beta_read_questions(
             QuestionDb(),
-            assignment=SimpleNamespace(id=assignment_id, state=BetaReadAssignmentState.MISSED.value),
+            assignment=SimpleNamespace(
+                id=assignment_id, state=BetaReadAssignmentState.MISSED.value
+            ),
             questions=["Late?"],
         )
 
@@ -2108,13 +2562,27 @@ async def test_beta_read_progress_feedback_and_question_helpers(monkeypatch):
                 return book if requested_id == book_id else None
             return None
 
-    assert await beta_read_utils._resolve_feedback_scene(LookupDb(), assignment=assignment, scene_id=str(scene_id)) is scene
-    assert await beta_read_utils._resolve_feedback_question(LookupDb(), assignment=assignment, question_id=str(question_id)) is question
+    assert (
+        await beta_read_utils._resolve_feedback_scene(
+            LookupDb(), assignment=assignment, scene_id=str(scene_id)
+        )
+        is scene
+    )
+    assert (
+        await beta_read_utils._resolve_feedback_question(
+            LookupDb(), assignment=assignment, question_id=str(question_id)
+        )
+        is question
+    )
     with pytest.raises(HTTPException):
-        await beta_read_utils._resolve_feedback_scene(LookupDb(), assignment=assignment, scene_id="not-a-uuid")
+        await beta_read_utils._resolve_feedback_scene(
+            LookupDb(), assignment=assignment, scene_id="not-a-uuid"
+        )
     scene.chapter_number = 5
     with pytest.raises(HTTPException):
-        await beta_read_utils._resolve_feedback_scene(LookupDb(), assignment=assignment, scene_id=str(scene_id))
+        await beta_read_utils._resolve_feedback_scene(
+            LookupDb(), assignment=assignment, scene_id=str(scene_id)
+        )
 
     feedback_item = SimpleNamespace(id=uuid.uuid4(), assignment_id=assignment_id, metadata_json={})
 
@@ -2154,9 +2622,18 @@ async def test_beta_read_progress_feedback_and_question_helpers(monkeypatch):
 
 
 def test_world_building_candidate_conflict_and_scoring_helpers():
-    assert world_building_utils.classify_world_intent("Where can I use the moon law?") == "story_integration"
-    assert world_building_utils.classify_world_intent("What gaps contradict the canon?") == "gap_detection"
-    assert world_building_utils._dedupe_strings([" Moon Gate ", "moon gate", "", "River"]) == ["Moon Gate", "River"]
+    assert (
+        world_building_utils.classify_world_intent("Where can I use the moon law?")
+        == "story_integration"
+    )
+    assert (
+        world_building_utils.classify_world_intent("What gaps contradict the canon?")
+        == "gap_detection"
+    )
+    assert world_building_utils._dedupe_strings([" Moon Gate ", "moon gate", "", "River"]) == [
+        "Moon Gate",
+        "River",
+    ]
 
     character_id = str(uuid.uuid4())
     resolved = world_building_utils._apply_character_and_override_resolution(
@@ -2211,11 +2688,20 @@ def test_world_building_candidate_conflict_and_scoring_helpers():
     assert resolved[0]["canonical_name"] == "Moon Gate"
     assert resolved[0]["usage_count"] == 4
     assert resolved[0]["author_override"] is True
-    assert any(item["canonical_name"] == "Mira Vale" and item["character_id"] == character_id for item in resolved)
+    assert any(
+        item["canonical_name"] == "Mira Vale" and item["character_id"] == character_id
+        for item in resolved
+    )
 
     collapsed = world_building_utils._collapse_elements(
         [
-            {"name": "Moon Gate", "aliases": ["Gate"], "usage_count": 1, "chapter_numbers": [2], "confidence": 0.5},
+            {
+                "name": "Moon Gate",
+                "aliases": ["Gate"],
+                "usage_count": 1,
+                "chapter_numbers": [2],
+                "confidence": 0.5,
+            },
             {
                 "canonical_name": "Moon Gate",
                 "aliases": ["Lunar Gate"],
@@ -2233,20 +2719,62 @@ def test_world_building_candidate_conflict_and_scoring_helpers():
     assert world_building_utils._map_element_to_wiki_type("kingdom") == "location"
     assert world_building_utils._map_element_to_wiki_type("weapon") == "item"
     assert world_building_utils._world_names_equivalent("Moon-Gate", "moon gate") is True
-    assert world_building_utils._world_text_mentions_name("the moon gate opens", "Moon Gate") is True
-    assert world_building_utils._should_surface_world_item({"element_type": "place", "confidence": 0.4, "usage_count": 1}) is False
-    assert world_building_utils._should_surface_world_item({"element_type": "place", "confidence": 0.7, "usage_count": 1}) is True
-    assert world_building_utils._should_surface_story_item(
-        {"element_type": "place", "presence_score": 0.4, "usage_count": 3, "chapter_count": 2, "confidence": 0.7}
-    ) is True
-    assert world_building_utils._is_underintegrated_story_match({"presence_score": 0.2, "usage_count": 4, "chapter_count": 2}) is True
-    assert world_building_utils._claim_phrase({"attribute": "requirement", "value": "ash"}) == "requires ash"
-    assert world_building_utils._claim_phrase({"attribute": "climate", "value": "cold", "negated": True}) == "is not cold"
-    assert world_building_utils._claims_contradict(
-        {"attribute": "travel_time", "value": "3 days"},
-        {"attribute": "travel_time", "value": "5 days"},
-    ) is True
-    assert world_building_utils._descriptions_conflict("The realm is frozen and cold.", "The realm is desert hot.") is True
+    assert (
+        world_building_utils._world_text_mentions_name("the moon gate opens", "Moon Gate") is True
+    )
+    assert (
+        world_building_utils._should_surface_world_item(
+            {"element_type": "place", "confidence": 0.4, "usage_count": 1}
+        )
+        is False
+    )
+    assert (
+        world_building_utils._should_surface_world_item(
+            {"element_type": "place", "confidence": 0.7, "usage_count": 1}
+        )
+        is True
+    )
+    assert (
+        world_building_utils._should_surface_story_item(
+            {
+                "element_type": "place",
+                "presence_score": 0.4,
+                "usage_count": 3,
+                "chapter_count": 2,
+                "confidence": 0.7,
+            }
+        )
+        is True
+    )
+    assert (
+        world_building_utils._is_underintegrated_story_match(
+            {"presence_score": 0.2, "usage_count": 4, "chapter_count": 2}
+        )
+        is True
+    )
+    assert (
+        world_building_utils._claim_phrase({"attribute": "requirement", "value": "ash"})
+        == "requires ash"
+    )
+    assert (
+        world_building_utils._claim_phrase(
+            {"attribute": "climate", "value": "cold", "negated": True}
+        )
+        == "is not cold"
+    )
+    assert (
+        world_building_utils._claims_contradict(
+            {"attribute": "travel_time", "value": "3 days"},
+            {"attribute": "travel_time", "value": "5 days"},
+        )
+        is True
+    )
+    assert (
+        world_building_utils._descriptions_conflict(
+            "The realm is frozen and cold.", "The realm is desert hot."
+        )
+        is True
+    )
     assert world_building_utils._filename_title("moon_gate-notes.md") == "Moon Gate Notes"
 
     world_item = {
@@ -2270,7 +2798,9 @@ def test_world_building_candidate_conflict_and_scoring_helpers():
     conflict = world_building_utils._build_cross_source_conflict_detail(world_item, story_item)
     assert conflict is not None
     assert "ash" in conflict["description"]
-    internal = world_building_utils._detect_internal_candidate_conflicts([world_item, {**story_item, "world_document_id": "doc-2"}], source_kind="world")
+    internal = world_building_utils._detect_internal_candidate_conflicts(
+        [world_item, {**story_item, "world_document_id": "doc-2"}], source_kind="world"
+    )
     assert internal and internal[0]["id"].startswith("story_conflicts-moon gate-world")
 
 
@@ -2282,17 +2812,19 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
     dirty_profiles: list[str] = []
     uploaded_text: list[tuple[str, str]] = []
 
-    monkeypatch.setattr(public_utils.settings, "PUBLIC_MODE_ENABLED", True)
-    monkeypatch.setattr(public_utils, "upload_text", lambda key, text: uploaded_text.append((key, text)))
+    monkeypatch.setattr(settings, "PUBLIC_MODE_ENABLED", True)
+    monkeypatch.setattr(content, "upload_text", lambda key, text: uploaded_text.append((key, text)))
+    monkeypatch.setattr(content, "count_tokens", lambda text: len(text.split()))
+
     async def fake_cache_del(key):
         cache_deletes.append(key)
 
-    monkeypatch.setattr(public_utils, "cache_del", fake_cache_del)
+    monkeypatch.setattr(content, "cache_del", fake_cache_del)
 
     async def fake_dirty_profile(user_id):
         dirty_profiles.append(user_id)
 
-    monkeypatch.setattr(public_utils, "mark_public_profile_cache_dirty", fake_dirty_profile)
+    monkeypatch.setattr(content, "mark_public_profile_cache_dirty", fake_dirty_profile)
 
     class ScalarResult:
         def __init__(self, value):
@@ -2326,20 +2858,22 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
 
     db = FakeDb()
     with pytest.raises(HTTPException):
-        await public_utils.create_public_demo_book(
+        await content.create_public_demo_book(
             db,
             admin_user=admin_user,
             body=PublicBookManualIn(title="Empty", chapters=[]),
         )
     db.existing = uuid.uuid4()
     with pytest.raises(HTTPException):
-        await public_utils.create_public_demo_book(
+        await content.create_public_demo_book(
             db,
             admin_user=admin_user,
-            body=PublicBookManualIn(title="Duplicate", chapters=[PublicChapterIn(title="One", text="Words")]),
+            body=PublicBookManualIn(
+                title="Duplicate", chapters=[PublicChapterIn(title="One", text="Words")]
+            ),
         )
     db.existing = None
-    book, created = await public_utils.create_public_demo_book(
+    book, created = await content.create_public_demo_book(
         db,
         admin_user=admin_user,
         body=PublicBookManualIn(
@@ -2357,7 +2891,7 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
 
     db.book = book
     db.book.id = book_id
-    appended_book, appended = await public_utils.append_public_demo_book_chapter(
+    appended_book, appended = await content.append_public_demo_book_chapter(
         db,
         book_id=book_id,
         body=PublicChapterIn(title="Three", text="Third chapter"),
@@ -2366,7 +2900,9 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
     assert appended_book.total_chapters == 3
     db.book = SimpleNamespace(is_public=False)
     with pytest.raises(HTTPException):
-        await public_utils.append_public_demo_book_chapter(db, book_id=book_id, body=PublicChapterIn(title="X", text="Y"))
+        await content.append_public_demo_book_chapter(
+            db, book_id=book_id, body=PublicChapterIn(title="X", text="Y")
+        )
 
     class FakeRequest:
         def __init__(self, content_type, payload):
@@ -2380,7 +2916,7 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
             return self.payload
 
     upload = SimpleNamespace(filename="cover.png")
-    body, image = await public_utils.parse_public_forum_post_create_request(
+    body, image = await requests.parse_public_forum_post_create_request(
         FakeRequest(
             "multipart/form-data",
             {
@@ -2396,12 +2932,15 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
     assert body.desired_beta_reader_count == 4
     assert body.allow_contact_requests is False
     assert image is upload
-    json_body, image = await public_utils.parse_public_forum_post_create_request(
-        FakeRequest("application/json", {"headline": "General thread", "body": "This is a long enough public forum post."})
+    json_body, image = await requests.parse_public_forum_post_create_request(
+        FakeRequest(
+            "application/json",
+            {"headline": "General thread", "body": "This is a long enough public forum post."},
+        )
     )
     assert json_body.thread_type == "novel"
     assert image is None
-    update_body, _ = await public_utils.parse_public_forum_post_update_request(
+    update_body, _ = await requests.parse_public_forum_post_update_request(
         FakeRequest(
             "multipart/form-data",
             {
@@ -2414,14 +2953,14 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
     )
     assert update_body.status == "closed"
     assert update_body.remove_image is True
-    comment_body, _ = await public_utils.parse_public_forum_comment_create_request(
+    comment_body, _ = await requests.parse_public_forum_comment_create_request(
         FakeRequest("application/json", {"body": "This comment has enough detail."})
     )
     assert comment_body.body.startswith("This comment")
     for parser in (
-        public_utils.parse_public_forum_post_create_request,
-        public_utils.parse_public_forum_post_update_request,
-        public_utils.parse_public_forum_comment_create_request,
+        requests.parse_public_forum_post_create_request,
+        requests.parse_public_forum_post_update_request,
+        requests.parse_public_forum_comment_create_request,
     ):
         with pytest.raises(HTTPException):
             await parser(FakeRequest("application/json", ["bad"]))
@@ -2438,14 +2977,16 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
         async def seek(self, offset):
             self.seek_calls.append(offset)
 
-    raw, suffix, mime = await public_utils._read_public_forum_image(FakeUpload([b"\x89PNGimage-bytes"]))
+    raw, suffix, mime = await requests._read_public_forum_image(FakeUpload([b"\x89PNGimage-bytes"]))
     assert (suffix, mime, raw.startswith(b"\x89PNG")) == ("png", "image/png", True)
     with pytest.raises(HTTPException):
-        await public_utils._read_public_forum_image(FakeUpload([b""]))
+        await requests._read_public_forum_image(FakeUpload([b""]))
     with pytest.raises(HTTPException):
-        await public_utils._read_public_forum_image(FakeUpload([b"not-an-image"]))
+        await requests._read_public_forum_image(FakeUpload([b"not-an-image"]))
     with pytest.raises(HTTPException):
-        await public_utils._read_public_forum_image(FakeUpload([b"x" * (public_utils.MAX_PUBLIC_FORUM_IMAGE_BYTES + 1)]))
+        await requests._read_public_forum_image(
+            FakeUpload([b"x" * (public_utils.MAX_PUBLIC_FORUM_IMAGE_BYTES + 1)])
+        )
 
     owner_id = uuid.uuid4()
     target_id = uuid.uuid4()
@@ -2460,11 +3001,25 @@ async def test_public_utils_manual_creation_request_parsing_and_image_helpers(mo
         async def get(self, model, requested_id):
             return image_target if requested_id == target_id else None
 
-    monkeypatch.setattr(public_utils, "decode_token", lambda token: {"type": "asset", "sub": str(owner_id), "res": f"public-forum-post-image:{target_id}"} if token == "good" else None)
-    monkeypatch.setattr(public_utils, "download_book", lambda key: b"image")
-    response = await public_utils.get_public_forum_image_response(ImageDb(), target_kind="post", target_id=target_id, token="good")
+    monkeypatch.setattr(
+        requests,
+        "decode_token",
+        lambda token: (
+            {"type": "asset", "sub": str(owner_id), "res": f"public-forum-post-image:{target_id}"}
+            if token == "good"
+            else None
+        ),
+    )
+    monkeypatch.setattr(requests, "download_book", lambda key: b"image")
+    response = await requests.get_public_forum_image_response(
+        ImageDb(), target_kind="post", target_id=target_id, token="good"
+    )
     assert response.body == b"image"
     with pytest.raises(HTTPException):
-        await public_utils.get_public_forum_image_response(ImageDb(), target_kind="bad", target_id=target_id, token="good")
+        await requests.get_public_forum_image_response(
+            ImageDb(), target_kind="bad", target_id=target_id, token="good"
+        )
     with pytest.raises(HTTPException):
-        await public_utils.get_public_forum_image_response(ImageDb(), target_kind="post", target_id=target_id, token="bad")
+        await requests.get_public_forum_image_response(
+            ImageDb(), target_kind="post", target_id=target_id, token="bad"
+        )

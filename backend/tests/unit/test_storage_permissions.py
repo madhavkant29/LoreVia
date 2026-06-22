@@ -10,7 +10,9 @@ def test_ensure_local_storage_permissions_relabels_existing_tree(monkeypatch, tm
     nested_file = nested_dir / "cover.png"
     nested_file.write_bytes(b"cover-bytes")
 
-    monkeypatch.setattr(storage.settings, "S3_ENDPOINT_URL", f"file://{storage_root.as_posix()}", raising=False)
+    monkeypatch.setattr(
+        storage.settings, "S3_ENDPOINT_URL", f"file://{storage_root.as_posix()}", raising=False
+    )
     monkeypatch.setattr(storage.settings, "S3_BUCKET", "local-dev", raising=False)
     monkeypatch.setattr(storage.os, "geteuid", lambda: 0, raising=False)
     monkeypatch.setattr(storage, "_storage_owner_ids", lambda: (10001, 10001))
@@ -45,7 +47,9 @@ def test_ensure_local_storage_permissions_is_noop_for_non_root(monkeypatch, tmp_
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
 
-    monkeypatch.setattr(storage.settings, "S3_ENDPOINT_URL", f"file://{storage_root.as_posix()}", raising=False)
+    monkeypatch.setattr(
+        storage.settings, "S3_ENDPOINT_URL", f"file://{storage_root.as_posix()}", raising=False
+    )
     monkeypatch.setattr(storage.settings, "S3_BUCKET", "local-dev", raising=False)
     monkeypatch.setattr(storage.os, "geteuid", lambda: 10001, raising=False)
 

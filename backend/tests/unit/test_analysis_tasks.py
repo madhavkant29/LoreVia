@@ -66,12 +66,16 @@ class TestAnalyseChapterTaskRetryFilter:
         with pytest.raises(CeleryRetry):
             task(mock_self, "ch-1", "text", "title")
 
-        mock_self.retry.assert_called_once_with(exc=mock_self.retry.call_args[1]["exc"], countdown=60)
+        mock_self.retry.assert_called_once_with(
+            exc=mock_self.retry.call_args[1]["exc"], countdown=60
+        )
 
     def test_non_retryable_error_does_not_retry(self, monkeypatch):
         monkeypatch.setattr(
             "app.workers.tasks.analysis_tasks.run_worker_coro",
-            MagicMock(side_effect=_raise_after_closing_coro(json.JSONDecodeError("bad json", "{", 0))),
+            MagicMock(
+                side_effect=_raise_after_closing_coro(json.JSONDecodeError("bad json", "{", 0))
+            ),
         )
 
         task = analyse_chapter_task.__wrapped__.__func__

@@ -87,10 +87,7 @@ def exclude_character_fields(
     if not exclude_keys:
         return characters
 
-    return [
-        {k: v for k, v in char.items() if k not in exclude_keys}
-        for char in characters
-    ]
+    return [{k: v for k, v in char.items() if k not in exclude_keys} for char in characters]
 
 
 def filter_character_fields(
@@ -101,7 +98,4 @@ def filter_character_fields(
     fields = parse_csv_param(fields_param)
     if fields is None:
         return characters
-    return [
-        {k: v for k, v in char.items() if k in fields}
-        for char in characters
-    ]
+    return [{k: v for k, v in char.items() if k in fields} for char in characters]

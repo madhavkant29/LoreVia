@@ -8,8 +8,8 @@ from typing import cast
 
 import sentry_sdk
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -20,7 +20,12 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import allowed_hosts, cors_middleware_options, settings
 from app.core.events import on_shutdown, on_startup
-from app.utils.logging.errors import public_error_message, request_log_context, scrub_sentry_event, sanitize_validation_errors
+from app.utils.logging.errors import (
+    public_error_message,
+    request_log_context,
+    sanitize_validation_errors,
+    scrub_sentry_event,
+)
 from app.utils.security_utils import apply_security_headers
 from app.utils.tunnel.cloudflare import CloudflareTunnelMiddleware
 
@@ -54,7 +59,9 @@ _CORS_ALLOW_ORIGIN_REGEX = (
 def _cors_failure_headers(origin: str | None) -> list[tuple[bytes, bytes]]:
     if not origin:
         return []
-    if origin in _CORS_ALLOW_ORIGINS or (_CORS_ALLOW_ORIGIN_REGEX and _CORS_ALLOW_ORIGIN_REGEX.match(origin)):
+    if origin in _CORS_ALLOW_ORIGINS or (
+        _CORS_ALLOW_ORIGIN_REGEX and _CORS_ALLOW_ORIGIN_REGEX.match(origin)
+    ):
         headers: list[tuple[bytes, bytes]] = [
             (b"access-control-allow-origin", origin.encode()),
             (b"vary", b"Origin"),
@@ -77,7 +84,12 @@ def _install_exception_handlers(target_app: FastAPI) -> None:
             ),
         )
         detail = public_error_message(exc.status_code)
-        if 400 <= exc.status_code < 500 and exc.status_code != 404 and isinstance(exc.detail, str) and exc.detail:
+        if (
+            400 <= exc.status_code < 500
+            and exc.status_code != 404
+            and isinstance(exc.detail, str)
+            and exc.detail
+        ):
             detail = exc.detail
         return JSONResponse(
             status_code=exc.status_code,
@@ -172,7 +184,7 @@ if settings.CLOUDFLARE_TUNNEL_TOKEN:
 
 class SecurityHeadersMiddleware:
     """Pure ASGI middleware to avoid BaseHTTPMiddleware event loop issues."""
-    
+
     def __init__(self, app: ASGIApp):
         self.app = app
 
@@ -195,8 +207,9 @@ class SecurityHeadersMiddleware:
                 break
         if not request_id:
             request_id = str(uuid.uuid4())
-        
+
         from app.utils.request_context import set_request_id, set_request_user_id
+
         set_request_id(request_id)
         set_request_user_id(None)
         started_at = time.perf_counter()
@@ -251,15 +264,19 @@ class SecurityHeadersMiddleware:
                 ]
                 for header_name, header_value in _cors_failure_headers(request_origin):
                     failure_headers.append([header_name, header_value])
-                await send({
-                    "type": "http.response.start",
-                    "status": 500,
-                    "headers": failure_headers,
-                })
-                await send({
-                    "type": "http.response.body",
-                    "body": b"Internal Server Error",
-                })
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 500,
+                        "headers": failure_headers,
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b"Internal Server Error",
+                    }
+                )
             else:
                 raise
 
@@ -276,6 +293,7 @@ class SecurityHeadersMiddleware:
             )
         set_request_id(None)
         set_request_user_id(None)
+
 
 app.add_middleware(SecurityHeadersMiddleware)
 _lazy_api_app = _LazyMountedApp(_build_api_app)

@@ -27,7 +27,9 @@ UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 def create_auth_csrf_token() -> str:
     nonce = secrets.token_urlsafe(24)
-    signature = hmac.new(settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256).hexdigest()
+    signature = hmac.new(
+        settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256
+    ).hexdigest()
     return f"{nonce}.{signature}"
 
 
@@ -124,5 +126,7 @@ def _csrf_token_matches(header_token: str, cookie_token: str) -> bool:
         nonce, signature = cookie_token.rsplit(".", 1)
     except ValueError:
         return False
-    expected_signature = hmac.new(settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256).hexdigest()
+    expected_signature = hmac.new(
+        settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256
+    ).hexdigest()
     return bool(nonce) and hmac.compare_digest(signature, expected_signature)

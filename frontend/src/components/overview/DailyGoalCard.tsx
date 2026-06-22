@@ -1,23 +1,20 @@
 "use client"
 
-import Link from "next/link"
-
 import { Icon } from "./Icon"
 import { PanelTitle } from "./PanelTitle"
 import { clamp, panelClass } from "./utils"
 
-export function DailyGoalCard({ isDark, dailyWords, dailyTarget }: { isDark: boolean; dailyWords: number; dailyTarget: number }) {
+export function DailyGoalCard({ isDark, dailyWords, dailyTarget, onUpdateGoal }: { isDark: boolean; dailyWords: number; dailyTarget: number; onUpdateGoal?: () => void }) {
   const goalPercent = clamp((dailyWords / dailyTarget) * 100, 0, 100)
-  const progressLabel =
-    dailyWords >= dailyTarget
-      ? "Goal reached today."
-      : dailyWords > 0
-        ? "Progress updates when you save manuscript edits."
-        : "No writing logged yet today."
+  const progressLabel = dailyWords >= dailyTarget
+    ? "Goal reached today."
+    : dailyWords > 0
+      ? "Progress updates when you save manuscript edits."
+      : "No writing logged yet today."
 
   return (
-    <section className={panelClass(isDark, "p-4 sm:p-5")}>
-      <PanelTitle isDark={isDark}>Daily Goal</PanelTitle>
+    <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+      <PanelTitle isDark={isDark}>Daily goal</PanelTitle>
       <div className="mt-6 flex items-center justify-center">
         <div
           className="relative flex h-32 w-32 items-center justify-center rounded-full"
@@ -29,10 +26,8 @@ export function DailyGoalCard({ isDark, dailyWords, dailyTarget }: { isDark: boo
           </div>
         </div>
       </div>
-      <div className="mt-5 flex items-center justify-between gap-3">
-        <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{progressLabel}</p>
-        <Link href="/settings" className={`rounded-md px-3 py-2 text-xs font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>Update Goal</Link>
-      </div>
+      <p className={`mt-5 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{progressLabel}</p>
+      {onUpdateGoal ? <button type="button" onClick={onUpdateGoal} className={`mt-3 inline-flex w-full items-center justify-between border-t pt-4 text-xs font-semibold ${isDark ? "border-white/10 text-teal-300" : "border-slate-100 text-teal-700"}`}>Update goal <Icon name="chevron" /></button> : null}
     </section>
   )
 }

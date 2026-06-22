@@ -1,7 +1,7 @@
 """Unit coverage for book service persistence wrappers."""
 
-from io import BytesIO
 import uuid
+from io import BytesIO
 
 import pytest
 
@@ -43,7 +43,13 @@ class FakeDB:
 @pytest.mark.asyncio
 async def test_create_book_uploads_source_and_persists_pending_record(monkeypatch):
     captured = []
-    monkeypatch.setattr(book_service, "upload_book", lambda file, user_id, filename: captured.append((file.read(), user_id, filename)) or "books/source.docx")
+    monkeypatch.setattr(
+        book_service,
+        "upload_book",
+        lambda file, user_id, filename: (
+            captured.append((file.read(), user_id, filename)) or "books/source.docx"
+        ),
+    )
     db = FakeDB()
     user_id = uuid.uuid4()
     book = await book_service.create_book(
@@ -68,7 +74,9 @@ async def test_create_book_uploads_source_and_persists_pending_record(monkeypatc
 async def test_create_editor_project_initializes_ready_manual_workspace(monkeypatch):
     uploads = []
     monkeypatch.setattr(book_service, "upload_text", lambda key, text: uploads.append((key, text)))
-    monkeypatch.setattr(book_service, "normalize_writer_workspace", lambda _value: {"processing": {}})
+    monkeypatch.setattr(
+        book_service, "normalize_writer_workspace", lambda _value: {"processing": {}}
+    )
     db = FakeDB()
     user_id = uuid.uuid4()
     book_id = uuid.uuid4()

@@ -2,6 +2,7 @@
 Semantic search over book chunks using pgvector.
 Spoiler-gated to user's current chapter.
 """
+
 import logging
 import uuid
 
@@ -76,7 +77,9 @@ async def semantic_search(
     final_limit = max(1, int(limit))
     retrieval_limit = max(final_limit, int(candidate_limit or final_limit))
     threshold = float(
-        settings.SEARCH_SIMILARITY_THRESHOLD if similarity_threshold is None else similarity_threshold
+        settings.SEARCH_SIMILARITY_THRESHOLD
+        if similarity_threshold is None
+        else similarity_threshold
     )
 
     try:
@@ -136,4 +139,6 @@ async def find_context_for_tap(
     max_chapter: int,
 ) -> list[dict]:
     """Used for Smart Tap — returns top 3 most relevant context snippets."""
-    return await semantic_search(db, book_id, query, max_chapter, limit=settings.SEARCH_MAX_CONTEXT_CHUNKS)
+    return await semantic_search(
+        db, book_id, query, max_chapter, limit=settings.SEARCH_MAX_CONTEXT_CHUNKS
+    )

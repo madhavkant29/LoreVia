@@ -6,7 +6,7 @@ from app.workers.consumers.extraction_consumer import process_book
 
 
 def test_inflight_lock_ttl_exceeds_hard_limit():
-    EXTRACTION_HARD_LIMIT = 25 * 60       # celery_app.py task_annotations time_limit
+    EXTRACTION_HARD_LIMIT = 25 * 60  # celery_app.py task_annotations time_limit
     MINIMUM_TTL = EXTRACTION_HARD_LIMIT + 300
     assert EXTRACTION_INFLIGHT_TTL_SECONDS >= MINIMUM_TTL
 
