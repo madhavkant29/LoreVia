@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from app.utils.billing_utils import (
+    BACKEND_PRICING_CATALOG_PATH,
     PLAN_DISPLAY_NAMES,
     PLAN_PRICE_ID_ENV_KEYS,
     PLAN_PRICES_USD,
@@ -16,6 +20,8 @@ def _load_shared_pricing_catalog() -> dict[str, list[dict[str, object]]]:
 
 
 def test_shared_pricing_catalog_matches_backend_constants():
+    assert SHARED_PRICING_CATALOG_PATH == BACKEND_PRICING_CATALOG_PATH
+    assert BACKEND_PRICING_CATALOG_PATH.parts[-3:] == ("app", "data", "pricing-catalog.json")
     catalog = _load_shared_pricing_catalog()
     tiers = catalog["tiers"]
     plans = {str(plan["code"]): plan for plan in catalog["plans"]}
@@ -55,4 +61,17 @@ def test_shared_pricing_catalog_tracks_price_id_env_keys():
     assert PLAN_PRICE_ID_ENV_KEYS["author_monthly"] == plans["author_monthly"]["price_id_env_keys"]
     assert (
         PLAN_PRICE_ID_ENV_KEYS["architect_annual"] == plans["architect_annual"]["price_id_env_keys"]
+    )
+
+
+def test_frontend_pricing_catalog_is_generated_from_backend_source():
+    repo_root = Path(__file__).resolve().parents[3]
+    frontend_catalog_path = (
+        repo_root / "frontend" / "src" / "lib" / "billing" / "pricing-catalog.json"
+    )
+    if not frontend_catalog_path.exists():
+        pytest.skip("Frontend catalog is not copied into the backend-only Docker image.")
+
+    assert json.loads(frontend_catalog_path.read_text(encoding="utf-8")) == json.loads(
+        BACKEND_PRICING_CATALOG_PATH.read_text(encoding="utf-8")
     )

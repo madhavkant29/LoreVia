@@ -3,6 +3,8 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 import resend
+import requests
+from resend.exceptions import ResendError
 from sqlalchemy import func, select
 
 from app.core.config import settings
@@ -29,6 +31,7 @@ resend.api_key = settings.RESEND_API_KEY
 
 _PUBLIC_APP_URL = "https://getlorevia.com"
 _LOCAL_EMAIL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+EMAIL_DELIVERY_EXCEPTIONS = (ResendError, requests.RequestException, TimeoutError)
 log = get_logger("lorevia.email")
 
 
@@ -66,7 +69,7 @@ def _send(payload: dict[str, Any]) -> bool:
             },
         )
         return True
-    except Exception:
+    except EMAIL_DELIVERY_EXCEPTIONS:
         # Email delivery should never block auth or reading flows.
         log.exception(
             "email_send_failed",
@@ -339,6 +342,7 @@ async def _resolve_promotional_context(
             "allowed": True,
             "unsubscribe_url": links.unsubscribe_url,
             "preferences_url": links.preferences_url,
+            "browser_unsubscribe_url": getattr(links, "browser_unsubscribe_url", links.unsubscribe_url),
         }
 
 
@@ -361,12 +365,13 @@ async def _send_categorized_email(
         if not context or not context.get("allowed"):
             return False
         unsubscribe_url = str(context["unsubscribe_url"])
+        browser_unsubscribe_url = str(context.get("browser_unsubscribe_url") or unsubscribe_url)
         preferences_url = str(context["preferences_url"])
         include_unsubscribe_button = category == EMAIL_CATEGORY_MARKETING
         payload["html"] = _inject_promotional_footer(
             html,
             _promotional_footer(
-                unsubscribe_url=unsubscribe_url,
+                unsubscribe_url=browser_unsubscribe_url,
                 preferences_url=preferences_url,
                 include_unsubscribe_button=include_unsubscribe_button,
             ),

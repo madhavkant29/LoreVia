@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.user import LlmUsageEvent, User
 from app.utils import llm_usage_utils
@@ -109,6 +110,107 @@ async def test_create_tracked_chat_completion_returns_response_when_usage_record
     )
 
     assert result is response
+
+
+@pytest.mark.asyncio
+async def test_tracked_chat_completion_records_expected_provider_failures(monkeypatch):
+    user_id = uuid.uuid4()
+    reservation = SimpleNamespace(id="tracked-reservation", operation="chat", user_id=user_id)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+    failed: list[object] = []
+
+    async def _provider_failure(**_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    async def _reserve(**_kwargs):
+        return reservation
+
+    async def _fail(value):
+        failed.append(value)
+
+    client.chat.completions.create = _provider_failure
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", _reserve)
+    monkeypatch.setattr("app.services.llm_control_service.fail_llm_reservation", _fail)
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_message",
+            model="gpt-test",
+            user_id=user_id,
+            messages=[],
+        )
+
+    assert failed == [reservation]
+
+
+@pytest.mark.asyncio
+async def test_tracked_chat_completion_preserves_provider_error_when_failure_recording_fails(
+    monkeypatch,
+):
+    user_id = uuid.uuid4()
+    reservation = SimpleNamespace(id="tracked-reservation", operation="chat", user_id=user_id)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+
+    async def _provider_failure(**_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    async def _reserve(**_kwargs):
+        return reservation
+
+    async def _fail(_reservation):
+        raise SQLAlchemyError("database unavailable")
+
+    client.chat.completions.create = _provider_failure
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", _reserve)
+    monkeypatch.setattr("app.services.llm_control_service.fail_llm_reservation", _fail)
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_message",
+            model="gpt-test",
+            user_id=user_id,
+            messages=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_tracked_embedding_propagates_unexpected_client_bugs_without_failed_reservation(
+    monkeypatch,
+):
+    user_id = uuid.uuid4()
+    client = SimpleNamespace(embeddings=SimpleNamespace())
+    failed = False
+
+    async def _client_bug(**_kwargs):
+        raise AssertionError("client invariant")
+
+    async def _reserve(**kwargs):
+        return SimpleNamespace(
+            id="tracked-reservation",
+            operation="embedding",
+            user_id=kwargs["user_id"],
+        )
+
+    async def _fail(_reservation):
+        nonlocal failed
+        failed = True
+
+    client.embeddings.create = _client_bug
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", _reserve)
+    monkeypatch.setattr("app.services.llm_control_service.fail_llm_reservation", _fail)
+
+    with pytest.raises(AssertionError, match="client invariant"):
+        await create_tracked_embedding(
+            client=client,
+            feature="chapter_chunk_embedding",
+            model="text-embedding-3-small",
+            user_id=user_id,
+            input="text",
+        )
+
+    assert failed is False
 
 
 def test_llm_token_caps_select_tier_limits(monkeypatch):

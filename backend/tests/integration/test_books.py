@@ -55,16 +55,18 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
         )
         await _db.flush()
 
-    monkeypatch.setattr("app.api.v1.routes.books._process_chapter", _fake_process_chapter)
+    monkeypatch.setattr("app.services.manuscript_import_service._process_chapter", _fake_process_chapter)
     monkeypatch.setattr(
-        "app.api.v1.routes.books.extract_novel_scene_candidates", lambda **_kwargs: []
+        "app.services.manuscript_import_service.extract_novel_scene_candidates", lambda **_kwargs: []
     )
 
     async def _noop(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr("app.api.v1.routes.books.replace_chapter_novel_scenes", _noop)
-    monkeypatch.setattr("app.api.v1.routes.books.sync_chapter_content_from_novel_scenes", _noop)
+    monkeypatch.setattr("app.services.manuscript_import_service.replace_chapter_novel_scenes", _noop)
+    monkeypatch.setattr(
+        "app.services.manuscript_import_service.sync_chapter_content_from_novel_scenes", _noop
+    )
 
     dispatched: list[dict] = []
 
@@ -77,7 +79,7 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
         return _Result(f"analysis-{len(dispatched)}")
 
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.enqueue_analysis_execution", _fake_enqueue
+        "app.services.manuscript_import_service.enqueue_analysis_execution", _fake_enqueue
     )
 
     started_at = time.perf_counter()

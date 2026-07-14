@@ -10,15 +10,50 @@ function readerPath(bookId: string, suffix = "") {
   return `/reader/${normalizeBookRouteId(bookId)}${suffix}`
 }
 
+export type ChapterInclude =
+  | "characters"
+  | "media"
+  | "tags"
+  | "beta_feedback"
+  | "text_content"
+  | "html_content"
+  | "text_url"
+
+export const FULL_CHAPTER_INCLUDE: ChapterInclude[] = [
+  "characters",
+  "media",
+  "tags",
+  "beta_feedback",
+  "text_content",
+  "html_content",
+  "text_url",
+]
+
+export const MANUSCRIPT_CHAPTER_INCLUDE: ChapterInclude[] = ["media", "text_content", "html_content"]
+
+const EMPTY_INCLUDE_SENTINEL = "__none__"
+
+function csvParam(value?: string | readonly string[] | null) {
+  if (Array.isArray(value)) return value.length > 0 ? value.join(",") : EMPTY_INCLUDE_SENTINEL
+  return value ?? undefined
+}
+
 function invalidateBetaReadCache() {
   void invalidateQueryKeys("reader:beta-reads:")
   void invalidateQueryKeys("books:list:")
 }
 
 export const readerApi = {
-  getChapter: (bookId: string, chapter: number) =>
+  getChapter: (
+    bookId: string,
+    chapter: number,
+    options?: { include?: ChapterInclude[] | string; fields?: readonly string[] | string }
+  ) =>
     apiClient.get<ChapterData>(readerPath(bookId, `/chapter/${chapter}`), {
-      params: { include: "characters,media,tags,beta_feedback,text_content,html_content,text_url" },
+      params: {
+        include: csvParam(options?.include ?? FULL_CHAPTER_INCLUDE),
+        fields: csvParam(options?.fields),
+      },
     }).then(r => r.data),
   getContext: (bookId: string, q: string, chapter: number) =>
     apiClient.get<ContextResult>(readerPath(bookId, "/context"), { params: { q, chapter } }).then(r => r.data),
@@ -36,8 +71,14 @@ export const readerApi = {
     apiClient.get<SummaryCollectionResponse>(readerPath(bookId, "/summary-collection")).then(r => r.data),
   getForeshadowing: (bookId: string) =>
     apiClient.get<{ items: ForeshadowingItem[] }>(readerPath(bookId, "/foreshadowing")).then(r => r.data),
-  getTimeline: (bookId: string, options?: { limit?: number; offset?: number }) =>
-    apiClient.get<TimelineResponse>(readerPath(bookId, "/timeline"), { params: { limit: options?.limit ?? 100, offset: options?.offset ?? 0, include: "chapters,character_tracks,thread_tracks,relationship_markers" } }).then(r => r.data),
+  getTimeline: (bookId: string, options?: { limit?: number; offset?: number; include?: string }) =>
+    apiClient.get<TimelineResponse>(readerPath(bookId, "/timeline"), {
+      params: {
+        limit: options?.limit ?? 100,
+        offset: options?.offset ?? 0,
+        include: options?.include ?? "chapters,character_tracks,thread_tracks,relationship_markers",
+      },
+    }).then(r => r.data),
   getEvents: (bookId: string, options?: { chapter?: number; limit?: number; offset?: number }) =>
     apiClient.get<BookEventsPaginated>(readerPath(bookId, "/events"), {
       params: {

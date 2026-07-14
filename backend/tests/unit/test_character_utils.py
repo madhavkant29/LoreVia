@@ -15,6 +15,7 @@ from app.utils.characters.manual import (
 )
 from app.utils.characters.presentation import build_character_dossier_summary
 from app.utils.characters.review import set_character_review_state
+from app.utils.characters import serialization as character_serialization
 from app.utils.characters.serialization import serialize_book_character
 
 
@@ -215,6 +216,20 @@ def test_serialize_book_character_includes_declared_profile_fields():
     assert payload["build"] == "slight"
     assert payload["age_descriptor"] == "middle-aged"
     assert payload["distinguishing"] == "scar over left eyebrow"
+
+
+def test_serialize_character_alias_records_returns_empty_for_uninspectable_object():
+    assert character_serialization.serialize_character_alias_records(object()) == []
+
+
+def test_serialize_character_alias_records_propagates_unexpected_inspection_errors(monkeypatch):
+    def fail_inspect(_character):
+        raise RuntimeError("inspection regression")
+
+    monkeypatch.setattr(character_serialization, "inspect", fail_inspect)
+
+    with pytest.raises(RuntimeError, match="inspection regression"):
+        character_serialization.serialize_character_alias_records(object())
 
 
 @pytest.mark.asyncio

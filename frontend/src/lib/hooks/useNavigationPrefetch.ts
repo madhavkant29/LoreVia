@@ -22,7 +22,7 @@ function buildPrefetchEntries(bookId: string): Record<string, PrefetchEntry[]> {
         queryKey: [`book:${bookId}:reader-bootstrap`],
         queryFn: async () => {
           const booksApi = await prefetchLoaders.loadBooksApi()
-          return booksApi.getReaderBootstrap(bookId)
+          return booksApi.getReaderBootstrap(bookId, { profile: "critical" })
         },
         staleTime: 20_000,
       },
@@ -32,7 +32,7 @@ function buildPrefetchEntries(bookId: string): Record<string, PrefetchEntry[]> {
         queryKey: [`book:${bookId}:manuscript-bootstrap`],
         queryFn: async () => {
           const booksApi = await prefetchLoaders.loadBooksApi()
-          return booksApi.getManuscriptBootstrap(bookId)
+          return booksApi.getManuscriptBootstrap(bookId, { profile: "critical" })
         },
         staleTime: 30_000,
       },

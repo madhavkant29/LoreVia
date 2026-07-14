@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     BACKEND_CORS_ORIGINS: str = "https://getlorevia.com,https://www.getlorevia.com,https://api.getlorevia.com,http://localhost:3000,http://127.0.0.1:3000"
     ALLOWED_HOSTS: str = "getlorevia.com,www.getlorevia.com,api.getlorevia.com,localhost,127.0.0.1"
+    SLOW_REQUEST_LOG_MS: int = 800
 
     # Database
     DATABASE_URL: str

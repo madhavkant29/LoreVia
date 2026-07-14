@@ -163,6 +163,7 @@ async def test_send_trial_email_first_manuscript_nudge_uses_professional_company
         return {
             "allowed": True,
             "unsubscribe_url": "https://getlorevia.com/api/v1/email/unsubscribe?token=abc",
+            "browser_unsubscribe_url": "https://getlorevia.com/unsubscribe?token=abc",
             "preferences_url": "https://getlorevia.com/api/v1/email/preferences?token=def",
         }
 
@@ -191,6 +192,7 @@ async def test_send_categorized_email_adds_visible_unsubscribe_button_for_market
         return {
             "allowed": True,
             "unsubscribe_url": "https://getlorevia.com/api/v1/email/unsubscribe?token=abc",
+            "browser_unsubscribe_url": "https://getlorevia.com/unsubscribe?token=abc",
             "preferences_url": "https://getlorevia.com/api/v1/email/preferences?token=def",
         }
 
@@ -209,6 +211,7 @@ async def test_send_categorized_email_adds_visible_unsubscribe_button_for_market
 
     assert delivered is True
     assert "Unsubscribe" in captured[0]["html"]
+    assert "https://getlorevia.com/unsubscribe?token=abc" in captured[0]["html"]
     assert "Manage email preferences" in captured[0]["html"]
     assert (
         captured[0]["headers"]["List-Unsubscribe"]

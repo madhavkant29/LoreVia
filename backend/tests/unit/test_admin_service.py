@@ -147,15 +147,17 @@ async def test_revoke_admin_principal_updates_user_token_version(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_platform_metrics_counts_records_and_reports_redis_memory(monkeypatch):
-    class Redis:
-        async def info(self, section):
-            assert section == "memory"
-            return {"used_memory": 3 * 1024 * 1024 + 512 * 1024}
+    async def get_redis_diagnostics():
+        return {
+            "memory_mb": 3.5,
+            "key_count": 12,
+            "connected_clients": 2,
+            "key_prefix_counts": {"advisor:book": 3, "public:forum": 1},
+            "key_prefix_samples": {"advisor:book": ["advisor:book:book-1:message:a"]},
+            "key_scan_truncated": False,
+        }
 
-    async def get_redis():
-        return Redis()
-
-    monkeypatch.setattr("app.core.redis.get_redis", get_redis)
+    monkeypatch.setattr("app.core.redis.get_redis_diagnostics", get_redis_diagnostics)
     result = await admin_service.get_platform_metrics(FakeDB(10, 8, 30, 120, 40))
     assert result == {
         "users": 10,
@@ -164,6 +166,11 @@ async def test_get_platform_metrics_counts_records_and_reports_redis_memory(monk
         "chunks_indexed": 120,
         "summaries_cached": 40,
         "redis_memory_mb": 3.5,
+        "redis_key_count": 12,
+        "redis_connected_clients": 2,
+        "redis_key_prefix_counts": {"advisor:book": 3, "public:forum": 1},
+        "redis_key_prefix_samples": {"advisor:book": ["advisor:book:book-1:message:a"]},
+        "redis_key_scan_truncated": False,
     }
 
 

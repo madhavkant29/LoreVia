@@ -7,6 +7,7 @@ describe("route helpers", () => {
     expect(shouldSkipAuthBootstrap("/login")).toBe(true)
     expect(shouldSkipAuthBootstrap("/blog/how-to-revise")).toBe(true)
     expect(shouldSkipAuthBootstrap("/public/forum")).toBe(true)
+    expect(shouldSkipAuthBootstrap("/unsubscribe")).toBe(true)
     expect(shouldSkipAuthBootstrap("/library")).toBe(false)
   })
 
@@ -14,6 +15,7 @@ describe("route helpers", () => {
     expect(shouldHideSiteFooter("/sky-of-ash--book-1")).toBe(true)
     expect(shouldHideSiteFooter("/sky-of-ash--book-1/manuscript")).toBe(true)
     expect(shouldHideSiteFooter("/pricing")).toBe(false)
+    expect(shouldHideSiteFooter("/unsubscribe")).toBe(false)
   })
 
   it("resolves safe private auth next paths", () => {
@@ -33,6 +35,7 @@ describe("route helpers", () => {
     expect(resolveSafeAuthNextPath("/checkout/success")).toBe("/library")
     expect(resolveSafeAuthNextPath("/copyright")).toBe("/library")
     expect(resolveSafeAuthNextPath("/public/forum")).toBe("/library")
+    expect(resolveSafeAuthNextPath("/unsubscribe?token=abc")).toBe("/library")
     expect(resolveSafeAuthNextPath(null)).toBe("/library")
   })
 })

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs"
+
 import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -243,6 +245,14 @@ describe("zero-coverage client runtime components", () => {
 
     expect(getRegistrations).toHaveBeenCalled()
     expect(unregister).toHaveBeenCalled()
+  })
+
+  it("keeps the production service worker network-only", () => {
+    const source = readFileSync("public/sw.js", "utf8")
+
+    expect(source).not.toContain('addEventListener("fetch"')
+    expect(source).not.toContain("caches.open")
+    expect(source).toContain('caches.delete("lorevia-offline-v1")')
   })
 })
 

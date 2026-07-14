@@ -179,9 +179,10 @@ export default function BookOverviewPage() {
     queryKey: overviewQueryKey,
     queryFn: async () => {
       const startedAt = typeof performance !== "undefined" ? performance.now() : 0
-      const bootstrap: ReaderBootstrapPayload = await booksApi.getReaderBootstrap(bookId)
+      const bootstrap: ReaderBootstrapPayload = await booksApi.getReaderBootstrap(bookId, { profile: "critical" })
       captureTiming("reader_bootstrap_ms", startedAt, { book_id: bookId })
       const payload = bootstrap.overview
+      const fullBootstrap = bootstrap.profile !== "critical"
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(`book-route-segment:${normalizeBookRouteId(bookId)}`, getBookRouteSegment(payload.book))
       }
@@ -189,15 +190,17 @@ export default function BookOverviewPage() {
       queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "progress")), payload.progress)
       queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "chapters")), payload.chapter_list)
       queryClient.setQueryData(asQueryKey(readerCacheKey(bookId, "summary-collection")), payload.summary_collection)
-      queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "notes")), bootstrap.notes)
-      queryClient.setQueryData(asQueryKey(booksQuotesCacheKey()), bootstrap.saved_quotes)
-      if (bootstrap.stats) queryClient.setQueryData(asQueryKey(booksStatsCacheKey()), bootstrap.stats)
-      queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "characters")), bootstrap.characters)
-      queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "chapter-reports:6")), bootstrap.chapter_reports)
-      if (bootstrap.prewriting_check) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "pre-writing:auto")), bootstrap.prewriting_check)
-      if (bootstrap.story_health) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "story-health")), bootstrap.story_health)
-      if (bootstrap.writer_workspace) queryClient.setQueryData(writerWorkspaceQueryKey, bootstrap.writer_workspace)
-      if (bootstrap.revision_intelligence) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), bootstrap.revision_intelligence)
+      if (fullBootstrap) {
+        queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "notes")), bootstrap.notes)
+        queryClient.setQueryData(asQueryKey(booksQuotesCacheKey()), bootstrap.saved_quotes)
+        if (bootstrap.stats) queryClient.setQueryData(asQueryKey(booksStatsCacheKey()), bootstrap.stats)
+        queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "characters")), bootstrap.characters)
+        queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "chapter-reports:6")), bootstrap.chapter_reports)
+        if (bootstrap.prewriting_check) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "pre-writing:auto")), bootstrap.prewriting_check)
+        if (bootstrap.story_health) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "story-health")), bootstrap.story_health)
+        if (bootstrap.writer_workspace) queryClient.setQueryData(writerWorkspaceQueryKey, bootstrap.writer_workspace)
+        if (bootstrap.revision_intelligence) queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), bootstrap.revision_intelligence)
+      }
       return payload
     },
     staleTime: 20_000,

@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -47,6 +48,7 @@ log = logging.getLogger("lorevia.editor_project")
 CHARACTER_CANDIDATE_PENDING = "pending"
 CHARACTER_CANDIDATE_SUPPRESSED = "suppressed"
 AUTO_FIRST_REPROCESS_WORD_THRESHOLD = 2000
+EDITOR_REBUILD_DISPATCH_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
 
 
 def _reprocess_metadata(book: Book) -> dict[str, Any]:
@@ -496,7 +498,7 @@ async def dispatch_rebuild(db: AsyncSession, book: Book) -> tuple[int, int]:
                 rebuild_run_id=rebuild_run_id,
                 run_kind="editor_rebuild",
             )
-    except Exception as exc:
+    except EDITOR_REBUILD_DISPATCH_EXCEPTIONS as exc:
         await fail_rebuild_if_active(
             db,
             book,
@@ -568,7 +570,7 @@ async def maybe_auto_reprocess_editor_project(
         chapters_queued, rebuilt_words = await dispatch_rebuild(db, book)
         await consume_processing_reservation(db, reservation.id)
         await db.commit()
-    except Exception:
+    except EDITOR_REBUILD_DISPATCH_EXCEPTIONS:
         await release_processing_reservation(db, reservation.id)
         await db.commit()
         raise

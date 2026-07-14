@@ -115,7 +115,7 @@ def description_similarity(desc1: str | None, desc2: str | None) -> float:
         left_vec = _vector(left_tokens)
         right_vec = _vector(right_tokens)
         return _cosine_from_vectors(left_vec, right_vec)
-    except Exception:
+    except (ArithmeticError, TypeError, ValueError):
         return 0.0
 
 

@@ -32,6 +32,8 @@ export interface ManuscriptImportResponse {
   chapter_reports: ChapterConsistencyReport[]
 }
 
+type BootstrapProfile = "critical" | "full"
+
 function invalidateBookCache(bookId: string) {
   void invalidateQueryKeys(`book:${normalizeBookRouteId(bookId)}:`)
   void invalidateQueryKeys("books:list:")
@@ -65,15 +67,20 @@ export const booksApi = {
     invalidateReaderCache(id)
     return r.data
   }),
-  getReaderBootstrap: (id: string) =>
-    apiClient.get<ReaderBootstrapPayload>(bookPath(id, "/reader-bootstrap")).then(r => r.data),
+  getReaderBootstrap: (id: string, options?: { profile?: BootstrapProfile }) => {
+    const path = bookPath(id, "/reader-bootstrap")
+    return options?.profile
+      ? apiClient.get<ReaderBootstrapPayload>(path, { params: { profile: options.profile } }).then(r => r.data)
+      : apiClient.get<ReaderBootstrapPayload>(path).then(r => r.data)
+  },
   getManuscriptBootstrap: (
     id: string,
-    params?: { activeChapterNumber?: number | null; annotationChapterNumber?: number | null }
+    params?: { activeChapterNumber?: number | null; annotationChapterNumber?: number | null; profile?: BootstrapProfile }
   ) => apiClient.get<ManuscriptBootstrapPayload>(bookPath(id, "/manuscript-bootstrap"), {
     params: {
       ...(typeof params?.activeChapterNumber === "number" ? { active_chapter_number: params.activeChapterNumber } : {}),
       ...(typeof params?.annotationChapterNumber === "number" ? { annotation_chapter_number: params.annotationChapterNumber } : {}),
+      ...(params?.profile ? { profile: params.profile } : {}),
     },
   }).then(r => r.data),
   listCollaborators: (id: string) =>

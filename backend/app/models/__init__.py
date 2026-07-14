@@ -57,6 +57,7 @@ from app.models.operations import (
     BookProcessingRun,
     RevenueLedgerEvent,
     SupportIncident,
+    TaskDispatchOutbox,
     TaskExecution,
 )
 from app.models.progress import ReadingProgress, ReadingSession

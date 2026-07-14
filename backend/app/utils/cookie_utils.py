@@ -27,7 +27,7 @@ def auth_cookie_domain() -> str | None:
         return None
     try:
         hostname = (urlparse(settings.APP_URL).hostname or "").strip().lower().rstrip(".")
-    except Exception:
+    except ValueError:
         return None
     if not hostname or configured_domain in {"localhost", "127.0.0.1", "::1"}:
         return None

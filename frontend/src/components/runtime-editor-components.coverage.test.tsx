@@ -1,26 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, type ReactElement, type ReactNode } from "react"
+import { act, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const useQueryMock = vi.hoisted(() => vi.fn())
-const readerApiMock = vi.hoisted(() => ({
-  getPlotThreads: vi.fn(),
-  updatePlotThread: vi.fn(),
-}))
-const booksApiMock = vi.hoisted(() => ({
-  listVaultNotes: vi.fn(),
-}))
 const intelligenceApiMock = vi.hoisted(() => ({
   continuityReport: vi.fn(),
 }))
-const saveContextualVaultNoteMock = vi.hoisted(() => vi.fn())
 
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
-}))
-vi.mock("@tanstack/react-query", () => ({ useQuery: useQueryMock }))
 vi.mock("@/components/editor/SharedRichTextEditor", () => ({
   EditorToolbar: ({ editorKey }: { editorKey: string }) => <div>Toolbar {editorKey}</div>,
   RichTextEditor: ({ html, onChange }: { html: string; onChange: (html: string, text: string) => void }) => (
@@ -29,19 +16,8 @@ vi.mock("@/components/editor/SharedRichTextEditor", () => ({
     </button>
   ),
 }))
-vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock }))
-vi.mock("@/lib/api/reader", () => ({ readerApi: readerApiMock }))
-vi.mock("@/lib/query/cacheKeys", () => ({
-  asQueryKey: (value: unknown) => value,
-  readerCacheKey: (...parts: string[]) => parts.join(":"),
-}))
-vi.mock("@/lib/stores/preferencesStore", () => ({
-  usePreferencesStore: () => ({ theme: "dark" }),
-}))
-vi.mock("@/lib/utils/notes", () => ({ saveContextualVaultNote: saveContextualVaultNoteMock }))
 
-import { PlotTracker } from "@/components/intelligence/PlotTracker"
 import { ImportStructureEditor } from "@/components/modals/ImportStructureEditor"
 import { EditorialReviewResults } from "@/components/reader/EditorialReviewResults"
 import { ManuscriptOverlayDialogs } from "@/components/reader/ManuscriptOverlayDialogs"
@@ -52,16 +28,7 @@ let container: HTMLDivElement | null = null
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 beforeEach(() => {
-  readerApiMock.getPlotThreads.mockResolvedValue(plotThreads())
-  readerApiMock.updatePlotThread.mockResolvedValue({})
-  booksApiMock.listVaultNotes.mockResolvedValue([])
   intelligenceApiMock.continuityReport.mockResolvedValue(new Blob(["report"], { type: "application/pdf" }))
-  saveContextualVaultNoteMock.mockResolvedValue({})
-  useQueryMock.mockReturnValue({
-    data: plotThreads(),
-    isLoading: false,
-    refetch: vi.fn().mockResolvedValue({}),
-  })
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:report") })
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() })
   Object.defineProperty(HTMLAnchorElement.prototype, "click", { configurable: true, value: vi.fn() })
@@ -108,33 +75,6 @@ describe("runtime editor components", () => {
     expect(onCancel).toHaveBeenCalled()
     expect(onSave).toHaveBeenCalled()
     expect(onSave.mock.calls[0][0]).toHaveLength(1)
-  })
-
-  it("renders plot tracker compact, dashboard, save note, status, and vault flows", async () => {
-    await render(<PlotTracker bookId="book-1" chapter={2} mode="compact" />)
-    expect(text()).toContain("Missing gate oath")
-    expect(text()).toContain("Open full plot thread dashboard")
-
-    await rerender(<PlotTracker bookId="book-1" mode="dashboard" />)
-    expect(text()).toContain("Lifecycle status")
-    setSelectValue("select", "resolved")
-    setTextareaValue("textarea", "Resolve this in the finale.")
-    await click("Save thread")
-    expect(readerApiMock.updatePlotThread).toHaveBeenCalledWith("book-1", "thread-1", {
-      note: "Resolve this in the finale.",
-      status: "resolved",
-    })
-
-    await click("Save to vault")
-    expect(saveContextualVaultNoteMock).toHaveBeenCalled()
-
-    useQueryMock.mockReturnValue({ data: [], isLoading: false, refetch: vi.fn() })
-    await rerender(<PlotTracker key="empty" bookId="book-1" />)
-    expect(text()).toContain("No plot threads tracked yet")
-
-    useQueryMock.mockReturnValue({ data: [], isLoading: true, refetch: vi.fn() })
-    await rerender(<PlotTracker key="loading" bookId="book-1" />)
-    expect(text()).toContain("Loading plot threads")
   })
 
   it("renders editorial review results and drives save and continuity report actions", async () => {
@@ -284,21 +224,6 @@ function setInputValue(selector: string, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }))
 }
 
-function setTextareaValue(selector: string, value: string) {
-  const input = container?.querySelector(selector) as HTMLTextAreaElement | null
-  if (!input) throw new Error(`Missing textarea ${selector}`)
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
-  setter?.call(input, value)
-  input.dispatchEvent(new Event("input", { bubbles: true }))
-}
-
-function setSelectValue(selector: string, value: string) {
-  const input = container?.querySelector(selector) as HTMLSelectElement | null
-  if (!input) throw new Error(`Missing select ${selector}`)
-  input.value = value
-  input.dispatchEvent(new Event("change", { bubbles: true }))
-}
-
 async function clickCheckbox(index: number) {
   const input = Array.from(container?.querySelectorAll('input[type="checkbox"]') ?? [])[index] as HTMLInputElement | undefined
   if (!input) throw new Error(`Missing checkbox ${index}`)
@@ -306,41 +231,6 @@ async function clickCheckbox(index: number) {
     input.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     await flush()
   })
-}
-
-function plotThreads() {
-  return [
-    {
-      id: "thread-1",
-      title: "Missing gate oath",
-      type: "continuity",
-      status: "developing",
-      description: "The oath is introduced but not paid off.",
-      first_mentioned: 1,
-      last_mentioned: 4,
-      resolved_at: null,
-      related_characters: ["Mara", "Joren"],
-      mention_count: 5,
-      risk: "May feel abandoned.",
-      suggested_action: "Resolve before the finale.",
-      note: "Track the oath.",
-    },
-    {
-      id: "thread-2",
-      title: "Ash prophecy",
-      type: "prophecy",
-      status: "resolved",
-      description: "Prophecy thread closes.",
-      first_mentioned: 2,
-      last_mentioned: 7,
-      resolved_at: 8,
-      related_characters: [],
-      mention_count: 2,
-      risk: "",
-      suggested_action: "",
-      note: "",
-    },
-  ]
 }
 
 function overlayProps(handlers: Record<string, ReturnType<typeof vi.fn>>) {

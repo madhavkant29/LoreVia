@@ -5,7 +5,7 @@ import pytest
 from app.models.book import Book, Chapter
 from app.models.character import Character
 from app.models.user import User
-from app.services.event_linking_service import link_summary_events
+from app.services.event_linking_service import _normalize_major_event, link_summary_events
 
 
 @pytest.mark.asyncio
@@ -120,3 +120,27 @@ async def test_link_summary_events_uses_resolver_context_for_family_role_referen
     )
 
     assert payload["major_events"][0]["involved_characters"] == [str(grete.id), str(gregor.id)]
+
+
+def test_normalize_major_event_defaults_malformed_importance_but_propagates_unexpected_errors():
+    assert (
+        _normalize_major_event(
+            {"event_title": "Odd score", "importance": object()},
+            chapter_number=1,
+            character_ids=[],
+            character_names=[],
+        )["importance"]
+        == 5
+    )
+
+    class ExplodingImportance:
+        def __int__(self):
+            raise RuntimeError("unexpected conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected conversion failure"):
+        _normalize_major_event(
+            {"event_title": "Broken score", "importance": ExplodingImportance()},
+            chapter_number=1,
+            character_ids=[],
+            character_names=[],
+        )

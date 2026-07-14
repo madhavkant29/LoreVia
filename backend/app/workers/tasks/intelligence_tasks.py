@@ -2,6 +2,7 @@
 
 import uuid
 
+from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.logging.errors import public_error_message
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
@@ -20,7 +21,7 @@ def generate_wiki_task(self, book_id: str):
     async def _run():
         from app.core.database import AsyncSessionLocal
         from app.models.book import Book
-        from app.utils.world_building_utils import generate_wiki_from_manuscript
+        from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
 
         async with AsyncSessionLocal() as db:
             book = await db.get(Book, uuid.UUID(book_id))
@@ -33,7 +34,7 @@ def generate_wiki_task(self, book_id: str):
         return run_worker_coro(_run())
     except ValueError:
         raise
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -61,7 +62,7 @@ def generate_advisor_reply_task(
             mark_advisor_job_failed,
             mark_advisor_job_running,
         )
-        from app.utils.advisor_utils import build_advisor_reply_payload
+        from app.utils.advisor_chat_utils import build_advisor_reply_payload
 
         async with AsyncSessionLocal() as db:
             job_uuid = uuid.UUID(job_id)
@@ -89,7 +90,7 @@ def generate_advisor_reply_task(
         return run_worker_coro(_run())
     except ValueError:
         raise
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if self.request.retries >= self.max_retries:
 
             async def _mark_failed():
@@ -131,7 +132,7 @@ def generate_series_advisor_reply_task(
             mark_advisor_job_failed,
             mark_advisor_job_running,
         )
-        from app.utils.advisor_utils import build_series_advisor_reply_payload
+        from app.utils.advisor_chat_utils import build_series_advisor_reply_payload
 
         async with AsyncSessionLocal() as db:
             job_uuid = uuid.UUID(job_id)
@@ -158,7 +159,7 @@ def generate_series_advisor_reply_task(
         return run_worker_coro(_run())
     except ValueError:
         raise
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if self.request.retries >= self.max_retries:
 
             async def _mark_failed():
@@ -201,10 +202,8 @@ def generate_advisor_suggestions_task(
             mark_advisor_suggestion_job_failed,
             mark_advisor_suggestion_job_running,
         )
-        from app.utils.advisor_utils import (
-            build_advisor_suggestions_payload,
-            make_advisor_suggestions_cache_key,
-        )
+        from app.utils.advisor_scan_utils import build_advisor_suggestions_payload
+        from app.utils.advisor_utils import make_advisor_suggestions_cache_key
 
         async with AsyncSessionLocal() as db:
             job_uuid = uuid.UUID(job_id)
@@ -253,7 +252,7 @@ def generate_advisor_suggestions_task(
         return run_worker_coro(_run())
     except ValueError:
         raise
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if self.request.retries >= self.max_retries:
 
             async def _mark_failed():

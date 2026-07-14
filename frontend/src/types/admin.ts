@@ -131,6 +131,11 @@ export interface AdminMetrics {
   chunks_indexed: number
   summaries_cached: number
   redis_memory_mb: number
+  redis_key_count?: number
+  redis_connected_clients?: number
+  redis_key_prefix_counts?: Record<string, number>
+  redis_key_prefix_samples?: Record<string, string[]>
+  redis_key_scan_truncated?: boolean
 }
 
 export interface AdminQueueDepth {

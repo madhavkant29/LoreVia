@@ -1,4 +1,5 @@
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -22,6 +23,7 @@ from app.utils.characters.extraction import (
 from app.utils.characters.identity import filter_character_identity_aliases
 from app.utils.characters.manual import apply_manual_character_description
 from app.utils.characters.merging import merge_characters
+from app.utils.characters import partitioning as character_partitioning
 from app.utils.characters.partitioning import partition_character
 from app.utils.characters.presentation import (
     build_character_dossier_summary,
@@ -101,6 +103,71 @@ def test_description_similarity_prefers_related_text():
 
     assert related > unrelated
     assert related > 0.2
+
+
+def test_description_similarity_propagates_unexpected_tokenizer_errors(monkeypatch):
+    from app.utils.characters import similarity
+
+    def fail_tokens(_text: str):
+        raise RuntimeError("tokenizer regression")
+
+    monkeypatch.setattr(similarity, "_similarity_tokens", fail_tokens)
+
+    with pytest.raises(RuntimeError, match="tokenizer regression"):
+        similarity.description_similarity("left text", "right text")
+
+
+@pytest.mark.asyncio
+async def test_partition_payload_enrichment_only_swallows_expected_extractor_failures(monkeypatch):
+    source = SimpleNamespace(
+        first_chapter=1,
+        last_seen_chapter=2,
+        role="supporting",
+    )
+    evidence = {
+        "snippets": ["Gregor crossed the room."],
+        "first_chapter": 1,
+        "last_seen_chapter": 2,
+        "mention_count": 1,
+    }
+
+    async def _expected_extractor_failure(_text: str):
+        raise RuntimeError("llm unavailable")
+
+    monkeypatch.setattr(
+        character_partitioning,
+        "extract_characters_and_relationships",
+        _expected_extractor_failure,
+    )
+
+    payload = await character_partitioning._build_partition_payload(
+        source=source,
+        book_id=uuid.uuid4(),
+        name="Gregor",
+        aliases=[],
+        evidence=evidence,
+    )
+
+    assert payload["name"] == "Gregor"
+    assert payload["personality_tags"] == []
+
+    async def _unexpected_extractor_bug(_text: str):
+        raise AssertionError("extractor invariant")
+
+    monkeypatch.setattr(
+        character_partitioning,
+        "extract_characters_and_relationships",
+        _unexpected_extractor_bug,
+    )
+
+    with pytest.raises(AssertionError, match="extractor invariant"):
+        await character_partitioning._build_partition_payload(
+            source=source,
+            book_id=uuid.uuid4(),
+            name="Gregor",
+            aliases=[],
+            evidence=evidence,
+        )
 
 
 def test_visibility_score_penalizes_phrase_like_noise():

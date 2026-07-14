@@ -34,6 +34,7 @@ from app.utils.books.scene_serialization import (
     _scene_out,
 )
 from app.utils.index_format import format_index
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 from app.utils.tag_utils import (
     ENTITY_TYPE_CHAPTER,
     ENTITY_TYPE_SCENE,
@@ -414,11 +415,10 @@ async def search_author_workspace(
             if not chapter.s3_key:
                 continue
             try:
-                stored = manuscript.deserialize_manuscript_content(
-                    await asyncio.to_thread(download_book, chapter.s3_key)
-                )
-            except Exception:
+                raw = await asyncio.to_thread(download_book, chapter.s3_key)
+            except STORAGE_IO_EXCEPTIONS:
                 continue
+            stored = manuscript.deserialize_manuscript_content(raw)
             text = str(stored.get("text") or "")
             title = chapter.title or f"Chapter {chapter.number}"
             if not _matches(f"{title}\n{text}"):

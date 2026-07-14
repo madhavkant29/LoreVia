@@ -4,7 +4,6 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.api.deps.auth import get_current_user
 from app.core.config import settings
@@ -18,12 +17,12 @@ from app.core.redis import (
     key_relationship_graph,
     set_relationship_evolution_cache,
 )
-from app.models.book import Book
 from app.models.character import Character, CharacterState
 from app.models.intelligence import CharacterRelationship
 from app.utils.billing_utils import require_author_access
 from app.utils.books.collaboration_access import (
     collaboration_allows_chapter,
+    collaboration_can_view_story_bible,
     get_book_with_collaboration_access,
 )
 from app.utils.reader_utils import (
@@ -60,10 +59,11 @@ async def get_relationships(
         raise HTTPException(400, "limit must be between 1 and 100")
     if offset < 0:
         raise HTTPException(400, "offset must be >= 0")
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
-    require_author_access(current_user)
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if not collaboration_allows_chapter(collaborator, chapter):
+        raise HTTPException(403, "This share does not include that chapter.")
+    if collaborator is not None and not collaboration_can_view_story_bible(collaborator):
+        raise HTTPException(403, "This share does not include the character bible.")
     use_cache = parse_csv_param(include) is None
     cache_scope = "all" if include_inactive else "active"
     cache_key = f"{key_relationship_graph(str(book_id), chapter)}:v5:{cache_scope}"
@@ -79,6 +79,7 @@ async def get_relationships(
             graph["limit"] = limit
             graph["offset"] = offset
             graph["has_more"] = (offset + limit) < total_edges
+            graph["next_offset"] = offset + limit if graph["has_more"] else None
             return graph
 
     want_nodes = include_requested(include, "nodes")
@@ -95,10 +96,6 @@ async def get_relationships(
         .where(
             CharacterRelationship.book_id == book_id,
             CharacterRelationship.from_chapter <= chapter,
-        )
-        .options(
-            selectinload(CharacterRelationship.character_a),
-            selectinload(CharacterRelationship.character_b),
         )
     )
     historical_rels, _ = canonicalize_relationship_book_rows(list(rels_result.scalars().all()))
@@ -344,6 +341,7 @@ async def get_relationships(
     graph["limit"] = limit
     graph["offset"] = offset
     graph["has_more"] = (offset + limit) < total_edges
+    graph["next_offset"] = offset + limit if graph["has_more"] else None
     return graph
 
 

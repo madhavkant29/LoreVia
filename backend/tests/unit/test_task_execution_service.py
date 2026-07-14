@@ -1,10 +1,11 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
-from app.models.book import Book
-from app.models.operations import TaskExecution
+from app.models.book import Book, Chapter
+from app.models.operations import BookProcessingRun, TaskDispatchOutbox, TaskExecution
 from app.models.user import ProcessingUsageEvent, User
 from app.services.task_execution_service import (
     claim_task_execution,
@@ -12,15 +13,22 @@ from app.services.task_execution_service import (
     dispatch_pending_analysis_tasks,
     dispatch_pending_embedding_tasks,
     dispatch_pending_extraction_tasks,
+    enqueue_chapter_repair_execution,
     ensure_task_execution,
     fail_task_execution,
     get_or_create_processing_run,
+    reconcile_stale_task_dispatch_outbox,
     sanitize_task_arguments,
     task_identity,
 )
 
 
 async def _clear_dispatchable_executions(db, task_name: str) -> None:
+    await db.execute(
+        update(TaskDispatchOutbox)
+        .where(TaskDispatchOutbox.task_name == task_name)
+        .values(status="cancelled", lease_until=None)
+    )
     await db.execute(
         update(TaskExecution)
         .where(
@@ -114,6 +122,7 @@ async def test_fair_dispatch_selects_one_task_per_waiting_user(db, monkeypatch):
     dispatched: list[tuple[str, str]] = []
     await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
     await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
 
     def fake_apply_async(*, args, kwargs, queue, task_id):
         dispatched.append((args[0], queue))
@@ -147,6 +156,7 @@ async def test_fair_dispatch_never_exceeds_global_worker_capacity(db, monkeypatc
     dispatched: list[str] = []
     await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
     await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
 
     def fake_apply_async(*, args, kwargs, queue, task_id):
         dispatched.append(task_id)
@@ -249,6 +259,7 @@ async def test_claim_rejects_paused_and_terminal_executions(db):
 async def test_dispatch_failure_returns_execution_to_pending(db, monkeypatch):
     await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
     await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
     user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
     run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
     execution = await ensure_task_execution(
@@ -271,6 +282,144 @@ async def test_dispatch_failure_returns_execution_to_pending(db, monkeypatch):
     assert execution.status == "pending_dispatch"
     assert execution.error_category == "dispatch"
     assert execution.celery_task_id is None
+
+
+async def test_dispatch_creates_published_outbox_with_sanitized_payload(db, monkeypatch):
+    dispatched: list[dict] = []
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
+
+    def fake_apply_async(*, args, kwargs, queue, task_id):
+        dispatched.append({"args": args, "kwargs": kwargs, "queue": queue, "task_id": task_id})
+        return SimpleNamespace(id=task_id)
+
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.process_chapter_task.apply_async", fake_apply_async
+    )
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_chapter",
+        processing_run=run,
+        chapter_number=7,
+        arguments={
+            "book_id": str(book.id),
+            "chapter_number": 7,
+            "chapter_text": "private manuscript content",
+        },
+    )
+    await db.commit()
+
+    assert await dispatch_pending_extraction_tasks(db) == 1
+
+    outbox = (
+        await db.execute(
+            select(TaskDispatchOutbox).where(TaskDispatchOutbox.execution_id == execution.id)
+        )
+    ).scalar_one()
+    assert outbox.status == "published"
+    assert outbox.published_at is not None
+    assert outbox.payload_json["execution_id"] == str(execution.id)
+    assert outbox.payload_json["book_id"] == str(book.id)
+    assert "chapter_text" not in outbox.payload_json
+    assert dispatched[0]["task_id"] == str(execution.id)
+
+
+async def test_claim_marks_execution_terminal_when_attempt_budget_is_exhausted(db):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_book",
+        processing_run=run,
+        arguments={"book_id": str(book.id)},
+    )
+    execution.status = "queued"
+    execution.attempt_count = 3
+    execution.max_attempts = 3
+    await db.commit()
+
+    assert not await claim_task_execution(db, str(execution.id), str(execution.id))
+    await db.refresh(execution)
+    assert execution.status == "failed_terminal"
+    assert execution.error_category == "attempt_exhausted"
+
+
+async def test_reconcile_stale_outbox_recovers_unconfirmed_publish(db):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_book",
+        processing_run=run,
+        arguments={"book_id": str(book.id)},
+    )
+    execution.status = "queued"
+    outbox = TaskDispatchOutbox(
+        execution_id=execution.id,
+        task_name=execution.task_name,
+        queue="extraction",
+        payload_json={"execution_id": str(execution.id), "book_id": str(book.id)},
+        status="publishing",
+        attempts=1,
+        available_at=datetime.now(UTC) - timedelta(minutes=10),
+        lease_until=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    db.add(outbox)
+    await db.commit()
+
+    assert await reconcile_stale_task_dispatch_outbox(db) == 1
+    await db.flush()
+    await db.refresh(outbox)
+    assert outbox.status == "pending"
+    assert outbox.lease_until is None
+
+
+async def test_chapter_repair_execution_uses_durable_dispatch(db, monkeypatch):
+    dispatched: list[dict] = []
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
+
+    def fake_apply_async(*, args, kwargs, queue, task_id):
+        dispatched.append({"args": args, "kwargs": kwargs, "queue": queue, "task_id": task_id})
+        return SimpleNamespace(id=task_id)
+
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.repair_chapter_payload_task.apply_async",
+        fake_apply_async,
+    )
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    execution = await enqueue_chapter_repair_execution(
+        db,
+        book_id=book.id,
+        user_id=user.id,
+        chapter_id=None,
+        chapter_number=3,
+        chapters_total=5,
+        reason="source_integrity_mismatch",
+    )
+
+    await db.refresh(execution)
+    assert execution.task_name == "extraction_tasks.repair_chapter_payload"
+    assert execution.status == "queued"
+    assert dispatched == [
+        {
+            "args": [str(book.id), 3],
+            "kwargs": {"execution_id": str(execution.id)},
+            "queue": "extraction",
+            "task_id": str(execution.id),
+        }
+    ]
+    execution.status = "running"
+    await db.commit()
+
+    await complete_task_execution(db, str(execution.id))
+    run = await db.get(BookProcessingRun, execution.processing_run_id)
+    assert run.status == "succeeded"
+    assert run.chapters_completed == 1
 
 
 async def test_manual_processing_reservation_reconciles_with_terminal_outcome(db):
@@ -356,6 +505,15 @@ async def test_analysis_dispatch_respects_configured_capacity(db, monkeypatch):
         "app.services.task_execution_service.settings.ANALYSIS_WORKER_CONCURRENCY", 1
     )
     user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    chapter = Chapter(
+        book_id=book.id,
+        number=1,
+        title="Analysis chapter",
+        s3_key=f"chapters/{book.id}/1.txt",
+        word_count=10,
+    )
+    db.add(chapter)
+    await db.flush()
     run = await get_or_create_processing_run(
         db, user_id=user.id, book_id=book.id, chapters_total=1
     )
@@ -363,8 +521,9 @@ async def test_analysis_dispatch_respects_configured_capacity(db, monkeypatch):
         db,
         task_name="analysis_tasks.analyse_chapter",
         processing_run=run,
+        chapter_id=chapter.id,
         chapter_number=1,
-        arguments={"book_id": str(book.id)},
+        arguments={"book_id": str(book.id), "chapter_id": str(chapter.id)},
     )
     await db.commit()
 

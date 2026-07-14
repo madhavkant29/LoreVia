@@ -30,6 +30,7 @@ import {
 import type { Book, ManuscriptWorkspaceTree, NovelScene, SceneMetadata } from "@/types/book"
 import type { Character } from "@/types/character"
 import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
+import { usePromptDialog } from "@/components/ui/PromptDialog"
 
 type FolderNode = WorkspaceFolderNode
 type StructureNode = NonNullable<ManuscriptWorkspaceTree["structure_tree"]>[number]
@@ -139,6 +140,7 @@ export default function ScenesPage() {
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
   const [addCharacterText, setAddCharacterText] = useState("")
   const selectionRef = useRef<string>("")
+  const prompt = usePromptDialog()
 
   const { data: book = null } = useBookDetail(bookId)
   const {
@@ -313,10 +315,16 @@ export default function ScenesPage() {
     setShowBrowserOnMobile(false)
   }
 
-  const createFolder = (parentFolder?: string | null) => {
-    if (typeof window === "undefined") return
+  const createFolder = async (parentFolder?: string | null) => {
     const base = normalizeWorkspaceFolderPath(parentFolder ?? selectedFolder) || "scenes"
-    const requestedFolder = window.prompt("Create a scene folder path. Use / to nest folders.", `${base}/New Folder`)
+    const requestedFolder = await prompt({
+      title: "Create scene folder",
+      body: "Use / to nest folders inside the scene workspace.",
+      label: "Folder path",
+      initialValue: `${base}/New Folder`,
+      confirmLabel: "Create folder",
+      validate: (value) => normalizeWorkspaceFolderPath(value) ? null : "Folder path cannot be empty.",
+    })
     if (requestedFolder === null) return
     const cleanFolder = normalizeWorkspaceFolderPath(requestedFolder)
     if (!cleanFolder) {
@@ -414,7 +422,7 @@ export default function ScenesPage() {
               book={book}
               isDark={isDark}
               onNewScene={() => newScene()}
-              onNewFolder={() => createFolder()}
+              onNewFolder={() => void createFolder()}
             />
 
             <MobilePanelToggles
@@ -456,7 +464,7 @@ export default function ScenesPage() {
                       collapsed={collapsed}
                       onToggleFolder={(path) => setCollapsed((current) => ({ ...current, [path]: !current[path] }))}
                       onSelectFolder={setSelectedFolder}
-                      onCreateFolder={createFolder}
+                      onCreateFolder={(path) => void createFolder(path)}
                       onDropScene={(sceneId, folderPath) => void moveSceneToFolder(sceneId, folderPath)}
                       dropTargetFolder={dropTargetFolder}
                       onDropTargetChange={setDropTargetFolder}

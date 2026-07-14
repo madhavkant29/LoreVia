@@ -23,6 +23,7 @@ from app.utils.public.moderation import (
 from app.utils.public.requests import (
     hash_text,
 )
+from app.utils.client_identity import trusted_client_ip
 from app.utils.public_utils import (
     MODERATION_STATUS_HIDDEN,
     MODERATION_STATUS_REPORTED,
@@ -53,7 +54,7 @@ async def create_content_report(
     reported_content_url = validate_public_content_report_target(book, body.reported_content_url)
     if report_type == REPORT_TYPE_COPYRIGHT and not body.reporter_email:
         raise HTTPException(400, "Copyright reports must include a reporter email.")
-    reporter_ip_hash = hash_text(request.client.host if request.client else None)
+    reporter_ip_hash = hash_text(trusted_client_ip(request))
     await ensure_public_content_report_not_duplicate(
         db,
         book_id=book.id,

@@ -60,6 +60,7 @@ from app.utils.public_utils import (
     PUBLIC_ANALYTICS_EVENT_BOOK_VIEW,
     PUBLIC_ANALYTICS_EVENT_CHAPTER_VIEW,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 
 def normalize_public_ranking_key(value: str | None) -> str:
@@ -429,7 +430,7 @@ async def _sample_public_book_text(
             continue
         try:
             stored = deserialize_manuscript_content(await asyncio.to_thread(download_book, s3_key))
-        except Exception:
+        except STORAGE_IO_EXCEPTIONS:
             continue
         fragments.append(str(stored.get("text") or ""))
         if sum(len(fragment) for fragment in fragments) >= max_chars:

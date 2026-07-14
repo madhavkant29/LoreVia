@@ -11,6 +11,7 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from app.core.config import settings
 from app.core.database import engine
 from app.core.redis import close_all_redis_clients
+from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 from app.utils.logging.errors import scrub_sentry_event
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
 from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
@@ -238,7 +239,7 @@ def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
         set_request_id(request_id)
         if request_id and settings.SENTRY_DSN:
             sentry_sdk.set_tag("request_id", request_id)
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         # never block task execution on observability
         return
 
@@ -248,7 +249,7 @@ def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwarg
     try:
         set_request_id(None)
         set_request_user_id(None)
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
 
@@ -256,7 +257,7 @@ def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwarg
 def _worker_process_init(**kwargs):
     try:
         get_worker_loop()
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
 
@@ -267,7 +268,7 @@ def _worker_process_shutdown(**kwargs):
     try:
         loop = get_worker_loop()
         loop.run_until_complete(_shutdown_worker_async_resources())
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
     finally:
         close_worker_loop()
@@ -295,7 +296,7 @@ def _worker_ready_health_log(sender=None, **kwargs):
                 len(priority_queues),
                 ",".join(q.name for q in priority_queues),
             )
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
 

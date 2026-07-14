@@ -27,8 +27,58 @@ def is_local_storage() -> bool:
     return endpoint.startswith("file://")
 
 
+def validate_storage_key(key: str) -> str:
+    normalized = str(key or "").strip()
+    if not normalized:
+        raise ValueError("Storage key cannot be empty.")
+    if "\x00" in normalized or "\\" in normalized or "//" in normalized:
+        raise ValueError("Storage key contains invalid path separators.")
+    key_path = Path(normalized)
+    if key_path.is_absolute():
+        raise ValueError("Storage key cannot be absolute.")
+    parts = key_path.parts
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("Storage key cannot contain traversal segments.")
+    return "/".join(parts)
+
+
+def _local_bucket_root() -> Path:
+    return (_local_storage_root() / settings.S3_BUCKET).resolve()
+
+
 def _local_path(key: str) -> Path:
-    return _local_storage_root() / settings.S3_BUCKET / key
+    safe_key = validate_storage_key(key)
+    root = _local_bucket_root()
+    candidate = (root / safe_key).resolve()
+    if root != candidate and root not in candidate.parents:
+        raise ValueError("Storage key escapes the configured bucket.")
+    return candidate
+
+
+def _ensure_local_parent(path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        parent = path.parent
+        storage_root = _local_storage_root().resolve()
+        while parent != storage_root and not parent.exists():
+            try:
+                parent.mkdir(parents=True, exist_ok=True, mode=0o777)
+            except PermissionError:
+                parent = parent.parent
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
+
+
+def _write_local_bytes(key: str, raw: bytes) -> None:
+    path = _local_path(key)
+    _ensure_local_parent(path)
+    path.write_bytes(raw)
+
+
+def _write_local_text(key: str, content: str) -> None:
+    path = _local_path(key)
+    _ensure_local_parent(path)
+    path.write_text(content, encoding="utf-8")
 
 
 def _get_s3_client():
@@ -43,6 +93,7 @@ def _get_s3_client():
 
 def get_object_size(key: str) -> int:
     """Return the stored byte size without downloading a remote object."""
+    key = validate_storage_key(key)
     if is_local_storage():
         return _local_path(key).stat().st_size
     response = _get_s3_client().head_object(Bucket=settings.S3_BUCKET, Key=key)
@@ -55,7 +106,7 @@ def _storage_owner_ids() -> tuple[int, int]:
 
         app_user = pwd.getpwnam("app")
         return app_user.pw_uid, app_user.pw_gid
-    except Exception:
+    except (ImportError, KeyError, OSError):
         # The API container does not create the `app` user, but the worker
         # image runs Celery as uid/gid 10001. Use that service account as the
         # portable fallback so shared local volumes end up writable by workers.
@@ -97,21 +148,7 @@ def upload_book(file: BinaryIO, user_id: str, filename: str) -> str:
     safe_name = Path(filename).name
     key = f"books/{user_id}/{uuid.uuid4()}/{safe_name}"
     if is_local_storage():
-        path = _local_path(key)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            # Fallback: create directories with 777 permissions if initial mkdir fails
-            import os
-
-            parent = path.parent
-            while parent != _local_storage_root() and not parent.exists():
-                try:
-                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-                except PermissionError:
-                    parent = parent.parent
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-        path.write_bytes(file.read())
+        _write_local_bytes(key, file.read())
     else:
         s3 = _get_s3_client()
         s3.upload_fileobj(file, settings.S3_BUCKET, key)
@@ -122,20 +159,7 @@ def upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
     safe_name = Path(filename).name
     key = f"books/{user_id}/{uuid.uuid4()}/{safe_name}"
     if is_local_storage():
-        path = _local_path(key)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            import os
-
-            parent = path.parent
-            while parent != _local_storage_root() and not parent.exists():
-                try:
-                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-                except PermissionError:
-                    parent = parent.parent
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-        path.write_bytes(raw)
+        _write_local_bytes(key, raw)
     else:
         s3 = _get_s3_client()
         s3.put_object(
@@ -147,21 +171,9 @@ def upload_book_bytes(raw: bytes, user_id: str, filename: str) -> str:
 
 
 def upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
+    key = validate_storage_key(key)
     if is_local_storage():
-        path = _local_path(key)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            import os
-
-            parent = path.parent
-            while parent != _local_storage_root() and not parent.exists():
-                try:
-                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-                except PermissionError:
-                    parent = parent.parent
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-        path.write_bytes(raw)
+        _write_local_bytes(key, raw)
     else:
         s3 = _get_s3_client()
         extra_args = {"Bucket": settings.S3_BUCKET, "Key": key, "Body": raw}
@@ -172,21 +184,9 @@ def upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
 
 
 def upload_text(key: str, content: str) -> str:
+    key = validate_storage_key(key)
     if is_local_storage():
-        path = _local_path(key)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            import os
-
-            parent = path.parent
-            while parent != _local_storage_root() and not parent.exists():
-                try:
-                    parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-                except PermissionError:
-                    parent = parent.parent
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o777)
-        path.write_text(content, encoding="utf-8")
+        _write_local_text(key, content)
     else:
         s3 = _get_s3_client()
         s3.put_object(
@@ -199,6 +199,7 @@ def upload_text(key: str, content: str) -> str:
 
 
 def download_book(key: str) -> bytes:
+    key = validate_storage_key(key)
     if is_local_storage():
         return _local_path(key).read_bytes()
     s3 = _get_s3_client()
@@ -206,6 +207,7 @@ def download_book(key: str) -> bytes:
 
 
 def delete_object(key: str) -> None:
+    key = validate_storage_key(key)
     if is_local_storage():
         path = _local_path(key)
         if path.exists():
@@ -217,6 +219,8 @@ def delete_object(key: str) -> None:
 
 def move_object(src_key: str, dst_key: str) -> str:
     """Move an object from src_key to dst_key, returning dst_key."""
+    src_key = validate_storage_key(src_key)
+    dst_key = validate_storage_key(dst_key)
     if src_key == dst_key:
         return dst_key
     if is_local_storage():
@@ -237,6 +241,7 @@ def move_object(src_key: str, dst_key: str) -> str:
 
 
 def get_presigned_url(key: str, expires: int = 3600) -> str | None:
+    key = validate_storage_key(key)
     if is_local_storage():
         return None
     s3 = _get_s3_client()

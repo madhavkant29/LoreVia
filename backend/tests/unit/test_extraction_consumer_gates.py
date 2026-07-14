@@ -1,14 +1,18 @@
 import uuid
 
 from app.models.character import Character
-from app.workers.consumers.extraction_consumer import (
-    _blocked_character_ids,
+from app.services.extraction_chapter_content_service import _prepare_chapter_rich_content
+from app.services.extraction_character_decision_service import (
     _can_auto_save_character,
     _character_save_decision,
-    _merge_alias_in_memory,
-    _prepare_chapter_rich_content,
-    _relationship_resolution_candidates,
     _should_update_existing_character,
+)
+from app.services.extraction_character_persistence_service import (
+    _blocked_character_ids,
+    _merge_alias_in_memory,
+)
+from app.services.extraction_relationship_service import (
+    _relationship_resolution_candidates,
 )
 
 

@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.models.book import Book
@@ -669,7 +670,7 @@ async def test_admin_refund_review_surfaces_partial_provider_failure_for_follow_
         return {"id": "adj_followup_123", "status": "pending_approval"}
 
     async def fail_cancel_subscription_immediately(subscription_id: str):
-        raise RuntimeError(
+        raise httpx.HTTPError(
             "provider timeout authorization=Bearer refund-admin-secret "
             "database_url=postgresql://admin_refund:admin_pass@db.example.com/refunds"
         )

@@ -24,10 +24,8 @@ from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import (
     get_book_cache_version,
-    get_book_overview_cache,
     get_writer_workspace_cache,
     mark_book_cache_dirty,
-    set_book_overview_cache,
     set_writer_workspace_cache,
 )
 from app.models.book import (
@@ -36,7 +34,6 @@ from app.models.book import (
 from app.models.character import (
     Character,
 )
-from app.models.progress import ReadingProgress
 from app.schemas.books import (
     BookOverviewOut,
     ChapterConsistencyReport,
@@ -79,17 +76,8 @@ from app.utils.books.revision_decisions import (
 from app.utils.books.revision_service import (
     build_revision_intelligence_payload,
 )
-from app.utils.books.serialization import (
-    book_out,
-)
+from app.utils.books.overview import build_book_overview_payload
 from app.utils.books.story_health import build_story_health_payload
-from app.utils.reader_utils import (
-    build_chapter_list_payload,
-    build_reading_progress_payload,
-    build_summary_collection_payload,
-    chapter_intelligence_map,
-)
-from app.utils.sparse_utils import include_requested, parse_csv_param
 
 router = APIRouter()
 
@@ -110,87 +98,14 @@ async def get_book_overview(
         book_id,
         current_user,
     )
-    await enqueue_processing_state_repair_if_needed(book)
-    use_cache = parse_csv_param(include) is None
-    if use_cache:
-        cache_version = await get_book_cache_version(str(book.id))
-        access_key = book_cache_access_key(current_user.id, collaborator)
-        cached = await get_book_overview_cache(
-            str(book.id), str(current_user.id), access_key, cache_version
-        )
-        if cached is not None:
-            return BookOverviewOut(**cached)
-
-    progress = (
-        (
-            await db.execute(
-                select(ReadingProgress).where(
-                    ReadingProgress.book_id == book.id,
-                    ReadingProgress.user_id == current_user.id,
-                )
-            )
-        )
-        .scalars()
-        .first()
+    return await build_book_overview_payload(
+        db,
+        book=book,
+        current_user=current_user,
+        collaborator=collaborator,
+        include=include,
+        fields=fields,
     )
-    intelligence_map = (
-        await chapter_intelligence_map(db, book, current_user)
-        if include_requested(include, "chapter_list", "summary_collection")
-        else {}
-    )
-
-    book_payload = await book_out(db, book, current_user.id, collaborator, progress=progress)
-    progress_payload = (
-        await build_reading_progress_payload(
-            db,
-            book=book,
-            current_user=current_user,
-            collaborator=collaborator,
-            progress=progress,
-        )
-        if include_requested(include, "progress")
-        else None
-    )
-    chapter_list_payload = (
-        await build_chapter_list_payload(
-            db,
-            book=book,
-            current_user=current_user,
-            collaborator=collaborator,
-            progress=progress,
-            intelligence_map=intelligence_map,
-        )
-        if include_requested(include, "chapter_list")
-        else None
-    )
-    summary_collection_payload = (
-        await build_summary_collection_payload(
-            db,
-            book=book,
-            current_user=current_user,
-            collaborator=collaborator,
-            progress=progress,
-            intelligence_map=intelligence_map,
-        )
-        if include_requested(include, "summary_collection")
-        else None
-    )
-
-    payload = BookOverviewOut(
-        book=book_payload,
-        progress=progress_payload,
-        chapter_list=chapter_list_payload,
-        summary_collection=summary_collection_payload,
-    )
-    if use_cache:
-        await set_book_overview_cache(
-            str(book.id),
-            str(current_user.id),
-            access_key,
-            cache_version,
-            payload.model_dump(mode="json"),
-        )
-    return payload
 
 
 # â”€â”€â”€ Analysis & intelligence endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

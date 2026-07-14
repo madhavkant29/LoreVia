@@ -32,6 +32,7 @@ from app.utils.books import (
     collaboration_access,
     normalization,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 if TYPE_CHECKING:
     pass
@@ -365,7 +366,7 @@ async def load_novel_export_chapters(
                 continue
             try:
                 raw = await asyncio.to_thread(download_book, media.storage_key)
-            except Exception:
+            except STORAGE_IO_EXCEPTIONS:
                 continue
             media_by_chapter_id.setdefault(media.chapter_id, []).append(
                 {
@@ -383,12 +384,12 @@ async def load_novel_export_chapters(
         chapter_text = ""
         if s3_key:
             try:
-                stored = deserialize_manuscript_content(
-                    await asyncio.to_thread(download_book, s3_key)
-                )
-                chapter_text = str(stored.get("text") or "")
-            except Exception:
+                raw = await asyncio.to_thread(download_book, s3_key)
+            except STORAGE_IO_EXCEPTIONS:
                 chapter_text = ""
+            else:
+                stored = deserialize_manuscript_content(raw)
+                chapter_text = str(stored.get("text") or "")
         chapters.append(
             {
                 "number": number,
@@ -405,7 +406,7 @@ async def load_novel_cover_image(book: Book) -> dict[str, Any] | None:
         return None
     try:
         raw = await asyncio.to_thread(download_book, book.cover_s3_key)
-    except Exception:
+    except STORAGE_IO_EXCEPTIONS:
         return None
     return {
         "raw": raw,

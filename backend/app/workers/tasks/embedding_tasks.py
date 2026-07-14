@@ -1,3 +1,4 @@
+from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 
@@ -59,7 +60,7 @@ def update_character_embedding_task(self, character_id: str, execution_id: str |
                     await dispatch_pending_embedding_tasks(db)
 
             run_worker_coro(_complete_execution())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if execution_id:
             async def _record_failure(error: Exception = exc) -> None:
                 from app.core.database import AsyncSessionLocal

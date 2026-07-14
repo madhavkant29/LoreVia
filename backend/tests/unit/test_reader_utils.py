@@ -117,6 +117,88 @@ def test_timeline_plot_thread_span_clamps_to_visible_window():
     assert span == (2, 3)
 
 
+def test_normalize_summary_response_only_swallows_invalid_json(monkeypatch):
+    fallback = reader_utils.normalize_summary_response("{not json", ["event"], [], [])
+    assert fallback["content"] == "{not json"
+    assert fallback["key_events"] == ["event"]
+
+    def _json_bug(_value: str):
+        raise RuntimeError("json wrapper bug")
+
+    monkeypatch.setattr(reader_utils.json, "loads", _json_bug)
+
+    with pytest.raises(RuntimeError, match="json wrapper bug"):
+        reader_utils.normalize_summary_response('{"summary": "ok"}', [], [], [])
+
+
+@pytest.mark.asyncio
+async def test_serialize_chapter_media_only_swallows_storage_io(monkeypatch):
+    media = SimpleNamespace(
+        id=uuid.uuid4(),
+        marker="[[IMAGE:map]]",
+        storage_key="media/map.png",
+        asset_type="image",
+        content_type="image/png",
+        caption="Map",
+        sort_order=1,
+        created_at=None,
+    )
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(all=lambda: [(media, uuid.uuid4())])
+    monkeypatch.setattr(reader_utils, "get_presigned_url", lambda _key: None)
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr(reader_utils, "download_book", _storage_missing)
+
+    items = await reader_utils.serialize_chapter_media(db, uuid.uuid4())
+
+    assert items[0]["content_base64"] is None
+
+    def _unexpected_download_bug(_key: str) -> bytes:
+        raise RuntimeError("download wrapper bug")
+
+    monkeypatch.setattr(reader_utils, "download_book", _unexpected_download_bug)
+
+    with pytest.raises(RuntimeError, match="download wrapper bug"):
+        await reader_utils.serialize_chapter_media(db, uuid.uuid4())
+
+
+def test_parse_chapter_from_source_only_swallows_storage_and_parser_failures(monkeypatch):
+    book = SimpleNamespace(
+        s3_key="books/source.pdf",
+        format="pdf",
+        preserve_chapter_numbers=False,
+        preserve_source_chapters=False,
+        work_type="novel",
+    )
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr(reader_utils, "download_book", _storage_missing)
+
+    assert reader_utils.parse_chapter_from_source(book, 1) is None
+
+    monkeypatch.setattr(reader_utils, "download_book", lambda _key: b"pdf")
+
+    def _parser_failure(*_args, **_kwargs):
+        raise RuntimeError("invalid pdf")
+
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf", _parser_failure)
+
+    assert reader_utils.parse_chapter_from_source(book, 1) is None
+
+    def _parser_bug(*_args, **_kwargs):
+        raise AssertionError("parser invariant")
+
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf", _parser_bug)
+
+    with pytest.raises(AssertionError, match="parser invariant"):
+        reader_utils.parse_chapter_from_source(book, 1)
+
+
 @pytest.mark.asyncio
 async def test_queue_analysis_if_missing_skips_duplicate_inflight(monkeypatch):
     chapter = SimpleNamespace(

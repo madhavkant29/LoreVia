@@ -275,6 +275,16 @@ export default function SettingsPage() {
     void saveEmailPreferences(next)
   }
 
+  const unsubscribeFromPromotionalEmails = () => {
+    if (!emailPreferences || emailPreferencesSaving || emailPreferences.unsubscribed_all) return
+    void saveEmailPreferences({
+      ...emailPreferences,
+      product_updates: false,
+      marketing: false,
+      unsubscribed_all: true,
+    })
+  }
+
   const dailyGoal = stableUser?.daily_word_goal ?? 1000
   const todayWords = stableUser?.today_word_count ?? 0
   const goalProgress = Math.max(0, Math.min(100, Math.round((todayWords / Math.max(dailyGoal, 1)) * 100)))
@@ -518,31 +528,41 @@ export default function SettingsPage() {
 
             <SettingsPanel id="emails" title="LoreVia emails">
               {emailPreferences ? (
-                <div className="settings-choice-grid settings-choice-grid--two">
-                  {[
-                    {
-                      value: "product_updates" as const,
-                      label: "Product updates",
-                      desc: "Feature launches, onboarding guidance, and product news.",
-                      icon: <MailIcon />,
-                    },
-                    {
-                      value: "marketing" as const,
-                      label: "Marketing emails",
-                      desc: "Offers, discounts, and future promotional campaigns.",
-                      icon: <ShieldIcon />,
-                    },
-                  ].map((option) => (
-                    <SelectableCard
-                      key={option.value}
-                      active={emailPreferences[option.value]}
-                      title={option.label}
-                      description={option.desc}
-                      icon={option.icon}
-                      disabled={emailPreferencesSaving}
-                      onClick={() => changeEmailPreference(option.value)}
-                    />
-                  ))}
+                <div>
+                  <div className="settings-choice-grid settings-choice-grid--two">
+                    {[
+                      {
+                        value: "product_updates" as const,
+                        label: "Product updates",
+                        desc: "Feature launches, onboarding guidance, and product news.",
+                        icon: <MailIcon />,
+                      },
+                      {
+                        value: "marketing" as const,
+                        label: "Marketing emails",
+                        desc: "Offers, discounts, and future promotional campaigns.",
+                        icon: <ShieldIcon />,
+                      },
+                    ].map((option) => (
+                      <SelectableCard
+                        key={option.value}
+                        active={emailPreferences[option.value]}
+                        title={option.label}
+                        description={option.desc}
+                        icon={option.icon}
+                        disabled={emailPreferencesSaving}
+                        onClick={() => changeEmailPreference(option.value)}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={unsubscribeFromPromotionalEmails}
+                    disabled={emailPreferencesSaving || emailPreferences.unsubscribed_all}
+                    className="settings-secondary-button mt-4"
+                  >
+                    {emailPreferences.unsubscribed_all ? "Promotional emails unsubscribed" : "Unsubscribe from promotional emails"}
+                  </button>
                 </div>
               ) : null}
               {emailPreferencesLoading ? <InlineMessage message="Loading email preferences..." tone="neutral" className="mt-4" /> : null}

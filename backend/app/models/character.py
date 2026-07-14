@@ -43,6 +43,7 @@ class Character(Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
             postgresql_with={"m": 16, "ef_construction": 64},
         ),
+        Index("ix_characters_book_first_name", "book_id", "first_chapter", "name"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -190,6 +191,9 @@ class CharacterState(Base):
     """Spoiler-free snapshot at a given chapter."""
 
     __tablename__ = "character_states"
+    __table_args__ = (
+        Index("ix_character_states_character_chapter", "character_id", "at_chapter"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     character_id: Mapped[uuid.UUID] = mapped_column(

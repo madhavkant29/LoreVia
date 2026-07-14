@@ -7,7 +7,10 @@
       "billing_interval": "monthly",
       "price_usd": 29,
       "checkout_enabled": true,
-      "price_id_env_keys": ["PADDLE_AUTHOR_MONTHLY_PRICE_ID", "PADDLE_PRO_MONTHLY_PRICE_ID"]
+      "price_id_env_keys": [
+        "PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "PADDLE_PRO_MONTHLY_PRICE_ID"
+      ]
     },
     {
       "code": "author_annual",
@@ -16,7 +19,10 @@
       "billing_interval": "annual",
       "price_usd": 249,
       "checkout_enabled": true,
-      "price_id_env_keys": ["PADDLE_AUTHOR_ANNUAL_PRICE_ID", "PADDLE_PRO_ANNUAL_PRICE_ID"]
+      "price_id_env_keys": [
+        "PADDLE_AUTHOR_ANNUAL_PRICE_ID",
+        "PADDLE_PRO_ANNUAL_PRICE_ID"
+      ]
     },
     {
       "code": "architect_monthly",
@@ -25,7 +31,10 @@
       "billing_interval": "monthly",
       "price_usd": 49,
       "checkout_enabled": true,
-      "price_id_env_keys": ["PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "PADDLE_POWER_MONTHLY_PRICE_ID"]
+      "price_id_env_keys": [
+        "PADDLE_ARCHITECT_MONTHLY_PRICE_ID",
+        "PADDLE_POWER_MONTHLY_PRICE_ID"
+      ]
     },
     {
       "code": "architect_annual",
@@ -34,7 +43,10 @@
       "billing_interval": "annual",
       "price_usd": 449,
       "checkout_enabled": true,
-      "price_id_env_keys": ["PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "PADDLE_POWER_ANNUAL_PRICE_ID"]
+      "price_id_env_keys": [
+        "PADDLE_ARCHITECT_ANNUAL_PRICE_ID",
+        "PADDLE_POWER_ANNUAL_PRICE_ID"
+      ]
     }
   ],
   "tiers": [

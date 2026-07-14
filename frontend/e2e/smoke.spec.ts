@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test"
 import { installMockApi } from "./support/mockApi"
 
 const BOOK_ROUTE = "/sky-of-ash--book-1"
+const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
+const E2E_APP_ORIGIN = process.env.E2E_APP_ORIGIN ?? `http://localhost:${process.env.E2E_PORT ?? "3001"}`
 
 function watchBrowserSignals(page: Page) {
   const consoleMessages: string[] = []
@@ -186,16 +188,85 @@ test("auth redirects protect private pages and skip login for active sessions", 
 
 test("admin route returns 404 when the request is not allowed", async ({ page }) => {
   await installMockApi(page, { admin: "none" })
+  await page.goto("/")
+  const response = await page.evaluate(async () => {
+    const result = await fetch("/api/v1/admin/session")
+    return { status: result.status, body: await result.json() }
+  })
+
+  expect(response.status).toBe(403)
+  expect(response.body).toEqual({ detail: "Admin only" })
+
   await page.goto("/admin")
 
   await expect(page.getByText("This page could not be found.")).toBeVisible()
 })
 
-test.skip("admin route loads the operations console for owner admins", async ({ page }) => {
-  // TODO: This test is currently skipped due to Next.js hot reload timing issues in E2E environment
-  // The test passes inconsistently depending on when the webServer completes its reload
+test("admin session accepts owner admins in the E2E mock", async ({ page }) => {
   await installMockApi(page, { admin: "owner" })
-  await page.goto("/admin")
+  await page.goto("/")
+  const response = await page.evaluate(async () => {
+    const result = await fetch("/api/v1/admin/session")
+    return { status: result.status, body: await result.json() }
+  })
+
+  expect(response.status).toBe(200)
+  expect(response.body).toMatchObject({
+    is_admin: true,
+    is_owner: true,
+    requires_step_up: false,
+  })
+  expect(response.body.scopes).toEqual(["moderation_admin", "billing_admin", "super_admin"])
+})
+
+test("admin route loads the operations console for owner admins", async ({ page }) => {
+  await installMockApi(page, { admin: "owner" })
+  await page.route("**/api/v1/admin/session", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: {
+        "access-control-allow-credentials": "true",
+        "access-control-allow-origin": E2E_APP_ORIGIN,
+      },
+      body: JSON.stringify({
+        is_admin: true,
+        scopes: ["moderation_admin", "billing_admin", "super_admin"],
+        is_owner: true,
+        requires_step_up: false,
+        session_expires_at: null,
+      }),
+    })
+  })
+  await page.goto("/")
+  const response = await page.evaluate(async () => {
+    const result = await fetch("/api/v1/admin/session")
+    return { status: result.status, body: await result.json() }
+  })
+
+  expect(response.status).toBe(200)
+  expect(response.body).toMatchObject({
+    is_admin: true,
+    is_owner: true,
+    requires_step_up: false,
+  })
+  expect(response.body.scopes).toEqual(["moderation_admin", "billing_admin", "super_admin"])
+
+  await page.setExtraHTTPHeaders({
+    "x-lorevia-admin-test-session": `owner:${ADMIN_TEST_SESSION_SECRET}`,
+  })
+  await page.evaluate((value) => {
+    document.cookie = `lorevia_admin_test_session=${encodeURIComponent(value)}; Path=/; SameSite=Lax`
+  }, `owner:${ADMIN_TEST_SESSION_SECRET}`)
+  await page.context().addCookies([
+    {
+      name: "lorevia_admin_test_session",
+      value: `owner:${ADMIN_TEST_SESSION_SECRET}`,
+      url: E2E_APP_ORIGIN,
+      sameSite: "Lax",
+    },
+  ])
+  await page.goto(`/admin?e2e=${Date.now()}`)
 
   await expect(page.getByRole("heading", { name: "Operations Console" })).toBeVisible()
   await expect(page.getByText("Billing setup")).toBeVisible()
@@ -242,6 +313,18 @@ test("settings page updates promotional email preferences", async ({ page }) => 
   await page.getByRole("button", { name: /Product updates/i }).click()
 
   await expect(page.getByText("Email preferences updated.")).toBeVisible()
+  await page.getByRole("button", { name: "Unsubscribe from promotional emails" }).click()
+  await expect(page.getByRole("button", { name: "Promotional emails unsubscribed" })).toBeVisible()
+})
+
+test("email unsubscribe link suppresses promotional email", async ({ page }) => {
+  await installMockApi(page, { session: "guest" })
+  await page.goto("/unsubscribe?token=mock-unsubscribe-token")
+
+  await expect(page.getByRole("heading", { name: "You are unsubscribed" })).toBeVisible()
+  await expect(page.getByText("author@getlorevia.com")).toBeVisible()
+  await expect(page.getByText(/product updates or marketing emails/i)).toBeVisible()
+  await expect(page.getByRole("link", { name: "Manage preferences" })).toHaveAttribute("href", "/settings#emails")
 })
 
 test("settings data export triggers a download request", async ({ page }) => {
@@ -280,15 +363,14 @@ test("settings sidebar follows the current section while scrolling", async ({ pa
 
 test("library permanent book deletion requires confirmation and removes the project", async ({ page }) => {
   await installMockApi(page)
-  page.on("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("DELETE BOOK")
-    await dialog.accept("DELETE BOOK")
-  })
   await page.goto("/library")
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.locator('button[aria-label="Open actions for Sky of Ash"]').first().click()
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click()
+  const deleteDialog = page.getByRole("dialog", { name: "Delete Sky of Ash permanently?" })
+  await deleteDialog.getByLabel("Confirmation phrase").fill("DELETE BOOK")
+  await deleteDialog.getByRole("button", { name: "Delete permanently" }).click()
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" })).toHaveCount(0)
 })

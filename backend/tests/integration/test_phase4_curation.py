@@ -27,7 +27,7 @@ async def _register_author(client, email: str, monkeypatch) -> tuple[dict[str, s
     )
 
     monkeypatch.setattr(
-        "app.api.v1.routes.books.characters.require_author_access",
+        "app.services.character_relationship_service.require_author_access",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(

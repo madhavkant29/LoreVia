@@ -29,7 +29,7 @@ def _normalize_major_event(
     else:
         try:
             importance = int(importance_raw if importance_raw is not None else 5)
-        except Exception:
+        except (TypeError, ValueError):
             importance = 5
     return {
         "chapter_number": chapter_number,
@@ -54,12 +54,12 @@ def _normalize_character_event(
     impact_score = raw_event.get("impact_score", raw_event.get("importance", 5))
     try:
         impact_score = int(impact_score)
-    except Exception:
+    except (TypeError, ValueError):
         impact_score = 5
     growth_magnitude = raw_event.get("growth_magnitude", impact_score)
     try:
         growth_magnitude = int(growth_magnitude)
-    except Exception:
+    except (TypeError, ValueError):
         growth_magnitude = impact_score
     return {
         "chapter_number": chapter_number,

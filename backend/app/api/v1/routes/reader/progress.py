@@ -9,7 +9,7 @@ from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import mark_reader_progress_cache_dirty
 from app.models.progress import ReadingProgress
-from app.utils.beta_read_utils import sync_beta_assignments_for_reader_book
+from app.utils.beta_read_lifecycle_utils import sync_beta_assignments_for_reader_book
 from app.utils.books.collaboration_access import (
     collaboration_allows_chapter,
     get_book_with_collaboration_access,

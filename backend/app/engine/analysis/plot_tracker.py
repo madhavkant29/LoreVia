@@ -8,7 +8,7 @@ import uuid
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.core.llm import complete_with_fallback
+from app.core.llm import LLM_PROVIDER_EXCEPTIONS, complete_with_fallback
 
 PLOT_SYSTEM = """Analyse this chapter for meaningful plot threads. Return JSON only:
 {
@@ -63,9 +63,9 @@ async def extract_plot_threads(
             for t in threads:
                 t["introduced_at"] = chapter_num
             return threads
-        except Exception:
+        except (json.JSONDecodeError, AttributeError, TypeError):
             return []
-    except Exception:
+    except LLM_PROVIDER_EXCEPTIONS:
         return []
 
 

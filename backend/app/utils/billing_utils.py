@@ -86,10 +86,9 @@ LEGACY_PLAN_ALIASES = {
     "power_annual": "architect_annual",
 }
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SHARED_PRICING_CATALOG_PATH = (
-    REPO_ROOT / "frontend" / "src" / "lib" / "billing" / "pricing-catalog.json"
-)
+APP_ROOT = Path(__file__).resolve().parents[1]
+BACKEND_PRICING_CATALOG_PATH = APP_ROOT / "data" / "pricing-catalog.json"
+SHARED_PRICING_CATALOG_PATH = BACKEND_PRICING_CATALOG_PATH
 
 
 @lru_cache(maxsize=1)

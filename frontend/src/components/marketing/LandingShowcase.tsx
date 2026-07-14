@@ -131,7 +131,9 @@ export function LandingShowcase() {
   useEffect(() => {
     if (typeof window === "undefined" || !("IntersectionObserver" in window)) return
 
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    const reduceMotion = Boolean(
+      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches,
+    )
     const observer = new IntersectionObserver(
       (entries) => {
         const visibleEntry = entries

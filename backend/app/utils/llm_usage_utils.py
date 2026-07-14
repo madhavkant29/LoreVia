@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
+from openai import OpenAIError
 from openai.types.chat import ChatCompletion
 from openai.types.create_embedding_response import CreateEmbeddingResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -20,6 +23,7 @@ from app.utils.billing_utils import ARCHITECT_TIER, AUTHOR_TIER, billing_access_
 from app.utils.request_context import get_request_id, get_request_user_id
 
 log = logging.getLogger("lorevia.llm_usage")
+LLM_PROVIDER_CALL_EXCEPTIONS = (OpenAIError, httpx.HTTPError, TimeoutError, RuntimeError)
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,20 @@ class ManualReprocessTokenCaps:
 
 
 LlmTokenCaps = ManualReprocessTokenCaps
+
+
+async def _fail_llm_reservation_best_effort(
+    fail_llm_reservation: Any,
+    reservation: Any,
+) -> None:
+    try:
+        await fail_llm_reservation(reservation)
+    except SQLAlchemyError:
+        log.warning(
+            "llm_reservation_failure_recording_failed reservation_id=%s",
+            getattr(reservation, "id", None),
+            exc_info=True,
+        )
 
 
 def _coerce_uuid(value: object | None) -> uuid.UUID | None:
@@ -336,8 +354,8 @@ async def create_tracked_chat_completion(
     )
     try:
         response = await client.chat.completions.create(model=model, **kwargs)
-    except Exception:
-        await fail_llm_reservation(reservation)
+    except LLM_PROVIDER_CALL_EXCEPTIONS:
+        await _fail_llm_reservation_best_effort(fail_llm_reservation, reservation)
         raise
     await finish_llm_reservation(reservation, response)
     return response
@@ -373,8 +391,8 @@ async def create_tracked_embedding(
     )
     try:
         response = await client.embeddings.create(model=model, **kwargs)
-    except Exception:
-        await fail_llm_reservation(reservation)
+    except LLM_PROVIDER_CALL_EXCEPTIONS:
+        await _fail_llm_reservation_best_effort(fail_llm_reservation, reservation)
         raise
     await finish_llm_reservation(reservation, response)
     return response

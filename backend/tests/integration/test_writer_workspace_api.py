@@ -226,7 +226,7 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
             )
             await _db.flush()
 
-    monkeypatch.setattr("app.api.v1.routes.books._process_chapter", _fake_process_chapter)
+    monkeypatch.setattr("app.services.manuscript_import_service._process_chapter", _fake_process_chapter)
 
     import_response = await client.post(
         f"/api/v1/books/{book.id}/manuscript/import",

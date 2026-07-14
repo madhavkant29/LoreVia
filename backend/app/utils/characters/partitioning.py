@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from openai import OpenAIError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +47,15 @@ from app.utils.characters.merging import (
     _dedupe_relationships,
 )
 from app.utils.characters.text import clean_optional_text, clean_string_list
+
+
+PARTITION_ENRICHMENT_EXCEPTIONS = (
+    OpenAIError,
+    TimeoutError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 def _collect_partition_evidence(
@@ -188,7 +198,7 @@ async def _build_partition_payload(
                 for entity in extracted.get("characters", [])
                 if isinstance(entity, dict) and _partition_matches_entity(name, aliases, entity)
             ]
-        except Exception:
+        except PARTITION_ENRICHMENT_EXCEPTIONS:
             entities = []
 
     merged_entity = _merge_partition_entities(name, aliases, entities)

@@ -5,7 +5,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any, cast
 
-from openai import AsyncOpenAI
+import httpx
+from openai import AsyncOpenAI, OpenAIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import (
     retry,
@@ -19,6 +20,7 @@ from app.utils.llm_usage_utils import create_tracked_chat_completion
 
 _openai_client: AsyncOpenAI | None = None
 _gemini_client: object | None = None
+LLM_PROVIDER_EXCEPTIONS = (OpenAIError, httpx.HTTPError, TimeoutError, RuntimeError, ValueError)
 
 
 def _get_openai_client(external: AsyncOpenAI | None = None) -> AsyncOpenAI:
@@ -136,7 +138,7 @@ async def complete_with_fallback(
             content = response.choices[0].message.content or ""
             if content.strip():
                 return content.strip()
-        except Exception as exc:  # pragma: no cover - network/provider path
+        except LLM_PROVIDER_EXCEPTIONS as exc:  # pragma: no cover - network/provider path
             openai_error = exc
 
     if settings.GEMINI_API_KEY and gemini_model:
@@ -149,7 +151,7 @@ async def complete_with_fallback(
                 max_tokens=max_tokens,
                 want_json=response_format == {"type": "json_object"},
             )
-        except Exception:  # pragma: no cover - network/provider path
+        except LLM_PROVIDER_EXCEPTIONS:  # pragma: no cover - network/provider path
             if openai_error:
                 raise openai_error
             raise
@@ -171,7 +173,7 @@ async def _complete_with_gemini(
 ) -> str:
     try:
         from google.generativeai import types
-    except Exception as exc:  # pragma: no cover - optional dependency
+    except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Gemini fallback requested but google-genai is not installed") from exc
 
     client = cast(Any, _get_gemini_client())

@@ -12,14 +12,14 @@ from app.utils.world_building_utils import (
     _claims_contradict,
     build_world_logic_response,
     classify_world_intent,
-    create_world_building_documents,
     detect_integration_analysis,
     detect_series_world_analysis,
     detect_world_gaps,
-    generate_wiki_from_manuscript,
     ingest_world_elements_from_chapter,
     save_canon_override,
 )
+from app.utils.world_building_document_workflow_utils import create_world_building_documents
+from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
 
 
 def test_classify_world_intent_prefers_integration_for_story_use_queries():
@@ -42,8 +42,11 @@ async def test_detect_world_gap_and_integration_payloads(db, monkeypatch):
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(email="world-utils@lorevia.app", username="worldutils", password_hash="hash")
     db.add(user)
@@ -108,8 +111,11 @@ async def test_detect_series_world_analysis_checks_lore_across_books(db, monkeyp
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(
         email="world-series-utils@lorevia.app", username="worldseriesutils", password_hash="hash"
@@ -201,8 +207,11 @@ async def test_generate_wiki_and_world_logic_response(db, monkeypatch):
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(email="wiki-utils@lorevia.app", username="wikiutils", password_hash="hash")
     db.add(user)
@@ -402,8 +411,11 @@ async def test_detect_world_gaps_matches_transliteration_variants_without_false_
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     await create_world_building_documents(
         db,
@@ -437,7 +449,10 @@ async def test_detect_world_gaps_surfaces_internal_magic_rule_conflicts(db, monk
         return stored[key]
 
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(
         email="world-magic-conflict@lorevia.app",
@@ -510,7 +525,10 @@ async def test_detect_world_gaps_surfaces_internal_geography_conflicts(db, monke
         return stored[key]
 
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(
         email="world-geo-conflict@lorevia.app", username="worldgeoconflict", password_hash="hash"
@@ -586,8 +604,11 @@ async def test_detect_world_gaps_uses_character_aliases_as_canonical_identity(db
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(
         email="world-character@lorevia.app", username="worldcharacter", password_hash="hash"
@@ -704,8 +725,11 @@ async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(
         email="world-watchlist@lorevia.app", username="worldwatchlist", password_hash="hash"

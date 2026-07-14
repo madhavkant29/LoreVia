@@ -82,10 +82,7 @@ def _has_valid_bearer_access_token(authorization: str) -> bool:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         return False
-    try:
-        payload = decode_token(token.strip())
-    except Exception:
-        return False
+    payload = decode_token(token.strip())
     return bool(payload and payload.get("type") == "access" and payload.get("sub"))
 
 
@@ -107,7 +104,7 @@ def _validate_same_origin_request(request: Request) -> None:
     try:
         parsed = urlparse(candidate)
         request_origin = f"{parsed.scheme}://{parsed.netloc}"
-    except Exception:
+    except ValueError:
         raise HTTPException(403, "Invalid request origin.")
 
     if request_origin.rstrip("/") not in allowed_origins:

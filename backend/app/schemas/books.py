@@ -124,6 +124,7 @@ class BookOverviewOut(BaseModel):
 
 
 class ReaderBootstrapOut(BaseModel):
+    profile: Literal["critical", "full"] = "full"
     overview: BookOverviewOut
     notes: list[BookNoteOut] = Field(default_factory=list)
     saved_quotes: list[dict[str, Any]] = Field(default_factory=list)
@@ -137,6 +138,7 @@ class ReaderBootstrapOut(BaseModel):
 
 
 class ManuscriptBootstrapOut(BaseModel):
+    profile: Literal["critical", "full"] = "full"
     book: BookOut
     characters: list[dict[str, Any]] = Field(default_factory=list)
     writer_workspace: WriterWorkspaceOut | None = None

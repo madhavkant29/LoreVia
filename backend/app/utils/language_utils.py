@@ -1113,7 +1113,7 @@ def _score_headings(text: str, language: str) -> float:
     """Score based on how many heading-like lines match language patterns."""
     try:
         lang_regex = build_heading_regex(languages=[language])
-    except Exception:
+    except (ValueError, re.error):
         return 0.0
     lines = text.splitlines()
     heading_lines = [line.strip() for line in lines if line.strip()]

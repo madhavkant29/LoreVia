@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,6 @@ from app.schemas.email import (
     EmailPreferenceOut,
     EmailPreferenceTokenViewOut,
     EmailPreferenceUpdateBody,
-    EmailUnsubscribeBody,
     EmailUnsubscribeOut,
 )
 from app.utils.auth_utils import normalize_email
@@ -77,11 +76,20 @@ async def save_email_preferences(
 
 @router.post("/unsubscribe", response_model=EmailUnsubscribeOut)
 async def unsubscribe_email(
-    body: EmailUnsubscribeBody | None = None,
+    request: Request,
     token: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    unsubscribe_token = token or (body.token if body else None)
+    unsubscribe_token = token.strip() if token else None
+    if not unsubscribe_token:
+        try:
+            payload = await request.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            raw_token = payload.get("token")
+            unsubscribe_token = raw_token.strip() if isinstance(raw_token, str) else None
+
     if not unsubscribe_token:
         raise HTTPException(400, "Unsubscribe token is required")
 

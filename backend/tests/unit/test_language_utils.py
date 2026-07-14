@@ -1,3 +1,8 @@
+import re
+
+import pytest
+
+from app.utils import language_utils
 from app.utils.language_utils import (
     STOPWORDS,
     TRIGRAM_PROFILES,
@@ -157,6 +162,23 @@ def test_score_headings_unknown_language():
 
 
 # ── detect_language ────────────────────────────────────────────────────────
+
+
+def test_score_headings_only_swallows_expected_regex_build_failures(monkeypatch):
+    def _invalid_heading_regex(*_args, **_kwargs):
+        raise re.error("invalid regex")
+
+    monkeypatch.setattr(language_utils, "build_heading_regex", _invalid_heading_regex)
+
+    assert _score_headings("Chapter 1", "en") == 0.0
+
+    def _unexpected_heading_bug(*_args, **_kwargs):
+        raise RuntimeError("heading builder bug")
+
+    monkeypatch.setattr(language_utils, "build_heading_regex", _unexpected_heading_bug)
+
+    with pytest.raises(RuntimeError, match="heading builder bug"):
+        _score_headings("Chapter 1", "en")
 
 
 def test_detect_english():

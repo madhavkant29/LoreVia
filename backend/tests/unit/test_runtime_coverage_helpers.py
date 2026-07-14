@@ -21,11 +21,15 @@ from app.schemas.user import UserCreate, UserLogin, UserOut
 from app.services import character_service
 from app.utils import (
     advisor_utils,
+    beta_read_policy_utils,
+    beta_read_progress_utils,
     beta_read_utils,
     export_utils,
     intelligence_utils,
     public_utils,
     reader_utils,
+    world_building_serialization_utils,
+    world_building_story_utils,
     world_building_utils,
 )
 from app.utils.books import (
@@ -816,8 +820,12 @@ def test_public_utils_form_slug_forum_and_ranking_helpers(monkeypatch):
     assert requests.hash_text(" reader ") == requests.hash_text("reader")
     assert requests.hash_text("   ") is None
     request = SimpleNamespace(
-        headers={"x-forwarded-for": "203.0.113.5, 10.0.0.2", "user-agent": " Test   Agent "},
-        client=SimpleNamespace(host="198.51.100.9"),
+        headers={
+            "x-forwarded-for": "203.0.113.5, 10.0.0.2",
+            "x-lorevia-edge-verified": "1",
+            "user-agent": " Test   Agent ",
+        },
+        client=SimpleNamespace(host="127.0.0.1"),
     )
     assert requests.build_public_visitor_fingerprint(request) == requests.hash_text(
         "203.0.113.5|test agent"
@@ -1639,7 +1647,7 @@ def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
     assert assignment.late_feedback is True
 
     now = datetime(2026, 1, 5, tzinfo=UTC)
-    assert beta_read_utils.submission_is_late(assignment, now=now) is False
+    assert beta_read_policy_utils.submission_is_late(assignment, now=now) is False
     beta_read_utils.assert_valid_beta_transition(
         BetaReadAssignmentState.ACTIVE.value,
         BetaReadAssignmentState.IN_PROGRESS.value,
@@ -1657,7 +1665,7 @@ def test_beta_read_utils_validate_scope_rating_state_and_penalties(monkeypatch):
     )
     assert assignment.state == BetaReadAssignmentState.REVOKED.value
     assert assignment.revoked_reason == "author_cancelled"
-    assert beta_read_utils.beta_view_bucket(assignment, now=now) == "missed"
+    assert beta_read_policy_utils.beta_view_bucket(assignment, now=now) == "missed"
 
 
 def test_book_utils_runtime_normalizers_and_workspace_helpers():
@@ -2195,8 +2203,8 @@ def test_runtime_public_beta_export_and_import_helpers_cover_edge_branches(monke
     )
     assert assignment.submitted_progress_pct == 100
     assert assignment.late_feedback is True
-    assert beta_read_utils.beta_view_bucket(assignment, now=now) == "scheduled"
-    assert beta_read_utils.beta_status_label(assignment, now=now) == "Scheduled"
+    assert beta_read_policy_utils.beta_view_bucket(assignment, now=now) == "scheduled"
+    assert beta_read_policy_utils.beta_status_label(assignment, now=now) == "Scheduled"
     assert beta_read_utils.beta_primary_action(assignment, now=now) == "View"
     beta_read_utils.set_beta_assignment_state(
         assignment, BetaReadAssignmentState.REVOKED.value, now=now, revoked_reason="scope_changed"
@@ -2360,9 +2368,9 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
         starts_at=now - timedelta(days=1),
         expires_at=now - timedelta(hours=1),
     )
-    assert beta_read_utils.submission_is_late(assignment, now) is True
-    assert beta_read_utils.beta_view_bucket(assignment, now=now) == "missed"
-    assert beta_read_utils.beta_status_label(assignment, now=now) == "Expired"
+    assert beta_read_policy_utils.submission_is_late(assignment, now) is True
+    assert beta_read_policy_utils.beta_view_bucket(assignment, now=now) == "missed"
+    assert beta_read_policy_utils.beta_status_label(assignment, now=now) == "Expired"
     assert beta_read_utils.beta_primary_action(assignment, now=now) == "View"
     with pytest.raises(HTTPException):
         beta_read_utils.assert_valid_beta_transition(
@@ -2374,8 +2382,8 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
         starts_at=now + timedelta(days=1),
         expires_at=now + timedelta(days=4),
     )
-    assert beta_read_utils.beta_view_bucket(scheduled, now=now) == "scheduled"
-    assert beta_read_utils.beta_status_label(scheduled, now=now) == "Scheduled"
+    assert beta_read_policy_utils.beta_view_bucket(scheduled, now=now) == "scheduled"
+    assert beta_read_policy_utils.beta_status_label(scheduled, now=now) == "Scheduled"
     assert beta_read_utils.beta_primary_action(scheduled, now=now) == "View"
 
     for state, expected_label, expected_action, expected_bucket in [
@@ -2399,13 +2407,13 @@ def test_beta_read_validation_state_and_penalty_branches(monkeypatch):
             starts_at=now - timedelta(days=1),
             expires_at=now + timedelta(days=1),
         )
-        assert beta_read_utils.beta_status_label(item, now=now) == expected_label
+        assert beta_read_policy_utils.beta_status_label(item, now=now) == expected_label
         assert beta_read_utils.beta_primary_action(item, now=now) == expected_action
-        assert beta_read_utils.beta_view_bucket(item, now=now) == expected_bucket
+        assert beta_read_policy_utils.beta_view_bucket(item, now=now) == expected_bucket
     unknown = SimpleNamespace(
         state="custom_state", starts_at=now, expires_at=now + timedelta(days=1)
     )
-    assert beta_read_utils.beta_status_label(unknown, now=now) == "Custom State"
+    assert beta_read_policy_utils.beta_status_label(unknown, now=now) == "Custom State"
 
     stateful = SimpleNamespace(state=BetaReadAssignmentState.ACTIVE.value)
     beta_read_utils.set_beta_assignment_state(
@@ -2495,7 +2503,7 @@ async def test_beta_read_progress_feedback_and_question_helpers(monkeypatch):
     assert beta_read_utils._requirements_met(assignment, snapshot) is True
     assert beta_read_utils._requirements_met(assignment, {**snapshot, "comment_count": 4}) is False
 
-    context_snapshot = beta_read_utils._assignment_progress_snapshot_from_context(
+    context_snapshot = beta_read_progress_utils._assignment_progress_snapshot_from_context(
         assignment,
         book=book,
         progress=SimpleNamespace(chapters_read=[], current_chapter=3),
@@ -2693,7 +2701,7 @@ def test_world_building_candidate_conflict_and_scoring_helpers():
         for item in resolved
     )
 
-    collapsed = world_building_utils._collapse_elements(
+    collapsed = world_building_story_utils.collapse_elements(
         [
             {
                 "name": "Moon Gate",
@@ -2716,8 +2724,8 @@ def test_world_building_candidate_conflict_and_scoring_helpers():
     assert collapsed["moon gate"]["usage_count"] == 3
     assert collapsed["moon gate"]["chapter_numbers"] == [2, 3]
 
-    assert world_building_utils._map_element_to_wiki_type("kingdom") == "location"
-    assert world_building_utils._map_element_to_wiki_type("weapon") == "item"
+    assert world_building_serialization_utils.map_element_to_wiki_type("kingdom") == "location"
+    assert world_building_serialization_utils.map_element_to_wiki_type("weapon") == "item"
     assert world_building_utils._world_names_equivalent("Moon-Gate", "moon gate") is True
     assert (
         world_building_utils._world_text_mentions_name("the moon gate opens", "Moon Gate") is True
@@ -2775,7 +2783,7 @@ def test_world_building_candidate_conflict_and_scoring_helpers():
         )
         is True
     )
-    assert world_building_utils._filename_title("moon_gate-notes.md") == "Moon Gate Notes"
+    assert world_building_serialization_utils.filename_title("moon_gate-notes.md") == "Moon Gate Notes"
 
     world_item = {
         "name": "Moon Gate",

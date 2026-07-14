@@ -1,4 +1,4 @@
-"""Tests for chapter validation in reader routes."""
+﻿"""Tests for chapter validation in reader routes."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.api.v1.routes import reader
+from tests.unit.route_patch_helpers import patch_route_dependency
+from tests.unit.route_facades import reader
 
 
 class _FakeDB:
@@ -133,8 +134,8 @@ async def test_get_summary_validates_chapter_range(monkeypatch):
     async def _fake_access(*_args, **_kwargs):
         return book, None
 
-    monkeypatch.setattr(reader, "get_book_with_collaboration_access", _fake_access)
-    monkeypatch.setattr(reader, "summary_mode_allowed", lambda *a, **kw: True)
+    patch_route_dependency(monkeypatch, reader, "get_book_with_collaboration_access", _fake_access)
+    patch_route_dependency(monkeypatch, reader, "summary_mode_allowed", lambda *a, **kw: True)
     db = _FakeDB()
 
     with pytest.raises(HTTPException) as exc_info:

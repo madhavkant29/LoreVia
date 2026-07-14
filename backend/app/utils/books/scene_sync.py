@@ -26,6 +26,7 @@ from app.utils.books.scene_metadata import (
     build_workspace_chapter_text_from_scenes,
     strip_scene_metadata_from_manuscript_text,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 
 def _chapter_storage_key(book_id: uuid.UUID, chapter_number: int) -> str:
@@ -107,11 +108,11 @@ async def sync_chapter_content_from_novel_scenes(
     previous_payload = {"text": "", "html": None}
     if chapter.s3_key:
         try:
-            previous_payload = manuscript.deserialize_manuscript_content(
-                await asyncio.to_thread(download_book, chapter.s3_key)
-            )
-        except Exception:
+            previous_raw = await asyncio.to_thread(download_book, chapter.s3_key)
+        except STORAGE_IO_EXCEPTIONS:
             previous_payload = {"text": "", "html": None}
+        else:
+            previous_payload = manuscript.deserialize_manuscript_content(previous_raw)
     stored_key = await asyncio.to_thread(
         upload_text,
         chapter.s3_key or _chapter_storage_key(book.id, chapter_number),

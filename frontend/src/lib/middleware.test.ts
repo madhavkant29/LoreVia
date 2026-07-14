@@ -138,6 +138,7 @@ describe("middleware CSP", () => {
       "/refund",
       "/status",
       "/terms",
+      "/unsubscribe",
     ]
 
     for (const route of publicRoutes) {

@@ -48,11 +48,7 @@ export function useConfirmDialog() {
   const context = useContext(ConfirmContext)
   if (context) return context.confirm
 
-  return async (config: ConfirmDialogConfig) => {
-    if (typeof window === "undefined") return false
-    const body = typeof config.body === "string" ? config.body : config.title
-    return window.confirm(body)
-  }
+  return async () => false
 }
 
 export function ConfirmDialog({

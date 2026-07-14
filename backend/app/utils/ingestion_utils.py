@@ -27,6 +27,7 @@ from app.utils.books.writer_workspace import (
     normalize_writer_workspace,
 )
 from app.utils.logging.errors import redact_sensitive_text
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 READING_CHAPTER_TARGET_WORDS = 7000
@@ -115,7 +116,7 @@ async def load_staged_chapter_payload(
     for storage_key in candidate_keys:
         try:
             raw = await asyncio.to_thread(download_book, storage_key)
-        except Exception:
+        except STORAGE_IO_EXCEPTIONS:
             continue
         return deserialize_manuscript_content(raw)
 

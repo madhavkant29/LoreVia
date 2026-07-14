@@ -14,6 +14,8 @@ COPYRIGHT_RE = re.compile(r"(?:copyright|\u00a9|\(c\)|all rights reserved)", re.
 PUBLIC_DOMAIN_RE = re.compile(r"(?:public domain|project gutenberg)", re.IGNORECASE)
 TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
+REGISTRY_LOOKUP_EXCEPTIONS = (httpx.HTTPError, KeyError, TypeError, ValueError)
+DOCUMENT_PARSE_EXCEPTIONS = (RuntimeError, ValueError, TypeError, zipfile.BadZipFile, OSError)
 
 
 async def check_isbn(isbn: str) -> dict:
@@ -36,7 +38,7 @@ async def check_isbn(isbn: str) -> dict:
                     "authors": [a["name"] for a in entry.get("authors", [])],
                     "requires_disclaimer": True,
                 }
-    except Exception:
+    except REGISTRY_LOOKUP_EXCEPTIONS:
         pass
     return {"found": False}
 
@@ -125,7 +127,7 @@ def _extract_pdf_text(raw: bytes) -> str:
             parts.append(str(cast(Any, doc[index]).get_text() or ""))
         doc.close()
         return _normalize_text("\n".join(parts))
-    except Exception:
+    except DOCUMENT_PARSE_EXCEPTIONS:
         return ""
 
 
@@ -151,7 +153,7 @@ def _extract_zip_text(
             for name in selected_names[:8]:
                 parts.append(_strip_tags(_safe_decode(archive.read(name))))
             return _normalize_text("\n".join(parts))
-    except Exception:
+    except DOCUMENT_PARSE_EXCEPTIONS:
         return ""
 
 

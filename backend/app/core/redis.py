@@ -4,9 +4,11 @@ import json
 import logging
 import time
 import weakref
+from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 
 from app.core.config import settings
 
@@ -25,6 +27,197 @@ READER_DERIVED_CACHE_TTL_SECONDS = 2 * 60
 PUBLIC_PROFILE_CACHE_TTL_SECONDS = 5 * 60
 PUBLIC_FORUM_COMMENTS_CACHE_TTL_SECONDS = 2 * 60
 SYNOPSIS_CACHE_TTL_SECONDS = 7 * 86400  # 604800
+EMBEDDING_CACHE_TTL_SECONDS = 30 * 60
+CROSS_BOOK_INTEL_CACHE_TTL_SECONDS = 30 * 60
+REDIS_OPERATION_EXCEPTIONS = (RedisError, TimeoutError, OSError)
+
+
+@dataclass(frozen=True)
+class CachePolicy:
+    namespace: str
+    owner: str
+    ttl_seconds: int | None
+    invalidation: str
+    source_of_truth: str
+
+
+CACHE_POLICIES: tuple[CachePolicy, ...] = (
+    CachePolicy(
+        "advisor:book",
+        "advisor",
+        ADVISOR_CACHE_TTL_SECONDS,
+        "TTL plus advisor namespace delete after semantic book changes",
+        "Postgres and LLM recomputation",
+    ),
+    CachePolicy(
+        "advisor:series",
+        "advisor",
+        ADVISOR_CACHE_TTL_SECONDS,
+        "TTL plus advisor namespace delete after series/book changes",
+        "Postgres and LLM recomputation",
+    ),
+    CachePolicy(
+        "advisor:book:*:proactive",
+        "advisor",
+        PROACTIVE_SCAN_CACHE_TTL_SECONDS,
+        "TTL plus advisor namespace delete after semantic book changes",
+        "Postgres and LLM recomputation",
+    ),
+    CachePolicy(
+        "advisor:book:*:suggestions",
+        "advisor",
+        SUGGESTION_SCAN_CACHE_TTL_SECONDS,
+        "TTL plus advisor namespace delete after semantic book changes",
+        "Postgres and LLM recomputation",
+    ),
+    CachePolicy(
+        "advisor:book:*:synopsis",
+        "advisor",
+        SYNOPSIS_CACHE_TTL_SECONDS,
+        "Content hash key and TTL",
+        "Book/chapter content in Postgres",
+    ),
+    CachePolicy(
+        "story_context",
+        "advisor",
+        STORY_CONTEXT_CACHE_TTL_SECONDS,
+        "Book or series cache-version marker in key plus TTL",
+        "Postgres manuscript intelligence tables",
+    ),
+    CachePolicy(
+        "series_story_context",
+        "advisor",
+        STORY_CONTEXT_CACHE_TTL_SECONDS,
+        "Series cache-version marker in key plus TTL",
+        "Postgres manuscript intelligence tables",
+    ),
+    CachePolicy(
+        "book_overview",
+        "books",
+        BOOK_AGGREGATE_CACHE_TTL_SECONDS,
+        "Book cache-version marker in key plus TTL",
+        "Postgres book aggregate queries",
+    ),
+    CachePolicy(
+        "writer_workspace",
+        "books",
+        BOOK_AGGREGATE_CACHE_TTL_SECONDS,
+        "Book cache-version marker in key plus TTL",
+        "Postgres book/workspace records",
+    ),
+    CachePolicy(
+        "writing_dashboard",
+        "dashboard",
+        USER_DASHBOARD_CACHE_TTL_SECONDS,
+        "User dashboard cache-version marker and day marker in key plus TTL",
+        "Postgres user/book/progress records",
+    ),
+    CachePolicy(
+        "reader_events",
+        "reader",
+        READER_DERIVED_CACHE_TTL_SECONDS,
+        "Book and reader-progress cache-version markers in key plus TTL",
+        "Postgres reader event queries",
+    ),
+    CachePolicy(
+        "reader_timeline",
+        "reader",
+        READER_DERIVED_CACHE_TTL_SECONDS,
+        "Book and reader-progress cache-version markers in key plus TTL",
+        "Postgres reader timeline queries",
+    ),
+    CachePolicy(
+        "reader_relationship_evolution",
+        "reader",
+        READER_DERIVED_CACHE_TTL_SECONDS,
+        "Book and reader-progress cache-version markers in key plus TTL",
+        "Postgres relationship/event queries",
+    ),
+    CachePolicy(
+        "public:user_profile",
+        "public",
+        PUBLIC_PROFILE_CACHE_TTL_SECONDS,
+        "Public profile cache-version marker in key plus TTL",
+        "Postgres public profile queries",
+    ),
+    CachePolicy(
+        "public:forum",
+        "public",
+        PUBLIC_FORUM_COMMENTS_CACHE_TTL_SECONDS,
+        "Public forum cache-version marker in key plus TTL",
+        "Postgres public forum tables",
+    ),
+    CachePolicy(
+        "public:books",
+        "public",
+        300,
+        "Explicit delete on public catalog/profile changes plus TTL",
+        "Postgres public book records",
+    ),
+    CachePolicy(
+        "public:book",
+        "public",
+        300,
+        "Explicit delete on admin/public book changes plus TTL",
+        "Postgres public book records",
+    ),
+    CachePolicy(
+        "public:chapter",
+        "public",
+        3600,
+        "TTL and public book moderation/publish invalidation paths",
+        "Postgres public chapter records",
+    ),
+    CachePolicy(
+        "character:profile",
+        "characters",
+        None,
+        "TTL from settings.REDIS_TTL_CHARACTER_PROFILE",
+        "Postgres character records",
+    ),
+    CachePolicy(
+        "chapter:summary",
+        "reader",
+        None,
+        "TTL from settings.REDIS_TTL_SUMMARY",
+        "Postgres chapter summaries or LLM recomputation",
+    ),
+    CachePolicy(
+        "relationship:graph",
+        "reader",
+        None,
+        "TTL from settings.REDIS_TTL_GRAPH",
+        "Postgres relationship records",
+    ),
+    CachePolicy(
+        "book:search",
+        "reader",
+        None,
+        "TTL from settings.REDIS_TTL_SEARCH",
+        "Postgres/vector search recomputation",
+    ),
+    CachePolicy(
+        "recall",
+        "reader",
+        None,
+        "TTL from settings.REDIS_TTL_RECALL",
+        "Postgres reader/book records",
+    ),
+    CachePolicy(
+        "embedding",
+        "embeddings",
+        EMBEDDING_CACHE_TTL_SECONDS,
+        "Text/model hash plus TTL",
+        "OpenAI embedding API and tracked DB usage",
+    ),
+    CachePolicy(
+        "cross_book_intelligence",
+        "intelligence",
+        CROSS_BOOK_INTEL_CACHE_TTL_SECONDS,
+        "Input snapshot hash plus TTL",
+        "Postgres book/intelligence records",
+    ),
+)
 
 
 def _hash_ephemeral_token(token: str) -> str:
@@ -118,7 +311,7 @@ async def _cache_get_json_best_effort(key: str) -> object | None:
     try:
         r = await get_redis()
         data = await r.get(key)
-    except Exception:
+    except REDIS_OPERATION_EXCEPTIONS:
         log.warning("redis_cache_get_failed", extra={"cache_key": key}, exc_info=True)
         return None
     if not data:
@@ -129,7 +322,7 @@ async def _cache_get_json_best_effort(key: str) -> object | None:
         log.warning("redis_cache_payload_invalid", extra={"cache_key": key})
         try:
             await r.delete(key)
-        except Exception:
+        except REDIS_OPERATION_EXCEPTIONS:
             log.warning(
                 "redis_cache_delete_invalid_payload_failed", extra={"cache_key": key}, exc_info=True
             )
@@ -140,7 +333,7 @@ async def _cache_set_json_best_effort(key: str, value: object, ttl: int) -> None
     try:
         r = await get_redis()
         await r.setex(key, ttl, json.dumps(value, default=str))
-    except Exception:
+    except REDIS_OPERATION_EXCEPTIONS:
         log.warning("redis_cache_set_failed", extra={"cache_key": key}, exc_info=True)
 
 
@@ -149,18 +342,108 @@ async def _cache_delete_by_prefixes_best_effort(prefixes: list[str]) -> None:
         return
     try:
         r = await get_redis()
+        scan = getattr(r, "scan", None)
+        if scan is None:
+            log.warning("redis_cache_prefix_delete_scan_unavailable", extra={"prefixes": prefixes})
+            return
         keys_to_delete: list[str] = []
         for prefix in prefixes:
             cursor: int | str = 0
             while True:
-                cursor, keys = await r.scan(cursor=cursor, match=f"{prefix}*", count=200)
+                cursor, keys = await scan(cursor=cursor, match=f"{prefix}*", count=200)
                 keys_to_delete.extend(str(key) for key in keys)
                 if cursor in (0, "0"):
                     break
         if keys_to_delete:
             await r.delete(*keys_to_delete)
-    except Exception:
+    except REDIS_OPERATION_EXCEPTIONS:
         log.warning("redis_cache_prefix_delete_failed", extra={"prefixes": prefixes}, exc_info=True)
+
+
+def _coerce_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _redis_key_prefix(key: object) -> str:
+    if isinstance(key, bytes):
+        key = key.decode("utf-8", errors="replace")
+    text = str(key)
+    parts = text.split(":", 2)
+    if len(parts) == 1:
+        return parts[0]
+    if parts[0] in {"advisor", "public", "cache_version"}:
+        return f"{parts[0]}:{parts[1]}"
+    return parts[0]
+
+
+async def get_redis_diagnostics(*, scan_limit: int = 1000) -> dict[str, object]:
+    diagnostics: dict[str, object] = {
+        "ok": False,
+        "memory_mb": 0.0,
+        "connected_clients": 0,
+        "key_count": 0,
+        "key_prefix_counts": {},
+        "key_prefix_samples": {},
+        "key_scan_truncated": False,
+    }
+    try:
+        r = await get_redis()
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_diagnostics_connect_failed", exc_info=True)
+        return diagnostics | {"error": "connect_failed"}
+
+    diagnostics["ok"] = True
+    try:
+        memory = await r.info("memory")
+        diagnostics["memory_mb"] = round(
+            _coerce_int(memory.get("used_memory")) / 1024 / 1024, 2
+        )
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_diagnostics_memory_failed", exc_info=True)
+
+    try:
+        clients = await r.info("clients")
+        diagnostics["connected_clients"] = _coerce_int(clients.get("connected_clients"))
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_diagnostics_clients_failed", exc_info=True)
+
+    try:
+        diagnostics["key_count"] = _coerce_int(await r.dbsize())
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_diagnostics_dbsize_failed", exc_info=True)
+
+    try:
+        cursor: int | str = 0
+        scanned = 0
+        prefix_counts: dict[str, int] = {}
+        prefix_samples: dict[str, list[str]] = {}
+        while True:
+            cursor, keys = await r.scan(cursor=cursor, count=200)
+            for key in keys:
+                scanned += 1
+                prefix = _redis_key_prefix(key)
+                prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+                samples = prefix_samples.setdefault(prefix, [])
+                if len(samples) < 3:
+                    samples.append(
+                        key.decode("utf-8", errors="replace")
+                        if isinstance(key, bytes)
+                        else str(key)
+                    )
+                if scanned >= scan_limit:
+                    diagnostics["key_scan_truncated"] = True
+                    break
+            if cursor in (0, "0") or scanned >= scan_limit:
+                break
+        diagnostics["key_prefix_counts"] = dict(sorted(prefix_counts.items()))
+        diagnostics["key_prefix_samples"] = dict(sorted(prefix_samples.items()))
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_diagnostics_scan_failed", exc_info=True)
+
+    return diagnostics
 
 
 async def store_refresh_session(user_id: str, session_id: str, ttl_seconds: int) -> None:
@@ -903,9 +1186,6 @@ def key_public_forum_post_detail(version: int, post_id: str) -> str:
     return f"public:forum:post:v{version}:{post_id}"
 
 
-EMBEDDING_CACHE_TTL_SECONDS = 30 * 60
-
-
 def key_embedding_cache(*, feature: str, model: str, text: str) -> str:
     text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return f"embedding:{model}:{feature}:{text_hash}"
@@ -926,9 +1206,6 @@ async def set_embedding_cache(*, feature: str, model: str, text: str, vector: li
         vector,
         EMBEDDING_CACHE_TTL_SECONDS,
     )
-
-
-CROSS_BOOK_INTEL_CACHE_TTL_SECONDS = 30 * 60
 
 
 def key_cross_book_intelligence(books_hash: str, snapshot_hash: str) -> str:

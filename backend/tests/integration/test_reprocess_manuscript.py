@@ -36,6 +36,10 @@ async def _register_author(client, email: str, monkeypatch) -> tuple[dict[str, s
         "app.api.v1.routes.books.imports.require_author_access",
         lambda *_args, **_kwargs: None,
     )
+    monkeypatch.setattr(
+        "app.services.manuscript_reprocess_service.require_author_access",
+        lambda *_args, **_kwargs: None,
+    )
 
     return headers, user_id
 
@@ -305,7 +309,7 @@ async def test_reprocess_charge_failure_invalidates_queued_rebuild(client, db, m
         _fake_apply_async,
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.consume_processing_reservation",
+        "app.services.manuscript_reprocess_service.consume_processing_reservation",
         _fail_usage_consumption,
     )
 
@@ -392,7 +396,7 @@ async def test_reprocess_requires_author_access(client, db, monkeypatch):
     await db.commit()
 
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.require_author_access",
+        "app.services.manuscript_reprocess_service.require_author_access",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             __import__("fastapi").HTTPException(403, "Requires Author plan")
         ),
@@ -432,7 +436,7 @@ async def test_reprocess_rejects_when_upload_capacity_is_exhausted(client, db, m
         raise HTTPException(403, "Author tier includes 15 uploads. You have 0 remaining.")
 
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.reserve_processing_words",
+        "app.services.manuscript_reprocess_service.reserve_processing_words",
         _reject_processing_allowance,
     )
 

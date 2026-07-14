@@ -11,6 +11,7 @@ from app.models.book import Book
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
 from app.services.public_publish_service import submit_public_share
 from app.utils.billing_utils import require_author_access
+from app.utils.client_identity import trusted_client_ip
 from app.utils.public.moderation import (
     add_moderation_action,
 )
@@ -48,7 +49,7 @@ async def publish_book_publicly(
         book=book,
         user=current_user,
         body=body,
-        request_ip=request.client.host if request.client else None,
+        request_ip=trusted_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
 

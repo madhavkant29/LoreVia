@@ -12,7 +12,7 @@ from app.models.intelligence import BookChunk
 async def test_smart_tap_returns_search_for_unknown(client, auth_headers):
     """Tapping an unknown word should return search results (empty list ok)."""
     fake_book = uuid.uuid4()
-    with patch("app.api.v1.routes.reader.find_context_for_tap", AsyncMock(return_value=[])):
+    with patch("app.api.v1.routes.reader.core.find_context_for_tap", AsyncMock(return_value=[])):
         r = await client.get(
             f"/api/v1/reader/{fake_book}/context?q=unknown&chapter=5",
             headers=auth_headers,

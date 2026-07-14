@@ -10,8 +10,9 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
@@ -54,6 +55,7 @@ from app.utils.llm_usage_utils import (
 from app.utils.logging.errors import public_error_message
 
 router = APIRouter()
+GROUNDED_QA_STREAM_EXCEPTIONS = (OpenAIError, RuntimeError, ValueError, SQLAlchemyError)
 
 
 @router.get("/{book_id}/cross-book-intelligence", response_model=CrossBookIntelligenceOut)
@@ -315,7 +317,12 @@ async def qa_stream_endpoint(
             yield _intelligence_sse(
                 "done", cast(dict[str, Any], jsonable_encoder(response_payload))
             )
-        except Exception:
+        except HTTPException as exc:
+            if reservation is not None:
+                await fail_llm_reservation(reservation)
+                reservation = None
+            yield _intelligence_sse("error", {"error": str(exc.detail)})
+        except GROUNDED_QA_STREAM_EXCEPTIONS:
             if reservation is not None:
                 await fail_llm_reservation(reservation)
                 reservation = None

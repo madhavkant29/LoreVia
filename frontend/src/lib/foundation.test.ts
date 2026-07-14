@@ -217,8 +217,8 @@ describe("foundation utilities", () => {
     expect(isPaidTier("free")).toBe(false)
   })
 
-  it("returns an invited beta reader label", () => {
-    expect(tierLabel("collaborator")).toBe("Invited beta reader")
+  it("normalizes legacy collaborator tier labels to Free", () => {
+    expect(tierLabel("collaborator")).toBe("Free")
   })
 
   it("returns an Author label", () => {

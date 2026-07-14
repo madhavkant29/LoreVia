@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -437,7 +438,7 @@ async def test_create_refund_review_request_sanitizes_provider_exception_details
         return _transaction_summary(user=user, charge_at=now - timedelta(hours=1))
 
     async def fake_create_refund_adjustment(transaction_id: str, reason: str):
-        raise RuntimeError(
+        raise httpx.HTTPError(
             "authorization=Bearer provider-secret-token "
             "database_url=postgresql://refund_user:refund_pass@db.example.com/refunds"
         )
@@ -496,7 +497,7 @@ async def test_create_refund_review_request_sanitizes_subscription_cancellation_
         return {"id": "adj_cancel_error_123", "status": "pending_approval"}
 
     async def fake_cancel_subscription_immediately(subscription_id: str):
-        raise RuntimeError(
+        raise httpx.HTTPError(
             "x-api-key=provider-key-123 cookie=session_cookie "
             "database_url=postgresql://cancel_user:cancel_pass@db.example.com/refunds"
         )
@@ -533,6 +534,63 @@ async def test_create_refund_review_request_sanitizes_subscription_cancellation_
     )
     assert "cancel_pass" not in review.provider_response_json["cancel_subscription_error_redacted"]
     assert "[REDACTED]" in review.provider_response_json["cancel_subscription_error_redacted"]
+
+
+@pytest.mark.asyncio
+async def test_create_refund_review_request_propagates_unexpected_provider_client_bug(
+    db, monkeypatch
+):
+    user = await _create_user(db, email_prefix="refund-provider-bug")
+    subscription = Subscription(
+        user_id=user.id,
+        plan="author_monthly",
+        status="active",
+        paddle_sub_id="sub_provider_bug_123",
+        paddle_transaction_id="txn_provider_bug_123",
+    )
+    db.add(subscription)
+    await db.commit()
+
+    now = datetime.now(UTC)
+
+    async def fake_get_transaction_summary(transaction_id: str):
+        assert transaction_id == "txn_provider_bug_123"
+        return SimpleNamespace(
+            transaction_id="txn_provider_bug_123",
+            status="completed",
+            plan="author_monthly",
+            billing_interval="monthly",
+            display_name="Author",
+            currency_code="USD",
+            total="USD 29.00",
+            invoice_number="INV-123",
+            invoice_pdf_url="https://files.paddle.com/invoice.pdf",
+            subscription_id="sub_provider_bug_123",
+            customer_email=user.email,
+            customer_id="ctm_123",
+            charge_at=now - timedelta(hours=1),
+        )
+
+    async def fake_create_refund_adjustment(transaction_id: str, reason: str):
+        raise RuntimeError("provider client regression")
+
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
+
+    with pytest.raises(RuntimeError, match="provider client regression"):
+        await create_refund_review_request(
+            db,
+            transaction_id="txn_provider_bug_123",
+            request_reason="Need refund",
+            request_source="support",
+            support_reference="CASE-PROVIDER-BUG",
+            requested_by_admin_user_id=user.id,
+            now=now,
+        )
 
 
 @pytest.mark.asyncio

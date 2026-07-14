@@ -1447,7 +1447,7 @@ async def test_forgot_password_cooldown_suppresses_repeat_emails_for_same_accoun
         deliveries.append(token)
         return True, f"https://app.example/reset-password?token={token}"
 
-    monkeypatch.setattr("app.api.v1.routes.auth.deliver_password_reset_email", _fake_deliver)
+    monkeypatch.setattr("app.api.v1.routes.auth_recovery.deliver_password_reset_email", _fake_deliver)
 
     user = User(
         email="reset-cooldown@lorevia.app",
@@ -1566,7 +1566,16 @@ async def test_manuscript_import_updates_today_word_count(client, db, auth_heade
     async def _fake_embed_batch(texts: list[str], **_kwargs) -> list[list[float]]:
         return [[0.0] * 1536 for _ in texts]
 
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed_batch)
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_embedding_service.embed_batch", _fake_embed_batch
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_character_reporting_service.embed_batch", _fake_embed_batch
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_character_reporting_service.embed_batch",
+        _fake_embed_batch,
+    )
 
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200

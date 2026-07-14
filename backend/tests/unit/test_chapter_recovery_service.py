@@ -203,6 +203,60 @@ async def test_resolve_reader_chapter_payload_merges_fallback_media_when_markers
     assert payload["media"] == [{"marker": "[[IMAGE:1]]", "url": "/api/v1/reader/media/demo"}]
 
 
+def test_download_stored_text_or_empty_swallows_storage_io_but_not_parser_bugs(monkeypatch):
+    chapter = SimpleNamespace(s3_key="chapters/atlas/1.json")
+    monkeypatch.setattr(
+        chapter_recovery_service, "download_book", lambda _key: (_ for _ in ()).throw(OSError("missing"))
+    )
+    assert chapter_recovery_service.download_stored_text_or_empty(chapter) == ""
+
+    monkeypatch.setattr(chapter_recovery_service, "download_book", lambda _key: b"payload")
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "deserialize_manuscript_content",
+        lambda _raw: (_ for _ in ()).throw(RuntimeError("parser regression")),
+    )
+    with pytest.raises(RuntimeError, match="parser regression"):
+        chapter_recovery_service.download_stored_text_or_empty(chapter)
+
+
+@pytest.mark.asyncio
+async def test_resolve_reader_chapter_payload_propagates_unexpected_stored_payload_errors(
+    monkeypatch,
+):
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        number=2,
+        title="Two",
+        s3_key="chapters/atlas/2.json",
+        content_version=1,
+        analysis_state={"status": "queued", "generated_modes": [], "attempt_count": 1},
+    )
+    book = SimpleNamespace(
+        id=uuid.uuid4(),
+        format="pdf",
+        preserve_chapter_numbers=False,
+        preserve_source_chapters=False,
+        work_type="novel",
+        s3_key="books/atlas.pdf",
+    )
+
+    monkeypatch.setattr(chapter_recovery_service, "download_book", lambda _key: b"payload")
+    monkeypatch.setattr(
+        chapter_recovery_service,
+        "deserialize_manuscript_content",
+        lambda _raw: (_ for _ in ()).throw(RuntimeError("stored payload parser regression")),
+    )
+
+    with pytest.raises(RuntimeError, match="stored payload parser regression"):
+        await chapter_recovery_service.resolve_reader_chapter_payload(
+            _RepairDB(),
+            book=book,
+            chapter=chapter,
+            chapter_num=2,
+        )
+
+
 @pytest.mark.asyncio
 async def test_repair_chapter_payload_from_source_persists_recovered_state(monkeypatch):
     chapter = SimpleNamespace(
@@ -287,18 +341,18 @@ async def test_queue_chapter_repair_if_needed_marks_state_and_enqueues(monkeypat
         number=3,
         analysis_state={"status": "pending", "generated_modes": [], "attempt_count": 1},
     )
-    book = SimpleNamespace(id=uuid.uuid4())
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), total_chapters=4)
     db = _FakeDB()
     queued: list[dict] = []
 
-    class _Task:
-        @staticmethod
-        def apply_async(*, args, queue, **kwargs):
-            queued.append({"args": args, "queue": queue, "kwargs": kwargs})
+    async def enqueue_chapter_repair_execution(db_arg, **kwargs):
+        queued.append({"db": db_arg, "kwargs": kwargs})
+        return SimpleNamespace(id=uuid.uuid4())
 
     monkeypatch.setattr(chapter_recovery_service, "cache_set_if_absent", _async_true)
     monkeypatch.setattr(
-        "app.workers.tasks.extraction_tasks.repair_chapter_payload_task", _Task(), raising=False
+        "app.services.task_execution_service.enqueue_chapter_repair_execution",
+        enqueue_chapter_repair_execution,
     )
 
     scheduled = await chapter_recovery_service.queue_chapter_repair_if_needed(
@@ -309,7 +363,10 @@ async def test_queue_chapter_repair_if_needed_marks_state_and_enqueues(monkeypat
 
     assert scheduled is True
     assert chapter.analysis_state["source_integrity"]["recovery_status"] == "queued"
-    assert queued[0]["args"] == [str(book.id), chapter.number]
+    assert queued[0]["db"] is db
+    assert queued[0]["kwargs"]["book_id"] == book.id
+    assert queued[0]["kwargs"]["chapter_id"] == chapter.id
+    assert queued[0]["kwargs"]["chapter_number"] == chapter.number
     assert db.commits == 1
 
 

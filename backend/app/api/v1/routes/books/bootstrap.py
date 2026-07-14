@@ -1,5 +1,5 @@
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -22,7 +22,7 @@ BLEACH_EMPTY_TAGS: Any = frozenset()
 
 from app.api.deps.auth import get_current_user
 from app.api.v1.routes.books.core import get_user_stats, list_saved_quotes
-from app.api.v1.routes.books.intelligence import get_book_overview, get_emotional_arc
+from app.api.v1.routes.books.intelligence import get_emotional_arc
 from app.core.database import get_db
 from app.models.book import (
     VaultNoteSource,
@@ -64,6 +64,7 @@ from app.utils.books.revision_service import (
 from app.utils.books.serialization import (
     book_out,
 )
+from app.utils.books.overview import build_book_overview_payload
 from app.utils.books.story_health import build_story_health_payload
 from app.utils.books.vault_storage import (
     list_vault_notes,
@@ -121,11 +122,17 @@ router = APIRouter()
 @router.get("/{book_id}/reader-bootstrap", response_model=ReaderBootstrapOut)
 async def get_reader_bootstrap(
     book_id: uuid.UUID,
+    profile: Literal["critical", "full"] = Query("full"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    overview = await get_book_overview(book_id, None, None, db, current_user)
     book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    overview = await build_book_overview_payload(
+        db,
+        book=book,
+        current_user=current_user,
+        collaborator=collaborator,
+    )
     author_bootstrap = _can_include_author_bootstrap(current_user, collaborator)
 
     notes: list[BookNoteOut] = []
@@ -138,7 +145,7 @@ async def get_reader_bootstrap(
     writer_workspace: WriterWorkspaceOut | None = None
     revision_intelligence: RevisionIntelligenceOut | None = None
 
-    if book.mode == "reader":
+    if profile == "full" and book.mode == "reader":
         notes = await list_book_notes(db, book, collaborator=collaborator)
         if collaborator is None:
             try:
@@ -146,7 +153,7 @@ async def get_reader_bootstrap(
             except HTTPException:
                 saved_quotes = []
 
-    if author_bootstrap:
+    if profile == "full" and author_bootstrap:
         stats = await get_user_stats(db, current_user)
         characters = await _bootstrap_characters(db, book)
         chapter_reports = await list_chapter_consistency_reports(db, book, 6)
@@ -158,6 +165,7 @@ async def get_reader_bootstrap(
         )
 
     return ReaderBootstrapOut(
+        profile=profile,
         overview=overview,
         notes=notes,
         saved_quotes=saved_quotes,
@@ -176,6 +184,7 @@ async def get_manuscript_bootstrap(
     book_id: uuid.UUID,
     active_chapter_number: int | None = Query(None, ge=1),
     annotation_chapter_number: int | None = Query(None, ge=1),
+    profile: Literal["critical", "full"] = Query("full"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -189,14 +198,16 @@ async def get_manuscript_bootstrap(
     book_payload = await book_out(db, book, current_user.id, collaborator)
     characters = await _bootstrap_characters(db, book)
     writer_workspace = build_writer_workspace_response(book)
-    emotional_arc = (
-        await get_emotional_arc(book_id, db, current_user) if collaborator is None else None
-    )
     workspace_tree = await build_manuscript_workspace_tree(
         db,
         book=book,
         user_id=current_user.id,
         collaborator=collaborator,
+    )
+    emotional_arc = (
+        await get_emotional_arc(book_id, db, current_user)
+        if profile == "full" and collaborator is None
+        else None
     )
     annotations = (
         await list_manuscript_annotations(
@@ -206,10 +217,10 @@ async def get_manuscript_bootstrap(
             collaborator=collaborator,
             chapter_number=annotation_chapter_number,
         )
-        if annotation_chapter_number is not None
+        if profile == "full" and annotation_chapter_number is not None
         else []
     )
-    notes = await list_book_notes(db, book, collaborator=collaborator)
+    notes = await list_book_notes(db, book, collaborator=collaborator) if profile == "full" else []
     vault_notes = (
         await list_vault_notes(
             db,
@@ -217,17 +228,20 @@ async def get_manuscript_bootstrap(
             user_id=current_user.id,
             source=VaultNoteSource.USER_NOTES.value,
         )
-        if collaborator is None
+        if profile == "full" and collaborator is None
         else []
     )
     chapter_versions = (
         await list_chapter_versions(db, book, active_chapter_number, 12)
-        if active_chapter_number is not None
+        if profile == "full" and active_chapter_number is not None
         else []
     )
-    prewriting_check = await build_prewriting_check(db, book, chapter_number)
+    prewriting_check = (
+        await build_prewriting_check(db, book, chapter_number) if profile == "full" else None
+    )
 
     return ManuscriptBootstrapOut(
+        profile=profile,
         book=book_payload,
         characters=characters,
         writer_workspace=writer_workspace,

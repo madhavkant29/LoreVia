@@ -20,6 +20,7 @@ from app.utils.auth_cookies import (
 from app.utils.auth_csrf import (
     AUTH_CSRF_COOKIE_NAME,
     AUTH_CSRF_HEADER_NAME,
+    _has_valid_bearer_access_token,
     cookie_authenticated_request_requires_csrf,
     create_auth_csrf_token,
     set_auth_csrf_cookie,
@@ -65,6 +66,12 @@ def test_auth_cookie_domain_requires_explicit_matching_override(monkeypatch):
     assert auth_cookie_domain() == "getlorevia.com"
 
     monkeypatch.setattr("app.core.config.settings.AUTH_COOKIE_DOMAIN", "example.com", raising=False)
+    assert auth_cookie_domain() is None
+
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "https://[bad-host", raising=False)
+    monkeypatch.setattr(
+        "app.core.config.settings.AUTH_COOKIE_DOMAIN", ".getlorevia.com", raising=False
+    )
     assert auth_cookie_domain() is None
 
 
@@ -382,3 +389,34 @@ def test_validate_auth_csrf_token_rejects_invalid_inputs(cookie_token, header_to
         validate_auth_csrf_token(request)
 
     assert exc_info.value.status_code == 403
+
+
+def test_validate_auth_csrf_token_rejects_malformed_origin():
+    token = create_auth_csrf_token()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"cookie", f"{AUTH_CSRF_COOKIE_NAME}={token}".encode()),
+                (AUTH_CSRF_HEADER_NAME.encode("utf-8"), token.encode("utf-8")),
+                (b"origin", b"https://[bad-host"),
+            ],
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        validate_auth_csrf_token(request)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Invalid request origin."
+
+
+def test_has_valid_bearer_access_token_propagates_unexpected_decode_errors(monkeypatch):
+    def fake_decode(_token: str):
+        raise RuntimeError("programming error")
+
+    monkeypatch.setattr("app.utils.auth_csrf.decode_token", fake_decode)
+
+    with pytest.raises(RuntimeError, match="programming error"):
+        _has_valid_bearer_access_token("Bearer token")

@@ -11,7 +11,7 @@ from app.schemas.books import (
     BookCollaboratorUpdateBody,
     CollaboratorActivityOut,
 )
-from app.utils.beta_read_utils import get_book_collaborator_activity
+from app.utils.beta_read_activity_utils import get_book_collaborator_activity
 from app.utils.billing_utils import require_author_access
 from app.utils.books.collaboration_management import (
     create_book_collaborator,

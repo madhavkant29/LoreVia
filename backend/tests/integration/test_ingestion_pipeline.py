@@ -10,9 +10,9 @@ from app.models.character import Character, CharacterCandidate, CharacterRelatio
 from app.models.intelligence import CharacterRelationship, Notification
 from app.models.operations import TaskExecution
 from app.models.user import User
+from app.services.extraction_processing_flow_service import _claim_book_completion
 from app.workers.consumers import extraction_consumer
 from app.workers.consumers.extraction_consumer import (
-    _claim_book_completion,
     _process_chapter,
     process_book,
 )
@@ -53,6 +53,11 @@ def _bind_worker_session(monkeypatch, db) -> None:
     )
     monkeypatch.setattr(extraction_consumer, "AsyncSessionLocal", worker_session_factory)
     monkeypatch.setitem(process_book.__globals__, "AsyncSessionLocal", worker_session_factory)
+
+
+def _patch_embedding_batches(monkeypatch, embed_batch) -> None:
+    monkeypatch.setattr("app.services.extraction_chapter_embedding_service.embed_batch", embed_batch)
+    monkeypatch.setattr("app.services.extraction_character_reporting_service.embed_batch", embed_batch)
 
 
 @pytest.mark.asyncio
@@ -162,10 +167,10 @@ async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_on
         return _embedding_for(len(texts))
 
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     await _process_chapter(
         db, book, {"number": 1, "title": "One", "text": "Nothing relevant."}, queue_wait_ms=1
@@ -298,7 +303,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _AnalysisTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -309,12 +314,12 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.send_processing_complete_with_stats",
+        "app.services.extraction_processing_flow_service.send_processing_complete_with_stats",
         _fake_send_processing_complete_with_stats,
     )
 
@@ -467,7 +472,7 @@ async def test_process_book_persists_isbn_and_copyright_warning(
 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -485,7 +490,7 @@ async def test_process_book_persists_isbn_and_copyright_warning(
         return {"isbn": "9780306406157", "copyright_warning": True}
 
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.evaluate_document_copyright",
+        "app.services.extraction_book_processing_service.evaluate_document_copyright",
         _fake_evaluate_document_copyright,
     )
 
@@ -600,7 +605,7 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -611,10 +616,10 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -760,7 +765,7 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -771,10 +776,10 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -890,7 +895,7 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -901,10 +906,10 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -1007,10 +1012,10 @@ async def test_process_chapter_records_ambiguous_roster_match_without_crashing(d
         return _embedding_for(len(texts))
 
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     await _process_chapter(
         db,
@@ -1127,7 +1132,7 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -1138,10 +1143,10 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -1285,7 +1290,7 @@ async def test_unresolved_relationships_become_relationship_review_records(
 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -1296,10 +1301,10 @@ async def test_unresolved_relationships_become_relationship_review_records(
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -1381,7 +1386,7 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -1394,13 +1399,13 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(
         "app.parsers.pdf_parser.extract_first_page_cover", lambda raw: (b"cover-bytes", "image/png")
     )
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.upload_binary", _raise_permission_error
+        "app.services.extraction_book_processing_service.upload_binary", _raise_permission_error
     )
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _fake_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
 
     response = await client.post(
         "/api/v1/books/upload",
@@ -1469,7 +1474,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -1480,15 +1485,15 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.extract_characters_and_relationships",
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
         _raise_extract,
     )
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed)
+    _patch_embedding_batches(monkeypatch, _fake_embed)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.embed_for_dedup", _fake_embed_for_dedup
+        "app.engine.character.deduplicator.embed_for_dedup", _fake_embed_for_dedup
     )
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.find_similar", _never_find_similar
+        "app.services.extraction_new_character_resolution_service.find_similar", _never_find_similar
     )
 
     response = await client.post(
@@ -1584,7 +1589,7 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
 
     def _fake_parse_pdf(
@@ -1660,7 +1665,7 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
 
     def _fake_parse_pdf(
@@ -1728,7 +1733,7 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.download_book", lambda key: VALID_PDF_BYTES
+        "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
@@ -1739,7 +1744,7 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(
     )
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
     monkeypatch.setattr(
-        "app.workers.consumers.extraction_consumer.is_book_hidden", _fake_is_book_hidden
+        "app.services.extraction_book_processing_service.is_book_hidden", _fake_is_book_hidden
     )
 
     response = await client.post(

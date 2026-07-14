@@ -4,6 +4,8 @@ from typing import Any
 
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -32,6 +34,7 @@ from app.utils.request_context import set_request_user_id
 
 bearer = HTTPBearer(auto_error=False)
 log = logging.getLogger("lorevia.auth")
+AUTH_INFRASTRUCTURE_EXCEPTIONS = (SQLAlchemyError, RedisError, TimeoutError, OSError)
 
 
 def _claim_version(payload: dict[str, Any]) -> int:
@@ -47,10 +50,7 @@ def _claim_version(payload: dict[str, Any]) -> int:
 def _decode_access_payload(token: str | None) -> dict[str, Any] | None:
     if not token:
         return None
-    try:
-        payload = decode_token(token)
-    except Exception:
-        return None
+    payload = decode_token(token)
     if not payload:
         return None
     if payload.get("type") != "access":
@@ -61,10 +61,7 @@ def _decode_access_payload(token: str | None) -> dict[str, Any] | None:
 def _decode_refresh_payload(token: str | None) -> dict[str, Any] | None:
     if not token:
         return None
-    try:
-        payload = decode_token(token)
-    except Exception:
-        return None
+    payload = decode_token(token)
     if not payload:
         return None
     if payload.get("type") != "refresh":
@@ -77,7 +74,7 @@ async def _load_user_from_claims(user_id: str, claimed_version: int, db: AsyncSe
         user = await get_user_for_auth_subject(db, user_id)
     except ValueError:
         raise HTTPException(401, "Invalid or expired token")
-    except Exception:
+    except AUTH_INFRASTRUCTURE_EXCEPTIONS:
         log.exception("database_unavailable_during_auth", extra={"user_id": user_id})
         raise HTTPException(503, "Authentication service temporarily unavailable")
 
@@ -137,7 +134,7 @@ async def get_current_user(
 
     try:
         session_active = await refresh_session_active(user_id, session_id)
-    except Exception:
+    except AUTH_INFRASTRUCTURE_EXCEPTIONS:
         log.exception(
             "redis_unavailable_during_auth", extra={"user_id": user_id, "session_id": session_id}
         )
@@ -161,7 +158,7 @@ async def get_optional_current_user(
             request=request, response=response, credentials=credentials, db=db
         )
     except HTTPException as exc:
-        if exc.status_code in {401, 503}:
+        if exc.status_code == 401:
             return None
         raise
 

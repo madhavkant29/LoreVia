@@ -34,6 +34,7 @@ from app.services.advisor_jobs_service import (
     mark_advisor_job_failed,
     serialize_advisor_job,
 )
+from app.utils.advisor_chat_utils import stream_series_advisor_reply_payload
 from app.utils.advisor_utils import (
     SERIES_CONTINUITY_SYSTEM,
     build_series_story_context,
@@ -41,11 +42,12 @@ from app.utils.advisor_utils import (
     make_editorial_cache_key,
     normalize_series_continuity_result,
     retrieve_series_continuity_passages,
-    stream_series_advisor_reply_payload,
 )
+from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.billing_utils import require_author_access
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.logging.errors import public_error_message
+from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
 
 router = APIRouter()
@@ -86,7 +88,7 @@ async def _enqueue_series_advisor_task(
                 "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
             },
         )
-    except Exception:
+    except TASK_ENQUEUE_ERRORS:
         await mark_advisor_job_failed(
             db,
             job_id=job.id,
@@ -159,7 +161,7 @@ async def series_advisor_message_stream(
                 messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
             ):
                 yield _advisor_sse(item["event"], item["data"])
-        except Exception:
+        except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 
     return StreamingResponse(
@@ -393,7 +395,7 @@ async def series_continuity_check_stream(
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
             yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
-        except Exception:
+        except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 
     return _advisor_stream_response(event_stream())

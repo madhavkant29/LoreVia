@@ -22,12 +22,11 @@ from app.services.advisor_suggestion_jobs_service import (
     mark_advisor_suggestion_job_failed,
     serialize_advisor_suggestion_job,
 )
-from app.utils.advisor_utils import (
-    build_advisor_suggestions_payload,
-    make_advisor_suggestions_cache_key,
-)
+from app.utils.advisor_scan_utils import build_advisor_suggestions_payload
+from app.utils.advisor_utils import make_advisor_suggestions_cache_key
 from app.utils.billing_utils import require_author_access
 from app.utils.logging.errors import public_error_message
+from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_advisor_suggestions_task
 
 router = APIRouter()
@@ -99,7 +98,7 @@ async def advisor_suggestions_scan(
                 "total_chapters": total_ch,
             },
         )
-    except Exception:
+    except TASK_ENQUEUE_ERRORS:
         await mark_advisor_suggestion_job_failed(
             db,
             job_id=job.id,

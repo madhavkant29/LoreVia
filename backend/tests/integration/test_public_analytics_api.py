@@ -88,21 +88,33 @@ async def test_public_analytics_endpoint_tracks_views_and_surfaces_aggregates(cl
 
     first_book_view = await client.post(
         f"/api/v1/public/books/{book.id}/analytics/view",
-        headers={"user-agent": "integration-suite/1.0", "x-forwarded-for": "203.0.113.9"},
+        headers={
+            "user-agent": "integration-suite/1.0",
+            "x-forwarded-for": "203.0.113.9",
+            "x-lorevia-edge-verified": "1",
+        },
         json={"event_type": "book_view"},
     )
     assert first_book_view.status_code == 204
 
     duplicate_book_view = await client.post(
         f"/api/v1/public/books/{book.id}/analytics/view",
-        headers={"user-agent": "integration-suite/1.0", "x-forwarded-for": "203.0.113.9"},
+        headers={
+            "user-agent": "integration-suite/1.0",
+            "x-forwarded-for": "203.0.113.9",
+            "x-lorevia-edge-verified": "1",
+        },
         json={"event_type": "book_view"},
     )
     assert duplicate_book_view.status_code == 204
 
     chapter_view = await client.post(
         f"/api/v1/public/books/{book.id}/analytics/view",
-        headers={"user-agent": "integration-suite/1.0", "x-forwarded-for": "198.51.100.12"},
+        headers={
+            "user-agent": "integration-suite/1.0",
+            "x-forwarded-for": "198.51.100.12",
+            "x-lorevia-edge-verified": "1",
+        },
         json={"event_type": "chapter_view", "chapter_number": 1},
     )
     assert chapter_view.status_code == 204

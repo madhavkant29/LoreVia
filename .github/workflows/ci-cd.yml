@@ -58,6 +58,15 @@ jobs:
         pip install -r backend/requirements.txt
         pip install pytest pytest-asyncio pytest-cov
 
+    - name: Check pricing catalog drift
+      run: |
+        python backend/scripts/sync_pricing_catalog.py --check
+
+    - name: Report repository hygiene
+      continue-on-error: true
+      run: |
+        python backend/scripts/repo_hygiene_report.py
+
     - name: Download spaCy model
       run: |
         python -m spacy download en_core_web_sm
@@ -147,6 +156,7 @@ jobs:
         cd frontend
         npm run test
         npm run type-check
+        npm run lint
 
     - name: Build application
       run: |

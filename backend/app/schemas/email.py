@@ -24,10 +24,6 @@ class EmailPreferenceTokenViewOut(EmailPreferenceOut):
     preferences_url: str | None = None
 
 
-class EmailUnsubscribeBody(BaseModel):
-    token: str
-
-
 class EmailUnsubscribeOut(BaseModel):
     ok: bool = True
     email: str

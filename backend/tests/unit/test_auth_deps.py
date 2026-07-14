@@ -13,6 +13,7 @@ from app.api.deps.auth import (
     _load_user_from_claims,
     get_admin,
     get_current_user,
+    get_optional_current_user,
 )
 from app.utils.auth_utils import get_user_for_auth_subject
 
@@ -37,13 +38,14 @@ def test_decode_access_payload_only_accepts_access_tokens(monkeypatch):
     assert _decode_access_payload(None) is None
 
 
-def test_decode_refresh_payload_swallows_decode_errors(monkeypatch):
+def test_decode_refresh_payload_propagates_unexpected_decode_errors(monkeypatch):
     def fake_decode(_token: str):
         raise RuntimeError("boom")
 
     monkeypatch.setattr("app.api.deps.auth.decode_token", fake_decode)
 
-    assert _decode_refresh_payload("bad-token") is None
+    with pytest.raises(RuntimeError, match="boom"):
+        _decode_refresh_payload("bad-token")
 
 
 @pytest.mark.asyncio
@@ -122,6 +124,48 @@ async def test_get_current_user_rejects_refresh_tokens_without_session_id(monkey
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Invalid or expired token"
+
+
+@pytest.mark.asyncio
+async def test_optional_current_user_returns_none_for_expected_unauthorized(monkeypatch):
+    request = Request({"type": "http", "headers": []})
+    response = Response()
+
+    async def fake_get_current_user(**_kwargs):
+        raise HTTPException(401, "Invalid or expired token")
+
+    monkeypatch.setattr("app.api.deps.auth.get_current_user", fake_get_current_user)
+
+    assert (
+        await get_optional_current_user(
+            request=request,
+            response=response,
+            credentials=None,
+            db=SimpleNamespace(),
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_optional_current_user_propagates_auth_infrastructure_failures(monkeypatch):
+    request = Request({"type": "http", "headers": []})
+    response = Response()
+
+    async def fake_get_current_user(**_kwargs):
+        raise HTTPException(503, "Authentication service temporarily unavailable")
+
+    monkeypatch.setattr("app.api.deps.auth.get_current_user", fake_get_current_user)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_optional_current_user(
+            request=request,
+            response=response,
+            credentials=None,
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 503
 
 
 @pytest.mark.asyncio

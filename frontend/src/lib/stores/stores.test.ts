@@ -72,8 +72,10 @@ describe("zustand stores", () => {
     useAuthStore.getState().setUser({ id: "1", email: "reader@example.com", username: "reader", tier: "reader" } as never)
 
     expect(useAuthStore.getState().user?.username).toBe("reader")
+    expect(useAuthStore.getState().user?.tier).toBe("free")
     expect(useAuthStore.getState().hydrated).toBe(true)
     expect(sessionStorageData.get("lorevia-auth-user")).toContain("\"username\":\"reader\"")
+    expect(sessionStorageData.get("lorevia-auth-user")).toContain("\"tier\":\"free\"")
   })
 
   it("marks the auth store hydrated without a user", () => {

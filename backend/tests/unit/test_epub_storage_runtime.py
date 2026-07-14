@@ -4,6 +4,7 @@ import io
 from types import SimpleNamespace
 
 import ebooklib
+import pytest
 
 from app.core import storage
 from app.parsers import epub_parser
@@ -133,6 +134,27 @@ def test_local_storage_round_trip_move_delete_and_permissions(monkeypatch, tmp_p
     )
     storage.ensure_local_storage_permissions()
     assert any(path.name == "note.txt" for path, _, _ in touched)
+
+
+@pytest.mark.parametrize(
+    "key",
+    (
+        "",
+        "/absolute/path.txt",
+        "../escape.txt",
+        "safe/../escape.txt",
+        "safe\\.\\escape.txt",
+        "safe//empty.txt",
+        "safe/\x00/nul.txt",
+    ),
+)
+def test_storage_key_validation_rejects_unsafe_paths(monkeypatch, tmp_path, key):
+    restore_storage_functions(monkeypatch)
+    monkeypatch.setattr(storage.settings, "S3_ENDPOINT_URL", tmp_path.as_uri())
+    monkeypatch.setattr(storage.settings, "S3_BUCKET", "bucket")
+
+    with pytest.raises(ValueError):
+        storage.upload_binary(key, b"unsafe")
 
 
 def test_storage_owner_and_permission_fallbacks(monkeypatch, tmp_path):

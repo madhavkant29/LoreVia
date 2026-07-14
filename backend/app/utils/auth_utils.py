@@ -5,9 +5,11 @@ import re
 import uuid
 from typing import Any
 
+from passlib.exc import MissingBackendError, PasswordSizeError, UnknownHashError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import verify_password
 from app.models.user import User
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
@@ -50,6 +52,17 @@ def password_is_valid(password: str, email: str) -> bool:
         ),
     ]
     return all(checks)
+
+
+def verify_password_safely(plain: str, hashed: str | None) -> bool:
+    """Return False for malformed or unsupported stored password hashes."""
+
+    if not hashed:
+        return False
+    try:
+        return verify_password(plain, hashed)
+    except (TypeError, ValueError, UnknownHashError, MissingBackendError, PasswordSizeError):
+        return False
 
 
 def normalize_device_id(device_id: str) -> str:

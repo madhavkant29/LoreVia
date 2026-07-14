@@ -81,6 +81,7 @@ export interface BookOverviewPayload {
 }
 
 export interface ReaderBootstrapPayload {
+  profile?: "critical" | "full"
   overview: BookOverviewPayload
   notes: BookNote[]
   saved_quotes: SavedQuote[]
@@ -94,6 +95,7 @@ export interface ReaderBootstrapPayload {
 }
 
 export interface ManuscriptBootstrapPayload {
+  profile?: "critical" | "full"
   book: Book
   characters: Character[]
   writer_workspace: WriterWorkspace | null

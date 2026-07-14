@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -77,6 +78,34 @@ class TaskExecution(Base):
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dismissed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     dismissal_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class TaskDispatchOutbox(Base):
+    __tablename__ = "task_dispatch_outbox"
+    __table_args__ = (
+        UniqueConstraint("execution_id", name="uq_task_dispatch_outbox_execution_id"),
+        CheckConstraint(
+            "status IN ('pending', 'publishing', 'published', 'publish_failed', 'cancelled')",
+            name="ck_task_dispatch_outbox_status",
+        ),
+        Index("ix_task_dispatch_outbox_status_available", "status", "available_at"),
+        Index("ix_task_dispatch_outbox_queue_status", "queue", "status"),
+        Index("ix_task_dispatch_outbox_lease_until", "lease_until"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("task_executions.id", ondelete="CASCADE"), nullable=False)
+    task_name: Mapped[str] = mapped_column(String, nullable=False)
+    queue: Mapped[str] = mapped_column(String, nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

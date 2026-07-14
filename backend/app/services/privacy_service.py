@@ -8,13 +8,14 @@ from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
 from app.core.config import settings
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_password
 from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaReadQuestion
 from app.models.book import (
     Book,
@@ -55,7 +56,7 @@ from app.models.user import (
 )
 from app.services.paddle_service import cancel_subscription_at_period_end
 from app.services.supabase_auth_service import delete_supabase_auth_user
-from app.utils.auth_utils import next_token_version
+from app.utils.auth_utils import next_token_version, verify_password_safely
 from app.utils.books.manuscript import (
     deserialize_manuscript_content,
 )
@@ -75,6 +76,9 @@ from app.utils.privacy_utils import (
     validate_account_deletion_confirmation,
     validate_book_deletion_confirmation,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
+
+PADDLE_PROVIDER_EXCEPTIONS = (httpx.HTTPError, KeyError, TypeError, ValueError)
 
 
 def _json_default(value: Any) -> str:
@@ -102,9 +106,9 @@ async def _download_text_or_error(key: str) -> dict[str, Any]:
                 "html": content.html,
                 "metadata": content.metadata,
             }
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return {"storage_key": key, "text": raw.decode("utf-8", errors="replace")}
-    except Exception as exc:
+    except STORAGE_IO_EXCEPTIONS as exc:
         return {"storage_key": key, "error": str(exc)}
 
 
@@ -428,10 +432,7 @@ async def request_account_deletion(
     if user.supabase_auth_id is None:
         if not password:
             raise HTTPException(400, "Current password is required to delete this account.")
-        try:
-            password_ok = verify_password(password, user.password_hash)
-        except Exception:
-            password_ok = False
+        password_ok = verify_password_safely(password, user.password_hash)
         if not password_ok:
             raise HTTPException(403, "Current password is incorrect.")
 
@@ -466,7 +467,7 @@ async def request_account_deletion(
                 }
             )
             subscription.status = "cancelling"
-        except Exception as exc:
+        except PADDLE_PROVIDER_EXCEPTIONS as exc:
             followup_required = True
             provider_actions["paddle"].append(
                 {
@@ -563,7 +564,7 @@ async def delete_storage_keys(keys: list[str]) -> dict[str, Any]:
         try:
             await asyncio.to_thread(storage.delete_object, key)
             deleted.append(key)
-        except Exception as exc:
+        except STORAGE_IO_EXCEPTIONS as exc:
             errors[key] = str(exc)
     return {"deleted": deleted, "errors": errors}
 

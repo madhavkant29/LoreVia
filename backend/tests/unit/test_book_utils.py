@@ -13,7 +13,8 @@ from app.models.book import Book, Chapter, ChapterMedia, ManuscriptAnnotation, N
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
 from app.models.user import User
-from app.utils.advisor_utils import build_advisor_suggestions_payload
+from app.utils.advisor_scan_utils import build_advisor_suggestions_payload
+from app.utils.books import revision_analysis as revision_analysis_module
 from app.utils.books.chapter_titles import (
     build_chapter_title_from_summary,
     chapter_title_is_placeholder,
@@ -88,8 +89,10 @@ from app.utils.books.scene_metadata import (
     strip_scene_metadata_from_manuscript_text,
 )
 from app.utils.books.scene_ordering import normalize_scene_reorder_ids
+from app.utils.books.scene_sync import sync_chapter_content_from_novel_scenes
 from app.utils.books.serialization import (
     build_blank_cover_image,
+    chapter_word_count,
     compute_words_read_for_books,
     ensure_book_cover,
 )
@@ -182,6 +185,9 @@ class _FakeExecuteDB:
     def add(self, value):
         self.added.append(value)
 
+    async def flush(self):
+        return None
+
 
 class _AllResult:
     def __init__(self, rows):
@@ -219,6 +225,26 @@ def test_scene_keyword_set_filters_common_revision_noise_but_keeps_story_terms()
     assert "apr" not in keywords
     assert "auteurs" not in keywords
     assert {"nora", "silver gate", "royal", "blood"}.issubset(keywords)
+
+
+@pytest.mark.asyncio
+async def test_revision_analysis_chapter_text_loading_only_swallows_storage_io(monkeypatch):
+    chapter = SimpleNamespace(number=3, s3_key="chapters/book/3.json")
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr(revision_analysis_module, "download_book", _storage_missing)
+
+    assert await revision_analysis_module._load_chapter_texts([chapter]) == {3: ""}
+
+    def _unexpected_bug(_key: str) -> bytes:
+        raise RuntimeError("download wrapper bug")
+
+    monkeypatch.setattr(revision_analysis_module, "download_book", _unexpected_bug)
+
+    with pytest.raises(RuntimeError, match="download wrapper bug"):
+        await revision_analysis_module._load_chapter_texts([chapter])
 
 
 def test_build_revision_change_summary_falls_back_when_only_noise_terms_changed():
@@ -525,6 +551,107 @@ async def test_load_novel_export_chapters_includes_media_when_requested(monkeypa
     ]
 
 
+@pytest.mark.asyncio
+async def test_load_novel_export_chapters_only_swallows_storage_io(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4())
+    chapter_id = uuid.uuid4()
+
+    db = _FakeExecuteDB(
+        execute_values=[
+            _AllResult([(chapter_id, 1, "Opening", "chapters/book/1.json")]),
+        ]
+    )
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", _storage_missing)
+
+    chapters = await load_novel_export_chapters(
+        db,
+        book=book,
+        collaborator=None,
+        include_images=False,
+    )
+
+    assert chapters[0]["text"] == ""
+
+    db = _FakeExecuteDB(
+        execute_values=[
+            _AllResult([(chapter_id, 1, "Opening", "chapters/book/1.json")]),
+        ]
+    )
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await load_novel_export_chapters(
+            db,
+            book=book,
+            collaborator=None,
+            include_images=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_chapter_content_from_novel_scenes_only_swallows_storage_io(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4(), title="Atlas")
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        s3_key="chapters/book/1.json",
+        word_count=0,
+        content_version=1,
+        title="Opening",
+    )
+
+    def _upload_text(key: str, content: str) -> str:
+        assert key == "chapters/book/1.json"
+        assert isinstance(content, str)
+        return key
+
+    monkeypatch.setattr("app.utils.books.scene_sync.upload_text", _upload_text)
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.scene_sync.download_book", _storage_missing)
+    db = _FakeExecuteDB(execute_values=[_ScalarResult(chapter), _ScalarsResult([])])
+
+    synced = await sync_chapter_content_from_novel_scenes(
+        db,
+        book=book,
+        chapter_number=1,
+    )
+
+    assert synced["chapter"] is chapter
+    assert chapter.s3_key == "chapters/book/1.json"
+
+    monkeypatch.setattr("app.utils.books.scene_sync.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.scene_sync.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+    db = _FakeExecuteDB(execute_values=[_ScalarResult(chapter), _ScalarsResult([])])
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await sync_chapter_content_from_novel_scenes(
+            db,
+            book=book,
+            chapter_number=1,
+        )
+
+
 def test_build_blank_cover_image_renders_title_and_author_placeholder():
     raw, content_type = build_blank_cover_image("The Silent Archive", "Mira Vale")
 
@@ -593,6 +720,76 @@ async def test_ensure_book_cover_generates_blank_cover_when_missing(monkeypatch)
     assert uploaded["content_type"] == "image/png"
     image = Image.open(io.BytesIO(uploaded["raw"]))
     assert image.size == (1200, 1800)
+
+
+@pytest.mark.asyncio
+async def test_ensure_book_cover_only_swallows_expected_storage_failures(monkeypatch):
+    class _FakeDB:
+        async def flush(self):
+            return None
+
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="No Cover Yet",
+        author="A. Writer",
+        format="txt",
+        work_type="novel",
+        s3_key="books/user/story.txt",
+        cover_s3_key=None,
+        status="pending",
+        is_public=False,
+    )
+
+    def _storage_upload_failure(*_args, **_kwargs):
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr("app.utils.books.serialization.upload_binary", _storage_upload_failure)
+
+    await ensure_book_cover(_FakeDB(), book)
+
+    assert book.cover_s3_key is None
+
+    def _unexpected_upload_bug(*_args, **_kwargs):
+        raise RuntimeError("upload wrapper bug")
+
+    monkeypatch.setattr("app.utils.books.serialization.upload_binary", _unexpected_upload_bug)
+
+    with pytest.raises(RuntimeError, match="upload wrapper bug"):
+        await ensure_book_cover(_FakeDB(), book)
+
+
+@pytest.mark.asyncio
+async def test_chapter_word_count_only_swallows_storage_io(monkeypatch):
+    chapter = SimpleNamespace(word_count=None, s3_key="chapters/book/1.json")
+
+    class _ScalarChapter:
+        def scalar(self):
+            return chapter
+
+    class _FakeDB:
+        async def execute(self, *_args, **_kwargs):
+            return _ScalarChapter()
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.serialization.download_book", _storage_missing)
+
+    assert await chapter_word_count(_FakeDB(), uuid.uuid4(), 1) == 0
+
+    monkeypatch.setattr("app.utils.books.serialization.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.serialization.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await chapter_word_count(_FakeDB(), uuid.uuid4(), 1)
 
 
 def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
@@ -1565,6 +1762,83 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_author_workspace_only_swallows_manuscript_storage_io(monkeypatch):
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="Atlas",
+        format="txt",
+        work_type="novel",
+        s3_key="atlas.txt",
+        status="ready",
+        mode="author",
+    )
+    chapter = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=4,
+        title="The Gate",
+        s3_key="chapter-4.txt",
+        content_version=1,
+    )
+
+    class _ScalarRows:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [chapter]
+
+    class _FakeSearchDB:
+        async def execute(self, *_args, **_kwargs):
+            return _ScalarRows()
+
+    async def _no_scenes(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("app.utils.books.workspace_search.list_novel_scenes", _no_scenes)
+    monkeypatch.setattr(
+        "app.utils.books.workspace_search.vault_storage.list_vault_notes",
+        _no_scenes,
+    )
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.workspace_search.download_book", _storage_missing)
+
+    assert (
+        await search_author_workspace(
+            _FakeSearchDB(),
+            book=book,
+            user_id=book.user_id,
+            query="silver gate",
+            scopes=["manuscript"],
+        )
+        == []
+    )
+
+    monkeypatch.setattr("app.utils.books.workspace_search.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.workspace_search.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await search_author_workspace(
+            _FakeSearchDB(),
+            book=book,
+            user_id=book.user_id,
+            query="silver gate",
+            scopes=["manuscript"],
+        )
+
+
+@pytest.mark.asyncio
 async def test_search_author_workspace_rejects_nested_regex_repetition():
     with pytest.raises(HTTPException) as exc_info:
         await search_author_workspace(
@@ -1940,6 +2214,27 @@ async def test_parse_import_upload_covers_text_markdown_pdf_epub_and_unsupported
 
     with pytest.raises(HTTPException, match="Unsupported manuscript import"):
         await parse_import_upload("book.xyz", b"unknown", False)
+
+
+@pytest.mark.asyncio
+async def test_parse_import_upload_legacy_doc_only_maps_expected_parse_failures(monkeypatch):
+    from docx.opc.exceptions import PackageNotFoundError
+
+    def _expected_doc_parse_failure(*_args, **_kwargs):
+        raise PackageNotFoundError("legacy doc")
+
+    monkeypatch.setattr("docx.Document", _expected_doc_parse_failure)
+
+    with pytest.raises(HTTPException, match="Legacy \\.doc files"):
+        await parse_import_upload("legacy.doc", b"not-a-docx", False)
+
+    def _unexpected_doc_bug(*_args, **_kwargs):
+        raise RuntimeError("doc parser bug")
+
+    monkeypatch.setattr("docx.Document", _unexpected_doc_bug)
+
+    with pytest.raises(RuntimeError, match="doc parser bug"):
+        await parse_import_upload("legacy.doc", b"not-a-docx", False)
 
 
 def test_build_import_preview_covers_text_screenplay_and_invalid_format(monkeypatch):

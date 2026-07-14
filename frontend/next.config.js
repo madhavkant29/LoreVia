@@ -14,6 +14,22 @@ const nextConfig = {
   typedRoutes: true,
   output: "standalone",
   productionBrowserSourceMaps: false,
+  experimental: {
+    optimizePackageImports: [
+      "@tiptap/core",
+      "@tiptap/react",
+      "@tiptap/starter-kit",
+      "@tiptap/extension-color",
+      "@tiptap/extension-highlight",
+      "@tiptap/extension-image",
+      "@tiptap/extension-link",
+      "@tiptap/extension-task-item",
+      "@tiptap/extension-task-list",
+      "@tiptap/extension-text-align",
+      "@tiptap/extension-text-style",
+      "@tiptap/extension-underline",
+    ],
+  },
   allowedDevOrigins: [
     "http://localhost:3000",
     "http://127.0.0.1:3000",

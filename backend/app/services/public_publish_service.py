@@ -43,6 +43,7 @@ from app.utils.public_utils import (
     PUBLIC_STATUS_PUBLISHED,
     USER_PUBLIC_SHARE_SOURCE_KIND,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 log = logging.getLogger("lorevia.public_publish")
 
@@ -176,14 +177,15 @@ async def _refresh_copyright_signals(book: Book) -> bool:
     if not getattr(book, "s3_key", None) or getattr(book, "format", None) == "manual":
         return True
     try:
-        copyright_info = await evaluate_document_copyright(
-            format_name=getattr(book, "format", None),
-            raw=await asyncio.to_thread(download_book, book.s3_key),
-            existing_isbn=getattr(book, "isbn", None),
-        )
-    except Exception:
+        raw = await asyncio.to_thread(download_book, book.s3_key)
+    except STORAGE_IO_EXCEPTIONS:
         log.exception("public_share_copyright_check_failed", extra={"book_id": str(book.id)})
         return False
+    copyright_info = await evaluate_document_copyright(
+        format_name=getattr(book, "format", None),
+        raw=raw,
+        existing_isbn=getattr(book, "isbn", None),
+    )
     if copyright_info.get("isbn"):
         book.isbn = str(copyright_info["isbn"])
     book.copyright_warning = bool(copyright_info.get("copyright_warning", False))

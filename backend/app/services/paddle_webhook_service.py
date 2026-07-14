@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.database import AsyncSessionLocal
 from app.models.user import PaddleWebhookEvent, RefundReview, Subscription, User
@@ -42,6 +42,7 @@ SERVICE_ACTIVE_STATUSES = {"active", "trialing"}
 CANCELED_STATUSES = {"canceled", "cancelled"}
 SUBSCRIPTION_CONFIRMATION_EMAIL = "subscription_confirmation"
 SUBSCRIPTION_CANCELLATION_EMAIL = "subscription_cancellation"
+WEBHOOK_PROCESSING_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
 
 
 async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
@@ -67,7 +68,7 @@ async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
             notification_id=notification_id,
             payload=event,
         )
-    except Exception:
+    except WEBHOOK_PROCESSING_EXCEPTIONS:
         await _mark_webhook_failed(event_id=event_id, error_message=public_error_message(500))
         raise
 
@@ -182,7 +183,7 @@ async def _process_claimed_webhook(
             webhook_event.processed_at = datetime.now(UTC)
             webhook_event.last_error = None
             await db.commit()
-        except Exception:
+        except WEBHOOK_PROCESSING_EXCEPTIONS:
             await db.rollback()
             raise
 
@@ -193,7 +194,7 @@ async def _process_claimed_webhook(
                 await send_subscription_confirmation(email_address, plan_tier)
             elif email_kind == SUBSCRIPTION_CANCELLATION_EMAIL:
                 await send_subscription_cancellation(email_address, plan_tier)
-        except Exception:
+        except WEBHOOK_PROCESSING_EXCEPTIONS:
             logger.exception(
                 "Failed to send subscription lifecycle email for Paddle event %s", event_id
             )

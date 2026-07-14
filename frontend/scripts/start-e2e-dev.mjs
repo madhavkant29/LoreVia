@@ -13,15 +13,38 @@ if (outputPath !== expectedOutputPath) {
 rmSync(outputPath, { force: true, recursive: true })
 
 const nextBin = path.resolve("node_modules/next/dist/bin/next")
-const child = spawn(process.execPath, [nextBin, "dev", "-p", "3001", "--hostname", "localhost"], {
+const port = process.env.E2E_PORT || "3001"
+const child = spawn(process.execPath, [nextBin, "dev", "-p", port, "--hostname", "localhost"], {
   env: {
     ...process.env,
   },
   stdio: "inherit",
 })
 
+let shuttingDown = false
+
+function shutdown(signal) {
+  if (shuttingDown) {
+    return
+  }
+
+  shuttingDown = true
+
+  if (process.platform === "win32" && child.pid) {
+    const taskkill = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+    })
+    taskkill.on("close", () => process.exit(0))
+    setTimeout(() => process.exit(0), 2_000).unref()
+    return
+  }
+
+  child.kill(signal)
+  setTimeout(() => process.exit(0), 2_000).unref()
+}
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => child.kill(signal))
+  process.on(signal, () => shutdown(signal))
 }
 
 child.on("exit", (code) => {

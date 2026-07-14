@@ -163,6 +163,29 @@ async def test_complete_with_fallback_retries_503_then_falls_back_to_gemini(monk
     assert call_count[0] == 3
 
 
+@pytest.mark.asyncio
+async def test_complete_with_fallback_propagates_unexpected_openai_client_bugs(monkeypatch):
+    async def _buggy_openai_completion(**kwargs):
+        raise AssertionError("client invariant")
+
+    async def _mock_gemini(**kwargs):
+        return "should not be used"
+
+    monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm.settings, "GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setattr(llm, "create_tracked_chat_completion", _buggy_openai_completion)
+    monkeypatch.setattr(llm, "_complete_with_gemini", _mock_gemini)
+
+    with pytest.raises(AssertionError, match="client invariant"):
+        await llm.complete_with_fallback(
+            system="System prompt",
+            user="User prompt",
+            openai_model="gpt-test",
+            gemini_model="gemini-test",
+            usage_feature="reader_recall",
+        )
+
+
 def test_is_transient_openai_error_httpx():
     import httpx
 

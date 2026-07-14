@@ -242,6 +242,34 @@ describe("SettingsPage billing actions", () => {
     expect(view.textContent).toContain("Email preferences updated.")
   })
 
+  it("can unsubscribe from all promotional email preferences", async () => {
+    updateEmailPreferencesMock.mockResolvedValue({
+      email: "author@example.com",
+      product_updates: false,
+      marketing: false,
+      unsubscribed_all: true,
+      unsubscribed_at: "2026-06-29T07:00:00Z",
+    })
+
+    const view = await renderSettingsPage()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const button = findButton(view, "Unsubscribe from promotional emails")
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    expect(updateEmailPreferencesMock).toHaveBeenCalledWith({
+      product_updates: false,
+      marketing: false,
+    })
+    expect(view.textContent).toContain("Promotional emails unsubscribed")
+  })
+
   it("marks the settings sidebar item for the section nearest the scroll position", async () => {
     const view = await renderSettingsPage()
     const accountLink = view.querySelector('a[href="#account"]') as HTMLAnchorElement | null

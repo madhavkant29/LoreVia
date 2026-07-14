@@ -14,7 +14,6 @@ const intelligenceApiMock = vi.hoisted(() => ({
   continuityReport: vi.fn(),
   editorialReviewStream: vi.fn(),
 }))
-const cytoscapeMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => (
@@ -22,10 +21,6 @@ vi.mock("next/link", () => ({
       {children}
     </a>
   ),
-}))
-
-vi.mock("cytoscape", () => ({
-  default: cytoscapeMock,
 }))
 
 vi.mock("@/components/ui/Skeleton", () => ({
@@ -42,7 +37,6 @@ vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock }))
 
 import { AskLoreViaWorkspace } from "@/components/reader/AskLoreViaWorkspace"
-import { GraphViewer } from "@/components/reader/GraphViewer"
 import { StoryAdvisorEditorialPanel } from "@/components/reader/StoryAdvisorEditorialPanel"
 import { VaultPreview } from "@/components/reader/VaultPreview"
 
@@ -125,49 +119,6 @@ function makeStorage() {
   }
 }
 
-function makeCytoscapeCore() {
-  const callbacks: Record<string, Array<(event?: { target: { data: (key: string) => string } }) => void>> = {}
-  const nodeList = [
-    {
-      id: () => "Story Vault/Characters/Mara.md",
-      position: () => ({ x: 10, y: 20 }),
-      length: 1,
-      data: (key: string) => (key === "path" ? "Story Vault/Characters/Mara.md" : "Mara"),
-      addClass: vi.fn().mockReturnThis(),
-      removeClass: vi.fn().mockReturnThis(),
-      connectedEdges: vi.fn(() => ({
-        addClass: vi.fn().mockReturnThis(),
-        removeClass: vi.fn().mockReturnThis(),
-        connectedNodes: vi.fn(() => ({ removeClass: vi.fn().mockReturnThis() })),
-      })),
-    },
-  ]
-  const cy = {
-    callbacks,
-    destroy: vi.fn(),
-    elements: vi.fn(() => ({
-      addClass: vi.fn().mockReturnThis(),
-      removeClass: vi.fn().mockReturnThis(),
-    })),
-    fit: vi.fn(),
-    getElementById: vi.fn(() => nodeList[0]),
-    layout: vi.fn(() => ({ run: vi.fn() })),
-    nodes: vi.fn(() => ({ forEach: (fn: (node: (typeof nodeList)[number]) => void) => nodeList.forEach(fn) })),
-    on: vi.fn((event: string, selectorOrCallback: string | ((event?: { target: { data: (key: string) => string } }) => void), maybeCallback?: (event?: { target: { data: (key: string) => string } }) => void) => {
-      const callback = typeof selectorOrCallback === "function" ? selectorOrCallback : maybeCallback
-      callbacks[event] = callbacks[event] ?? []
-      if (callback) callbacks[event].push(callback)
-    }),
-    style: vi.fn(() => ({
-      selector: vi.fn().mockReturnThis(),
-      style: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-    })),
-    zoom: vi.fn((value?: unknown) => (value ? cy : 1)),
-  }
-  return cy
-}
-
 beforeEach(() => {
   Object.defineProperty(window, "localStorage", {
     configurable: true,
@@ -227,7 +178,6 @@ beforeEach(() => {
       ],
     }
   })
-  cytoscapeMock.mockReset().mockImplementation(makeCytoscapeCore)
 })
 
 afterEach(() => {
@@ -397,61 +347,5 @@ describe("reader runtime components", () => {
     await click("Download edited Vault ZIP")
     expect(window.URL.createObjectURL).toHaveBeenCalled()
     expect(text()).toContain("Downloaded edited vault")
-  })
-
-  it("renders Graph Viewer populated, local, command, storage, and empty states", async () => {
-    await renderElement(
-      <GraphViewer
-        graph={{
-          nodes: [
-            { id: "Story Vault/Characters/Mara.md", path: "Story Vault/Characters/Mara.md", title: "Mara", folder: "Characters", link_count: 3 },
-            { id: "Story Vault/Plot/Key.md", path: "Story Vault/Plot/Key.md", title: "Key", folder: "Plot", link_count: 1 },
-          ],
-          edges: [
-            { source: "Story Vault/Characters/Mara.md", target: "Story Vault/Plot/Key.md", label: "links" },
-          ],
-        }}
-        selectedPath="Story Vault/Characters/Mara.md"
-        onOpenNote={vi.fn()}
-        isDark
-      />,
-    )
-    await act(flush)
-
-    expect(text()).toContain("Graph View")
-    expect(text()).toContain("2 notes | 1 links")
-    expect(cytoscapeMock).toHaveBeenCalled()
-
-    await click("+")
-    await click("-")
-    await click("Fit")
-    await click("Local")
-    expect(text()).toContain("Global")
-    await click("Reset")
-    expect(window.localStorage.removeItem).toHaveBeenCalled()
-
-    const cy = cytoscapeMock.mock.results[0]?.value
-    cy.callbacks.mouseover?.[0]?.({ target: { data: () => "Story Vault/Characters/Mara.md" } })
-    cy.callbacks.mouseout?.[0]?.()
-    cy.callbacks.dragfree?.[0]?.()
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 220))
-    })
-    expect(window.localStorage.setItem).toHaveBeenCalled()
-
-    root?.unmount()
-    container?.remove()
-    root = null
-    container = null
-
-    await renderElement(
-      <GraphViewer
-        graph={{ nodes: [], edges: [] }}
-        selectedPath={null}
-        onOpenNote={vi.fn()}
-        isDark={false}
-      />,
-    )
-    expect(text()).toContain("Add a few wiki-links")
   })
 })

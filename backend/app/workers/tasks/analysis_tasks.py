@@ -4,6 +4,7 @@ import httpx
 
 from app.core.database import AsyncSessionLocal
 from app.models.book import Chapter
+from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.ingestion_utils import (
     LLM_USAGE_LIMIT_MAX_RETRIES,
     LLM_USAGE_LIMIT_RETRY_SECONDS,
@@ -124,7 +125,7 @@ def analyse_chapter_task(
 
             run_worker_coro(_complete_execution())
         return result
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if is_llm_usage_limit_error(exc):
             if execution_id:
                 async def _pause_execution(error_detail: str = str(exc)) -> None:

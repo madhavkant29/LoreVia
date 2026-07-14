@@ -8,8 +8,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from openai import AsyncOpenAI
+from fastapi import HTTPException
+from openai import OpenAIError, AsyncOpenAI
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -44,6 +46,7 @@ from app.utils.ingestion_utils import (
     mark_book_processing_cancelled,
     merge_processing_pipeline,
 )
+from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.logging.errors import public_error_message
 from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 from app.utils.plot_thread_utils import (
@@ -147,9 +150,14 @@ async def analyse_chapter(
                             user_id=book.user_id,
                             book_id=book.id,
                         )
-                    except Exception as exc:
+                    except (HTTPException, OpenAIError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
                         if is_llm_usage_limit_error(exc) or is_llm_coordination_retry_error(exc):
                             raise
+                        log.warning(
+                            "analysis_detailed_summary_unavailable chapter_id=%s",
+                            chapter_id,
+                            exc_info=True,
+                        )
                         summary_payload = None
                     if summary_payload is not None:
                         detailed_payload = cast(dict[str, Any], summary_payload)
@@ -316,10 +324,11 @@ async def analyse_chapter(
             if settings.DEBUG:
                 log.info("analysed_chapter %s %s", chapter_id, results)
             return {"chapter_id": chapter_id, "summaries": results}
-        except Exception as exc:
+        except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
             try:
                 await db.rollback()
-            except Exception:
+            except SQLAlchemyError:
+                log.warning("analysis_rollback_failed chapter_id=%s", chapter_id, exc_info=True)
                 pass
             try:
                 fresh_chapter = await db.get(Chapter, chapter.id)
@@ -338,10 +347,20 @@ async def analyse_chapter(
                     if fresh_book is not None:
                         await _refresh_book_analysis_pipeline(db, fresh_book)
                 await db.commit()
-            except Exception:
+            except SQLAlchemyError:
+                log.warning(
+                    "analysis_failure_state_update_failed chapter_id=%s",
+                    chapter_id,
+                    exc_info=True,
+                )
                 try:
                     await db.rollback()
-                except Exception:
+                except SQLAlchemyError:
+                    log.warning(
+                        "analysis_failure_state_rollback_failed chapter_id=%s",
+                        chapter_id,
+                        exc_info=True,
+                    )
                     pass
             raise
         finally:

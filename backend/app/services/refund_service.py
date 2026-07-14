@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -48,6 +49,7 @@ ADJUSTMENT_CREATE_ERROR_MESSAGE = (
 )
 CANCEL_SUBSCRIPTION_ERROR_MESSAGE = "Refund was created, but provider subscription cancellation failed. Manual provider follow-up is required."
 AUTO_REFUND_SUBSCRIPTION_LINKAGE_ERROR_MESSAGE = "This monthly charge requires manual review because the active local subscription could not be safely linked for immediate cancellation."
+PADDLE_PROVIDER_EXCEPTIONS = (httpx.HTTPError, KeyError, TypeError, ValueError)
 
 
 @dataclass(frozen=True)
@@ -478,7 +480,7 @@ async def _submit_refund_review_to_provider(
                 review.paddle_transaction_id,
                 refund_reason,
             )
-        except Exception as exc:
+        except PADDLE_PROVIDER_EXCEPTIONS as exc:
             provider_response["adjustment_create_error"] = ADJUSTMENT_CREATE_ERROR_MESSAGE
             provider_response["adjustment_create_error_redacted"] = redact_sensitive_text(str(exc))
             review.provider_response_json = provider_response
@@ -502,7 +504,7 @@ async def _submit_refund_review_to_provider(
 
     try:
         cancellation = await cancel_subscription_immediately(subscription.paddle_sub_id)
-    except Exception as exc:
+    except PADDLE_PROVIDER_EXCEPTIONS as exc:
         provider_response["cancel_subscription_error"] = CANCEL_SUBSCRIPTION_ERROR_MESSAGE
         provider_response["cancel_subscription_error_redacted"] = redact_sensitive_text(str(exc))
         review.provider_response_json = provider_response

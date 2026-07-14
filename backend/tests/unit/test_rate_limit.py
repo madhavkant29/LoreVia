@@ -9,11 +9,13 @@ from app.api.deps.rate_limit import (
     _bump_daily_bucket,
     _bump_weekly_bucket,
     _client_identifier,
+    rate_limit_internal_job,
     rate_limit_advisor,
     rate_limit_continuity_checker,
     rate_limit_manuscript_import,
     rate_limit_recall,
     rate_limit_upload,
+    rate_limit_summary,
     rate_limit_world_building_ai,
     rate_limit_world_building_upload,
 )
@@ -51,6 +53,30 @@ def test_client_identifier_ignores_forged_cloudflare_header_without_edge_marker(
     )
 
     assert _client_identifier(request) == "198.51.100.8"
+
+
+def test_client_identifier_requires_edge_marker_for_forwarded_headers_from_proxy() -> None:
+    request = _request_with_headers(
+        {
+            "x-real-ip": "203.0.113.24",
+            "x-forwarded-for": "203.0.113.25",
+        },
+        client_host="127.0.0.1",
+    )
+
+    assert _client_identifier(request) == "127.0.0.1"
+
+
+def test_client_identifier_ignores_malformed_forwarded_header() -> None:
+    request = _request_with_headers(
+        {
+            "x-forwarded-for": "not-an-ip",
+            "x-lorevia-edge-verified": "1",
+        },
+        client_host="127.0.0.1",
+    )
+
+    assert _client_identifier(request) == "127.0.0.1"
 
 
 def test_client_identifier_falls_back_to_socket_client() -> None:
@@ -117,6 +143,58 @@ async def test_weekly_bucket_blocks_after_limit(monkeypatch):
 
     assert getattr(exc_info.value, "status_code", None) == 429
     assert "refreshes next week" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_summary_rate_limit_uses_hourly_override(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    async def _fake_limit_for_user(_db, user_id, field, default):
+        assert _db is None
+        assert user_id == "summary-user"
+        assert field == "summary_per_hour"
+        assert default == 3
+        return 1
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
+    monkeypatch.setattr("app.api.deps.rate_limit.settings.FREE_SUMMARY_PER_HOUR", 3)
+    user = SimpleNamespace(id="summary-user")
+
+    await rate_limit_summary(user, db=None)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_summary(user, db=None)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+
+
+@pytest.mark.asyncio
+async def test_internal_job_rate_limit_is_not_keyed_by_invalid_secret(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    for index in range(10):
+        request = _request_with_headers(
+            {"x-internal-job-secret": f"rotating-{index}"},
+            client_host="198.51.100.8",
+        )
+        await rate_limit_internal_job(request)
+
+    with pytest.raises(Exception) as exc_info:
+        request = _request_with_headers(
+            {"x-internal-job-secret": "rotating-final"},
+            client_host="198.51.100.8",
+        )
+        await rate_limit_internal_job(request)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
 
 
 @pytest.mark.asyncio

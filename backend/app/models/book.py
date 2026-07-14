@@ -28,7 +28,10 @@ class VaultNoteSource(enum.StrEnum):
 
 class Book(Base):
     __tablename__ = "books"
-    __table_args__ = (UniqueConstraint("public_slug", name="uq_books_public_slug"),)
+    __table_args__ = (
+        UniqueConstraint("public_slug", name="uq_books_public_slug"),
+        Index("ix_books_user_hidden_created", "user_id", "hidden_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -318,6 +321,12 @@ class BookCollaborator(Base):
     __tablename__ = "book_collaborators"
     __table_args__ = (
         UniqueConstraint("book_id", "email", name="uq_book_collaborators_book_email"),
+        Index(
+            "ix_book_collaborators_email_status_invited",
+            "email",
+            "invite_status",
+            "invited_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -669,6 +678,10 @@ class ChapterVersion(Base):
 
 class BookNote(Base):
     __tablename__ = "book_notes"
+    __table_args__ = (
+        Index("ix_book_notes_book_chapter_updated", "book_id", "chapter_number", "updated_at"),
+        Index("ix_book_notes_user_updated", "user_id", "updated_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -692,6 +705,14 @@ class BookNote(Base):
 
 class ManuscriptAnnotation(Base):
     __tablename__ = "manuscript_annotations"
+    __table_args__ = (
+        Index(
+            "ix_manuscript_annotations_book_chapter_created",
+            "book_id",
+            "chapter_number",
+            "created_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -995,7 +1016,10 @@ class Series(Base):
 
 class SeriesBook(Base):
     __tablename__ = "series_books"
-    __table_args__ = (UniqueConstraint("series_id", "book_id", name="uq_series_books_series_book"),)
+    __table_args__ = (
+        UniqueConstraint("series_id", "book_id", name="uq_series_books_series_book"),
+        Index("ix_series_books_series_position_book", "series_id", "position", "book_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     series_id: Mapped[uuid.UUID] = mapped_column(

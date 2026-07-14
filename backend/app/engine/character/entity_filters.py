@@ -709,7 +709,7 @@ def _get_nlp():
             "en_core_web_sm",
             exclude=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"],
         )
-    except Exception:
+    except (ImportError, OSError):
         _nlp = None
     _nlp_loaded = True
     return _nlp

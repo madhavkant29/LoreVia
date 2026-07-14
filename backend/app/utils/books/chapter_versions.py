@@ -51,6 +51,7 @@ from app.utils.books.chapter_titles import (
 from app.utils.books.scene_sync import (
     _chapter_storage_key,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 from app.utils.tag_utils import (
     ENTITY_TYPE_CHAPTER,
 )
@@ -69,7 +70,7 @@ async def snapshot_chapter_version(
         return None
     try:
         raw = await asyncio.to_thread(download_book, chapter.s3_key)
-    except Exception:
+    except STORAGE_IO_EXCEPTIONS:
         return None
 
     version_key = await asyncio.to_thread(
@@ -264,7 +265,7 @@ async def _renumber_chapters_after_delete(
         if old_key and old_key != new_key:
             try:
                 chapter.s3_key = await asyncio.to_thread(move_object, old_key, new_key)
-            except Exception:
+            except STORAGE_IO_EXCEPTIONS:
                 chapter.s3_key = new_key
 
         chapter.number = new_number

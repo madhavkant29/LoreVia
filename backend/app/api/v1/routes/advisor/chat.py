@@ -34,13 +34,15 @@ from app.services.advisor_jobs_service import (
     mark_advisor_job_failed,
     serialize_advisor_job,
 )
+from app.utils.advisor_chat_utils import stream_advisor_reply_payload
 from app.utils.advisor_utils import (
     generate_whats_the_word_result,
     make_advisor_cache_key,
-    stream_advisor_reply_payload,
 )
+from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.billing_utils import require_author_access
 from app.utils.logging.errors import public_error_message
+from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
 
 router = APIRouter()
@@ -128,7 +130,7 @@ async def _enqueue_book_advisor_task(
                 "total_chapters": body.total_chapters,
             },
         )
-    except Exception:
+    except TASK_ENQUEUE_ERRORS:
         await mark_advisor_job_failed(
             db,
             job_id=job.id,
@@ -193,7 +195,7 @@ async def advisor_message_stream(
                 total_chapters=body.total_chapters,
             ):
                 yield _advisor_sse(item["event"], item["data"])
-        except Exception as exc:
+        except ADVISOR_STREAM_ERRORS as exc:
             logging.getLogger(__name__).error(
                 "advisor_message_stream failed book_id=%s user_id=%s: %s\n%s",
                 book_id,
@@ -295,7 +297,7 @@ async def whats_the_word_stream(
             yield _advisor_sse(
                 "done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload)))
             )
-        except Exception:
+        except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
         finally:
             await client.close()

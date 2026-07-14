@@ -223,15 +223,41 @@ async def test_manuscript_workspace_scene_annotation_and_version_workflow(
         headers=auth_headers,
     )
     assert reader_bootstrap.status_code == 200, reader_bootstrap.text
+    assert reader_bootstrap.json()["profile"] == "full"
     assert reader_bootstrap.json()["overview"]["book"]["id"] == str(book.id)
     assert reader_bootstrap.json()["writer_workspace"] is not None
+
+    reader_critical_bootstrap = await client.get(
+        f"/api/v1/books/{book.id}/reader-bootstrap?profile=critical",
+        headers=auth_headers,
+    )
+    assert reader_critical_bootstrap.status_code == 200, reader_critical_bootstrap.text
+    assert reader_critical_bootstrap.json()["profile"] == "critical"
+    assert reader_critical_bootstrap.json()["overview"]["book"]["id"] == str(book.id)
+    assert reader_critical_bootstrap.json()["writer_workspace"] is None
+    assert reader_critical_bootstrap.json()["chapter_reports"] == []
 
     manuscript_bootstrap = await client.get(
         f"/api/v1/books/{book.id}/manuscript-bootstrap?active_chapter_number=1",
         headers=auth_headers,
     )
     assert manuscript_bootstrap.status_code == 200, manuscript_bootstrap.text
+    assert manuscript_bootstrap.json()["profile"] == "full"
     assert manuscript_bootstrap.json()["book"]["id"] == str(book.id)
+    assert manuscript_bootstrap.json()["prewriting_check"] is not None
+
+    manuscript_critical_bootstrap = await client.get(
+        f"/api/v1/books/{book.id}/manuscript-bootstrap?active_chapter_number=1&profile=critical",
+        headers=auth_headers,
+    )
+    assert manuscript_critical_bootstrap.status_code == 200, manuscript_critical_bootstrap.text
+    assert manuscript_critical_bootstrap.json()["profile"] == "critical"
+    assert manuscript_critical_bootstrap.json()["book"]["id"] == str(book.id)
+    assert manuscript_critical_bootstrap.json()["writer_workspace"] is not None
+    assert manuscript_critical_bootstrap.json()["workspace_tree"] is not None
+    assert manuscript_critical_bootstrap.json()["prewriting_check"] is None
+    assert manuscript_critical_bootstrap.json()["notes"] == []
+    assert manuscript_critical_bootstrap.json()["chapter_versions"] == []
 
     search = await client.post(
         f"/api/v1/books/{book.id}/workspace/search",

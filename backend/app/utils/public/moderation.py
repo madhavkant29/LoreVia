@@ -151,7 +151,7 @@ PUBLIC_FORUM_IMAGE_MAGIC: dict[bytes, tuple[str, str]] = {
 def _allowed_public_report_hosts() -> set[str]:
     try:
         configured_host = (urlparse(settings.APP_URL).hostname or "").strip().lower().rstrip(".")
-    except Exception:
+    except ValueError:
         configured_host = ""
     if not configured_host:
         return set()

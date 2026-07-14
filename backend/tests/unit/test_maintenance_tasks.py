@@ -377,7 +377,7 @@ async def test_remaining_locked_maintenance_tasks_run_services(db, monkeypatch):
         assert session is db
         return {"ranked": 11}
 
-    monkeypatch.setattr("app.utils.beta_read_utils.run_beta_read_jobs", run_beta_reads)
+    monkeypatch.setattr("app.utils.beta_read_job_utils.run_beta_read_jobs", run_beta_reads)
     monkeypatch.setattr(
         "app.services.privacy_service.process_due_data_deletion_requests",
         process_deletions,

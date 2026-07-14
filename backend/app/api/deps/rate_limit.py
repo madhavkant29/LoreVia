@@ -1,12 +1,12 @@
-import ipaddress as _ipaddress
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import get_redis, key_ratelimit
 from app.models.user import User
@@ -19,6 +19,7 @@ from app.utils.billing_utils import (
     protected_authoring_limit_per_day,
     recall_limit_per_day,
 )
+from app.utils.client_identity import trusted_client_identifier
 from app.utils.email_utils import track_usage_limit_friction_and_maybe_send
 from app.utils.rate_limit_utils import limit_for_user
 
@@ -126,8 +127,19 @@ async def rate_limit_search(
     await _bump_daily_bucket(db, current_user, "search", limit)
 
 
-async def rate_limit_summary(current_user: User = Depends(get_current_user)):
-    return None
+async def rate_limit_summary(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _user_window_limit(
+        db,
+        current_user.id,
+        "summary",
+        field="summary_per_hour",
+        default=settings.FREE_SUMMARY_PER_HOUR,
+        window=3600,
+        message=DAILY_LIMIT_MESSAGE,
+    )
 
 
 async def rate_limit_chat(
@@ -191,60 +203,8 @@ async def rate_limit_api(
         raise HTTPException(429, "Rate limit exceeded")
 
 
-# RFC-1918 + loopback ranges that may legitimately act as reverse proxies.
-# Forwarded-IP headers are only trusted when the *direct* TCP connection
-# comes from one of these networks — preventing header-spoofing by external
-# clients who otherwise control X-Forwarded-For / CF-Connecting-IP freely.
-_TRUSTED_PROXY_NETS = [
-    _ipaddress.ip_network("10.0.0.0/8"),
-    _ipaddress.ip_network("172.16.0.0/12"),
-    _ipaddress.ip_network("192.168.0.0/16"),
-    _ipaddress.ip_network("127.0.0.0/8"),
-    _ipaddress.ip_network("::1/128"),
-]
-
-
-def _is_trusted_proxy(host: str) -> bool:
-    try:
-        addr = _ipaddress.ip_address(host)
-        return any(addr in net for net in _TRUSTED_PROXY_NETS)
-    except ValueError:
-        return False
-
-
 def _client_identifier(request: Request) -> str:
-    direct_ip = request.client.host if request.client else None
-
-    # Only trust forwarded-IP headers when the TCP peer is a known proxy.
-    # An external client can freely forge these headers if we skip this check.
-    if direct_ip and _is_trusted_proxy(direct_ip):
-        # Priority order matters:
-        #   1. CF-Connecting-IP  — set exclusively by Cloudflare; clients cannot forge it
-        #      when the request arrives via the Cloudflare Tunnel.
-        #   2. X-Real-IP        — set directly by Render's LB / Nginx; clients cannot
-        #      inject it because the proxy overwrites (not appends) this header.
-        #   3. X-Forwarded-For  — least reliable: proxies *append* to it, so a client
-        #      can prepend fake IPs. Checked last as a fallback.
-        cf_ip = request.headers.get("cf-connecting-ip")
-        edge_verified = request.headers.get("x-lorevia-edge-verified") == "1"
-        if edge_verified and cf_ip and cf_ip.strip():
-            return cf_ip.strip()
-
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip and real_ip.strip():
-            return real_ip.strip()
-
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            # Take the leftmost entry only — valid when the proxy *prepends*
-            # the real client IP (Cloudflare / most CDNs). For Render, prefer
-            # X-Real-IP above so we never reach this branch with spoofed data.
-            leftmost = xff.split(",")[0].strip()
-            if leftmost:
-                return leftmost
-
-    return direct_ip or "unknown"
-
+    return trusted_client_identifier(request)
 
 async def _auth_window(request: Request, bucket: str, limit: int, window: int) -> None:
     identifier = _client_identifier(request)
@@ -428,15 +388,15 @@ async def rate_limit_world_building_ai(
 
 async def rate_limit_internal_job(
     request: Request,
-    x_internal_job_secret: str | None = Header(default=None),
 ):
-    if x_internal_job_secret and x_internal_job_secret.strip():
-        import hashlib
-
-        identifier = hashlib.sha256(x_internal_job_secret.encode()).hexdigest()
-    else:
-        identifier = _client_identifier(request)
+    identifier = _client_identifier(request)
     ok = await _window(key_ratelimit(f"internal_job:{identifier}", "job"), 10, 60)
+    if not ok:
+        raise HTTPException(429, "Internal job rate limit exceeded. Please wait and try again.")
+
+
+async def rate_limit_verified_internal_scheduler():
+    ok = await _window(key_ratelimit("internal_job:scheduler", "job"), 60, 60)
     if not ok:
         raise HTTPException(429, "Internal job rate limit exceeded. Please wait and try again.")
 

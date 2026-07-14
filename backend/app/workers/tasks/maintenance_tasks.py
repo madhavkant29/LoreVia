@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
+from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 
@@ -20,11 +21,13 @@ def maintain_task_executions_task(self, *, limit: int = 500):
             dispatch_pending_analysis_tasks,
             dispatch_pending_embedding_tasks,
             dispatch_pending_extraction_tasks,
+            reconcile_stale_task_dispatch_outbox,
             release_stale_task_leases,
         )
 
         async with AsyncSessionLocal() as db:
             released = await release_stale_task_leases(db, limit=limit)
+            reconciled_outbox = await reconcile_stale_task_dispatch_outbox(db, limit=limit)
             await db.commit()
             extraction_dispatched = await dispatch_pending_extraction_tasks(db)
             analysis_dispatched = await dispatch_pending_analysis_tasks(db)
@@ -34,6 +37,7 @@ def maintain_task_executions_task(self, *, limit: int = 500):
             llm_coordination = await rehydrate_llm_coordination_state()
             return {
                 "released": released,
+                "reconciled_outbox": reconciled_outbox,
                 "extraction_dispatched": extraction_dispatched,
                 "analysis_dispatched": analysis_dispatched,
                 "embedding_dispatched": embedding_dispatched,
@@ -45,7 +49,7 @@ def maintain_task_executions_task(self, *, limit: int = 500):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -68,7 +72,7 @@ def release_stale_processing_reservations_task(self, *, limit: int = 500):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -151,7 +155,7 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -183,7 +187,7 @@ def send_due_trial_emails_task(self, *, limit: int = 100):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -198,7 +202,7 @@ def process_beta_reads_task(self, *, limit: int = 100):
     async def _run():
         from app.core.database import AsyncSessionLocal
         from app.core.redis import cache_delete_if_owner, cache_set_if_absent, key_cron_lock
-        from app.utils.beta_read_utils import run_beta_read_jobs
+        from app.utils.beta_read_job_utils import run_beta_read_jobs
 
         lock_key = key_cron_lock("maintenance_tasks.process_beta_reads")
         owner_token = self.request.id or "unknown"
@@ -215,7 +219,7 @@ def process_beta_reads_task(self, *, limit: int = 100):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -245,7 +249,7 @@ def process_data_deletion_requests_task(self, *, limit: int = 50):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -317,7 +321,7 @@ def cleanup_expired_advisor_jobs_task(self, *, limit: int = 1000):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -373,7 +377,7 @@ def cleanup_expired_webhook_events_task(self, *, batch_size: int = 1000):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -416,7 +420,7 @@ def cleanup_expired_subscription_events_task(self, *, batch_size: int = 1000):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)
 
 
@@ -448,5 +452,5 @@ def refresh_public_rankings_task(self):
 
     try:
         return run_worker_coro(_run())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         raise self.retry(exc=exc)

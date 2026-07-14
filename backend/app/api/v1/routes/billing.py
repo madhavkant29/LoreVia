@@ -1,3 +1,4 @@
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from app.utils.logging import get_logger
 
 router = APIRouter()
 log = get_logger("lorevia.billing")
+PADDLE_ROUTE_ERRORS = (RuntimeError, httpx.HTTPError, KeyError, ValueError)
 
 
 @router.post("/checkout", dependencies=[Depends(rate_limit_api)])
@@ -79,7 +81,7 @@ async def start_checkout(
             plan,
             existing_customer_id=existing.paddle_customer_id,
         )
-    except Exception:
+    except PADDLE_ROUTE_ERRORS:
         log.exception(
             "paddle_checkout_failed", extra={"user_id": str(current_user.id), "plan": plan}
         )
@@ -119,8 +121,11 @@ async def get_checkout_confirmation(
                 credentials=None,
                 db=db,
             )
-        except Exception:
-            current_user = None
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                current_user = None
+            else:
+                raise
     if current_user is None and not token_is_valid:
         raise HTTPException(401, "A valid confirmation token is required.")
 
@@ -139,7 +144,7 @@ async def get_checkout_confirmation(
 
     try:
         summary = await get_transaction_summary(normalized_transaction_id)
-    except Exception:
+    except PADDLE_ROUTE_ERRORS:
         log.exception(
             "paddle_confirmation_failed",
             extra={
@@ -208,7 +213,7 @@ async def open_portal(
             subscription.paddle_customer_id,
             [subscription.paddle_sub_id] if subscription.paddle_sub_id else None,
         )
-    except Exception:
+    except PADDLE_ROUTE_ERRORS:
         log.exception("paddle_portal_failed", extra={"user_id": str(current_user.id)})
         raise HTTPException(502, "Unable to open Paddle portal.")
     return {"portal_url": portal_url, "billing_enabled": True}

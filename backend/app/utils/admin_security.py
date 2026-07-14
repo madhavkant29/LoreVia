@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, Response
 
-from app.core.config import settings
+from app.core.config import cors_origins, settings
 from app.utils.cookie_utils import (
     auth_cookie_secure,
     delete_cookie,
@@ -57,15 +57,20 @@ def validate_admin_csrf_token(request: Request) -> None:
     _validate_same_origin_admin_request(request)
 
 
-def _validate_same_origin_admin_request(request: Request) -> None:
+def admin_csrf_allowed_origins() -> set[str]:
     allowed_origins = {
-        settings.APP_URL.rstrip("/"),
-        "https://getlorevia.com",
-        "https://www.getlorevia.com",
+        origin.rstrip("/")
+        for origin in cors_origins()
+        if origin.strip() and "*" not in origin
     }
+    allowed_origins.add(settings.APP_URL.rstrip("/"))
+    allowed_origins.update({"https://getlorevia.com", "https://www.getlorevia.com"})
     if settings.DEBUG:
         allowed_origins.update({"http://localhost:3000", "http://127.0.0.1:3000"})
+    return allowed_origins
 
+
+def _validate_same_origin_admin_request(request: Request) -> None:
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
     candidate = origin or referer
@@ -75,10 +80,10 @@ def _validate_same_origin_admin_request(request: Request) -> None:
     try:
         parsed = urlparse(candidate)
         request_origin = f"{parsed.scheme}://{parsed.netloc}"
-    except Exception:
+    except ValueError:
         raise HTTPException(403, "Invalid admin request origin.")
 
-    if request_origin.rstrip("/") not in allowed_origins:
+    if request_origin.rstrip("/") not in admin_csrf_allowed_origins():
         raise HTTPException(403, "Invalid admin request origin.")
 
 

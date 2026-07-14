@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import create_asset_token, decode_token
 from app.core.storage import download_book, get_presigned_url, upload_binary
+from app.utils.client_identity import trusted_client_ip
 from app.models.book import (
     BookForumComment,
     BookForumPost,
@@ -23,6 +24,7 @@ from app.schemas.public import (
     PublicForumPostCreateBody,
     PublicForumPostUpdateBody,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 FORUM_POST_OPEN = "open"
 FORUM_POST_CLOSED = "closed"
@@ -156,8 +158,7 @@ def hash_text(value: str | None) -> str | None:
 def build_public_visitor_fingerprint(request: Request | None) -> str | None:
     if request is None:
         return None
-    forwarded_for = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
-    client_host = forwarded_for or (request.client.host if request.client is not None else "")
+    client_host = trusted_client_ip(request) or ""
     user_agent = " ".join(str(request.headers.get("user-agent") or "").split()).strip().lower()
     fingerprint_source = "|".join(part for part in (client_host, user_agent) if part)
     return hash_text(fingerprint_source)
@@ -367,6 +368,6 @@ async def get_public_forum_image_response(
 
     try:
         raw = await asyncio.to_thread(download_book, target.image_s3_key)
-    except Exception:
+    except STORAGE_IO_EXCEPTIONS:
         raise HTTPException(404, missing_message)
     return Response(content=raw, media_type=target.image_content_type or "application/octet-stream")

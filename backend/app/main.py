@@ -26,6 +26,7 @@ from app.utils.logging.errors import (
     sanitize_validation_errors,
     scrub_sentry_event,
 )
+from app.utils.exception_boundaries import HTTP_LAST_RESORT_EXCEPTIONS
 from app.utils.security_utils import apply_security_headers
 from app.utils.tunnel.cloudflare import CloudflareTunnelMiddleware
 
@@ -247,7 +248,7 @@ class SecurityHeadersMiddleware:
 
         try:
             await self.app(scope, receive, send_with_headers)
-        except Exception:
+        except HTTP_LAST_RESORT_EXCEPTIONS:
             log.exception(
                 "request_failed",
                 extra={
@@ -281,7 +282,7 @@ class SecurityHeadersMiddleware:
                 raise
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        if settings.DEBUG or duration_ms >= 1200:
+        if settings.DEBUG or duration_ms >= settings.SLOW_REQUEST_LOG_MS:
             log.info(
                 "request_complete",
                 extra={
@@ -327,7 +328,7 @@ async def ready():
             await conn.execute(text("SELECT '[0,0,0]'::vector"))
         r = await get_redis()
         await r.ping()
-    except Exception:
+    except HTTP_LAST_RESORT_EXCEPTIONS:
         log.exception("readiness_check_failed")
         return Response(status_code=503, content="not ready")
     return {"status": "ready"}

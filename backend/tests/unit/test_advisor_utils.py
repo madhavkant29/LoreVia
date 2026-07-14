@@ -9,13 +9,12 @@ from app.models.book import Book, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import PlotThread
 from app.models.user import User
+from app.utils import advisor_chat_utils
 from app.utils import advisor_utils
 from app.utils.advisor_utils import (
     advisor_retrieval_settings,
     build_advisor_world_context,
     build_fallback_advisor_suggestions,
-    build_series_story_context,
-    build_story_context,
     classify_intent_fast,
     classify_response_type,
     detect_advisor_world_mode,
@@ -26,6 +25,7 @@ from app.utils.advisor_utils import (
     normalize_proactive_scan_result,
     retrieve_series_continuity_passages,
 )
+from app.utils.advisor_story_context_utils import build_series_story_context, build_story_context
 
 
 def test_build_fallback_advisor_suggestions_returns_three_items_without_focus_thread():
@@ -224,9 +224,15 @@ async def test_build_story_context_returns_cached_payload(monkeypatch):
     async def _fake_set_cache(*_args, **_kwargs):
         raise AssertionError("cache set should not run on cache hit")
 
-    monkeypatch.setattr("app.utils.advisor_utils.get_book_cache_version", _fake_get_version)
-    monkeypatch.setattr("app.utils.advisor_utils.get_story_context_cache", _fake_get_cache)
-    monkeypatch.setattr("app.utils.advisor_utils.set_story_context_cache", _fake_set_cache)
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_book_cache_version", _fake_get_version
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_story_context_cache", _fake_get_cache
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.set_story_context_cache", _fake_set_cache
+    )
 
     class _FailingDB:
         async def execute(self, *_args, **_kwargs):
@@ -251,9 +257,15 @@ async def test_build_story_context_builds_and_caches_complete_runtime_context(mo
     async def _fake_set_cache(*args):
         cached_payloads.append(args)
 
-    monkeypatch.setattr("app.utils.advisor_utils.get_book_cache_version", _fake_get_version)
-    monkeypatch.setattr("app.utils.advisor_utils.get_story_context_cache", _fake_get_cache)
-    monkeypatch.setattr("app.utils.advisor_utils.set_story_context_cache", _fake_set_cache)
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_book_cache_version", _fake_get_version
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_story_context_cache", _fake_get_cache
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.set_story_context_cache", _fake_set_cache
+    )
 
     character = SimpleNamespace(
         name="Mara",
@@ -488,7 +500,7 @@ async def test_retrieve_series_continuity_passages_returns_empty_when_pgvector_e
                 Exception('type "vector" does not exist'),
             )
 
-    with patch("app.utils.advisor_utils.embed_text", AsyncMock(return_value=[0.1] * 1536)):
+    with patch("app.utils.advisor_retrieval_utils.embed_text", AsyncMock(return_value=[0.1] * 1536)):
         payload = await retrieve_series_continuity_passages(
             db=_FakeDB(),
             prior_book_ids=[uuid.uuid4()],
@@ -565,14 +577,14 @@ async def test_prepare_advisor_reply_context_builds_grounded_messages(monkeypatc
             }
         ]
 
-    monkeypatch.setattr(advisor_utils, "AsyncOpenAI", lambda **_kwargs: FakeClient())
-    monkeypatch.setattr(advisor_utils, "get_advisor_response_cache", no_cache)
-    monkeypatch.setattr(advisor_utils, "build_story_context", story_context)
-    monkeypatch.setattr(advisor_utils, "semantic_search", search)
-    monkeypatch.setattr(advisor_utils, "classify_intent_fast", lambda _text: "consistency")
+    monkeypatch.setattr(advisor_chat_utils, "AsyncOpenAI", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr(advisor_chat_utils, "get_advisor_response_cache", no_cache)
+    monkeypatch.setattr(advisor_chat_utils, "build_story_context", story_context)
+    monkeypatch.setattr(advisor_chat_utils, "semantic_search", search)
+    monkeypatch.setattr(advisor_chat_utils, "classify_intent_fast", lambda _text: "consistency")
 
     book = SimpleNamespace(id=uuid.uuid4(), title="Gate Book", total_chapters=6)
-    prepared = await advisor_utils._prepare_advisor_reply_context(
+    prepared = await advisor_chat_utils.prepare_advisor_reply_context(
         db=SimpleNamespace(),
         book=book,
         user_id=uuid.uuid4(),
@@ -593,8 +605,8 @@ async def test_prepare_advisor_reply_context_builds_grounded_messages(monkeypatc
     async def cached(*_args, **_kwargs):
         return {"reply": "Cached answer"}
 
-    monkeypatch.setattr(advisor_utils, "get_advisor_response_cache", cached)
-    cached_payload = await advisor_utils._prepare_advisor_reply_context(
+    monkeypatch.setattr(advisor_chat_utils, "get_advisor_response_cache", cached)
+    cached_payload = await advisor_chat_utils.prepare_advisor_reply_context(
         db=SimpleNamespace(),
         book=book,
         user_id=uuid.uuid4(),
@@ -667,10 +679,14 @@ async def test_build_series_story_context_labels_books_characters_and_threads(db
     async def set_cache(key, version_value, payload):
         stored.update(key=key, version=version_value, payload=payload)
 
-    monkeypatch.setattr(advisor_utils, "get_book_cache_version", version)
-    monkeypatch.setattr(advisor_utils, "get_series_cache_version", version)
-    monkeypatch.setattr(advisor_utils, "get_series_story_context_cache", no_cache)
-    monkeypatch.setattr(advisor_utils, "set_series_story_context_cache", set_cache)
+    monkeypatch.setattr("app.utils.advisor_story_context_utils.get_book_cache_version", version)
+    monkeypatch.setattr("app.utils.advisor_story_context_utils.get_series_cache_version", version)
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_series_story_context_cache", no_cache
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.set_series_story_context_cache", set_cache
+    )
 
     payload = await build_series_story_context(
         db,
@@ -733,15 +749,14 @@ async def test_stream_advisor_payload_records_usage_and_finalizes(monkeypatch):
     async def finalize(**kwargs):
         return {"reply": kwargs["reply"], "cached": False}
 
-    monkeypatch.setattr(advisor_utils, "_prepare_advisor_reply_context", prepare)
-    monkeypatch.setattr(advisor_utils, "assert_llm_token_capacity", capacity)
-    monkeypatch.setattr(advisor_utils, "reserve_llm_call", reserve)
-    monkeypatch.setattr(advisor_utils, "finish_llm_reservation_counts", finish)
-    monkeypatch.setattr(advisor_utils, "_finalize_advisor_reply_payload", finalize)
+    monkeypatch.setattr(advisor_chat_utils, "prepare_advisor_reply_context", prepare)
+    monkeypatch.setattr(advisor_chat_utils, "reserve_llm_call", reserve)
+    monkeypatch.setattr(advisor_chat_utils, "finish_llm_reservation_counts", finish)
+    monkeypatch.setattr(advisor_chat_utils, "finalize_advisor_reply_payload", finalize)
 
     events = [
         event
-        async for event in advisor_utils.stream_advisor_reply_payload(
+        async for event in advisor_chat_utils.stream_advisor_reply_payload(
             db=SimpleNamespace(),
             book=SimpleNamespace(id=uuid.uuid4()),
             user_id=uuid.uuid4(),
@@ -799,16 +814,15 @@ async def test_stream_series_advisor_payload_records_usage_and_finalizes(monkeyp
     async def finalize(**kwargs):
         return {"reply": kwargs["reply"], "book_count": kwargs["book_count"]}
 
-    monkeypatch.setattr(advisor_utils, "_prepare_series_advisor_reply_context", prepare)
-    monkeypatch.setattr(advisor_utils, "assert_llm_token_capacity", capacity)
-    monkeypatch.setattr(advisor_utils, "reserve_llm_call", reserve)
-    monkeypatch.setattr(advisor_utils, "finish_llm_reservation_counts", finish)
-    monkeypatch.setattr(advisor_utils, "_finalize_series_advisor_reply_payload", finalize)
+    monkeypatch.setattr(advisor_chat_utils, "prepare_series_advisor_reply_context", prepare)
+    monkeypatch.setattr(advisor_chat_utils, "reserve_llm_call", reserve)
+    monkeypatch.setattr(advisor_chat_utils, "finish_llm_reservation_counts", finish)
+    monkeypatch.setattr(advisor_chat_utils, "finalize_series_advisor_reply_payload", finalize)
 
     series = SimpleNamespace(id=uuid.uuid4())
     events = [
         event
-        async for event in advisor_utils.stream_series_advisor_reply_payload(
+        async for event in advisor_chat_utils.stream_series_advisor_reply_payload(
             db=SimpleNamespace(),
             series=series,
             user_id=uuid.uuid4(),
@@ -850,12 +864,12 @@ async def test_prepare_series_advisor_context_builds_history_and_handles_empty_s
         async def close(self):
             return None
 
-    monkeypatch.setattr(advisor_utils, "get_series_advisor_response_cache", no_cache)
-    monkeypatch.setattr(advisor_utils, "build_series_story_context", context)
-    monkeypatch.setattr(advisor_utils, "AsyncOpenAI", lambda **_kwargs: Client())
-    monkeypatch.setattr(advisor_utils, "classify_intent_fast", lambda _text: "opportunity")
+    monkeypatch.setattr(advisor_chat_utils, "get_series_advisor_response_cache", no_cache)
+    monkeypatch.setattr(advisor_chat_utils, "build_series_story_context", context)
+    monkeypatch.setattr(advisor_chat_utils, "AsyncOpenAI", lambda **_kwargs: Client())
+    monkeypatch.setattr(advisor_chat_utils, "classify_intent_fast", lambda _text: "opportunity")
 
-    prepared = await advisor_utils._prepare_series_advisor_reply_context(
+    prepared = await advisor_chat_utils.prepare_series_advisor_reply_context(
         db=Db(
             [
                 [SimpleNamespace(book_id=book_id, position=1)],
@@ -875,7 +889,7 @@ async def test_prepare_series_advisor_context_builds_history_and_handles_empty_s
     assert prepared["llm_messages"][-1]["content"].startswith("Where can")
 
     with pytest.raises(ValueError, match="no_books_found_in_series"):
-        await advisor_utils._prepare_series_advisor_reply_context(
+        await advisor_chat_utils.prepare_series_advisor_reply_context(
             db=Db([[]]),
             series=SimpleNamespace(id=series_id, name="Empty Cycle"),
             user_id=uuid.uuid4(),

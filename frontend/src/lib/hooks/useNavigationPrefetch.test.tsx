@@ -278,8 +278,8 @@ describe("useNavigationPrefetch", () => {
     const calls = prefetchQueryMock.mock.calls as Array<[{ queryFn: () => Promise<unknown> }]>
     await Promise.all(calls.map((call) => call[0].queryFn()))
 
-    expect(getReaderBootstrapMock).toHaveBeenCalledWith("book-1")
-    expect(getManuscriptBootstrapMock).toHaveBeenCalledWith("book-1")
+    expect(getReaderBootstrapMock).toHaveBeenCalledWith("book-1", { profile: "critical" })
+    expect(getManuscriptBootstrapMock).toHaveBeenCalledWith("book-1", { profile: "critical" })
     expect(advisorGreetingMock).toHaveBeenCalledWith("book-1")
     expect(getCharactersMock).toHaveBeenCalledWith("book-1")
     expect(getWorldBootstrapMock).toHaveBeenCalledWith("book-1", { focus: "gap" })

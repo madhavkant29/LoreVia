@@ -131,7 +131,6 @@ beforeEach(() => {
   mockBooks = []
   mockIsLoading = false
   mockIsError = true
-  window.prompt = vi.fn(() => "DELETE BOOK")
 })
 
 afterEach(() => {
@@ -405,7 +404,12 @@ describe("LibraryPage shared-book filtering", () => {
     clickByText("Open actions for Aster Draft")
     clickExactButton("Delete permanently")
     await flushUi()
-    expect(window.prompt).toHaveBeenCalled()
+    expect(container?.textContent).toContain("Delete Aster Draft permanently?")
+    const inputs = Array.from(container?.querySelectorAll("input") ?? []) as HTMLInputElement[]
+    const deleteInput = inputs[inputs.length - 1]
+    setValue(deleteInput, "DELETE BOOK")
+    clickExactButton("Delete permanently", 1)
+    await flushUi()
     expect(mockDeletePermanently).toHaveBeenCalledWith("book-ready", "DELETE BOOK")
 
     clickByText("Open actions for Aster Draft")

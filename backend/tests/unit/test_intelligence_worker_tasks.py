@@ -53,7 +53,7 @@ def test_generate_wiki_task_loads_book_generates_and_commits(monkeypatch):
     monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
     monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
     monkeypatch.setattr(
-        "app.utils.world_building_utils.generate_wiki_from_manuscript", fake_generate_wiki
+        "app.utils.world_building_wiki_utils.generate_wiki_from_manuscript", fake_generate_wiki
     )
 
     assert intelligence_tasks.generate_wiki_task.run(str(book.id)) is None
@@ -100,7 +100,7 @@ def test_generate_advisor_reply_task_marks_running_and_complete(monkeypatch):
     monkeypatch.setattr(
         "app.services.advisor_jobs_service.mark_advisor_job_complete", mark_complete
     )
-    monkeypatch.setattr("app.utils.advisor_utils.build_advisor_reply_payload", build_payload)
+    monkeypatch.setattr("app.utils.advisor_chat_utils.build_advisor_reply_payload", build_payload)
 
     result = intelligence_tasks.generate_advisor_reply_task.run(
         job_id=str(job_id),
@@ -173,7 +173,9 @@ def test_generate_series_advisor_reply_task_marks_complete(monkeypatch):
     monkeypatch.setattr(
         "app.services.advisor_jobs_service.mark_advisor_job_complete", mark_complete
     )
-    monkeypatch.setattr("app.utils.advisor_utils.build_series_advisor_reply_payload", build_payload)
+    monkeypatch.setattr(
+        "app.utils.advisor_chat_utils.build_series_advisor_reply_payload", build_payload
+    )
 
     assert intelligence_tasks.generate_series_advisor_reply_task.run(
         job_id=str(job_id),
@@ -230,7 +232,7 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
         "app.services.advisor_suggestion_jobs_service.mark_advisor_suggestion_job_complete",
         mark_complete,
     )
-    monkeypatch.setattr("app.utils.advisor_utils.build_advisor_suggestions_payload", build_payload)
+    monkeypatch.setattr("app.utils.advisor_scan_utils.build_advisor_suggestions_payload", build_payload)
     monkeypatch.setattr(
         "app.utils.advisor_utils.make_advisor_suggestions_cache_key",
         lambda **kwargs: f"scan:{kwargs['total_chapters']}:{kwargs['character_count']}",

@@ -25,7 +25,6 @@ from app.utils.ingestion_utils import (
     build_analysis_chapter_state,
     build_source_integrity_state,
 )
-from app.utils.queue_utils import queue_for_user
 from app.utils.reader_utils import (
     chapter_analysis_status,
     chapter_source_integrity,
@@ -35,6 +34,7 @@ from app.utils.reader_utils import (
     serialize_chapter_media,
     serialize_inline_images,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 
 def chapter_needs_source_recovery(
@@ -94,11 +94,16 @@ async def queue_chapter_repair_if_needed(
     )
     await db.commit()
 
-    from app.workers.tasks.extraction_tasks import repair_chapter_payload_task
+    from app.services.task_execution_service import enqueue_chapter_repair_execution
 
-    repair_chapter_payload_task.apply_async(
-        args=[str(book.id), chapter.number],
-        queue=queue_for_user(current_user, "extraction") if current_user else "extraction",
+    await enqueue_chapter_repair_execution(
+        db,
+        book_id=book.id,
+        user_id=book.user_id,
+        chapter_id=chapter.id,
+        chapter_number=chapter.number,
+        chapters_total=int(getattr(book, "total_chapters", None) or 0),
+        reason=reason,
     )
     return True
 
@@ -202,7 +207,7 @@ def download_stored_text_or_empty(chapter: Chapter) -> str:
         return ""
     try:
         payload = deserialize_manuscript_content(download_book(chapter.s3_key))
-    except Exception:
+    except STORAGE_IO_EXCEPTIONS:
         return ""
     return str(payload.get("text") or "")
 
@@ -238,7 +243,7 @@ async def resolve_reader_chapter_payload(
             stored_payload = deserialize_manuscript_content(download_book(chapter.s3_key))
             stored_text_content = str(stored_payload.get("text") or "")
             stored_html_content = str(stored_payload.get("html") or "") or None
-        except Exception:
+        except STORAGE_IO_EXCEPTIONS:
             stored_text_content = None
             stored_html_content = None
 

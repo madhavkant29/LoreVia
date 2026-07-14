@@ -327,6 +327,25 @@ async def test_load_staged_chapter_payload_falls_back_to_deterministic_key(monke
 
 
 @pytest.mark.asyncio
+async def test_load_staged_chapter_payload_propagates_deserializer_bugs(monkeypatch):
+    book_id = uuid.uuid4()
+
+    monkeypatch.setattr("app.utils.ingestion_utils.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr("app.utils.ingestion_utils.deserialize_manuscript_content", _deserialize_bug)
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await load_staged_chapter_payload(
+            book_id,
+            3,
+            chapter_s3_key="chapters/custom/chapter-3.txt",
+        )
+
+
+@pytest.mark.asyncio
 async def test_load_processing_chapter_payload_returns_chapter_only_payload(monkeypatch):
     book_id = uuid.uuid4()
 

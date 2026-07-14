@@ -691,7 +691,7 @@ async def test_collaboration_manuscript_export_respects_selected_chapter_scope(
 
     monkeypatch.setattr("app.api.v1.routes.books.exports.manuscript_docx", _fake_manuscript_docx)
     monkeypatch.setattr(
-        "app.api.v1.routes.books.storage.download_book",
+        "app.api.v1.routes.books.exports.storage.download_book",
         lambda _key: b'{"text":"Body text","html":"<p>Body text</p>"}',
     )
 

@@ -13,7 +13,7 @@ from app.models.intelligence import Notification
 from app.models.progress import ReadingProgress
 from app.models.user import User
 from app.utils.auth_csrf import AUTH_CSRF_COOKIE_NAME, AUTH_CSRF_HEADER_NAME, create_auth_csrf_token
-from app.utils.beta_read_utils import run_beta_read_jobs
+from app.utils.beta_read_job_utils import run_beta_read_jobs
 
 
 def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:

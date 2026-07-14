@@ -6,6 +6,7 @@ import asyncio
 import os
 import re
 import uuid
+import zipfile
 from typing import Any
 
 from fastapi import HTTPException
@@ -81,6 +82,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
             from io import BytesIO
 
             from docx import Document
+            from docx.opc.exceptions import PackageNotFoundError
 
             doc = Document(BytesIO(raw))
             text = "\n".join(
@@ -88,7 +90,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
             )
             text = book_text._normalize_unicode_replacements(text)
             return [{"title": stem, "text": text, "number": 1}]
-        except Exception:
+        except (PackageNotFoundError, zipfile.BadZipFile, KeyError, ValueError):
             raise HTTPException(
                 400,
                 "Legacy .doc files require additional system dependencies. Please convert to .docx format.",

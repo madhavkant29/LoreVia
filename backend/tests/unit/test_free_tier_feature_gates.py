@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.api.v1.routes import intelligence, world_building
+from app.api.v1.routes import intelligence
+from app.api.v1.routes import world_building_documents
 from app.api.v1.routes.advisor import chat as advisor_chat
 from app.api.v1.routes.advisor import suggestions as advisor_suggestions
 from app.api.v1.routes.books import notes as book_notes
@@ -103,9 +104,14 @@ async def test_free_owner_cannot_use_ask_lorevia(monkeypatch, deny_author_access
 async def test_free_owner_cannot_use_world_building(monkeypatch, deny_author_access):
     user = _free_user()
     book = _book(user.id)
+    monkeypatch.setattr(
+        world_building_documents, "get_owned_world_building_book", _async_value(book)
+    )
 
     await _assert_forbidden(
-        world_building.list_world_documents(book.id, db=_FakeDB(get_value=book), current_user=user)
+        world_building_documents.list_world_documents(
+            book.id, db=_FakeDB(get_value=book), current_user=user
+        )
     )
 
 

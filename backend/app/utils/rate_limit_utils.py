@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import json
 import uuid
 from typing import Any
 
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,7 +48,7 @@ async def get_cached_rate_limit_override(
     key = rate_limit_override_cache_key(user_id)
     try:
         cached = await cache_get(key)
-    except Exception:
+    except (RedisError, json.JSONDecodeError):
         log.warning(
             "rate_limit_override_cache_get_failed", extra={"user_id": str(user_id)}, exc_info=True
         )
@@ -65,7 +67,7 @@ async def get_cached_rate_limit_override(
     payload = _serialize_override(override)
     try:
         await cache_set(key, payload, RATE_LIMIT_OVERRIDE_CACHE_TTL_SECONDS)
-    except Exception:
+    except RedisError:
         log.warning(
             "rate_limit_override_cache_set_failed", extra={"user_id": str(user_id)}, exc_info=True
         )
@@ -88,7 +90,7 @@ async def limit_for_user(
 async def invalidate_rate_limit_override_cache(user_id: uuid.UUID | str | object) -> None:
     try:
         await cache_del(rate_limit_override_cache_key(user_id))
-    except Exception:
+    except RedisError:
         log.warning(
             "rate_limit_override_cache_delete_failed",
             extra={"user_id": str(user_id)},

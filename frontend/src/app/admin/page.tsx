@@ -176,7 +176,7 @@ export default function AdminPage() {
 
         {hasScope(session, "super_admin") ? (
           <RateLimitPanel
-            disabled={isPending}
+            disabled={isPending || session.requires_step_up}
             onLookup={(userId) => adminApi.getRateLimit(userId)}
             onSave={(userId, override) =>
               runAction(() => adminApi.setRateLimit(userId, override), "Rate limit overrides updated.")
@@ -231,7 +231,7 @@ export default function AdminPage() {
             <ModerationPanel
               publicShares={publicShares}
               reports={reports}
-              disabled={isPending}
+              disabled={isPending || session.requires_step_up}
               onReview={(bookId, approved, reason) =>
                 runAction(() => adminApi.reviewPublicShare(bookId, { approved, reason }), "Public share reviewed.")
               }
@@ -245,7 +245,7 @@ export default function AdminPage() {
             <RefundPanel
               billingStatus={billingStatus}
               refunds={refunds}
-              disabled={isPending}
+              disabled={isPending || session.requires_step_up}
               onApprove={(reviewId, reason, providerFollowupOnly) =>
                 runAction(
                   () => adminApi.approveRefund(reviewId, { reason, provider_followup_only: providerFollowupOnly }),
@@ -274,7 +274,7 @@ export default function AdminPage() {
           <section className="grid gap-6 lg:grid-cols-2">
             <AccessPanel
               principals={principals}
-              disabled={isPending}
+              disabled={isPending || session.requires_step_up}
               onGrant={(payload) => runAction(() => adminApi.grantAccess(payload), "Admin access updated.")}
               onRevoke={(principalId, reason) => runAction(() => adminApi.revokeAccess(principalId, reason), "Admin access revoked.")}
             />
@@ -1013,6 +1013,9 @@ function PublicDemoBookPanel({
 
 function PlatformMetricsPanel({ metrics }: { metrics: AdminMetrics | null }) {
   if (!metrics) return null
+  const redisPrefixCounts = Object.entries(metrics.redis_key_prefix_counts ?? {})
+  const redisKeyCount = metrics.redis_key_count
+  const redisClientCount = metrics.redis_connected_clients
   return (
     <section className="rounded-lg border border-[#d9dfd6] bg-white p-5">
       <h2 className="text-xl font-semibold">Platform Overview</h2>
@@ -1023,7 +1026,25 @@ function PlatformMetricsPanel({ metrics }: { metrics: AdminMetrics | null }) {
         <AdminMetric label="Chunks Indexed" value={metrics.chunks_indexed.toLocaleString()} />
         <AdminMetric label="Summaries Cached" value={metrics.summaries_cached.toLocaleString()} />
         <AdminMetric label="Redis Memory" value={`${metrics.redis_memory_mb} MB`} />
+        {typeof redisKeyCount === "number" ? <AdminMetric label="Redis Keys" value={redisKeyCount.toLocaleString()} /> : null}
+        {typeof redisClientCount === "number" ? <AdminMetric label="Redis Clients" value={redisClientCount.toLocaleString()} /> : null}
       </div>
+      {redisPrefixCounts.length > 0 ? (
+        <div className="mt-4 rounded-md border border-[#d9dfd6] bg-[#f8faf7] p-3">
+          <h3 className="text-sm font-semibold text-[#26352c]">Redis Key Prefixes</h3>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {redisPrefixCounts.slice(0, 9).map(([prefix, count]) => (
+              <div key={prefix} className="flex items-center justify-between rounded border border-[#e2e7df] bg-white px-3 py-2 text-sm">
+                <span className="truncate text-[#566258]">{prefix}</span>
+                <span className="font-semibold text-[#1f2d24]">{count.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+          {metrics.redis_key_scan_truncated ? (
+            <p className="mt-2 text-xs text-[#617065]">Prefix counts are sampled.</p>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   )
 }

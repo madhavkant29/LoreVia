@@ -36,6 +36,7 @@ USAGE_LIMIT_UPGRADE_COOLDOWN_SECONDS = 7 * 24 * 60 * 60
 class EmailPreferenceLinks:
     unsubscribe_url: str
     preferences_url: str
+    browser_unsubscribe_url: str
 
 
 def can_send_email(pref: EmailPreference | None, category: str) -> bool:
@@ -158,6 +159,7 @@ async def build_email_preference_links(user: User) -> EmailPreferenceLinks:
     return EmailPreferenceLinks(
         unsubscribe_url=f"{base_api_url}/unsubscribe?token={unsubscribe_token}",
         preferences_url=f"{base_api_url}/preferences?token={preferences_token}",
+        browser_unsubscribe_url=f"{app_url}/unsubscribe?token={unsubscribe_token}",
     )
 
 

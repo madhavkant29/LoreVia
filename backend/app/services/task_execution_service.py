@@ -7,19 +7,33 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from kombu.exceptions import OperationalError as KombuOperationalError
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import cache_del, cache_set_if_absent
-from app.models.operations import BookProcessingRun, TaskExecution
+from app.models.operations import BookProcessingRun, TaskDispatchOutbox, TaskExecution
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running")
 TERMINAL_EXECUTION_STATUSES = ("succeeded", "failed_terminal", "dismissed")
+DISPATCHABLE_EXECUTION_STATUSES = ("pending_dispatch", "queued")
+OUTBOX_READY_STATUSES = ("pending", "publish_failed")
 EXECUTION_LEASE_SECONDS = 30 * 60
+OUTBOX_LEASE_SECONDS = 5 * 60
 EXTRACTION_TASK_NAMES = (
     "extraction_tasks.process_book",
     "extraction_tasks.process_chapter",
+    "extraction_tasks.repair_chapter_payload",
+)
+TASK_PUBLISH_EXCEPTIONS = (
+    KombuOperationalError,
+    RuntimeError,
+    ValueError,
+    KeyError,
+    TypeError,
+    SQLAlchemyError,
 )
 
 log = logging.getLogger("lorevia.task_execution")
@@ -64,8 +78,86 @@ def sanitize_task_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
         "processing_run_id",
         "processing_reservation_id",
         "character_id",
+        "reason",
     }
     return {key: value for key, value in arguments.items() if key in allowed}
+
+
+def _safe_outbox_payload(execution: TaskExecution) -> dict[str, Any]:
+    arguments = sanitize_task_arguments(dict(execution.arguments_json or {}))
+    payload: dict[str, Any] = {
+        "execution_id": str(execution.id),
+        "task_name": execution.task_name,
+    }
+    for key in (
+        "book_id",
+        "chapter_id",
+        "chapter_version_id",
+        "rebuild_run_id",
+        "processing_run_id",
+        "processing_reservation_id",
+        "character_id",
+    ):
+        value = arguments.get(key)
+        if value is not None:
+            payload[key] = str(value)
+    if execution.book_id is not None:
+        payload["book_id"] = str(execution.book_id)
+    if execution.chapter_id is not None:
+        payload["chapter_id"] = str(execution.chapter_id)
+    if execution.chapter_version_id is not None:
+        payload["chapter_version_id"] = str(execution.chapter_version_id)
+    if execution.rebuild_run_id:
+        payload["rebuild_run_id"] = execution.rebuild_run_id
+    if execution.chapter_number is not None:
+        payload["chapter_number"] = int(execution.chapter_number)
+    if "manual_reprocess" in arguments:
+        payload["manual_reprocess"] = bool(arguments.get("manual_reprocess"))
+    return payload
+
+
+def _bounded_error_detail(error: BaseException | str) -> str:
+    return str(error)[:4000]
+
+
+async def ensure_task_dispatch_outbox(
+    db: AsyncSession,
+    execution: TaskExecution,
+    *,
+    queue: str,
+) -> TaskDispatchOutbox:
+    existing = (
+        await db.execute(
+            select(TaskDispatchOutbox)
+            .where(TaskDispatchOutbox.execution_id == execution.id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        row = TaskDispatchOutbox(
+            execution_id=execution.id,
+            task_name=execution.task_name,
+            queue=queue,
+            payload_json=_safe_outbox_payload(execution),
+            status="pending",
+        )
+        db.add(row)
+        await db.flush()
+        return row
+
+    existing.task_name = execution.task_name
+    existing.queue = queue
+    existing.payload_json = _safe_outbox_payload(execution)
+    if execution.status not in TERMINAL_EXECUTION_STATUSES:
+        existing.status = "pending"
+        existing.available_at = datetime.now(UTC)
+        existing.lease_until = None
+        existing.published_at = None
+    return existing
+
+
+def _outbox_backoff_seconds(attempts: int) -> int:
+    return min(300, max(5, 2 ** min(attempts, 8)))
 
 
 async def get_or_create_processing_run(
@@ -76,24 +168,26 @@ async def get_or_create_processing_run(
     run_kind: str = "initial_ingestion",
     rebuild_run_id: str | None = None,
     chapters_total: int = 0,
+    reuse_active: bool = True,
 ) -> BookProcessingRun:
     await db.execute(
         select(func.pg_advisory_xact_lock(func.hashtext(f"processing_run:{book_id}")))
     )
-    active = (
-        await db.execute(
-            select(BookProcessingRun)
-            .where(
-                BookProcessingRun.book_id == book_id,
-                BookProcessingRun.status.in_(("queued", "running", "paused")),
+    if reuse_active:
+        active = (
+            await db.execute(
+                select(BookProcessingRun)
+                .where(
+                    BookProcessingRun.book_id == book_id,
+                    BookProcessingRun.status.in_(("queued", "running", "paused")),
+                )
+                .order_by(BookProcessingRun.created_at.desc())
+                .with_for_update()
             )
-            .order_by(BookProcessingRun.created_at.desc())
-            .with_for_update()
-        )
-    ).scalars().first()
-    if active is not None:
-        active.chapters_total = max(active.chapters_total, chapters_total)
-        return active
+        ).scalars().first()
+        if active is not None:
+            active.chapters_total = max(active.chapters_total, chapters_total)
+            return active
     run = BookProcessingRun(
         user_id=user_id,
         book_id=book_id,
@@ -162,6 +256,15 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
     now = datetime.now(UTC)
     if execution.status == "running" and execution.locked_until and execution.locked_until > now:
         return execution.celery_task_id == celery_task_id
+    if execution.attempt_count >= execution.max_attempts:
+        execution.status = "failed_terminal"
+        execution.error_category = "attempt_exhausted"
+        execution.error_detail = "Task attempt budget exhausted before worker claim."
+        execution.completed_at = now
+        execution.locked_until = None
+        await db.commit()
+        await cache_del(f"task_execution_lease:{execution.id}")
+        return False
     lease_key = f"task_execution_lease:{execution.id}"
     if not await cache_set_if_absent(lease_key, celery_task_id, EXECUTION_LEASE_SECONDS):
         return False
@@ -239,6 +342,17 @@ async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
                 run.completed_at = datetime.now(UTC)
                 run.pause_reason = None
                 run.resume_blockers = []
+    elif (
+        execution.task_name == "extraction_tasks.repair_chapter_payload"
+        and execution.processing_run_id
+    ):
+        run = await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
+        if run is not None and run.run_kind == "source_recovery":
+            run.chapters_completed = 1
+            run.status = "succeeded"
+            run.completed_at = datetime.now(UTC)
+            run.pause_reason = None
+            run.resume_blockers = []
     await db.commit()
     await cache_del(f"task_execution_lease:{execution.id}")
 
@@ -276,6 +390,7 @@ async def fail_task_execution(
     if execution is None:
         return
     now = datetime.now(UTC)
+    terminal = terminal or execution.attempt_count >= execution.max_attempts
     execution.status = "failed_terminal" if terminal else "queued"
     execution.error_category = category
     execution.error_detail = str(error)[:4000]
@@ -296,6 +411,191 @@ async def fail_task_execution(
                 run.completed_at = now
     await db.commit()
     await cache_del(f"task_execution_lease:{execution.id}")
+
+
+async def reconcile_stale_task_dispatch_outbox(db: AsyncSession, *, limit: int = 500) -> int:
+    now = datetime.now(UTC)
+    rows = (
+        (
+            await db.execute(
+                select(TaskDispatchOutbox)
+                .where(
+                    TaskDispatchOutbox.status == "publishing",
+                    TaskDispatchOutbox.lease_until < now,
+                )
+                .order_by(TaskDispatchOutbox.lease_until)
+                .with_for_update(skip_locked=True)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    reconciled = 0
+    for row in rows:
+        execution = await db.get(TaskExecution, row.execution_id, with_for_update=True)
+        if execution is None or execution.status in TERMINAL_EXECUTION_STATUSES:
+            row.status = "cancelled"
+            row.lease_until = None
+        elif execution.status == "running":
+            row.status = "published"
+            row.published_at = row.published_at or now
+            row.lease_until = None
+        else:
+            row.status = "pending"
+            row.available_at = now
+            row.lease_until = None
+        reconciled += 1
+    return reconciled
+
+
+def _publish_outbox_task(row: TaskDispatchOutbox) -> None:
+    payload = dict(row.payload_json or {})
+    execution_id = str(row.execution_id)
+    if row.task_name == "extraction_tasks.process_book":
+        from app.workers.tasks.extraction_tasks import process_book_task
+
+        process_book_task.apply_async(
+            args=[str(payload["book_id"])],
+            kwargs={"execution_id": execution_id},
+            queue=row.queue,
+            task_id=execution_id,
+        )
+        return
+    if row.task_name == "extraction_tasks.process_chapter":
+        from app.workers.tasks.extraction_tasks import process_chapter_task
+
+        process_chapter_task.apply_async(
+            args=[str(payload["book_id"]), int(payload.get("chapter_number") or 0)],
+            kwargs={
+                "chapter_version_id": payload.get("chapter_version_id"),
+                "rebuild_run_id": payload.get("rebuild_run_id"),
+                "manual_reprocess": bool(payload.get("manual_reprocess")),
+                "execution_id": execution_id,
+            },
+            queue=row.queue,
+            task_id=execution_id,
+        )
+        return
+    if row.task_name == "extraction_tasks.repair_chapter_payload":
+        from app.workers.tasks.extraction_tasks import repair_chapter_payload_task
+
+        repair_chapter_payload_task.apply_async(
+            args=[str(payload["book_id"]), int(payload.get("chapter_number") or 0)],
+            kwargs={"execution_id": execution_id},
+            queue=row.queue,
+            task_id=execution_id,
+        )
+        return
+    if row.task_name == "analysis_tasks.analyse_chapter":
+        from app.workers.tasks.analysis_tasks import analyse_chapter_task
+
+        analyse_chapter_task.apply_async(
+            args=[str(payload["chapter_id"]), str(payload["book_id"])],
+            kwargs={
+                "is_reprocessing": True,
+                "rebuild_run_id": payload.get("rebuild_run_id"),
+                "manual_reprocess": bool(payload.get("manual_reprocess")),
+                "execution_id": execution_id,
+            },
+            queue=row.queue,
+            task_id=execution_id,
+        )
+        return
+    if row.task_name == "embedding_tasks.update_character_embedding":
+        from app.workers.tasks.embedding_tasks import update_character_embedding_task
+
+        character_id = payload.get("character_id")
+        if not character_id:
+            raise ValueError("Embedding task is missing character identity")
+        update_character_embedding_task.apply_async(
+            args=[str(character_id)],
+            kwargs={"execution_id": execution_id},
+            queue=row.queue,
+            task_id=execution_id,
+        )
+        return
+    raise ValueError(f"Unsupported task dispatch outbox task {row.task_name}")
+
+
+async def publish_task_dispatch_outbox(
+    db: AsyncSession,
+    *,
+    queues: tuple[str, ...],
+    limit: int = 100,
+) -> int:
+    await reconcile_stale_task_dispatch_outbox(db, limit=limit)
+    now = datetime.now(UTC)
+    rows = (
+        (
+            await db.execute(
+                select(TaskDispatchOutbox)
+                .where(
+                    TaskDispatchOutbox.queue.in_(queues),
+                    TaskDispatchOutbox.status.in_(OUTBOX_READY_STATUSES),
+                    TaskDispatchOutbox.available_at <= now,
+                )
+                .order_by(TaskDispatchOutbox.available_at, TaskDispatchOutbox.created_at)
+                .with_for_update(skip_locked=True)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        await db.commit()
+        return 0
+
+    for row in rows:
+        row.status = "publishing"
+        row.lease_until = now + timedelta(seconds=OUTBOX_LEASE_SECONDS)
+        row.attempts += 1
+        row.last_error = None
+    await db.commit()
+
+    published = 0
+    for row in rows:
+        try:
+            execution = await db.get(TaskExecution, row.execution_id, with_for_update=True)
+            if execution is None or execution.status in TERMINAL_EXECUTION_STATUSES:
+                fresh = await db.get(TaskDispatchOutbox, row.id, with_for_update=True)
+                if fresh is not None:
+                    fresh.status = "cancelled"
+                    fresh.lease_until = None
+                await db.commit()
+                continue
+            _publish_outbox_task(row)
+            fresh = await db.get(TaskDispatchOutbox, row.id, with_for_update=True)
+            execution.status = "queued"
+            execution.celery_task_id = str(execution.id)
+            execution.queued_at = execution.queued_at or datetime.now(UTC)
+            if fresh is not None:
+                fresh.status = "published"
+                fresh.published_at = datetime.now(UTC)
+                fresh.lease_until = None
+                fresh.last_error = None
+            await db.commit()
+            published += 1
+        except TASK_PUBLISH_EXCEPTIONS as exc:
+            failed = await db.get(TaskDispatchOutbox, row.id, with_for_update=True)
+            execution = await db.get(TaskExecution, row.execution_id, with_for_update=True)
+            if failed is not None:
+                failed.status = "publish_failed"
+                failed.lease_until = None
+                failed.available_at = datetime.now(UTC) + timedelta(
+                    seconds=_outbox_backoff_seconds(failed.attempts)
+                )
+                failed.last_error = _bounded_error_detail(exc)
+            if execution is not None and execution.status == "queued":
+                execution.status = "pending_dispatch"
+                execution.celery_task_id = None
+                execution.queued_at = None
+                execution.error_category = "dispatch"
+                execution.error_detail = _bounded_error_detail(exc)
+            await db.commit()
+            log.exception("task_publish_failed execution_id=%s", row.execution_id)
+    return published
 
 
 async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
@@ -349,7 +649,6 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
             break
     from app.models.user import User
     from app.utils.queue_utils import queue_for_user
-    from app.workers.tasks.extraction_tasks import process_book_task, process_chapter_task
 
     user_ids = {row.user_id for row in selected if row.user_id is not None}
     users = (
@@ -364,48 +663,17 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
         row.status = "queued"
         row.celery_task_id = str(row.id)
         row.queued_at = now
-    await db.commit()
-
-    published = 0
-    for row in selected:
-        args = row.arguments_json or {}
         queue = (
             queue_for_user(users_by_id[row.user_id], "extraction")
             if row.user_id in users_by_id
             else "extraction"
         )
-        try:
-            if row.task_name == "extraction_tasks.process_book":
-                process_book_task.apply_async(
-                    args=[str(row.book_id)],
-                    kwargs={"execution_id": str(row.id)},
-                    queue=queue,
-                    task_id=str(row.id),
-                )
-            else:
-                process_chapter_task.apply_async(
-                    args=[str(row.book_id), int(row.chapter_number or 0)],
-                    kwargs={
-                        "chapter_version_id": args.get("chapter_version_id"),
-                        "rebuild_run_id": row.rebuild_run_id,
-                        "manual_reprocess": bool(args.get("manual_reprocess")),
-                        "execution_id": str(row.id),
-                    },
-                    queue=queue,
-                    task_id=str(row.id),
-                )
-            published += 1
-        except Exception as exc:
-            failed = await db.get(TaskExecution, row.id, with_for_update=True)
-            if failed is not None and failed.status == "queued":
-                failed.status = "pending_dispatch"
-                failed.celery_task_id = None
-                failed.queued_at = None
-                failed.error_category = "dispatch"
-                failed.error_detail = str(exc)[:4000]
-                await db.commit()
-            log.exception("task_publish_failed execution_id=%s", row.id)
-    return published
+        await ensure_task_dispatch_outbox(db, row, queue=queue)
+    await db.commit()
+
+    return await publish_task_dispatch_outbox(
+        db, queues=("extraction", "extraction_priority"), limit=len(selected)
+    )
 
 
 async def enqueue_extraction_execution(
@@ -451,6 +719,46 @@ async def enqueue_extraction_execution(
         },
         identity_suffix=identity_suffix or processing_reservation_id,
     )
+    await db.commit()
+    await dispatch_pending_extraction_tasks(db)
+    return execution
+
+
+async def enqueue_chapter_repair_execution(
+    db: AsyncSession,
+    *,
+    book_id: uuid.UUID,
+    user_id: uuid.UUID,
+    chapter_id: uuid.UUID | None,
+    chapter_number: int,
+    chapters_total: int,
+    reason: str = "source_integrity_mismatch",
+) -> TaskExecution:
+    run = await get_or_create_processing_run(
+        db,
+        user_id=user_id,
+        book_id=book_id,
+        run_kind="source_recovery",
+        chapters_total=1,
+        reuse_active=False,
+    )
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.repair_chapter_payload",
+        processing_run=run,
+        chapter_id=chapter_id,
+        chapter_number=chapter_number,
+        arguments={
+            "book_id": str(book_id),
+            "chapter_id": str(chapter_id) if chapter_id else None,
+            "chapter_number": chapter_number,
+            "processing_run_id": str(run.id),
+            "reason": reason,
+        },
+        feature="source_recovery",
+    )
+    if execution.status not in TERMINAL_EXECUTION_STATUSES + ACTIVE_EXECUTION_STATUSES:
+        execution.status = "pending_dispatch"
     await db.commit()
     await dispatch_pending_extraction_tasks(db)
     return execution
@@ -530,8 +838,6 @@ async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
         return 0
     from app.models.user import User
     from app.utils.queue_utils import queue_for_user
-    from app.workers.tasks.analysis_tasks import analyse_chapter_task
-
     user_ids = {row.user_id for row in candidates if row.user_id is not None}
     users = (
         (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
@@ -544,38 +850,17 @@ async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
         row.status = "queued"
         row.celery_task_id = str(row.id)
         row.queued_at = now
+        queue = (
+            queue_for_user(users_by_id[row.user_id], "analysis")
+            if row.user_id in users_by_id
+            else "analysis"
+        )
+        await ensure_task_dispatch_outbox(db, row, queue=queue)
     await db.commit()
 
-    published = 0
-    for row in candidates:
-        try:
-            analyse_chapter_task.apply_async(
-                args=[str(row.chapter_id), str(row.book_id)],
-                kwargs={
-                    "is_reprocessing": True,
-                    "rebuild_run_id": row.rebuild_run_id,
-                    "manual_reprocess": bool((row.arguments_json or {}).get("manual_reprocess")),
-                    "execution_id": str(row.id),
-                },
-                queue=(
-                    queue_for_user(users_by_id[row.user_id], "analysis")
-                    if row.user_id in users_by_id
-                    else "analysis"
-                ),
-                task_id=str(row.id),
-            )
-            published += 1
-        except Exception as exc:
-            failed = await db.get(TaskExecution, row.id, with_for_update=True)
-            if failed is not None and failed.status == "queued":
-                failed.status = "pending_dispatch"
-                failed.celery_task_id = None
-                failed.queued_at = None
-                failed.error_category = "dispatch"
-                failed.error_detail = str(exc)[:4000]
-                await db.commit()
-            log.exception("task_publish_failed execution_id=%s", row.id)
-    return published
+    return await publish_task_dispatch_outbox(
+        db, queues=("analysis", "analysis_priority"), limit=len(candidates)
+    )
 
 
 async def dispatch_pending_embedding_tasks(db: AsyncSession) -> int:
@@ -612,39 +897,15 @@ async def dispatch_pending_embedding_tasks(db: AsyncSession) -> int:
     )
     if not candidates:
         return 0
-    from app.workers.tasks.embedding_tasks import update_character_embedding_task
-
     now = datetime.now(UTC)
     for row in candidates:
         row.status = "queued"
         row.celery_task_id = str(row.id)
         row.queued_at = now
+        await ensure_task_dispatch_outbox(db, row, queue="embedding")
     await db.commit()
 
-    published = 0
-    for row in candidates:
-        character_id = (row.arguments_json or {}).get("character_id")
-        try:
-            if not character_id:
-                raise ValueError("Embedding task is missing character identity")
-            update_character_embedding_task.apply_async(
-                args=[character_id],
-                kwargs={"execution_id": str(row.id)},
-                queue="embedding",
-                task_id=str(row.id),
-            )
-            published += 1
-        except Exception as exc:
-            failed = await db.get(TaskExecution, row.id, with_for_update=True)
-            if failed is not None and failed.status == "queued":
-                failed.status = "pending_dispatch"
-                failed.celery_task_id = None
-                failed.queued_at = None
-                failed.error_category = "dispatch"
-                failed.error_detail = str(exc)[:4000]
-                await db.commit()
-            log.exception("task_publish_failed execution_id=%s", row.id)
-    return published
+    return await publish_task_dispatch_outbox(db, queues=("embedding",), limit=len(candidates))
 
 
 async def release_stale_task_leases(db: AsyncSession, *, limit: int = 500) -> int:
@@ -663,7 +924,13 @@ async def release_stale_task_leases(db: AsyncSession, *, limit: int = 500) -> in
         .all()
     )
     for row in rows:
-        row.status = "pending_dispatch"
+        if row.attempt_count >= row.max_attempts:
+            row.status = "failed_terminal"
+            row.completed_at = now
+            row.error_category = "attempt_exhausted"
+            row.error_detail = "Task attempt budget exhausted after stale worker lease."
+        else:
+            row.status = "pending_dispatch"
         row.locked_until = None
         row.celery_task_id = None
         await cache_del(f"task_execution_lease:{row.id}")

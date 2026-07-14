@@ -8,7 +8,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
+from redis.exceptions import RedisError
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -150,7 +152,7 @@ async def reserve_llm_call(
         await rehydrate_llm_coordination_state()
     except HTTPException:
         raise
-    except Exception as exc:
+    except (RedisError, SQLAlchemyError) as exc:
         raise HTTPException(
             503,
             "LLM coordination is temporarily unavailable.",
@@ -193,7 +195,7 @@ async def reserve_llm_call(
             tpm,
             settings.LLM_MAX_CONCURRENT_CALLS_PER_USER,
         )
-    except Exception as exc:
+    except RedisError as exc:
         async with AsyncSessionLocal() as db:
             event = await db.scalar(
                 select(LlmUsageEvent).where(LlmUsageEvent.reservation_id == reservation_id)
@@ -300,7 +302,7 @@ async def _release_redis_concurrency(reservation: LlmReservation) -> None:
     try:
         redis = await get_redis()
         await redis.srem(f"llm:concurrency:{reservation.user_id}", reservation.id)
-    except Exception:
+    except RedisError:
         # PostgreSQL is authoritative. A Redis restart rehydrates only still-reserved calls.
         log.warning(
             "llm_concurrency_release_failed reservation_id=%s",

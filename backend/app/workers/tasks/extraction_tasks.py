@@ -1,4 +1,5 @@
 from app.services.chapter_recovery_service import repair_chapter_payload_from_source
+from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.ingestion_utils import (
     LLM_USAGE_LIMIT_MAX_RETRIES,
     LLM_USAGE_LIMIT_RETRY_SECONDS,
@@ -53,7 +54,7 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
 
             run_worker_coro(_complete_execution())
         return result
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         retryable = is_retryable_processing_error(exc)
         retries = int(getattr(self.request, "retries", 0) or 0)
         max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
@@ -220,7 +221,7 @@ def process_chapter_task(
                         version.restore_error = None
                         version.restore_completed_at = datetime.now(UTC)
                         await db.commit()
-            except Exception as exc:
+            except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
                 if is_llm_usage_limit_error(exc) and book is not None:
                     await db.rollback()
                     book = await db.get(Book, uuid.UUID(book_id))
@@ -291,7 +292,7 @@ def process_chapter_task(
                     await dispatch_pending_extraction_tasks(db)
 
             run_worker_coro(_complete_execution())
-    except Exception as exc:
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if is_llm_coordination_retry_error(exc):
             if execution_id:
                 async def _record_capacity_retry(error: Exception = exc) -> None:
@@ -381,7 +382,23 @@ def process_chapter_task(
     max_retries=3,
     ignore_result=True,
 )
-def repair_chapter_payload_task(self, book_id: str, chapter_num: int):
+def repair_chapter_payload_task(
+    self,
+    book_id: str,
+    chapter_num: int,
+    execution_id: str | None = None,
+):
+    if execution_id:
+        async def _claim_execution() -> bool:
+            from app.core.database import AsyncSessionLocal
+            from app.services.task_execution_service import claim_task_execution
+
+            async with AsyncSessionLocal() as db:
+                return await claim_task_execution(db, execution_id, self.request.id or execution_id)
+
+        if not run_worker_coro(_claim_execution()):
+            return {"skipped": "duplicate_or_active_execution"}
+
     async def _run():
         import uuid
 
@@ -406,8 +423,40 @@ def repair_chapter_payload_task(self, book_id: str, chapter_num: int):
             await repair_chapter_payload_from_source(db, book=book, chapter=chapter)
 
     try:
-        run_worker_coro(_run())
-    except Exception as exc:
-        if not is_retryable_processing_error(exc):
+        result = run_worker_coro(_run())
+        if execution_id:
+            async def _complete_execution() -> None:
+                from app.core.database import AsyncSessionLocal
+                from app.services.task_execution_service import (
+                    complete_task_execution,
+                    dispatch_pending_extraction_tasks,
+                )
+
+                async with AsyncSessionLocal() as db:
+                    await complete_task_execution(db, execution_id)
+                    await dispatch_pending_extraction_tasks(db)
+
+            run_worker_coro(_complete_execution())
+        return result
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
+        retryable = is_retryable_processing_error(exc)
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
+        if execution_id:
+            async def _record_execution_failure(error: Exception = exc) -> None:
+                from app.core.database import AsyncSessionLocal
+                from app.services.task_execution_service import fail_task_execution
+
+                async with AsyncSessionLocal() as db:
+                    await fail_task_execution(
+                        db,
+                        execution_id,
+                        error=error,
+                        terminal=not retryable or retries >= max_retries,
+                        category="retryable" if retryable else "source_recovery",
+                    )
+
+            run_worker_coro(_record_execution_failure())
+        if not retryable:
             raise
         raise self.retry(exc=exc)

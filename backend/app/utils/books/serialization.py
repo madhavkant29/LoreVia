@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -34,9 +35,14 @@ from app.schemas.books import (
 )
 from app.utils.books import collaboration, manuscript
 from app.utils.books.writer_workspace import build_book_processing_payload
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 if TYPE_CHECKING:
     pass
+
+
+COVER_RENDER_EXCEPTIONS = (RuntimeError, ValueError, OSError)
+COVER_PERSIST_EXCEPTIONS = STORAGE_IO_EXCEPTIONS + (SQLAlchemyError,)
 
 
 @dataclass(slots=True)
@@ -379,11 +385,14 @@ async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
 
         try:
             raw_book = await asyncio.to_thread(download_book, book.s3_key)
-        except Exception:
+        except STORAGE_IO_EXCEPTIONS:
             raw_book = None
 
         if raw_book:
-            cover = await asyncio.to_thread(extract_first_page_cover, raw_book)
+            try:
+                cover = await asyncio.to_thread(extract_first_page_cover, raw_book)
+            except COVER_RENDER_EXCEPTIONS:
+                cover = None
             if cover:
                 cover_bytes, content_type = cover
                 try:
@@ -394,7 +403,7 @@ async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
                         content_type,
                     )
                     await db.flush()
-                except Exception:
+                except COVER_PERSIST_EXCEPTIONS:
                     return
 
     if not book.cover_s3_key:
@@ -402,6 +411,10 @@ async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
             cover_bytes, content_type = await asyncio.to_thread(
                 build_blank_cover_image, book.title, book.author
             )
+        except COVER_RENDER_EXCEPTIONS:
+            return
+
+        try:
             book.cover_s3_key = await asyncio.to_thread(
                 upload_binary,
                 f"covers/{book.user_id}/{uuid.uuid4()}.png",
@@ -409,7 +422,7 @@ async def ensure_book_cover(db: AsyncSession, book: Book) -> None:
                 content_type,
             )
             await db.flush()
-        except Exception:
+        except COVER_PERSIST_EXCEPTIONS:
             return
 
 
@@ -524,8 +537,9 @@ async def chapter_word_count(
     if not chapter.s3_key or not allow_content_fallback:
         return 0
     try:
-        stored = manuscript.deserialize_manuscript_content(download_book(chapter.s3_key))
-        text = manuscript.clean_markdown_asterisks_str(str(stored.get("text") or ""))
-    except Exception:
+        raw = download_book(chapter.s3_key)
+    except STORAGE_IO_EXCEPTIONS:
         return 0
+    stored = manuscript.deserialize_manuscript_content(raw)
+    text = manuscript.clean_markdown_asterisks_str(str(stored.get("text") or ""))
     return len(text.replace("\r", " ").replace("\n", " ").split())

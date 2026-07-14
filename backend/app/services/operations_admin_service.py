@@ -18,6 +18,7 @@ from app.models.operations import (
 )
 from app.models.user import LlmUsageEvent, User
 from app.services.task_execution_service import (
+    EXTRACTION_TASK_NAMES,
     dispatch_pending_analysis_tasks,
     dispatch_pending_embedding_tasks,
     dispatch_pending_extraction_tasks,
@@ -61,8 +62,7 @@ async def retry_terminal_execution(db: AsyncSession, execution_id: uuid.UUID) ->
     if row.status != "failed_terminal":
         raise ValueError("Only terminal failures can be retried")
     supported_tasks = {
-        "extraction_tasks.process_book",
-        "extraction_tasks.process_chapter",
+        *EXTRACTION_TASK_NAMES,
         "analysis_tasks.analyse_chapter",
         "embedding_tasks.update_character_embedding",
     }
@@ -86,7 +86,7 @@ async def retry_terminal_execution(db: AsyncSession, execution_id: uuid.UUID) ->
             run.pause_reason = None
             run.resume_blockers = []
     await db.commit()
-    if row.task_name in {"extraction_tasks.process_book", "extraction_tasks.process_chapter"}:
+    if row.task_name in EXTRACTION_TASK_NAMES:
         await dispatch_pending_extraction_tasks(db)
     elif row.task_name == "analysis_tasks.analyse_chapter":
         await dispatch_pending_analysis_tasks(db)

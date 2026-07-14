@@ -81,7 +81,7 @@ async def predict(
             content = r.choices[0].message.content or "{}"
             data = json.loads(content)
             return data.get("theories", [])
-        except Exception:
+        except (json.JSONDecodeError, AttributeError, IndexError, KeyError, TypeError):
             return []
     finally:
         await client.close()

@@ -28,6 +28,7 @@ from app.utils.books import (
     revision_decisions,
 )
 from app.utils.books.domain_constants import REVISION_KEYWORD_STOPWORDS
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 if TYPE_CHECKING:
     pass
@@ -140,13 +141,8 @@ def _scene_keyword_set(text: str, *, character_names: set[str], thread_terms: se
 
 
 def _extract_chapter_text(raw: bytes | str) -> str:
-    try:
-        payload = manuscript.deserialize_manuscript_content(raw)
-        return str(payload.get("text") or "").strip()
-    except Exception:
-        if isinstance(raw, bytes):
-            return raw.decode("utf-8", errors="ignore").strip()
-        return str(raw).strip()
+    payload = manuscript.deserialize_manuscript_content(raw)
+    return str(payload.get("text") or "").strip()
 
 
 async def _load_chapter_texts(chapters: list[Chapter]) -> dict[int, str]:
@@ -157,7 +153,7 @@ async def _load_chapter_texts(chapters: list[Chapter]) -> dict[int, str]:
             continue
         try:
             raw = await asyncio.to_thread(download_book, chapter.s3_key)
-        except Exception:
+        except STORAGE_IO_EXCEPTIONS:
             loaded[chapter.number] = ""
             continue
         loaded[chapter.number] = _extract_chapter_text(raw)
@@ -234,7 +230,7 @@ async def _load_version_text(version: ChapterVersion) -> str:
         return ""
     try:
         raw = await asyncio.to_thread(download_book, version.s3_key)
-    except Exception:
+    except STORAGE_IO_EXCEPTIONS:
         return ""
     return _extract_chapter_text(raw)
 

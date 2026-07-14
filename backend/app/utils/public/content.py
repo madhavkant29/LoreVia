@@ -292,12 +292,9 @@ async def create_public_book_manual(
         raise HTTPException(400, "At least one chapter is required")
 
     public_slug = normalize_public_slug(body.title)
-    try:
-        existing = (
-            await db.execute(select(Book.id).where(Book.public_slug == public_slug))
-        ).scalar_one_or_none()
-    except Exception:
-        existing = None
+    existing = (
+        await db.execute(select(Book.id).where(Book.public_slug == public_slug))
+    ).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(409, "A public book with that slug already exists.")
 

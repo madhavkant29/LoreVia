@@ -125,7 +125,10 @@ async def test_operations_quality_and_margin_metrics_include_control_plane_alloc
     margin = await contribution_margin(db)
 
     assert operations["retry_count"] == 1
-    assert operations["by_task"][0]["average_duration_seconds"] == 10
+    analysis_task = next(
+        t for t in operations["by_task"] if t["task_name"] == "analysis_tasks.analyse_chapter"
+    )
+    assert analysis_task["average_duration_seconds"] == 10
     assert quality["character_corrections_after_promotion"] == 1
     assert quality["support_incidents_per_processed_manuscript"] == 1
     assert any(
@@ -134,7 +137,8 @@ async def test_operations_quality_and_margin_metrics_include_control_plane_alloc
     )
     assert margin["worker_cost"] > 0
     assert margin["storage_cost"] > 0
-    assert margin["by_book"][0]["allocated_revenue"] > 0
+    book_margin = next(row for row in margin["by_book"] if row["book_id"] == str(book.id))
+    assert book_margin["allocated_revenue"] > 0
     assert "task-seconds" in margin["allocation_basis"]
 
 

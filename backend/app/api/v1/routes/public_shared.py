@@ -27,6 +27,7 @@ from app.services.public_publish_service import submit_public_share
 from app.utils.books.manuscript import (
     deserialize_manuscript_content,
 )
+from app.utils.client_identity import trusted_client_ip
 from app.utils.public.catalog import (
     _active_forum_post_map,
 )
@@ -175,7 +176,7 @@ async def publish_user_shared_book(
         book=book,
         user=current_user,
         body=body,
-        request_ip=request.client.host if request.client else None,
+        request_ip=trusted_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
 

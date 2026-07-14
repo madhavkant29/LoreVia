@@ -1420,7 +1420,7 @@ def _get_pos_nlp():
         import spacy
 
         _pos_nlp = spacy.load("en_core_web_sm", exclude=["ner"])
-    except Exception:
+    except (ImportError, OSError):
         _pos_nlp = None
     _pos_nlp_loaded = True
     return _pos_nlp
@@ -1467,7 +1467,7 @@ def _context_pos_label(phrase: str, excerpt: str, *, provenance: dict | None = N
         return None
     try:
         doc = nlp(excerpt)
-    except Exception:
+    except (RuntimeError, ValueError):
         return None
 
     phrase_lower = phrase.lower()

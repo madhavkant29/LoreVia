@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.api.v1.routes import public
 from app.core.security import create_access_token
+from app.core.redis import get_redis, key_admin_step_up
 from app.models.book import Book, Chapter
 from app.models.progress import ReadingProgress
 from app.models.user import AdminPrincipal, User
@@ -494,6 +494,9 @@ async def test_public_share_requires_admin_approval_before_author_book_surfaces(
 
     direct_before = await client.get(f"/api/v1/public/books/{book.id}")
     assert direct_before.status_code == 404
+
+    redis = await get_redis()
+    await redis.setex(key_admin_step_up(str(admin.id), "access"), 600, "1")
 
     approval_response = await client.put(
         f"/api/v1/admin/public-shares/{book.id}",

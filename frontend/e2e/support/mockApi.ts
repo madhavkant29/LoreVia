@@ -27,7 +27,7 @@ const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
 const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
 const ACCESS_TOKEN_COOKIE = "lorevia_access_token"
 const REFRESH_TOKEN_COOKIE = "lorevia_refresh_token"
-const E2E_APP_ORIGIN = "http://localhost:3001"
+const E2E_APP_ORIGIN = process.env.E2E_APP_ORIGIN ?? `http://localhost:${process.env.E2E_PORT ?? "3001"}`
 
 function normalizeMockApiPath(pathname: string) {
   return pathname
@@ -2676,6 +2676,94 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       ])
     }
 
+    if (path === "/api/v1/admin/metrics" && method === "GET") {
+      return json(route, {
+        users: 42,
+        books: 84,
+        characters: 320,
+        chunks_indexed: 1200,
+        summaries_cached: 96,
+        redis_memory_mb: 18,
+        redis_key_count: 240,
+        redis_connected_clients: 3,
+        redis_key_prefix_counts: {
+          "advisor:book": 12,
+          "reader:summary": 34,
+        },
+        redis_key_scan_truncated: false,
+      })
+    }
+
+    if (path === "/api/v1/admin/queue-depth" && method === "GET") {
+      return json(route, {
+        extraction: 2,
+        analysis: 1,
+        embedding: 0,
+        intelligence: 3,
+      })
+    }
+
+    if (path === "/api/v1/admin/task-executions" && method === "GET") {
+      return json(route, [])
+    }
+
+    if (path === "/api/v1/admin/operations-metrics" && method === "GET") {
+      return json(route, {
+        total_executions: 128,
+        terminal_failures: 0,
+        failure_rate: 0,
+        oldest_job_age_seconds: 9,
+        average_task_duration_seconds: 12,
+        paused_runs: 1,
+        queue_depth: 6,
+        retry_count: 4,
+      })
+    }
+
+    if (path === "/api/v1/admin/ai-quality" && method === "GET") {
+      return json(route, {
+        label: "Review-confirmed precision proxy",
+        reviewed: 12,
+        accepted: 10,
+        acceptance_rate: 0.83,
+        character_corrections_after_promotion: 1,
+        relationship_corrections: 2,
+        breakdown: [],
+      })
+    }
+
+    if (path === "/api/v1/admin/contribution-margin" && method === "GET") {
+      return json(route, {
+        currency: "USD",
+        recognized_net_revenue: 420,
+        llm_cost: 38,
+        worker_cost: 24,
+        storage_cost: 3,
+        contribution_margin: 355,
+        allocation_basis: "E2E mock",
+      })
+    }
+
+    if (path === "/api/v1/admin/support-incidents" && method === "GET") {
+      return json(route, [])
+    }
+
+    if (path === "/api/v1/admin/subscription-metrics" && method === "GET") {
+      return json(route, {
+        cohort_start: "2026-06-01",
+        cohort_end: "2026-06-29",
+        trial_starts: 20,
+        trial_to_paid_conversions: 8,
+        trial_to_paid_rate: 0.4,
+        cancellation_events: 3,
+        resolved_cancellation_events: 2,
+        unresolved_cancellation_events: 1,
+        reactivated_after_cancellation: 1,
+        churned_after_cancellation: 2,
+        post_cancel_churn_rate: 0.67,
+      })
+    }
+
     if (path === "/api/v1/auth/me/username" && method === "PATCH") {
       const nextUsername = url.searchParams.get("username")?.trim()
       if (!nextUsername || nextUsername.length < 3) {
@@ -2699,6 +2787,26 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       mockEmailPreferences.unsubscribed_all = !mockEmailPreferences.product_updates && !mockEmailPreferences.marketing
       mockEmailPreferences.unsubscribed_at = mockEmailPreferences.unsubscribed_all ? "2026-05-23T12:00:00Z" : null
       return json(route, mockEmailPreferences)
+    }
+
+    if (path === "/api/v1/email/unsubscribe" && method === "POST") {
+      const payload = route.request().postDataJSON() as { token?: string } | null
+      if (!payload?.token) {
+        return json(route, { detail: "Unsubscribe token is required" }, 400)
+      }
+      mockEmailPreferences = {
+        ...mockEmailPreferences,
+        product_updates: false,
+        marketing: false,
+        unsubscribed_all: true,
+        unsubscribed_at: "2026-06-29T07:00:00Z",
+      }
+      return json(route, {
+        email: mockEmailPreferences.email,
+        product_updates: mockEmailPreferences.product_updates,
+        marketing: mockEmailPreferences.marketing,
+        unsubscribed_all: mockEmailPreferences.unsubscribed_all,
+      })
     }
 
     if (path === "/api/v1/notifications" && method === "GET") {

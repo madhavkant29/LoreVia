@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import download_book, upload_binary
@@ -531,7 +532,7 @@ async def reorder_chapter_novel_scenes(
     )
     try:
         await db.commit()
-    except Exception:
+    except SQLAlchemyError:
         await db.rollback()
         raise
 

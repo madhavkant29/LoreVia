@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from sqlalchemy import inspect
+from sqlalchemy.exc import NoInspectionAvailable
 
 from app.models.character import (
     Character,
@@ -58,7 +59,7 @@ def serialize_character_alias_records(char: Character) -> list[dict[str, Any]]:
     try:
         if "alias_records" in inspect(char).unloaded:
             return []
-    except Exception:
+    except NoInspectionAvailable:
         return []
     records = getattr(char, "alias_records", None) or []
     return [

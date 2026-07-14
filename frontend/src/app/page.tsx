@@ -5,13 +5,11 @@ import type { ReactNode } from "react"
 import Image from "next/image"
 import dynamic from "next/dynamic"
 
-import { AudienceSection } from "@/components/marketing/AudienceSection"
 import { SiteFooter } from "@/components/layout/SiteFooter"
 import { HomePricingSection } from "@/components/marketing/HomePricingSection"
 import { MarketingHeader } from "@/components/marketing/MarketingHeader"
 import { Reveal } from "@/components/marketing/Reveal"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { homepageComparisonRows, comparisonIndexCards } from "@/lib/comparisons"
 import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
 import {
   DEFAULT_OG_IMAGE,
@@ -66,31 +64,16 @@ const LandingShowcase = dynamic(
 const workflowSteps = [
   {
     step: "Upload the draft",
-    body: "Start with the manuscript you already have. LoreVia keeps chapters, scenes, exports, and revisions in one place.",
+    body: "Start with the manuscript you already have: DOCX, PDF, EPUB, Markdown, TXT, or vault notes.",
   },
   {
     step: "Build story memory",
-    body: "Characters, relationships, locations, timelines, and callbacks become editable working data instead of scattered notes.",
+    body: "Characters, relationships, locations, timelines, and callbacks become editable working data.",
   },
   {
-    step: "Surface the conflicts",
-    body: "Inspect contradictions, missing thread payoffs, detail drift, and timeline issues while the manuscript is still easy to correct.",
+    step: "Fix the conflicts",
+    body: "Review contradictions, dropped threads, timeline drift, and grounded answers while the draft is still easy to change.",
   },
-  {
-    step: "Ask grounded questions",
-    body: "Query the draft without losing chapter context or relying on unsupported summaries when you need a second pass.",
-  },
-  {
-    step: "Export or keep revising",
-    body: "Compile the manuscript, hand it to collaborators, or keep iterating with version history and spoiler-safe reading.",
-  },
-]
-
-const beforeAfterRows = [
-  ["Before", "Continuity issues live in memory, scattered comments, and separate notes."],
-  ["After", "LoreVia ties issues to chapters, characters, timelines, scenes, and revision targets."],
-  ["Before", "A rewrite can quietly break a reveal, injury timeline, relationship beat, or world rule."],
-  ["After", "The workspace shows where the story logic changed and what needs another author decision."],
 ]
 
 const faqItems = [
@@ -156,50 +139,27 @@ function SectionHeading({
 function WorkflowPanel() {
   return (
     <div className="rounded-lg border border-white/[0.08] bg-[#121214] p-6 md:p-8">
-      <div className="grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
+      <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
         <div>
-          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#d6a84f]">Before vs after workflow</p>
+          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#d6a84f]">Revision workflow</p>
           <h2 className="mt-5 max-w-lg font-display text-4xl font-semibold leading-[1.02] text-[#f4f1ea] md:text-5xl">
             Move from memory-based revision to manuscript evidence.
           </h2>
           <p className="mt-5 max-w-xl text-lg leading-8 text-[#a09a90]">
-            The page still keeps the full writing workflow: import, story memory, continuity review, grounded questions, export, and ongoing revision.
+            Import the draft, let LoreVia build the story map, then work through the conflicts with chapter evidence beside you.
           </p>
-          <div className="mt-8 space-y-4">
-            {workflowSteps.map((item, index) => (
-              <div key={item.step} className="flex gap-4">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#665128] text-sm font-semibold text-[#d6a84f]">
-                  {index + 1}
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-[#f4f1ea]">{item.step}</h3>
-                  <p className="mt-2 text-sm leading-7 text-[#a09a90]">{item.body}</p>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
 
-        <div className="grid gap-4">
-          {beforeAfterRows.map(([label, body]) => (
-            <div key={`${label}-${body}`} className="rounded-md border border-white/[0.08] bg-[#0c0c0d] p-5">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${label === "After" ? "text-[#8fbc8f]" : "text-[#d96c5f]"}`}>
-                {label}
-              </p>
-              <p className="mt-3 text-lg leading-8 text-[#f4f1ea]">{body}</p>
+        <div className="grid gap-4 md:grid-cols-3">
+          {workflowSteps.map((item, index) => (
+            <div key={item.step} className="rounded-md border border-white/[0.08] bg-[#0c0c0d] p-5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md border border-[#665128] text-sm font-semibold text-[#d6a84f]">
+                {index + 1}
+              </div>
+              <h3 className="mt-5 text-lg font-semibold text-[#f4f1ea]">{item.step}</h3>
+              <p className="mt-2 text-sm leading-7 text-[#a09a90]">{item.body}</p>
             </div>
           ))}
-          <div className="rounded-md border border-[#665128] bg-[#171719] p-5">
-            <p className="text-3xs font-semibold uppercase tracking-[0.22em] text-[#d6a84f]">
-              Grounded question
-            </p>
-            <p className="mt-4 rounded-md border border-white/[0.08] bg-[#0c0c0d] px-4 py-3 text-sm text-[#f4f1ea]">
-              What changed in Chapter 12 that could break the vault reveal?
-            </p>
-            <p className="mt-4 text-sm leading-7 text-[#a09a90]">
-              LoreVia answers from the draft context, then points you back to the chapter, character, and timeline evidence.
-            </p>
-          </div>
         </div>
       </div>
     </div>
@@ -230,76 +190,25 @@ function HeroWorkspaceSummary() {
 
 function HomepageComparisonSection() {
   return (
-    <Section id="compare" className="pt-8">
-      <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
-        <div>
-          <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Comparison</p>
-          <h2 className="mt-5 max-w-lg font-display text-4xl font-semibold leading-[1.02] text-white md:text-5xl">
-            A writing workspace that understands the manuscript.
-          </h2>
-          <p className="mt-5 max-w-xl text-lg leading-8 text-[#aeb9b3]">
-            Traditional tools help you write and organize. LoreVia does that too, then automatically builds editable story memory, checks continuity, and answers grounded questions from your draft.
-          </p>
-
-          <div className="mt-7">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#8fa19a]">
-              Detailed comparisons
+    <Section id="compare" className="py-10">
+      <div className="rounded-lg border border-white/[0.08] bg-[#0d1715] px-6 py-8 md:px-10">
+        <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div>
+            <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">Compare workflows</p>
+            <h2 className="mt-4 max-w-2xl font-display text-3xl font-semibold leading-tight text-white md:text-4xl">
+              Already comparing writing tools?
+            </h2>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-[#aeb9b3]">
+              Keep the homepage focused on trying LoreVia. Detailed Scrivener, Campfire, Google Docs, Novelcrafter, and Sudowrite comparisons live on the comparison hub.
             </p>
-            <div className="mt-4 grid gap-3">
-              {comparisonIndexCards.map((item) => (
-                <Link
-                  key={item.slug}
-                  href={`/compare/${item.slug}`}
-                  className="rounded-md border border-white/[0.08] bg-white/5 px-4 py-4 transition hover:border-white/[0.16] hover:bg-white/[0.08]"
-                >
-                  <p className="text-base font-semibold text-white">LoreVia vs {item.name}</p>
-                  <p className="mt-2 text-sm leading-7 text-[#9fb0a8]">{item.summary}</p>
-                </Link>
-              ))}
-            </div>
           </div>
-
           <Link
             href="/compare"
-            className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#86decd] transition hover:text-white"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-white/[0.12] bg-white/5 px-6 py-3.5 text-base font-semibold text-[#f4f1ea] transition hover:bg-white/[0.08]"
           >
             See detailed comparisons
             <ArrowIcon />
           </Link>
-        </div>
-
-        <div className="overflow-hidden rounded-lg border border-white/10 bg-[#0d1715]">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
-              <thead>
-                <tr className="text-[#9fb0a8]">
-                  {["Feature", "Scrivener", "Campfire", "Google Docs", "LoreVia"].map((heading) => (
-                    <th
-                      key={heading}
-                      className={`border-b border-white/[0.08] px-5 py-4 font-semibold ${
-                        heading === "LoreVia" ? "bg-[#0f2320] text-[#7ad3c1]" : ""
-                      }`}
-                    >
-                      {heading}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {homepageComparisonRows.map((row) => (
-                  <tr key={row.feature} className="text-[#d9e0db]">
-                    <td className="border-b border-white/6 px-5 py-4 font-medium text-white">{row.feature}</td>
-                    <td className="border-b border-white/6 px-5 py-4 text-[#aeb9b3]">{row.scrivener}</td>
-                    <td className="border-b border-white/6 px-5 py-4 text-[#aeb9b3]">{row.campfire}</td>
-                    <td className="border-b border-white/6 px-5 py-4 text-[#aeb9b3]">{row.googleDocs}</td>
-                    <td className="border-b border-[#14433d] bg-[#0f2320] px-5 py-4 font-semibold text-[#85e1ce]">
-                      {row.lorevia}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
     </Section>
@@ -416,7 +325,6 @@ export default function HomePage() {
           <WorkflowPanel />
         </Section>
 
-        <AudienceSection />
         <HomepageComparisonSection />
         <HomePricingSection ctaHref={ctaHref} />
 

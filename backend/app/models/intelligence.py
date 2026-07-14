@@ -36,6 +36,7 @@ class BookChunk(Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
             postgresql_with={"m": 16, "ef_construction": 64},
         ),
+        Index("ix_book_chunks_book_chunk", "book_id", "chunk_index"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -61,6 +62,21 @@ class CharacterRelationship(Base):
     """Timeline-aware relationship pairs between characters."""
 
     __tablename__ = "character_relationships"
+    __table_args__ = (
+        Index("ix_character_relationships_book_from", "book_id", "from_chapter"),
+        Index(
+            "ix_character_relationships_book_a_from",
+            "book_id",
+            "character_a_id",
+            "from_chapter",
+        ),
+        Index(
+            "ix_character_relationships_book_b_from",
+            "book_id",
+            "character_b_id",
+            "from_chapter",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
@@ -126,6 +142,7 @@ class ChapterSummary(Base):
     """Cached LLM summaries — generated once, served forever."""
 
     __tablename__ = "chapter_summaries"
+    __table_args__ = (Index("ix_chapter_summaries_chapter_mode", "chapter_id", "mode"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chapter_id: Mapped[uuid.UUID] = mapped_column(
@@ -149,6 +166,7 @@ class WikiEntry(Base):
     """Auto-generated wiki: locations, factions, items, events."""
 
     __tablename__ = "wiki_entries"
+    __table_args__ = (Index("ix_wiki_entries_book_type_name", "book_id", "entry_type", "name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
@@ -170,6 +188,7 @@ class QuoteEntry(Base):
     """Saved reader quotes with lightweight provenance metadata."""
 
     __tablename__ = "quote_entries"
+    __table_args__ = (Index("ix_quote_entries_user_created", "user_id", "created_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -271,6 +290,15 @@ class WorldBuildingDocument(Base):
     """Book-scoped world-building reference document stored separately from story chapters."""
 
     __tablename__ = "world_building_documents"
+    __table_args__ = (
+        Index(
+            "ix_world_building_documents_book_active_updated",
+            "book_id",
+            "is_active",
+            "updated_at",
+            "created_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
@@ -297,6 +325,10 @@ class WorldElement(Base):
     """Structured world-building element extracted from the manuscript."""
 
     __tablename__ = "world_elements"
+    __table_args__ = (
+        Index("ix_world_elements_book_usage_name", "book_id", "usage_count", "name"),
+        Index("ix_world_elements_book_scope_name", "book_id", "source_scope", "name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
@@ -348,6 +380,14 @@ class WorldCanonicalIdentity(Base):
     """Book-scoped canonical identity record for world-gap resolution."""
 
     __tablename__ = "world_canonical_identities"
+    __table_args__ = (
+        Index(
+            "ix_world_canonical_identities_book_updated",
+            "book_id",
+            "updated_at",
+            "created_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
@@ -405,6 +445,16 @@ class WorldNote(Base):
     """Author-facing world-building note linked to a book and optional chapter."""
 
     __tablename__ = "world_notes"
+    __table_args__ = (
+        Index("ix_world_notes_book_type_created", "book_id", "note_type", "created_at"),
+        Index(
+            "ix_world_notes_book_chapter_type_created",
+            "book_id",
+            "chapter_number",
+            "note_type",
+            "created_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(

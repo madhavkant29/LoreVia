@@ -289,6 +289,7 @@ export interface TimelineResponse {
   limit?: number
   offset?: number
   has_more?: boolean
+  next_offset?: number | null
 }
 
 export interface ThematicSearchResult {

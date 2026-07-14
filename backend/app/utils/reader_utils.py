@@ -16,6 +16,7 @@ from typing import Any
 import bleach  # type: ignore[import-untyped]
 from fastapi import HTTPException
 from sqlalchemy import and_, desc, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -49,6 +50,7 @@ from app.utils.plot_thread_utils import (
     build_plot_thread_payload,
     normalize_plot_thread_status,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 from app.utils.tag_utils import (
     ENTITY_TYPE_CHAPTER,
     ENTITY_TYPE_PLOT_THREAD,
@@ -58,6 +60,8 @@ from app.utils.tag_utils import (
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 log = logging.getLogger("lorevia.reader_utils")
+SOURCE_PARSE_EXCEPTIONS = (RuntimeError, ValueError, OSError)
+ANALYSIS_QUEUE_DISPATCH_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
 
 # ─── Character stopwords / filter sets ───────────────────────────────────────
 
@@ -558,7 +562,7 @@ def normalize_summary_response(content, key_events, char_changes, clues) -> dict
                     "char_changes": parsed.get("char_changes") or char_changes or [],
                     "clues": parsed.get("clues") or clues or [],
                 }
-        except Exception:
+        except json.JSONDecodeError:
             pass
 
     return {
@@ -972,7 +976,7 @@ async def queue_analysis_if_missing(
             chapter_number=chapter.number,
             chapters_total=1,
         )
-    except Exception as exc:
+    except ANALYSIS_QUEUE_DISPATCH_EXCEPTIONS as exc:
         await cache_del(queued_key)
         log.warning(
             "analysis_queue_dispatch_failed chapter_id=%s error=%s",
@@ -1125,7 +1129,7 @@ async def serialize_chapter_media(
                 item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode(
                     "ascii"
                 )
-            except Exception:
+            except STORAGE_IO_EXCEPTIONS:
                 item["content_base64"] = None
         items.append(item)
     return items
@@ -1172,7 +1176,7 @@ def merge_media_items(primary: list[dict], fallback: list[dict]) -> list[dict]:
 def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
     try:
         raw = download_book(book.s3_key)
-    except Exception:
+    except STORAGE_IO_EXCEPTIONS:
         return None
     try:
         preserve_numbers = (
@@ -1192,7 +1196,7 @@ def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
             preserve_chapter_numbers=preserve_numbers,
             generic_titles=book.work_type != "screenplay" and not preserve_numbers,
         )
-    except Exception:
+    except SOURCE_PARSE_EXCEPTIONS:
         return None
     chapter = next((item for item in chapters if item.get("number") == chapter_num), None)
     return chapter or None
