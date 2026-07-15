@@ -501,5 +501,3 @@ def _climate_bucket(text: str) -> str | None:
 
 def _normalize_text(value: str) -> str:
     return " ".join((value or "").replace("\n", " ").replace("\r", " ").split()).strip().lower()
-
-

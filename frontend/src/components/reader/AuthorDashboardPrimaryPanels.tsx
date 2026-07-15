@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useMemo, useState } from "react"
 import type { Route } from "next"
@@ -595,4 +595,3 @@ function secondaryButtonClass(isDark: boolean) {
 function footerLinkClass(isDark: boolean) {
   return `mt-5 inline-flex items-center gap-2 text-xs font-semibold ${isDark ? "text-teal-200" : "text-teal-800"}`
 }
-

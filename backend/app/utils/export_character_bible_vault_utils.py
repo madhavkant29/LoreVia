@@ -928,5 +928,3 @@ def character_bible_vault_preview(
         "root_folder": root_folder,
         "files": files,
     }
-
-

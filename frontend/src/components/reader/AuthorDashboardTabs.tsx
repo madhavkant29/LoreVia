@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import type { Route } from "next"
@@ -1169,4 +1169,3 @@ function getRecentWritingDays(userStats: UserStats | null, count: number) {
       }
     })
 }
-

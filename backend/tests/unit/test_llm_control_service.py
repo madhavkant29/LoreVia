@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import HTTPException
 from redis.exceptions import RedisError
+from sqlalchemy import delete
 
 from app.models.user import LlmUsageEvent, User
 from app.services import llm_control_service
@@ -59,6 +60,9 @@ class _FakeRedis:
 async def test_rehydrate_llm_coordination_rebuilds_active_and_releases_stale(
     db, monkeypatch
 ):
+    await db.execute(delete(LlmUsageEvent).where(LlmUsageEvent.status == "reserved"))
+    await db.commit()
+
     user = User(
         email=f"rehydrate-{uuid.uuid4().hex[:8]}@lorevia.app",
         username=f"rehydrate{uuid.uuid4().hex[:8]}",

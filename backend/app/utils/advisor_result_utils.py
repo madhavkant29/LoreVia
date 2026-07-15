@@ -461,5 +461,3 @@ def build_fallback_advisor_suggestions(
         )
 
     return suggestions
-
-
