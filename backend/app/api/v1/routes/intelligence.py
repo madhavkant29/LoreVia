@@ -53,6 +53,7 @@ from app.utils.llm_usage_utils import (
     record_llm_usage_counts,
 )
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
 GROUNDED_QA_STREAM_EXCEPTIONS = (OpenAIError, RuntimeError, ValueError, SQLAlchemyError)
@@ -108,7 +109,7 @@ async def cross_book_intelligence(
 
 
 def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
 
 
 def _intelligence_sse(event: str, data: dict[str, Any]) -> str:
@@ -262,6 +263,7 @@ async def qa_stream_endpoint(
             "content": f"Question: {body.question}\n\nContext:\n\n" + "\n\n".join(context_blocks),
         },
     ]
+
     async def event_stream():
         client = get_client()
         answer_parts: list[str] = []

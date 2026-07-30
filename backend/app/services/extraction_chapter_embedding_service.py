@@ -58,15 +58,24 @@ async def persist_chapter_chunks_with_embeddings(
         async with embed_semaphore:
             return await embed_batch(
                 batch,
-                db=db,
+                # Provider calls track usage in their own short-lived sessions.
+                # Never share the chapter transaction across parallel tasks.
+                db=None,
                 user_id=book.user_id,
                 book_id=book.id,
                 feature="chapter_chunk_embedding",
             )
 
-    embedded_batches = await asyncio.gather(
-        *(_embed_with_limit(batch) for batch in chunk_batches)
-    )
+    embed_tasks = [asyncio.create_task(_embed_with_limit(batch)) for batch in chunk_batches]
+    try:
+        embedded_batches = await asyncio.gather(*embed_tasks)
+    except BaseException:
+        # asyncio.gather propagates the first error without waiting for sibling
+        # tasks. Cancel and drain them before the owning DB session may close.
+        for task in embed_tasks:
+            task.cancel()
+        await asyncio.gather(*embed_tasks, return_exceptions=True)
+        raise
     chunk_embeddings = [embedding for batch in embedded_batches for embedding in batch]
     log.info(
         "ingestion_timing stage=embed book_id=%s chapter=%s elapsed_ms=%s batches=%s",

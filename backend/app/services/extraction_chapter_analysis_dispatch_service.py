@@ -14,16 +14,23 @@ async def dispatch_chapter_analysis_after_extraction(
     manual_reprocess: bool,
 ) -> None:
     active_run = (
-        await db.execute(
-            select(BookProcessingRun)
-            .where(
-                BookProcessingRun.book_id == book.id,
-                BookProcessingRun.status.in_(("queued", "running", "paused")),
+        (
+            await db.execute(
+                select(BookProcessingRun)
+                .where(
+                    BookProcessingRun.book_id == book.id,
+                    BookProcessingRun.status.in_(("queued", "running", "paused")),
+                )
+                .order_by(BookProcessingRun.created_at.desc())
             )
-            .order_by(BookProcessingRun.created_at.desc())
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if active_run is None:
+        # The lookup opened a transaction. Close it here so callers do not
+        # retain a checked-out connection after a no-op dispatch.
+        await db.commit()
         return
 
     await ensure_task_execution(

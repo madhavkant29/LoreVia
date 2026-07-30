@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import select
 
@@ -128,9 +129,7 @@ async def build_chapter_character_extraction_diagnostics(
                 previous_totals.get("adjudicated_place_entities") or 0
             )
             + int(adjudication_counts.get("place", 0)),
-            "adjudicated_alias_merges": int(
-                previous_totals.get("adjudicated_alias_merges") or 0
-            )
+            "adjudicated_alias_merges": int(previous_totals.get("adjudicated_alias_merges") or 0)
             + int(adjudication_counts.get("merged_alias", 0)),
             "ambiguous_llm_adjudications": int(
                 previous_totals.get("ambiguous_llm_adjudications") or 0

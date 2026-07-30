@@ -41,12 +41,14 @@ async def _database_status() -> dict[str, Any]:
                 )
             ).scalar_one_or_none()
             alembic_rows = (
-                await connection.execute(
-                    sa.text(
-                        "SELECT version_num FROM alembic_version ORDER BY version_num"
+                (
+                    await connection.execute(
+                        sa.text("SELECT version_num FROM alembic_version ORDER BY version_num")
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return {
                 "ok": db_ok,
                 "target": redact_database_target(settings.DATABASE_URL),

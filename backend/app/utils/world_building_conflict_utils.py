@@ -57,6 +57,7 @@ CLIMATE_BUCKETS = {
     "wet": {"rain", "storm", "flooded", "marsh", "mist", "wet"},
 }
 
+
 def _world_names_equivalent(left: str | None, right: str | None) -> bool:
     left_normalized = _normalize_world_name(left)
     right_normalized = _normalize_world_name(right)
@@ -85,7 +86,6 @@ def _world_text_mentions_name(world_text: str, name: str) -> bool:
     world_tokens = set(re.findall(r"[a-z0-9']+", world_text))
     name_tokens = [token for token in normalized_name.split() if token]
     return bool(name_tokens) and set(name_tokens).issubset(world_tokens)
-
 
 
 def _should_surface_world_item(world_item: dict) -> bool:

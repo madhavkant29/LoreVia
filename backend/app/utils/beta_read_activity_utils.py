@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaReadFeedbackKind
 from app.models.book import Book, BookCollaborator, Chapter, ManuscriptAnnotation
+from app.models.user import User
 from app.schemas.books import CollaboratorActivityItemOut, CollaboratorActivityOut
 from app.utils.beta_read_output_utils import (
     _build_beta_read_assignment_out_from_context,
     load_beta_assignment_render_context,
 )
 from app.utils.books.collaboration import serialize_book_collaborator
-from app.models.user import User
 
 
 def _beta_feedback_reader_display_name(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 INTENT_KEYWORDS: dict[str, list[str]] = {
     "plothole": [
         "plot hole",

@@ -7,9 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.routes import world_building_documents, world_building_notes
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_world_building_ai
+from app.api.v1.routes import world_building_documents, world_building_notes
 from app.core.database import get_db
 from app.core.storage import download_book
 from app.models.book import Book, Series
@@ -39,16 +39,6 @@ from app.utils.tag_utils import (
     ENTITY_TYPE_WORLD_NOTE,
     list_custom_tags_for_entity_ids,
 )
-from app.utils.world_building_utils import (
-    build_world_logic_response,
-    classify_world_intent,
-    detect_integration_analysis,
-    detect_series_world_analysis,
-    detect_world_gaps,
-    extract_world_elements,
-    list_extracted_world_elements,
-)
-from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
 from app.utils.world_building_document_utils import (
     get_world_building_document,
     list_world_building_documents,
@@ -60,6 +50,16 @@ from app.utils.world_building_response_utils import (
     serialize_world_document,
     serialize_world_note,
 )
+from app.utils.world_building_utils import (
+    build_world_logic_response,
+    classify_world_intent,
+    detect_integration_analysis,
+    detect_series_world_analysis,
+    detect_world_gaps,
+    extract_world_elements,
+    list_extracted_world_elements,
+)
+from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
 
 router = APIRouter()
 router.include_router(world_building_documents.router)

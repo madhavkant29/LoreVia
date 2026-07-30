@@ -40,7 +40,7 @@ async def test_finalize_book_completion_returns_false_when_book_not_complete(mon
     )
 
     assert completed is False
-    assert db.commits == 0
+    assert db.commits == 1
 
 
 @pytest.mark.asyncio

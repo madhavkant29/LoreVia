@@ -7,6 +7,7 @@ from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterAlias
 from app.models.intelligence import BookChunk
 from app.models.user import User
+from app.utils.characters import serialization as character_serialization
 from app.utils.characters.candidates import build_character_analysis_payload
 from app.utils.characters.governance import infer_character_trust_tier, is_cast_visible_character
 from app.utils.characters.manual import (
@@ -15,7 +16,6 @@ from app.utils.characters.manual import (
 )
 from app.utils.characters.presentation import build_character_dossier_summary
 from app.utils.characters.review import set_character_review_state
-from app.utils.characters import serialization as character_serialization
 from app.utils.characters.serialization import serialize_book_character
 
 

@@ -27,6 +27,7 @@ from app.utils.advisor_suggestions_utils import (
 )
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 log = logging.getLogger(__name__)
 
@@ -514,7 +515,9 @@ async def build_advisor_suggestions_payload(
     if not skip_llm and heuristic_count < 3 and (recent_summaries or open_threads or world_rows):
         detailed_summary_rows = (
             await db.execute(
-                select(Chapter.number, Chapter.title, ChapterSummary.content, ChapterSummary.key_events)
+                select(
+                    Chapter.number, Chapter.title, ChapterSummary.content, ChapterSummary.key_events
+                )
                 .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
                 .where(
                     Chapter.book_id == book_id,
@@ -587,7 +590,10 @@ async def build_advisor_suggestions_payload(
         proactive_result = await get_proactive_scan_cache(str(book.id), proactive_cache_key)
         if proactive_result is None:
             if settings.OPENAI_API_KEY and settings.OPENAI_INTEL_MODEL:
-                client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+                client = AsyncOpenAI(
+                    api_key=settings.OPENAI_API_KEY,
+                    max_retries=LLM_MAX_RETRIES,
+                )
                 try:
                     response = await create_tracked_chat_completion(
                         client=client,

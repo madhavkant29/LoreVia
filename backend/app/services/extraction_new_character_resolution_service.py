@@ -1,6 +1,6 @@
+import uuid
 from dataclasses import dataclass
 from typing import Any
-import uuid
 
 from app.core.config import settings
 from app.engine.character.deduplicator import find_similar

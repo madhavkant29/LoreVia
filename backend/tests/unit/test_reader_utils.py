@@ -249,9 +249,7 @@ async def test_queue_analysis_if_missing_creates_durable_execution(monkeypatch):
         dispatched.append(kwargs)
         return SimpleNamespace(id=uuid.uuid4())
 
-    monkeypatch.setattr(
-        "app.services.task_execution_service.enqueue_analysis_execution", _enqueue
-    )
+    monkeypatch.setattr("app.services.task_execution_service.enqueue_analysis_execution", _enqueue)
 
     queued = await reader_utils.queue_analysis_if_missing(db, chapter)
 
@@ -287,9 +285,7 @@ async def test_queue_analysis_if_missing_clears_queued_key_when_dispatch_fails(m
     async def _raise(*_args, **_kwargs):
         raise RuntimeError("database unavailable")
 
-    monkeypatch.setattr(
-        "app.services.task_execution_service.enqueue_analysis_execution", _raise
-    )
+    monkeypatch.setattr("app.services.task_execution_service.enqueue_analysis_execution", _raise)
 
     queued = await reader_utils.queue_analysis_if_missing(db, chapter)
 

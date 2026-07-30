@@ -39,11 +39,16 @@ async def _ensure_syncable_chapter(
     book: Book,
     chapter_number: int,
 ) -> tuple[Chapter, bool]:
-    chapter = (
-        await db.execute(
-            select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
-        )
-    ).scalar_one_or_none()
+    statement = (
+        select(Chapter)
+        .where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+        .with_for_update()
+    )
+    # Lock the chapter before SQLAlchemy flushes a pending Book update. Analysis
+    # writes Chapter -> Book, so allowing this query to autoflush Book first
+    # creates the inverse lock order and can deadlock with analysis.
+    with db.no_autoflush:
+        chapter = (await db.execute(statement)).scalar_one_or_none()
     if chapter is not None:
         if not chapter.s3_key:
             chapter.s3_key = _chapter_storage_key(book.id, chapter_number)

@@ -18,6 +18,28 @@ type ManuscriptSearchParams = {
   get: (name: string) => string | null
 }
 
+export async function completeEditedFindingDecision(
+  bookId: string,
+  searchParams: ManuscriptSearchParams,
+): Promise<{ findingId: string; source: "continuity" | "revision" } | null> {
+  const continuityFindingId = searchParams.get("continuity_finding")
+  const findingId = continuityFindingId ?? searchParams.get("finding")
+  if (!findingId) return null
+  if (continuityFindingId) {
+    await booksApi.decideContinuityFinding(bookId, findingId, {
+      decision: "resolved",
+      action: "manuscript_edit",
+      reason: "fixed",
+    })
+    return { findingId, source: "continuity" }
+  }
+  await booksApi.decideRevisionFinding(bookId, findingId, {
+    decision: "accepted",
+    action: "manuscript_edit",
+  })
+  return { findingId, source: "revision" }
+}
+
 type UseManuscriptIntelligenceActionsArgs = {
   activeChapterNumber: number
   bookId: string
@@ -135,15 +157,27 @@ export function useManuscriptIntelligenceActions({
     setPlotThreads(threads.filter((thread) => thread.status !== "resolved").slice(0, 8))
     if (synopsisResult) setSynopsis(synopsisResult)
     if (emotionalArcResult) setEmotionalArc(emotionalArcResult)
+    capture("live_canon_guard_queued", {
+      book_id: bookId,
+      chapter_number: chapterNum,
+      trigger: "meaningful_save",
+    })
   }
 
   async function completeFindingEdit() {
-    const findingId = searchParams.get("finding")
-    if (!findingId) return
     try {
-      await booksApi.decideRevisionFinding(bookId, findingId, { decision: "accepted", action: "manuscript_edit" })
-      capture("manuscript_edit_from_finding_completed", { book_id: bookId, finding_id: findingId })
-      capture("activation_completed", { book_id: bookId, finding_id: findingId, action: "manuscript_edit" })
+      const completed = await completeEditedFindingDecision(bookId, searchParams)
+      if (!completed) return
+      capture("manuscript_edit_from_finding_completed", {
+        book_id: bookId,
+        finding_id: completed.findingId,
+        finding_source: completed.source,
+      })
+      capture("activation_completed", {
+        book_id: bookId,
+        finding_id: completed.findingId,
+        action: "manuscript_edit",
+      })
       router.replace(`/${bookId}/manuscript`)
     } catch {
       // The manuscript save succeeded; attribution must not turn it into a failed save.

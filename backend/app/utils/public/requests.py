@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import create_asset_token, decode_token
 from app.core.storage import download_book, get_presigned_url, upload_binary
-from app.utils.client_identity import trusted_client_ip
 from app.models.book import (
     BookForumComment,
     BookForumPost,
@@ -24,6 +23,7 @@ from app.schemas.public import (
     PublicForumPostCreateBody,
     PublicForumPostUpdateBody,
 )
+from app.utils.client_identity import trusted_client_ip
 from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
 FORUM_POST_OPEN = "open"

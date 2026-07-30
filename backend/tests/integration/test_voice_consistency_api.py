@@ -96,7 +96,7 @@ async def test_voice_consistency_endpoint_limits_review_to_selected_character(
         )
 
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.voice.AsyncOpenAI", lambda api_key: _FakeOpenAIClient()
+        "app.api.v1.routes.advisor.voice.AsyncOpenAI", lambda **_kwargs: _FakeOpenAIClient()
     )
     monkeypatch.setattr("app.api.v1.routes.advisor.voice.semantic_search", _fake_semantic_search)
     monkeypatch.setattr("app.api.v1.routes.advisor.voice.build_story_context", _fake_story_context)
@@ -227,7 +227,7 @@ async def test_voice_consistency_endpoint_warns_on_selected_character_fallback(
         )
 
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.voice.AsyncOpenAI", lambda api_key: _FakeOpenAIClient()
+        "app.api.v1.routes.advisor.voice.AsyncOpenAI", lambda **_kwargs: _FakeOpenAIClient()
     )
     monkeypatch.setattr("app.api.v1.routes.advisor.voice.semantic_search", _fake_semantic_search)
     monkeypatch.setattr("app.api.v1.routes.advisor.voice.build_story_context", _fake_story_context)

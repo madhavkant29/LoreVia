@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookProcessing, BookSeries, BookWorkType, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookProcessing, BookSeries, BookWorkType, CanonFact, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, ContinuityFinding, ContinuityScan, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -171,6 +171,52 @@ export const booksApi = {
     apiClient.get<StoryHealth>(bookPath(id, "/story-health")).then(r => r.data),
   getRevisionIntelligence: (id: string) =>
     apiClient.get<RevisionIntelligence>(bookPath(id, "/revision-intelligence")).then(r => r.data),
+  createContinuityScan: (
+    id: string,
+    payload: { scope?: "full_book" | "targeted"; chapterNumbers?: number[] } = {},
+  ) => apiClient.post<ContinuityScan>(bookPath(id, "/continuity-scans"), {
+    scope: payload.scope ?? "full_book",
+    chapter_numbers: payload.chapterNumbers ?? [],
+  }).then(r => {
+    void invalidateQueryKeys(bookCacheKey(id, "revision-intelligence"))
+    return r.data
+  }),
+  getContinuityScan: (id: string, scanId: string) =>
+    apiClient.get<ContinuityScan>(bookPath(id, `/continuity-scans/${scanId}`)).then(r => r.data),
+  getContinuityFindings: (
+    id: string,
+    params?: { status?: string; category?: string; includeStale?: boolean },
+  ) => apiClient.get<ContinuityFinding[]>(bookPath(id, "/continuity-findings"), {
+    params: {
+      status: params?.status,
+      category: params?.category,
+      include_stale: params?.includeStale ?? true,
+    },
+  }).then(r => r.data),
+  decideContinuityFinding: (
+    id: string,
+    findingId: string,
+    payload: {
+      decision: "accepted" | "dismissed" | "intentional" | "resolved"
+      action?: "added_to_revision_plan" | "saved_note" | "manuscript_edit" | "exported_report" | null
+      reason?: "intentional" | "incorrect" | "not_relevant" | "fixed" | "other" | null
+    },
+  ) => apiClient.patch<ContinuityFinding>(
+    bookPath(id, `/continuity-findings/${findingId}`),
+    payload,
+  ).then(r => {
+    void invalidateQueryKeys(bookCacheKey(id, "revision-intelligence"))
+    return r.data
+  }),
+  recheckContinuityFinding: (id: string, findingId: string) =>
+    apiClient.post<ContinuityScan>(
+      bookPath(id, `/continuity-findings/${findingId}/recheck`),
+    ).then(r => {
+      void invalidateQueryKeys(bookCacheKey(id, "revision-intelligence"))
+      return r.data
+    }),
+  getCanonFacts: (id: string) =>
+    apiClient.get<CanonFact[]>(bookPath(id, "/canon/facts")).then(r => r.data),
   decideRevisionFinding: (
     id: string,
     findingId: string,

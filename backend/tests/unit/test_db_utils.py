@@ -4,6 +4,7 @@ from sqlalchemy.exc import OperationalError
 from app.utils.db_utils import (
     execute_read_with_retry,
     is_retryable_read_db_error,
+    is_retryable_transaction_db_error,
     run_read_with_retry,
 )
 
@@ -34,6 +35,15 @@ def _operational_error(message: str, *, connection_invalidated: bool = False) ->
     )
 
 
+def _transaction_error(message: str, *, sqlstate: str | None = None) -> OperationalError:
+    class OrigError(RuntimeError):
+        pass
+
+    orig = OrigError(message)
+    orig.sqlstate = sqlstate
+    return OperationalError("UPDATE books SET status = 'ready'", {}, orig)
+
+
 def test_is_retryable_read_db_error_matches_ssl_eof_disconnect():
     error = _operational_error("consuming input failed: SSL SYSCALL error: EOF detected")
 
@@ -50,6 +60,18 @@ def test_is_retryable_read_db_error_rejects_non_transient_errors():
     error = _operational_error("syntax error at or near FROM")
 
     assert not is_retryable_read_db_error(error)
+
+
+def test_is_retryable_transaction_db_error_matches_deadlock_sqlstate():
+    assert is_retryable_transaction_db_error(
+        _transaction_error("deadlock detected", sqlstate="40P01")
+    )
+
+
+def test_is_retryable_transaction_db_error_rejects_integrity_failure():
+    assert not is_retryable_transaction_db_error(
+        _transaction_error("duplicate key value violates unique constraint", sqlstate="23505")
+    )
 
 
 @pytest.mark.asyncio
@@ -134,3 +156,25 @@ async def test_run_read_with_retry_reruns_whole_operation_after_disconnect():
     assert operation_calls == 2
     assert session.execute_calls == 4
     assert session.rollback_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_read_retry_uses_exponential_backoff(monkeypatch):
+    delays: list[float] = []
+    errors = [_operational_error("connection reset by peer") for _ in range(3)]
+    session = FakeReadSession([*errors, "ok"])
+
+    async def capture_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("app.utils.db_utils.asyncio.sleep", capture_sleep)
+
+    result = await execute_read_with_retry(
+        session,
+        "SELECT 1",
+        attempts=4,
+        retry_delay_seconds=0.05,
+    )
+
+    assert result == "ok"
+    assert delays == [0.05, 0.1, 0.2]

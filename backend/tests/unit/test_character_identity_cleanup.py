@@ -449,6 +449,72 @@ async def test_identity_resolver_suppresses_noise_and_resolves_aliases(db):
 
 
 @pytest.mark.asyncio
+async def test_identity_resolver_holds_ambiguous_first_name_for_review(db):
+    user = User(
+        email="identity-ambiguous-first@example.com",
+        username="identity-ambiguous-first",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Ambiguous First Name",
+        format="pdf",
+        s3_key="books/ambiguous-first-name.pdf",
+        status="ready",
+        mode="author",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    db.add_all(
+        [
+            Character(
+                book_id=book.id,
+                name="John Carter",
+                aliases=[],
+                first_chapter=1,
+                mention_count=4,
+            ),
+            Character(
+                book_id=book.id,
+                name="John Reed",
+                aliases=[],
+                first_chapter=1,
+                mention_count=5,
+            ),
+        ]
+    )
+    await db.flush()
+
+    result = await resolve_character_mention(
+        db,
+        book_id=book.id,
+        chapter_number=1,
+        surface_text="John",
+        evidence={},
+    )
+
+    assert result.action == "needs_review"
+    assert result.target_character_id is None
+    assert result.reason == "ambiguous_single_token_first_name"
+    aliases = (
+        (
+            await db.execute(
+                select(CharacterAlias).where(
+                    CharacterAlias.book_id == book.id,
+                    CharacterAlias.normalized_alias == "john",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert aliases == []
+
+
+@pytest.mark.asyncio
 async def test_identity_resolver_does_not_merge_into_rejected_hidden_character(db):
     user = User(
         email="identity-hidden@example.com", username="identity-hidden", password_hash="hash"

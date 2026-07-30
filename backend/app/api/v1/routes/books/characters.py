@@ -52,8 +52,8 @@ from app.services.character_relationship_service import (
     attach_relationship_candidate_b_for_user,
     create_book_relationship_for_user,
     delete_book_relationship_for_user,
-    repair_book_relationship_timelines_for_user,
     reject_relationship_candidate_for_user,
+    repair_book_relationship_timelines_for_user,
     resolve_relationship_candidate_for_user,
     update_book_relationship_for_user,
 )

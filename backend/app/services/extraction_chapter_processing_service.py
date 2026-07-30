@@ -17,8 +17,13 @@ from app.core.redis import (
 )
 from app.engine.character.deduplicator import character_name_keys
 from app.models.character import Character
-from app.models.user import User
 from app.services.character_identity.resolver import reconcile_pending_first_name_alias_candidates
+from app.services.extraction_chapter_analysis_dispatch_service import (
+    dispatch_chapter_analysis_after_extraction,
+)
+from app.services.extraction_chapter_content_service import (
+    _prepare_chapter_rich_content,
+)
 from app.services.extraction_chapter_diagnostics_flow_service import (
     build_post_llm_chapter_diagnostics,
 )
@@ -28,12 +33,6 @@ from app.services.extraction_chapter_embedding_service import (
 from app.services.extraction_chapter_llm_service import collect_chapter_llm_extraction
 from app.services.extraction_chapter_progress_service import update_chapter_processing_progress
 from app.services.extraction_chapter_record_service import stage_chapter_for_extraction
-from app.services.extraction_chapter_content_service import (
-    _prepare_chapter_rich_content,
-)
-from app.services.extraction_chapter_analysis_dispatch_service import (
-    dispatch_chapter_analysis_after_extraction,
-)
 from app.services.extraction_character_resolution_service import (
     resolve_chapter_character_entities,
 )
@@ -60,6 +59,8 @@ async def _process_chapter(
     queue_wait_ms: int | None = None,
     rebuild_run_id: str | None = None,
     manual_reprocess: bool = False,
+    dispatch_analysis: bool = True,
+    check_book_completion: bool = True,
 ):
     """Extract characters, relationships, store chunks for one chapter."""
     if await is_book_hidden(db, book.id):
@@ -95,9 +96,11 @@ async def _process_chapter(
 
     try:
         started_at = time.perf_counter()
-        user = await db.get(User, book.user_id)
         db_load_started = time.perf_counter()
         chapter = await stage_chapter_for_extraction(db, book, ch_data, chapter_number)
+        # Stage/reset the chapter in a short transaction. Provider calls below
+        # must not hold a checked-out connection or chapter locks.
+        await db.commit()
         log.info(
             "ingestion_timing stage=chapter_db_load book_id=%s chapter=%s elapsed_ms=%s",
             book.id,
@@ -118,6 +121,7 @@ async def _process_chapter(
             chapter_number=chapter_number,
             ch_data=ch_data,
         )
+        await db.commit()
 
         existing_characters = (
             (
@@ -130,6 +134,9 @@ async def _process_chapter(
             .scalars()
             .all()
         )
+        # The roster is safe to use after commit because worker sessions use
+        # expire_on_commit=False. Release the read transaction before LLM I/O.
+        await db.commit()
         character_key_cache: dict[uuid.UUID, set[str]] = {
             char.id: character_name_keys(char.name, char.aliases or [])
             for char in existing_characters
@@ -166,9 +173,7 @@ async def _process_chapter(
             raw_character_entities=raw_character_entities,
         )
         aggregated_entities = character_resolution.aggregated_entities
-        pending_first_chapter_candidates = (
-            character_resolution.pending_first_chapter_candidates
-        )
+        pending_first_chapter_candidates = character_resolution.pending_first_chapter_candidates
         pending_first_chapter_updates = character_resolution.pending_first_chapter_updates
         saved_character_count = character_resolution.saved_character_count
         quarantined_candidate_count = character_resolution.quarantined_candidate_count
@@ -218,6 +223,11 @@ async def _process_chapter(
             )
             return
 
+        # Only expose the chapter as processed once all provider-backed
+        # extraction and its database writes have succeeded. The staging
+        # transaction deliberately leaves this false so another chapter
+        # cannot finalize the book while this task is still running.
+        chapter.processed = True
         commit_started = time.perf_counter()
         await db.commit()
         log.info(
@@ -236,25 +246,27 @@ async def _process_chapter(
             extraction_diagnostics=extraction_diagnostics,
         )
 
-        await finalize_book_completion_after_chapter(
-            db,
-            book=book,
-            chapter=chapter,
-            chapter_number=chapter_number,
-            processed_count=processed_count,
-            processing_total=processing_total,
-            queue_wait_ms=queue_wait_ms,
-            extraction_diagnostics=extraction_diagnostics,
-        )
+        if check_book_completion:
+            await finalize_book_completion_after_chapter(
+                db,
+                book=book,
+                chapter=chapter,
+                chapter_number=chapter_number,
+                processed_count=processed_count,
+                processing_total=processing_total,
+                queue_wait_ms=queue_wait_ms,
+                extraction_diagnostics=extraction_diagnostics,
+            )
 
-        await dispatch_chapter_analysis_after_extraction(
-            db,
-            book=book,
-            chapter=chapter,
-            chapter_number=chapter_number,
-            rebuild_run_id=rebuild_run_id,
-            manual_reprocess=manual_reprocess,
-        )
+        if dispatch_analysis:
+            await dispatch_chapter_analysis_after_extraction(
+                db,
+                book=book,
+                chapter=chapter,
+                chapter_number=chapter_number,
+                rebuild_run_id=rebuild_run_id,
+                manual_reprocess=manual_reprocess,
+            )
 
         log.info(
             "ingestion_timing stage=chapter_total book_id=%s chapter=%s elapsed_ms=%s",

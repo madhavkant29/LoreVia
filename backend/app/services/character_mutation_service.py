@@ -71,6 +71,23 @@ async def create_book_character_for_user(
         actor_user_id=current_user.id,
         reason_codes=["manual_character"],
     )
+    record_quality_review(
+        db,
+        book_id=book.id,
+        user_id=current_user.id,
+        entity_type="character",
+        entity_id=character.id,
+        outcome=(
+            "missed_character"
+            if int(book.total_chapters or 0) > 0 and book.status == "ready"
+            else "manual_created"
+        ),
+        evidence={
+            "created_from": "author_create_route",
+            "book_status": book.status,
+            "chapter_count": int(book.total_chapters or 0),
+        },
+    )
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()
     await db.refresh(character)
@@ -207,7 +224,9 @@ async def serialize_character_detail(
         for rel in relationships
     }
     counterparts = (
-        (await db.execute(select(Character).where(Character.id.in_(counterpart_ids)))).scalars().all()
+        (await db.execute(select(Character).where(Character.id.in_(counterpart_ids))))
+        .scalars()
+        .all()
         if counterpart_ids
         else []
     )

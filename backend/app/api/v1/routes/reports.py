@@ -12,6 +12,7 @@ from app.models.intelligence import Notification
 from app.models.moderation import ContentReport
 from app.models.user import User
 from app.schemas.public import ContentReportCreateBody, ContentReportOut
+from app.utils.client_identity import trusted_client_ip
 from app.utils.public.moderation import (
     add_moderation_action,
     copyright_report_requires_temporary_hold,
@@ -23,7 +24,6 @@ from app.utils.public.moderation import (
 from app.utils.public.requests import (
     hash_text,
 )
-from app.utils.client_identity import trusted_client_ip
 from app.utils.public_utils import (
     MODERATION_STATUS_HIDDEN,
     MODERATION_STATUS_REPORTED,

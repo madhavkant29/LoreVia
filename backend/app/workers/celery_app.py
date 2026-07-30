@@ -14,6 +14,7 @@ from app.core.redis import close_all_redis_clients
 from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 from app.utils.logging.errors import scrub_sentry_event
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
+from app.utils.retry_utils import NON_LLM_MAX_RETRIES
 from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
 from app.workers.queues.queues import TASK_QUEUES
 
@@ -131,6 +132,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=200,
     broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=NON_LLM_MAX_RETRIES,
     broker_transport_options={
         "visibility_timeout": settings.CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS,
     },
@@ -223,7 +225,7 @@ celery_app.conf.update(
         },
     },
     task_default_retry_delay=30,
-    task_max_retries=3,
+    task_max_retries=NON_LLM_MAX_RETRIES,
 )
 
 if redis_ssl_options:
@@ -256,7 +258,11 @@ def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwarg
 @signals.worker_process_init.connect
 def _worker_process_init(**kwargs):
     try:
-        get_worker_loop()
+        loop = get_worker_loop()
+        # Celery forks worker children after importing this module. Detach any
+        # pool inherited from the parent so a child never reuses or garbage
+        # collects a parent-owned async PostgreSQL connection.
+        loop.run_until_complete(engine.dispose(close=False))
     except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
@@ -301,5 +307,7 @@ def _worker_ready_health_log(sender=None, **kwargs):
 
 
 async def _shutdown_worker_async_resources() -> None:
-    await close_all_redis_clients()
-    await engine.dispose()
+    try:
+        await close_all_redis_clients()
+    finally:
+        await engine.dispose()

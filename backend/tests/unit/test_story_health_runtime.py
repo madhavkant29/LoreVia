@@ -87,11 +87,30 @@ async def test_build_story_health_payload_scores_all_runtime_dimensions(monkeypa
             dominant_markers=["questions"],
         ),
     ]
+    continuity_scan = SimpleNamespace(
+        id=uuid.uuid4(),
+        coverage={"chapters_analyzed": 12},
+        continuity_status="issues_found",
+    )
+    continuity_findings = [
+        SimpleNamespace(
+            is_stale=False,
+            confidence=0.93,
+            status="open",
+        ),
+        SimpleNamespace(
+            is_stale=False,
+            confidence=0.72,
+            status="review_needed",
+        ),
+    ]
     db = FakeDb(
         [
             FakeResult(characters),
             FakeResult(relationships),
             FakeResult([(mara_id, 2), (joren_id, 0)]),
+            FakeResult(scalar=continuity_scan),
+            FakeResult(continuity_findings),
             FakeResult(plot_threads),
             FakeResult(scalar=world_gap),
             FakeResult(voice_profiles),
@@ -140,6 +159,8 @@ async def test_build_story_health_payload_handles_empty_runtime_data(monkeypatch
             FakeResult([]),
             FakeResult([]),
             FakeResult([]),
+            FakeResult(scalar=None),
+            FakeResult(scalar=None),
             FakeResult([]),
             FakeResult(scalar=None),
             FakeResult([]),

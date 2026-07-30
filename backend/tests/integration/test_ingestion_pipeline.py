@@ -2,11 +2,18 @@ import uuid
 
 import fitz
 import pytest
+from httpx import Request
+from openai import APIConnectionError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.book import Book, Chapter
-from app.models.character import Character, CharacterCandidate, CharacterRelationshipCandidate
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterRelationshipCandidate,
+    CharacterState,
+)
 from app.models.intelligence import CharacterRelationship, Notification
 from app.models.operations import TaskExecution
 from app.models.user import User
@@ -56,8 +63,12 @@ def _bind_worker_session(monkeypatch, db) -> None:
 
 
 def _patch_embedding_batches(monkeypatch, embed_batch) -> None:
-    monkeypatch.setattr("app.services.extraction_chapter_embedding_service.embed_batch", embed_batch)
-    monkeypatch.setattr("app.services.extraction_character_reporting_service.embed_batch", embed_batch)
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_embedding_service.embed_batch", embed_batch
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_character_reporting_service.embed_batch", embed_batch
+    )
 
 
 @pytest.mark.asyncio
@@ -161,9 +172,11 @@ async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_on
     await db.commit()
 
     async def _fake_extract(_text: str, **_kwargs) -> dict:
+        assert _kwargs["usage_db"] is None
         return {"characters": [], "relationships": [], "rejected_characters": []}
 
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
+        assert _kwargs["db"] is None
         return _embedding_for(len(texts))
 
     monkeypatch.setattr(
@@ -205,6 +218,58 @@ async def test_process_chapter_clears_stale_pending_and_suppressed_candidates_on
     assert [
         (candidate.raw_character_b, candidate.status) for candidate in relationship_candidates
     ] == [("Sol", "accepted")]
+
+
+@pytest.mark.asyncio
+async def test_process_chapter_remains_incomplete_when_embedding_provider_disconnects(
+    db,
+    monkeypatch,
+):
+    user = User(
+        email="embedding-disconnect@lorevia.app",
+        username="embedding-disconnect",
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Interrupted Extraction",
+        format="pdf",
+        s3_key="books/interrupted-extraction.pdf",
+        status="processing",
+        total_chapters=1,
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(
+        book_id=book.id,
+        number=1,
+        title="Chapter 1",
+        s3_key="books/interrupted-extraction/chapter-1.txt",
+        processed=True,
+    )
+    db.add(chapter)
+    await db.commit()
+
+    async def _raise_connection_error(*args, **kwargs):
+        raise APIConnectionError(request=Request("POST", "https://api.openai.com/v1/embeddings"))
+
+    _patch_embedding_batches(monkeypatch, _raise_connection_error)
+
+    with pytest.raises(APIConnectionError):
+        await _process_chapter(
+            db,
+            book,
+            {
+                "number": 1,
+                "title": "Chapter 1",
+                "text": "Mara crosses the bridge before dawn.",
+            },
+        )
+
+    await db.refresh(chapter)
+    assert chapter.processed is False
 
 
 @pytest.mark.asyncio
@@ -297,9 +362,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
     async def _fake_send_processing_complete_with_stats(email: str, **payload):
         sent_ready_emails.append({"email": email, **payload})
 
-    monkeypatch.setattr(
-        "app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask()
-    )
+    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
     monkeypatch.setattr("app.workers.tasks.analysis_tasks.analyse_chapter_task", _AnalysisTask())
     monkeypatch.setattr(
@@ -338,8 +401,8 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
     result = await process_book(str(book_id), queue_wait_ms=12)
 
     assert result == {"book_id": str(book_id), "chapters": 3}
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2, 3]
-    assert [item["kwargs"].get("countdown", 0) for item in captured_chapter_tasks] == [0, 0, 0]
+    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
+    assert [item["kwargs"].get("countdown", 0) for item in captured_chapter_tasks] == [0]
 
     staged_chapters = (
         (
@@ -433,8 +496,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
     )
     assert [execution.chapter_number for execution in analysis_executions] == [1, 2, 3]
     assert all(
-        execution.status in {"pending_dispatch", "queued"}
-        for execution in analysis_executions
+        execution.status in {"pending_dispatch", "queued"} for execution in analysis_executions
     )
     assert any(
         batch and batch[0].startswith("Chapter 1: One\n\nAoi Tanaka enters the archive")
@@ -952,6 +1014,15 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
     assert [candidate.proposed_name for candidate in candidate_rows] == ["Anna Sergeyevna"]
     assert candidate_rows[0].status == "promoted"
     assert candidate_rows[0].matched_character_id == persisted_characters[0].id
+    baseline_state = (
+        await db.execute(
+            select(CharacterState).where(
+                CharacterState.character_id == persisted_characters[0].id,
+                CharacterState.at_chapter == 1,
+            )
+        )
+    ).scalar_one()
+    assert baseline_state.trait_snapshot == {}
 
 
 @pytest.mark.asyncio
@@ -1422,7 +1493,7 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(
     result = await process_book(str(book_id), queue_wait_ms=9)
 
     assert result == {"book_id": str(book_id), "chapters": 2}
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2]
+    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -1489,9 +1560,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
         _raise_extract,
     )
     _patch_embedding_batches(monkeypatch, _fake_embed)
-    monkeypatch.setattr(
-        "app.engine.character.deduplicator.embed_for_dedup", _fake_embed_for_dedup
-    )
+    monkeypatch.setattr("app.engine.character.deduplicator.embed_for_dedup", _fake_embed_for_dedup)
     monkeypatch.setattr(
         "app.services.extraction_new_character_resolution_service.find_similar", _never_find_similar
     )
@@ -1620,7 +1689,7 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(
 
     assert result == {"book_id": str(book_id), "chapters": 3}
     assert parse_calls == [True, False]
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2, 3]
+    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -1696,7 +1765,7 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
 
     assert result == {"book_id": str(book_id), "chapters": 2}
     assert parse_calls == [True, False]
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1, 2]
+    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
 
     book = await db.get(Book, book_id)
     assert book is not None

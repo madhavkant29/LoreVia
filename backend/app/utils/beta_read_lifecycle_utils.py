@@ -21,8 +21,8 @@ from app.utils.beta_read_access_utils import (
 )
 from app.utils.beta_read_policy_utils import (
     ACTIVE_READER_STATES,
-    apply_missed_beta_read_penalty,
     apply_beta_submission_snapshot,
+    apply_missed_beta_read_penalty,
     beta_read_rating_sentiment,
     ensure_timezone,
     normalize_beta_read_rating,

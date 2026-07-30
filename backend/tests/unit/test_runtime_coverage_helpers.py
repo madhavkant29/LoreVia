@@ -2783,7 +2783,9 @@ def test_world_building_candidate_conflict_and_scoring_helpers():
         )
         is True
     )
-    assert world_building_serialization_utils.filename_title("moon_gate-notes.md") == "Moon Gate Notes"
+    assert (
+        world_building_serialization_utils.filename_title("moon_gate-notes.md") == "Moon Gate Notes"
+    )
 
     world_item = {
         "name": "Moon Gate",

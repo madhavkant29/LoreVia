@@ -30,7 +30,9 @@ async def test_create_world_building_documents_uploads_active_documents(monkeypa
     async def sync_elements(_db, _book):
         return []
 
-    monkeypatch.setattr(world_building_document_workflow_utils, "sync_world_document_elements", sync_elements)
+    monkeypatch.setattr(
+        world_building_document_workflow_utils, "sync_world_document_elements", sync_elements
+    )
     monkeypatch.setattr(
         world_building_document_workflow_utils,
         "upload_binary",
@@ -63,7 +65,9 @@ async def test_update_world_building_document_replaces_storage_and_requires_text
     async def sync_elements(_db, _book):
         return []
 
-    monkeypatch.setattr(world_building_document_workflow_utils, "sync_world_document_elements", sync_elements)
+    monkeypatch.setattr(
+        world_building_document_workflow_utils, "sync_world_document_elements", sync_elements
+    )
     monkeypatch.setattr(
         world_building_document_workflow_utils,
         "upload_binary",
@@ -113,7 +117,9 @@ async def test_delete_world_building_document_validates_book_ownership(monkeypat
     async def sync_elements(_db, _book):
         return []
 
-    monkeypatch.setattr(world_building_document_workflow_utils, "sync_world_document_elements", sync_elements)
+    monkeypatch.setattr(
+        world_building_document_workflow_utils, "sync_world_document_elements", sync_elements
+    )
     db = _FakeDB()
     book = SimpleNamespace(id=uuid.uuid4())
     document = SimpleNamespace(book_id=uuid.uuid4())

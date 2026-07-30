@@ -16,7 +16,11 @@ from tenacity import (
 )
 
 from app.core.config import settings
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.llm_usage_utils import (
+    create_tracked_chat_completion,
+    is_retryable_llm_call_error,
+)
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 _openai_client: AsyncOpenAI | None = None
 _gemini_client: object | None = None
@@ -28,7 +32,9 @@ def _get_openai_client(external: AsyncOpenAI | None = None) -> AsyncOpenAI:
     if external is not None:
         return external
     if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        # Tenacity below is the single retry owner. Leaving the SDK's default
+        # retries enabled would multiply every configured attempt.
+        _openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
     return _openai_client
 
 
@@ -43,22 +49,11 @@ def _get_gemini_client() -> object:
 
 
 def _is_transient_openai_error(exc: BaseException) -> bool:
-    import httpx
-
-    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError)):
-        return True
-    try:
-        from openai import APIStatusError
-
-        if isinstance(exc, APIStatusError):
-            return exc.status_code >= 500 or exc.status_code == 429
-    except ImportError:
-        pass
-    return False
+    return is_retryable_llm_call_error(exc)
 
 
 @retry(
-    stop=stop_after_attempt(3),
+    stop=stop_after_attempt(LLM_MAX_RETRIES + 1),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception(_is_transient_openai_error),
     reraise=True,

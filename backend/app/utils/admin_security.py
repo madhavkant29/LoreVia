@@ -59,9 +59,7 @@ def validate_admin_csrf_token(request: Request) -> None:
 
 def admin_csrf_allowed_origins() -> set[str]:
     allowed_origins = {
-        origin.rstrip("/")
-        for origin in cors_origins()
-        if origin.strip() and "*" not in origin
+        origin.rstrip("/") for origin in cors_origins() if origin.strip() and "*" not in origin
     }
     allowed_origins.add(settings.APP_URL.rstrip("/"))
     allowed_origins.update({"https://getlorevia.com", "https://www.getlorevia.com"})

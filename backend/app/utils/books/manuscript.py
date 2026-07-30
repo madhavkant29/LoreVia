@@ -519,6 +519,7 @@ async def persist_editor_chapter_content(
             )
         return chapter
 
+    previous_content_version = chapter.content_version
     chapter.title = title or chapter.title
     chapter.description = description or chapter.description
     chapter.chapter_kind = normalization.normalize_chapter_kind(chapter_kind)
@@ -528,6 +529,15 @@ async def persist_editor_chapter_content(
     chapter.content_version = content_version
     chapter.processed = False
     chapter.analysis_state = {}
+    if previous_content_version != content_version:
+        from app.services.continuity.scan_service import mark_continuity_findings_stale
+
+        await mark_continuity_findings_stale(
+            db,
+            book_id=book.id,
+            chapter_number=chapter_number,
+            content_version=content_version,
+        )
     await db.flush()
     if should_sync_media:
         await sync_chapter_media_from_images(

@@ -58,3 +58,48 @@ export const pricingTiers: PricingTier[] = pricingCatalog.tiers.map((tier) => ({
   priceMonthly: tier.price_monthly,
   priceAnnual: tier.price_annual,
 }))
+
+export function buildPricingOffersJsonLd(pricingUrl: string) {
+  return pricingTiers.flatMap((tier) => {
+    if (tier.access === "free") {
+      return [{
+        "@type": "Offer",
+        name: tier.name,
+        price: "0",
+        priceCurrency: "USD",
+        url: pricingUrl,
+      }]
+    }
+
+    return [
+      {
+        "@type": "Offer",
+        name: `${tier.name} Monthly`,
+        sku: tier.monthlyCode,
+        price: tier.priceMonthly.toString(),
+        priceCurrency: "USD",
+        url: pricingUrl,
+        priceSpecification: {
+          "@type": "UnitPriceSpecification",
+          price: tier.priceMonthly.toString(),
+          priceCurrency: "USD",
+          billingDuration: "P1M",
+        },
+      },
+      {
+        "@type": "Offer",
+        name: `${tier.name} Annual`,
+        sku: tier.annualCode,
+        price: tier.priceAnnual.toString(),
+        priceCurrency: "USD",
+        url: pricingUrl,
+        priceSpecification: {
+          "@type": "UnitPriceSpecification",
+          price: tier.priceAnnual.toString(),
+          priceCurrency: "USD",
+          billingDuration: "P1Y",
+        },
+      },
+    ]
+  })
+}

@@ -108,9 +108,7 @@ async def test_reader_progress_update_marks_reader_progress_cache_dirty(monkeypa
         "get_book_with_collaboration_access",
         get_book_with_collaboration_access,
     )
-    monkeypatch.setattr(
-        reader_progress, "collaboration_allows_chapter", lambda *_args: True
-    )
+    monkeypatch.setattr(reader_progress, "collaboration_allows_chapter", lambda *_args: True)
     monkeypatch.setattr(
         reader_progress,
         "mark_reader_progress_cache_dirty",
@@ -149,9 +147,7 @@ async def test_public_forum_and_profile_invalidation_bump_expected_keys(monkeypa
     async def mark_public_profile_cache_dirty(value):
         calls.append(("profile", value))
 
-    monkeypatch.setattr(
-        forum_foundation, "cache_set_version_marker", cache_set_version_marker
-    )
+    monkeypatch.setattr(forum_foundation, "cache_set_version_marker", cache_set_version_marker)
     monkeypatch.setattr(forum_foundation, "cache_del", cache_del)
     monkeypatch.setattr(
         forum_foundation, "mark_public_profile_cache_dirty", mark_public_profile_cache_dirty
@@ -184,17 +180,11 @@ async def test_advisor_invalidation_marks_book_series_and_deletes_namespaces(
         calls.append(("series", value))
 
     async def invalidate_advisor_caches(*, book_id, series_ids=None):
-        calls.append(
-            ("advisor", [str(book_id), *[str(value) for value in series_ids or []]])
-        )
+        calls.append(("advisor", [str(book_id), *[str(value) for value in series_ids or []]]))
 
     monkeypatch.setattr(advisor_utils, "mark_book_cache_dirty", mark_book_cache_dirty)
-    monkeypatch.setattr(
-        advisor_utils, "mark_series_cache_dirty", mark_series_cache_dirty
-    )
-    monkeypatch.setattr(
-        advisor_utils, "invalidate_advisor_caches", invalidate_advisor_caches
-    )
+    monkeypatch.setattr(advisor_utils, "mark_series_cache_dirty", mark_series_cache_dirty)
+    monkeypatch.setattr(advisor_utils, "invalidate_advisor_caches", invalidate_advisor_caches)
 
     await advisor_utils.invalidate_advisor_caches_for_book(DB(), book_id=book_id)
 

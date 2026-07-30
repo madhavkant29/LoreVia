@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -81,7 +81,7 @@ async def test_update_chapter_processing_progress_updates_state_and_invalidates_
 
     assert processed_count == 3
     assert processing_total == 5
-    assert db.commits == 1
+    assert db.commits == 2
     assert db.statements
     assert invalidated == [(db, book.id)]
     assert book.writer_workspace["processing"]["stage"] == "chapter_complete"
@@ -106,6 +106,7 @@ async def test_update_chapter_processing_progress_uses_processed_count_when_tota
         "update_book_processing_state",
         lambda book, **kwargs: {"processing": kwargs},
     )
+
     async def fake_invalidate(*args, **kwargs):
         return None
 
@@ -126,4 +127,5 @@ async def test_update_chapter_processing_progress_uses_processed_count_when_tota
 
     assert processed_count == 2
     assert processing_total == 2
+    assert db.commits == 2
     assert book.writer_workspace["processing"]["total_chapters"] == 2

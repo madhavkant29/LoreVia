@@ -10,7 +10,7 @@ import { HomePricingSection } from "@/components/marketing/HomePricingSection"
 import { MarketingHeader } from "@/components/marketing/MarketingHeader"
 import { Reveal } from "@/components/marketing/Reveal"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { pricingTiers as billingPricingTiers } from "@/lib/billing/catalog"
+import { buildPricingOffersJsonLd } from "@/lib/billing/catalog"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
@@ -238,15 +238,7 @@ export default function HomePage() {
     ],
     description:
       "LoreVia helps authors write, organize, revise, and audit complex stories in one workspace with built-in story memory, continuity intelligence, and grounded manuscript answers.",
-    offers: billingPricingTiers
-      .filter((tier) => tier.priceMonthly >= 0)
-      .map((tier) => ({
-        "@type": "Offer",
-        price: tier.priceMonthly.toString(),
-        priceCurrency: "USD",
-        name: tier.name,
-        url: toAbsoluteUrl("/pricing"),
-      })),
+    offers: buildPricingOffersJsonLd(toAbsoluteUrl("/pricing")),
     featureList: [
       "Manuscript writing and editing",
       "Chapter-grounded answers",

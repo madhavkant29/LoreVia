@@ -15,18 +15,24 @@ from app.models.intelligence import (
     WorldBuildingDocument,
     WorldElement,
 )
-from app.utils.world_building_candidate_utils import (
-    _apply_character_and_override_resolution,
-    _dedupe_strings,
-    _merge_claims,
+from app.utils.world_building_analysis_payload_utils import (
+    build_integration_analysis_payload,
+    build_world_gap_analysis_payload,
+    empty_gap_analysis_payload,
+    empty_integration_analysis_payload,
 )
 from app.utils.world_building_candidate_record_utils import (
     collect_story_candidate_records,
     collect_world_document_candidate_records,
 )
+from app.utils.world_building_candidate_utils import (
+    _apply_character_and_override_resolution,
+    _dedupe_strings,
+    _merge_claims,
+)
 from app.utils.world_building_conflict_utils import (
-    _claim_phrase,
     _build_cross_source_conflict_detail,
+    _claim_phrase,
     _claims_contradict,
     _descriptions_conflict,
     _detect_internal_candidate_conflicts,
@@ -34,23 +40,17 @@ from app.utils.world_building_conflict_utils import (
     _normalize_world_name,
     _should_surface_story_item,
     _should_surface_world_item,
-    _world_text_mentions_name,
     _world_names_equivalent,
-)
-from app.utils.world_building_serialization_utils import (
-    rank_world_elements_for_query,
-    serialize_world_element,
+    _world_text_mentions_name,
 )
 from app.utils.world_building_document_utils import (
     list_world_building_documents,
 )
 from app.utils.world_building_document_workflow_utils import sync_world_document_elements
 from app.utils.world_building_note_utils import save_canon_override, save_world_note
-from app.utils.world_building_analysis_payload_utils import (
-    build_integration_analysis_payload,
-    build_world_gap_analysis_payload,
-    empty_gap_analysis_payload,
-    empty_integration_analysis_payload,
+from app.utils.world_building_serialization_utils import (
+    rank_world_elements_for_query,
+    serialize_world_element,
 )
 from app.utils.world_building_story_utils import (
     collect_story_characters,

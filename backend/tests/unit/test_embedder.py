@@ -1,10 +1,15 @@
 import json
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from httpx import Request
+from openai import APIConnectionError
+from tenacity import wait_none
 
 from app.core import redis as redis_utils
+from app.engine.embeddings import embedder
 
 
 def _stub_embedding_response(embedding: list[float]) -> MagicMock:
@@ -32,6 +37,42 @@ class _FakeRedis:
     async def delete(self, *keys):
         for key in keys:
             self.values.pop(key, None)
+
+
+def test_get_client_disables_hidden_sdk_retries(monkeypatch):
+    captured: dict[str, object] = {}
+    client = object()
+
+    def fake_openai(**kwargs):
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr(embedder, "AsyncOpenAI", fake_openai)
+    monkeypatch.setattr(embedder.settings, "OPENAI_API_KEY", "test-key")
+
+    assert embedder.get_client() is client
+    assert captured == {"api_key": "test-key", "max_retries": 0}
+
+
+@pytest.mark.asyncio
+async def test_embedding_retry_is_bounded_at_the_provider_call(monkeypatch):
+    calls = 0
+    response = SimpleNamespace(data=[])
+
+    async def fake_create_tracked_embedding(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise APIConnectionError(
+                request=Request("POST", "https://api.openai.com/v1/embeddings")
+            )
+        return response
+
+    monkeypatch.setattr(embedder, "create_tracked_embedding", fake_create_tracked_embedding)
+    call_without_wait = embedder._create_embedding_with_retry.retry_with(wait=wait_none())
+
+    assert await call_without_wait(client=object()) is response
+    assert calls == 3
 
 
 @pytest.mark.asyncio

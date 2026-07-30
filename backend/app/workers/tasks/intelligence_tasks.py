@@ -4,6 +4,7 @@ import uuid
 
 from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 
@@ -12,13 +13,16 @@ from app.workers.celery_app import celery_app
     bind=True,
     name="intelligence_tasks.generate_wiki",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def generate_wiki_task(self, book_id: str):
     """Generate auto-wiki for all chapters of a book. Phase 3."""
+    wiki_work_started = False
 
     async def _run():
+        nonlocal wiki_work_started
+
         from app.core.database import AsyncSessionLocal
         from app.models.book import Book
         from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
@@ -27,6 +31,7 @@ def generate_wiki_task(self, book_id: str):
             book = await db.get(Book, uuid.UUID(book_id))
             if not book:
                 raise ValueError("wiki_book_not_found")
+            wiki_work_started = True
             await generate_wiki_from_manuscript(db, book)
             await db.commit()
 
@@ -35,14 +40,17 @@ def generate_wiki_task(self, book_id: str):
     except ValueError:
         raise
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        if wiki_work_started or retries >= NON_LLM_MAX_RETRIES:
+            raise
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))
 
 
 @celery_app.task(
     bind=True,
     name="intelligence_tasks.generate_advisor_reply",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def generate_advisor_reply_task(
@@ -54,7 +62,11 @@ def generate_advisor_reply_task(
     messages: list[dict[str, str]],
     total_chapters: int,
 ):
+    advisor_work_started = False
+
     async def _run():
+        nonlocal advisor_work_started
+
         from app.core.database import AsyncSessionLocal
         from app.models.book import Book
         from app.services.advisor_jobs_service import (
@@ -76,6 +88,7 @@ def generate_advisor_reply_task(
                     error_detail="Advisor book was missing or inaccessible.",
                 )
                 raise ValueError("advisor_book_not_found")
+            advisor_work_started = True
             payload = await build_advisor_reply_payload(
                 db=db,
                 book=book,
@@ -91,7 +104,10 @@ def generate_advisor_reply_task(
     except ValueError:
         raise
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        if self.request.retries >= self.max_retries:
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES
+        retryable = not advisor_work_started and retries < max_retries
+        if not retryable:
 
             async def _mark_failed():
                 from app.core.database import AsyncSessionLocal
@@ -106,14 +122,15 @@ def generate_advisor_reply_task(
                     )
 
             run_worker_coro(_mark_failed())
-        raise self.retry(exc=exc)
+            raise
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))
 
 
 @celery_app.task(
     bind=True,
     name="intelligence_tasks.generate_series_advisor_reply",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def generate_series_advisor_reply_task(
@@ -124,7 +141,11 @@ def generate_series_advisor_reply_task(
     user_id: str,
     messages: list[dict[str, str]],
 ):
+    advisor_work_started = False
+
     async def _run():
+        nonlocal advisor_work_started
+
         from app.core.database import AsyncSessionLocal
         from app.models.book import Series
         from app.services.advisor_jobs_service import (
@@ -146,6 +167,7 @@ def generate_series_advisor_reply_task(
                     error_detail="Advisor series was missing or inaccessible.",
                 )
                 raise ValueError("advisor_series_not_found")
+            advisor_work_started = True
             payload = await build_series_advisor_reply_payload(
                 db=db,
                 series=series,
@@ -160,7 +182,10 @@ def generate_series_advisor_reply_task(
     except ValueError:
         raise
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        if self.request.retries >= self.max_retries:
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES
+        retryable = not advisor_work_started and retries < max_retries
+        if not retryable:
 
             async def _mark_failed():
                 from app.core.database import AsyncSessionLocal
@@ -175,14 +200,15 @@ def generate_series_advisor_reply_task(
                     )
 
             run_worker_coro(_mark_failed())
-        raise self.retry(exc=exc)
+            raise
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))
 
 
 @celery_app.task(
     bind=True,
     name="intelligence_tasks.generate_advisor_suggestions",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def generate_advisor_suggestions_task(
@@ -193,7 +219,11 @@ def generate_advisor_suggestions_task(
     user_id: str,
     total_chapters: int,
 ):
+    advisor_work_started = False
+
     async def _run():
+        nonlocal advisor_work_started
+
         from app.core.database import AsyncSessionLocal
         from app.core.redis import get_suggestion_scan_cache, set_suggestion_scan_cache
         from app.models.book import Book
@@ -218,6 +248,7 @@ def generate_advisor_suggestions_task(
                 )
                 raise ValueError("advisor_book_not_found")
 
+            advisor_work_started = True
             payload = await build_advisor_suggestions_payload(
                 db=db,
                 book=book,
@@ -253,7 +284,10 @@ def generate_advisor_suggestions_task(
     except ValueError:
         raise
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        if self.request.retries >= self.max_retries:
+        retries = int(getattr(self.request, "retries", 0) or 0)
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES
+        retryable = not advisor_work_started and retries < max_retries
+        if not retryable:
 
             async def _mark_failed():
                 from app.core.database import AsyncSessionLocal
@@ -270,4 +304,5 @@ def generate_advisor_suggestions_task(
                     )
 
             run_worker_coro(_mark_failed())
-        raise self.retry(exc=exc)
+            raise
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))

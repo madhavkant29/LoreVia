@@ -30,6 +30,14 @@ describe("AdminPage owner workflows", () => {
     expect(getContainer().textContent).toContain("Subscription Metrics")
     expect(getContainer().textContent).toContain("Admin Access")
     expect(getContainer().textContent).toContain("Audit")
+    expect(getContainer().textContent).toContain("Author Monthly")
+    expect(getContainer().textContent).toContain("$19/mo")
+    expect(getContainer().textContent).toContain("Author Annual")
+    expect(getContainer().textContent).toContain("$190/year")
+    expect(getContainer().textContent).toContain("Architect Monthly")
+    expect(getContainer().textContent).toContain("$39/mo")
+    expect(getContainer().textContent).toContain("Architect Annual")
+    expect(getContainer().textContent).toContain("$390/year")
 
     await act(async () => {
       clickButton("Approve", sectionByHeading("Moderation"))

@@ -144,10 +144,14 @@ async def get_timeline(
             )
         ).all()
     chapter_titles = {number: title for number, title in chapter_meta_rows}
-    chapter_points = [
-        {"number": number, "title": title}
-        for number, title in sorted(chapter_meta_rows, key=lambda item: item[0])
-    ] if want_chapters else []
+    chapter_points = (
+        [
+            {"number": number, "title": title}
+            for number, title in sorted(chapter_meta_rows, key=lambda item: item[0])
+        ]
+        if want_chapters
+        else []
+    )
 
     thread_rows = tuple()  # type: ignore[var-annotated]
     if want_events or want_thread_tracks:

@@ -17,6 +17,9 @@ def test_chat_cost_accounts_for_cached_prompt_tokens():
 
 
 def test_unknown_model_returns_incomplete_cost():
-    assert calculate_llm_cost(
-        "unknown", prompt_tokens=1, completion_tokens=1
-    ) == (None, None, None, None)
+    assert calculate_llm_cost("unknown", prompt_tokens=1, completion_tokens=1) == (
+        None,
+        None,
+        None,
+        None,
+    )

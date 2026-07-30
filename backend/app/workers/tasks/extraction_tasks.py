@@ -1,8 +1,6 @@
 from app.services.chapter_recovery_service import repair_chapter_payload_from_source
 from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.ingestion_utils import (
-    LLM_USAGE_LIMIT_MAX_RETRIES,
-    LLM_USAGE_LIMIT_RETRY_SECONDS,
     extract_queue_wait_ms,
     get_processing_started_at,
     is_book_hidden,
@@ -12,6 +10,8 @@ from app.utils.ingestion_utils import (
     load_processing_chapter_payload,
     update_book_processing_state,
 )
+from app.utils.llm_usage_utils import is_llm_call_error
+from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 from app.workers.consumers.extraction_consumer import _process_chapter, process_book
@@ -21,11 +21,12 @@ from app.workers.consumers.extraction_consumer import _process_chapter, process_
     bind=True,
     name="extraction_tasks.process_book",
     queue="extraction",
-    max_retries=3,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def process_book_task(self, book_id: str, execution_id: str | None = None):
     if execution_id:
+
         async def _claim_execution() -> bool:
             from app.core.database import AsyncSessionLocal
             from app.services.task_execution_service import claim_task_execution
@@ -41,6 +42,7 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
             process_book(book_id, queue_wait_ms=queue_wait_ms, task_id=self.request.id)
         )
         if execution_id:
+
             async def _complete_execution() -> None:
                 from app.core.database import AsyncSessionLocal
                 from app.services.task_execution_service import (
@@ -57,30 +59,33 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         retryable = is_retryable_processing_error(exc)
         retries = int(getattr(self.request, "retries", 0) or 0)
-        max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES
         if execution_id:
+
             async def _record_failure(error: Exception = exc) -> None:
                 from app.core.database import AsyncSessionLocal
                 from app.services.task_execution_service import fail_task_execution
 
                 async with AsyncSessionLocal() as db:
                     await fail_task_execution(
-                        db, execution_id, error=error,
+                        db,
+                        execution_id,
+                        error=error,
                         terminal=not retryable or retries >= max_retries,
                         category="retryable" if retryable else "processing",
                     )
 
             run_worker_coro(_record_failure())
-        if not retryable:
+        if not retryable or retries >= max_retries:
             raise
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))
 
 
 @celery_app.task(
     bind=True,
     name="extraction_tasks.process_chapter",
     queue="extraction",
-    max_retries=3,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def process_chapter_task(
@@ -92,7 +97,10 @@ def process_chapter_task(
     manual_reprocess: bool = False,
     execution_id: str | None = None,
 ):
+    chapter_work_started = False
+
     if execution_id:
+
         async def _claim_execution() -> bool:
             from app.core.database import AsyncSessionLocal
             from app.services.task_execution_service import claim_task_execution
@@ -104,6 +112,8 @@ def process_chapter_task(
             return {"skipped": "duplicate_or_active_execution"}
 
     async def _run():
+        nonlocal chapter_work_started
+
         import uuid
         from datetime import UTC, datetime
 
@@ -181,6 +191,9 @@ def process_chapter_task(
                 if chapter_payload is None:
                     raise ValueError(f"missing_chapter_payload:{book.id}:{chapter_num}")
 
+                # Nothing below this point is safe to replay as a whole task:
+                # provider calls may succeed before a later provider/DB error.
+                chapter_work_started = True
                 await _process_chapter(
                     db,
                     book,
@@ -280,6 +293,7 @@ def process_chapter_task(
     try:
         run_worker_coro(_run())
         if execution_id:
+
             async def _complete_execution() -> None:
                 from app.core.database import AsyncSessionLocal
                 from app.services.task_execution_service import (
@@ -295,24 +309,24 @@ def process_chapter_task(
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if is_llm_coordination_retry_error(exc):
             if execution_id:
-                async def _record_capacity_retry(error: Exception = exc) -> None:
+
+                async def _pause_capacity_execution(error_detail: str = str(exc)) -> None:
                     from app.core.database import AsyncSessionLocal
-                    from app.services.task_execution_service import fail_task_execution
+                    from app.services.task_execution_service import pause_task_execution
 
                     async with AsyncSessionLocal() as db:
-                        await fail_task_execution(
+                        await pause_task_execution(
                             db,
                             execution_id,
-                            error=error,
-                            terminal=False,
-                            category="llm_capacity",
+                            reason="llm_capacity",
+                            blocker={"kind": "llm_capacity", "detail": error_detail},
                         )
 
-                run_worker_coro(_record_capacity_retry())
-            retry_after = int(getattr(exc, "headers", {}).get("Retry-After", 30))
-            raise self.retry(exc=exc, countdown=retry_after, max_retries=12)
+                run_worker_coro(_pause_capacity_execution())
+            return {"paused": "llm_capacity"}
         if is_llm_usage_limit_error(exc):
             if execution_id:
+
                 async def _pause_execution(error_detail: str = str(exc)) -> None:
                     from app.core.database import AsyncSessionLocal
                     from app.services.task_execution_service import pause_task_execution
@@ -326,19 +340,20 @@ def process_chapter_task(
                         )
 
                 run_worker_coro(_pause_execution())
-            retries = int(getattr(self.request, "retries", 0) or 0)
-            if retries >= LLM_USAGE_LIMIT_MAX_RETRIES:
-                return {"paused": "llm_usage_limit"}
-            raise self.retry(
-                exc=exc,
-                countdown=LLM_USAGE_LIMIT_RETRY_SECONDS,
-                max_retries=LLM_USAGE_LIMIT_MAX_RETRIES,
-            )
-        retryable = is_retryable_processing_error(exc)
+            return {"paused": "llm_usage_limit"}
+        # Provider calls already exhausted their bounded call-level retries.
+        # Once chapter work starts, even a transient DB failure may follow paid
+        # work, so replaying the task would repeat successful provider stages.
+        retryable = (
+            is_retryable_processing_error(exc)
+            and not is_llm_call_error(exc)
+            and not chapter_work_started
+        )
         error_text = str(exc)
         retries = int(getattr(self.request, "retries", 0) or 0)
-        max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES
         if execution_id:
+
             async def _record_execution_failure(error: Exception = exc) -> None:
                 from app.core.database import AsyncSessionLocal
                 from app.services.task_execution_service import fail_task_execution
@@ -372,14 +387,16 @@ def process_chapter_task(
 
             run_worker_coro(_fail_terminal_rebuild())
             raise
-        raise self.retry(exc=exc)
+        if not retryable or retries >= max_retries:
+            raise
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))
 
 
 @celery_app.task(
     bind=True,
     name="extraction_tasks.repair_chapter_payload",
     queue="extraction",
-    max_retries=3,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def repair_chapter_payload_task(
@@ -389,6 +406,7 @@ def repair_chapter_payload_task(
     execution_id: str | None = None,
 ):
     if execution_id:
+
         async def _claim_execution() -> bool:
             from app.core.database import AsyncSessionLocal
             from app.services.task_execution_service import claim_task_execution
@@ -425,6 +443,7 @@ def repair_chapter_payload_task(
     try:
         result = run_worker_coro(_run())
         if execution_id:
+
             async def _complete_execution() -> None:
                 from app.core.database import AsyncSessionLocal
                 from app.services.task_execution_service import (
@@ -441,8 +460,9 @@ def repair_chapter_payload_task(
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         retryable = is_retryable_processing_error(exc)
         retries = int(getattr(self.request, "retries", 0) or 0)
-        max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES
         if execution_id:
+
             async def _record_execution_failure(error: Exception = exc) -> None:
                 from app.core.database import AsyncSessionLocal
                 from app.services.task_execution_service import fail_task_execution
@@ -457,6 +477,6 @@ def repair_chapter_payload_task(
                     )
 
             run_worker_coro(_record_execution_failure())
-        if not retryable:
+        if not retryable or retries >= max_retries:
             raise
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))

@@ -1,6 +1,6 @@
+import uuid
 from dataclasses import dataclass
 from typing import Any
-import uuid
 
 from app.engine.character.adjudicator import (
     ADJUDICATION_PROMOTED_CHARACTER,

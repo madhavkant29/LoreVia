@@ -7,8 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.api.v1.routes import intelligence
-from app.api.v1.routes import world_building_documents
+from app.api.v1.routes import intelligence, world_building_documents
 from app.api.v1.routes.advisor import chat as advisor_chat
 from app.api.v1.routes.advisor import suggestions as advisor_suggestions
 from app.api.v1.routes.books import notes as book_notes

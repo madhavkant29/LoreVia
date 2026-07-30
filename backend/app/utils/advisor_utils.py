@@ -60,6 +60,7 @@ from app.utils.advisor_result_utils import (
     build_character_voice_context,
     build_fallback_advisor_suggestions,
     identify_character_mentions,
+    merge_editorial_review_results,
     normalize_editorial_review_result,
     normalize_proactive_scan_result,
     normalize_prose_tighten_result,
@@ -78,11 +79,11 @@ from app.utils.advisor_story_context_utils import (
     build_series_story_context,
     build_story_context,
 )
-from app.utils.advisor_world_context_utils import build_advisor_world_context
 from app.utils.advisor_word_finder_utils import (
     generate_whats_the_word_result,
     normalize_whats_the_word_result,
 )
+from app.utils.advisor_world_context_utils import build_advisor_world_context
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.world_building_utils import classify_world_intent
 

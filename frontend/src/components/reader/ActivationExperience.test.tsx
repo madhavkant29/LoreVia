@@ -7,10 +7,16 @@ import { ActivationExperience } from "./ActivationExperience"
 import type { RevisionIntelligence } from "@/types/book"
 
 const decideMock = vi.fn()
+const getContinuityFindingsMock = vi.fn()
+const createContinuityScanMock = vi.fn()
 const captureMock = vi.fn()
 
 vi.mock("@/lib/api/books", () => ({
-  booksApi: { decideRevisionFinding: (...args: unknown[]) => decideMock(...args) },
+  booksApi: {
+    decideRevisionFinding: (...args: unknown[]) => decideMock(...args),
+    getContinuityFindings: (...args: unknown[]) => getContinuityFindingsMock(...args),
+    createContinuityScan: (...args: unknown[]) => createContinuityScanMock(...args),
+  },
 }))
 
 vi.mock("@/lib/analytics/posthog", () => ({ capture: (...args: unknown[]) => captureMock(...args) }))
@@ -58,6 +64,24 @@ describe("ActivationExperience", () => {
     document.body.appendChild(container)
     root = createRoot(container)
     decideMock.mockReset()
+    getContinuityFindingsMock.mockReset()
+    getContinuityFindingsMock.mockResolvedValue([])
+    createContinuityScanMock.mockReset()
+    createContinuityScanMock.mockResolvedValue({
+      id: "scan-1",
+      book_id: "book-1",
+      scope: "full_book",
+      status: "ready",
+      continuity_status: "clean",
+      detector_version: "v1",
+      chapter_versions: {},
+      coverage: { chapters_analyzed: 24 },
+      metrics: {},
+      word_count: 1000,
+      finding_count: 0,
+      stale_finding_count: 0,
+      findings: [],
+    })
     captureMock.mockReset()
   })
 

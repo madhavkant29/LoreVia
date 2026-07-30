@@ -52,6 +52,15 @@ def test_shared_pricing_catalog_matches_backend_constants():
         assert plans[annual_code]["checkout_enabled"] is True
 
 
+def test_shared_pricing_catalog_has_current_subscription_prices():
+    assert PLAN_PRICES_USD == {
+        "author_monthly": 19,
+        "author_annual": 190,
+        "architect_monthly": 39,
+        "architect_annual": 390,
+    }
+
+
 def test_shared_pricing_catalog_tracks_price_id_env_keys():
     catalog = _load_shared_pricing_catalog()
     plans = {str(plan["code"]): plan for plan in catalog["plans"]}

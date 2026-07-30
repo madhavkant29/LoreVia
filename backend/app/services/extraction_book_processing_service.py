@@ -145,9 +145,7 @@ async def process_book_ingestion_and_queue(
 
     all_chapters = apply_chapter_number_strategy(
         chapters,
-        preserve_chapter_numbers=(
-            book.preserve_chapter_numbers or book.preserve_source_chapters
-        )
+        preserve_chapter_numbers=(book.preserve_chapter_numbers or book.preserve_source_chapters)
         and book.work_type != "screenplay",
         generic_titles=book.work_type != "screenplay"
         and not (book.preserve_chapter_numbers or book.preserve_source_chapters),

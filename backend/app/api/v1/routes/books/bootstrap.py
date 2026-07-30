@@ -57,6 +57,7 @@ from app.utils.books.notes import (
     list_book_notes,
     list_manuscript_annotations,
 )
+from app.utils.books.overview import build_book_overview_payload
 from app.utils.books.planning import build_prewriting_check
 from app.utils.books.revision_service import (
     build_revision_intelligence_payload,
@@ -64,7 +65,6 @@ from app.utils.books.revision_service import (
 from app.utils.books.serialization import (
     book_out,
 )
-from app.utils.books.overview import build_book_overview_payload
 from app.utils.books.story_health import build_story_health_payload
 from app.utils.books.vault_storage import (
     list_vault_notes,

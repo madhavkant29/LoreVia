@@ -1,7 +1,6 @@
 import { useEffect, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
-import { intelligenceApi } from "@/lib/api/intelligence"
 import { readerApi } from "@/lib/api/reader"
 import {
   applyAnnotationHighlights,
@@ -336,15 +335,11 @@ export function useManuscriptUiEffects({
     }
     const handle = window.setTimeout(() => {
       setReadabilityLoading(true)
-      setContinuityLoading(true)
+      setContinuityLoading(false)
       booksApi.getReadability(bookId, trimmed)
         .then(setReadability)
         .catch(() => setReadability(null))
         .finally(() => setReadabilityLoading(false))
-      intelligenceApi.inlineContinuity(bookId, trimmed, activeChapterNumber)
-        .then(setInlineContinuity)
-        .catch(() => setInlineContinuity(null))
-        .finally(() => setContinuityLoading(false))
     }, 3000)
     return () => window.clearTimeout(handle)
   }, [

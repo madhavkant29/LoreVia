@@ -35,8 +35,12 @@ async def process_book(
 
 async def _process_book_impl(book_id: str, queue_wait_ms: int | None = None) -> dict:
     async with AsyncSessionLocal() as db:
-        return await process_book_ingestion_and_queue(
-            db,
-            book_id=book_id,
-            queue_wait_ms=queue_wait_ms,
-        )
+        try:
+            return await process_book_ingestion_and_queue(
+                db,
+                book_id=book_id,
+                queue_wait_ms=queue_wait_ms,
+            )
+        finally:
+            if db.in_transaction():
+                await db.rollback()

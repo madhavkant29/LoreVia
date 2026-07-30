@@ -40,6 +40,7 @@ from app.utils.intelligence_utils import (
 )
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
 
@@ -69,7 +70,7 @@ async def voice_consistency_review(
         }
 
     total_ch = book.total_chapters or 9999
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
 
     try:
         hits = await semantic_search(

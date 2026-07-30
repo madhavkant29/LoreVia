@@ -2,8 +2,8 @@ from html import escape
 from typing import Any, cast
 from urllib.parse import urlparse
 
-import resend
 import requests
+import resend
 from resend.exceptions import ResendError
 from sqlalchemy import func, select
 
@@ -342,7 +342,9 @@ async def _resolve_promotional_context(
             "allowed": True,
             "unsubscribe_url": links.unsubscribe_url,
             "preferences_url": links.preferences_url,
-            "browser_unsubscribe_url": getattr(links, "browser_unsubscribe_url", links.unsubscribe_url),
+            "browser_unsubscribe_url": getattr(
+                links, "browser_unsubscribe_url", links.unsubscribe_url
+            ),
         }
 
 

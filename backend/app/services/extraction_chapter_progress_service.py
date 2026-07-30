@@ -51,6 +51,9 @@ async def update_chapter_processing_progress(
     )
     await db.commit()
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
+    # Cache target discovery performs a database read. End that read
+    # transaction before returning to provider or scene-processing code.
+    await db.commit()
 
     processing_state = (
         book.writer_workspace.get("processing") if isinstance(book.writer_workspace, dict) else None
@@ -61,7 +64,9 @@ async def update_chapter_processing_progress(
         chapter_number,
         processed_count,
         processing_total,
-        (processing_state or {}).get("progress_pct") if isinstance(processing_state, dict) else None,
+        (processing_state or {}).get("progress_pct")
+        if isinstance(processing_state, dict)
+        else None,
         (processing_state or {}).get("eta_seconds") if isinstance(processing_state, dict) else None,
         queue_wait_ms,
     )

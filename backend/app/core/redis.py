@@ -398,9 +398,7 @@ async def get_redis_diagnostics(*, scan_limit: int = 1000) -> dict[str, object]:
     diagnostics["ok"] = True
     try:
         memory = await r.info("memory")
-        diagnostics["memory_mb"] = round(
-            _coerce_int(memory.get("used_memory")) / 1024 / 1024, 2
-        )
+        diagnostics["memory_mb"] = round(_coerce_int(memory.get("used_memory")) / 1024 / 1024, 2)
     except REDIS_OPERATION_EXCEPTIONS:
         log.warning("redis_diagnostics_memory_failed", exc_info=True)
 

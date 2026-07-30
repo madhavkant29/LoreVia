@@ -57,9 +57,7 @@ class _FakeRedis:
         return 0
 
 
-async def test_rehydrate_llm_coordination_rebuilds_active_and_releases_stale(
-    db, monkeypatch
-):
+async def test_rehydrate_llm_coordination_rebuilds_active_and_releases_stale(db, monkeypatch):
     await db.execute(delete(LlmUsageEvent).where(LlmUsageEvent.status == "reserved"))
     await db.commit()
 
@@ -121,9 +119,7 @@ async def test_redis_cleanup_failure_does_not_fail_completed_call(monkeypatch):
         async def srem(self, *_args):
             raise RedisError("redis unavailable")
 
-    monkeypatch.setattr(
-        llm_control_service, "get_redis", lambda: _async_value(BrokenRedis())
-    )
+    monkeypatch.setattr(llm_control_service, "get_redis", lambda: _async_value(BrokenRedis()))
     reservation = llm_control_service.LlmReservation(
         id=str(uuid.uuid4()), operation="chat", user_id=uuid.uuid4()
     )
@@ -136,9 +132,7 @@ async def test_redis_cleanup_unexpected_failure_propagates(monkeypatch):
         async def srem(self, *_args):
             raise RuntimeError("programming error")
 
-    monkeypatch.setattr(
-        llm_control_service, "get_redis", lambda: _async_value(BrokenRedis())
-    )
+    monkeypatch.setattr(llm_control_service, "get_redis", lambda: _async_value(BrokenRedis()))
     reservation = llm_control_service.LlmReservation(
         id=str(uuid.uuid4()), operation="chat", user_id=uuid.uuid4()
     )
@@ -151,9 +145,7 @@ async def test_reservation_returns_retryable_503_when_redis_is_unavailable(monke
     async def _fail_rehydrate(*, force=False):
         raise RedisError("redis unavailable")
 
-    monkeypatch.setattr(
-        llm_control_service, "rehydrate_llm_coordination_state", _fail_rehydrate
-    )
+    monkeypatch.setattr(llm_control_service, "rehydrate_llm_coordination_state", _fail_rehydrate)
 
     with pytest.raises(HTTPException) as exc_info:
         await llm_control_service.reserve_llm_call(
@@ -173,9 +165,7 @@ async def test_reservation_rehydrate_unexpected_failure_propagates(monkeypatch):
     async def _fail_rehydrate(*, force=False):
         raise RuntimeError("programming error")
 
-    monkeypatch.setattr(
-        llm_control_service, "rehydrate_llm_coordination_state", _fail_rehydrate
-    )
+    monkeypatch.setattr(llm_control_service, "rehydrate_llm_coordination_state", _fail_rehydrate)
 
     with pytest.raises(RuntimeError, match="programming error"):
         await llm_control_service.reserve_llm_call(

@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+
 def identify_character_mentions(
     text: str,
     character_rows: list[dict],
@@ -369,6 +370,67 @@ def normalize_series_continuity_result(raw: str) -> dict:
             or fallback["thematic_fit"]["notes"],
         },
         "overall_verdict": overall_verdict,
+    }
+
+
+def merge_editorial_review_results(results: list[dict]) -> dict:
+    """Merge map-reduce editorial passes without losing late-chapter evidence."""
+    if not results:
+        return normalize_editorial_review_result("{}")
+
+    def unique_items(field: str, identity_fields: tuple[str, ...]) -> list[dict]:
+        seen: set[str] = set()
+        merged: list[dict] = []
+        for result in results:
+            for item in result.get(field) or []:
+                if not isinstance(item, dict):
+                    continue
+                identity = "|".join(
+                    " ".join(str(item.get(key) or "").split()).strip().casefold()
+                    for key in identity_fields
+                )
+                if not identity or identity in seen:
+                    continue
+                seen.add(identity)
+                merged.append(item)
+        return merged
+
+    thematic_rank = {"strong": 0, "moderate": 1, "weak": 2}
+    weakest = max(
+        (result.get("thematic_fit") or {"score": "moderate", "notes": ""} for result in results),
+        key=lambda value: thematic_rank.get(str(value.get("score") or "moderate"), 1),
+    )
+    formatting_notes = list(
+        dict.fromkeys(
+            str(note)
+            for result in results
+            for note in (result.get("formatting_notes") or [])
+            if str(note).strip()
+        )
+    )
+    verdicts = list(
+        dict.fromkeys(
+            str(result.get("overall_verdict") or "").strip()
+            for result in results
+            if str(result.get("overall_verdict") or "").strip()
+        )
+    )
+    return {
+        "continuity_issues": unique_items(
+            "continuity_issues",
+            ("type", "title", "description"),
+        ),
+        "insertion_opportunities": unique_items(
+            "insertion_opportunities",
+            ("title", "target_chapter", "anchor_excerpt"),
+        ),
+        "grammar_issues": unique_items(
+            "grammar_issues",
+            ("original", "issue", "fix"),
+        ),
+        "formatting_notes": formatting_notes,
+        "thematic_fit": weakest,
+        "overall_verdict": "\n\n".join(verdicts),
     }
 
 

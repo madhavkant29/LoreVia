@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from httpx import Request
+from openai import APIConnectionError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.user import LlmUsageEvent, User
@@ -18,6 +20,31 @@ from app.utils.llm_usage_utils import (
     manual_reprocess_token_caps_for_user,
     summarize_llm_usage_for_user,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_offline_token_counter(monkeypatch):
+    monkeypatch.setattr(
+        llm_usage_utils,
+        "count_tokens",
+        lambda value: max(len(str(value or "").split()), 1),
+    )
+
+
+def test_llm_call_error_classification_keeps_retries_at_call_boundary():
+    connection_error = APIConnectionError(
+        request=Request("POST", "https://api.openai.com/v1/chat/completions")
+    )
+    capacity_error = HTTPException(429, "LLM capacity is temporarily busy. Retry shortly.")
+    usage_error = HTTPException(429, "LLM usage token limit exceeded for the 5-hour window.")
+
+    assert llm_usage_utils.is_llm_call_error(connection_error)
+    assert llm_usage_utils.is_retryable_llm_call_error(connection_error)
+    assert llm_usage_utils.is_llm_call_error(capacity_error)
+    assert llm_usage_utils.is_retryable_llm_call_error(capacity_error)
+    assert llm_usage_utils.is_llm_call_error(usage_error)
+    assert not llm_usage_utils.is_retryable_llm_call_error(usage_error)
+    assert not llm_usage_utils.is_llm_call_error(ValueError("parse failure"))
 
 
 @pytest.mark.asyncio
@@ -91,7 +118,9 @@ async def test_create_tracked_chat_completion_returns_response_when_usage_record
         return response
 
     async def _reserve(**kwargs):
-        return SimpleNamespace(id="tracked-reservation", operation="chat", user_id=kwargs["user_id"])
+        return SimpleNamespace(
+            id="tracked-reservation", operation="chat", user_id=kwargs["user_id"]
+        )
 
     async def _finish(*_args, **_kwargs):
         return None

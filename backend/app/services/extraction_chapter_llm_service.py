@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, cast
 
+from app.core.config import settings
 from app.engine.character.extractor import (
     extract_characters_and_relationships,
     fallback_character_mentions,
@@ -14,6 +15,7 @@ from app.services.extraction_character_reporting_service import (
 )
 from app.services.extraction_processing_flow_service import _group_chunks_for_extraction
 from app.utils.characters.serialization import build_character_roster_snapshot
+from app.utils.llm_usage_utils import is_llm_call_error
 
 log = logging.getLogger("lorevia.extraction")
 
@@ -34,7 +36,7 @@ class ChapterLlmExtractionResult:
 
 
 async def collect_chapter_llm_extraction(
-    db,
+    _db,
     *,
     book,
     chapter_number: int,
@@ -45,18 +47,24 @@ async def collect_chapter_llm_extraction(
     roster_snapshot = build_character_roster_snapshot(existing_characters)
     extraction_batches = _group_chunks_for_extraction(chunks)
     extraction_batch_texts = ["\n\n".join(chunk_batch) for chunk_batch in extraction_batches]
-    extraction_results = await asyncio.gather(
-        *(
-            extract_characters_and_relationships(
+    extraction_semaphore = asyncio.Semaphore(
+        max(1, min(settings.LLM_MAX_CONCURRENT_CALLS_PER_USER, len(extraction_batch_texts) or 1))
+    )
+
+    async def _extract_with_limit(batch_text: str) -> dict:
+        async with extraction_semaphore:
+            return await extract_characters_and_relationships(
                 batch_text,
                 user_id=book.user_id,
                 book_id=book.id,
                 known_characters=roster_snapshot,
-                usage_db=db,
+                # Usage control owns an independent short-lived session.
+                usage_db=None,
                 language=book.language,
             )
-            for batch_text in extraction_batch_texts
-        ),
+
+    extraction_results = await asyncio.gather(
+        *(_extract_with_limit(batch_text) for batch_text in extraction_batch_texts),
         return_exceptions=True,
     )
 
@@ -72,6 +80,11 @@ async def collect_chapter_llm_extraction(
     ):
         source_batch_key = f"{book.id}:{chapter_number}:{batch_index}"
         if isinstance(result, Exception):
+            # A provider/control failure is not a signal to make another paid
+            # call through the fallback path. All concurrent batches have
+            # settled at this point, so it is safe for the caller to close DB.
+            if is_llm_call_error(result):
+                raise result
             extraction_failed_batches += 1
             log.warning(
                 "character_extraction_batch_failed book_id=%s chapter=%s batch=%s",
@@ -84,7 +97,7 @@ async def collect_chapter_llm_extraction(
                 batch_text,
                 user_id=book.user_id,
                 book_id=book.id,
-                usage_db=db,
+                usage_db=None,
                 language=book.language,
             )
             extraction_fallback_batches += 1

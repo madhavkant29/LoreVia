@@ -12,10 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.engine.search.semantic import semantic_search
 from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 
 def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
 
 
 PREDICT_SYSTEM = """You are analysing a novel. The user asks a prediction question.

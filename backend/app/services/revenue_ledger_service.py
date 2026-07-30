@@ -83,15 +83,19 @@ async def record_refund_revenue(
     ):
         return None
     original = (
-        await db.execute(
-            select(RevenueLedgerEvent)
-            .where(
-                RevenueLedgerEvent.transaction_id == transaction_id,
-                RevenueLedgerEvent.net_amount > 0,
+        (
+            await db.execute(
+                select(RevenueLedgerEvent)
+                .where(
+                    RevenueLedgerEvent.transaction_id == transaction_id,
+                    RevenueLedgerEvent.net_amount > 0,
+                )
+                .order_by(RevenueLedgerEvent.created_at.desc())
             )
-            .order_by(RevenueLedgerEvent.created_at.desc())
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if original is None:
         return None
     refund = RevenueLedgerEvent(

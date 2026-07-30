@@ -7,6 +7,8 @@ from app.models.beta_read import BetaReadAssignment, BetaReadAssignmentState
 from app.models.book import BookCollaborator
 from app.models.user import User
 from app.schemas.beta_reads import BetaReadJobRunOut
+from app.utils.beta_read_access_utils import sync_beta_read_access
+from app.utils.beta_read_lifecycle_utils import expire_beta_assignment_if_due
 from app.utils.beta_read_policy_utils import (
     ACTIVE_READER_STATES,
     beta_submission_snapshot,
@@ -15,8 +17,6 @@ from app.utils.beta_read_policy_utils import (
     set_beta_assignment_state,
     utc_now,
 )
-from app.utils.beta_read_access_utils import sync_beta_read_access
-from app.utils.beta_read_lifecycle_utils import expire_beta_assignment_if_due
 from app.utils.notification_utils import create_notification_once, make_notification_idempotency_key
 
 

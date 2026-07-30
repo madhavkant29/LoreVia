@@ -132,7 +132,7 @@ async def test_reprocess_uploaded_manuscript_success(client, db, monkeypatch):
     assert body["charge_kind"] is None
     assert body["processed_words_reserved"] == 9
     assert body["chapters_queued"] == 2
-    assert len(dispatched) == 2
+    assert len(dispatched) == 1
     assert all(item["kwargs"]["kwargs"]["rebuild_run_id"] for item in dispatched)
     usage_event = (
         await db.execute(

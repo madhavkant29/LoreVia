@@ -5,6 +5,7 @@ import { QueryProvider } from "@/components/app/QueryProvider"
 import { PricingPlans } from "@/components/billing/PricingPlans"
 import { Navbar } from "@/components/layout/Navbar"
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
+import { buildPricingOffersJsonLd } from "@/lib/billing/catalog"
 import { DEFAULT_OG_IMAGE, SITE_NAME, SITE_URL, buildBreadcrumbJsonLd } from "@/lib/seo"
 
 export const metadata: Metadata = {
@@ -44,27 +45,7 @@ export default async function PricingPage() {
     url: `${SITE_URL}/pricing`,
     description:
       "Pricing for LoreVia, the fiction-author workspace for manuscript analysis, continuity checks, character tracking, and revision support.",
-    offers: [
-      {
-        "@type": "Offer",
-        name: "Free",
-        price: "0",
-        priceCurrency: "USD",
-        url: `${SITE_URL}/pricing`,
-      },
-      {
-        "@type": "Offer",
-        name: "Author",
-        priceCurrency: "USD",
-        url: `${SITE_URL}/pricing`,
-      },
-      {
-        "@type": "Offer",
-        name: "Architect",
-        priceCurrency: "USD",
-        url: `${SITE_URL}/pricing`,
-      },
-    ],
+    offers: buildPricingOffersJsonLd(`${SITE_URL}/pricing`),
   }
   const breadcrumbJsonLd = buildBreadcrumbJsonLd([
     { name: "Home", path: "/" },

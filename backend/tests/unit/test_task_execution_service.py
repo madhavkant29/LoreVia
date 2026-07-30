@@ -18,6 +18,7 @@ from app.services.task_execution_service import (
     fail_task_execution,
     get_or_create_processing_run,
     reconcile_stale_task_dispatch_outbox,
+    resume_temporary_capacity_pauses,
     sanitize_task_arguments,
     task_identity,
 )
@@ -98,9 +99,7 @@ async def _processing_user_and_book(db, suffix: str):
 
 async def test_processing_run_and_task_execution_are_idempotent(db):
     user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
-    run = await get_or_create_processing_run(
-        db, user_id=user.id, book_id=book.id, chapters_total=2
-    )
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id, chapters_total=2)
     first = await ensure_task_execution(
         db,
         task_name="extraction_tasks.process_chapter",
@@ -152,6 +151,83 @@ async def test_fair_dispatch_selects_one_task_per_waiting_user(db, monkeypatch):
     assert len({book_id for book_id, _queue in dispatched}) == 2
 
 
+async def test_extraction_dispatch_serializes_chapters_within_one_book(db, monkeypatch):
+    dispatched: list[int] = []
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
+
+    def fake_apply_async(*, args, kwargs, queue, task_id):
+        dispatched.append(int(args[1]))
+        return SimpleNamespace(id=task_id)
+
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.process_chapter_task.apply_async", fake_apply_async
+    )
+    monkeypatch.setattr(
+        "app.services.task_execution_service.settings.EXTRACTION_WORKER_CONCURRENCY", 4
+    )
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id, chapters_total=3)
+    for chapter_number in (1, 2, 3):
+        await ensure_task_execution(
+            db,
+            task_name="extraction_tasks.process_chapter",
+            processing_run=run,
+            chapter_number=chapter_number,
+            arguments={"book_id": str(book.id), "chapter_number": chapter_number},
+        )
+    await db.commit()
+
+    count = await dispatch_pending_extraction_tasks(db)
+
+    assert count == 1
+    assert dispatched == [1]
+
+
+async def test_extraction_dispatch_uses_chapter_order_even_when_enqueued_out_of_order(
+    db, monkeypatch
+):
+    dispatched: list[int] = []
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
+
+    def fake_apply_async(*, args, kwargs, queue, task_id):
+        dispatched.append(int(args[1]))
+        return SimpleNamespace(id=task_id)
+
+    monkeypatch.setattr(
+        "app.workers.tasks.extraction_tasks.process_chapter_task.apply_async", fake_apply_async
+    )
+    monkeypatch.setattr(
+        "app.services.task_execution_service.settings.EXTRACTION_WORKER_CONCURRENCY", 4
+    )
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id, chapters_total=3)
+    for chapter_number in (3, 1, 2):
+        await ensure_task_execution(
+            db,
+            task_name="extraction_tasks.process_chapter",
+            processing_run=run,
+            chapter_number=chapter_number,
+            arguments={"book_id": str(book.id), "chapter_number": chapter_number},
+        )
+    await db.commit()
+
+    assert await dispatch_pending_extraction_tasks(db) == 1
+    assert dispatched == [1]
+
+
+async def test_empty_extraction_dispatch_releases_advisory_transaction(db):
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
+    await _clear_dispatchable_executions(db, "extraction_tasks.process_chapter")
+    await _clear_dispatchable_executions(db, "extraction_tasks.repair_chapter_payload")
+
+    assert await dispatch_pending_extraction_tasks(db) == 0
+    assert db.in_transaction() is False
+
+
 async def test_fair_dispatch_never_exceeds_global_worker_capacity(db, monkeypatch):
     dispatched: list[str] = []
     await _clear_dispatchable_executions(db, "extraction_tasks.process_book")
@@ -193,9 +269,7 @@ async def test_fair_dispatch_never_exceeds_global_worker_capacity(db, monkeypatc
 
 async def test_completed_chapter_does_not_clear_later_allowance_pause(db):
     user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
-    run = await get_or_create_processing_run(
-        db, user_id=user.id, book_id=book.id, chapters_total=2
-    )
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id, chapters_total=2)
     execution = await ensure_task_execution(
         db,
         task_name="extraction_tasks.process_chapter",
@@ -221,9 +295,7 @@ async def test_completed_chapter_does_not_clear_later_allowance_pause(db):
 
 async def test_completed_chapter_does_not_resurrect_terminal_run(db):
     user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
-    run = await get_or_create_processing_run(
-        db, user_id=user.id, book_id=book.id, chapters_total=2
-    )
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id, chapters_total=2)
     execution = await ensure_task_execution(
         db,
         task_name="extraction_tasks.process_chapter",
@@ -254,6 +326,58 @@ async def test_claim_rejects_paused_and_terminal_executions(db):
         execution.status = status
         await db.commit()
         assert not await claim_task_execution(db, str(execution.id), str(execution.id))
+
+
+async def test_temporary_capacity_pause_returns_to_durable_dispatch_after_cooldown(db):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="analysis_tasks.analyse_chapter",
+        processing_run=run,
+        chapter_number=2,
+        arguments={"book_id": str(book.id), "chapter_id": str(uuid.uuid4())},
+    )
+    execution.status = "paused"
+    execution.error_category = "llm_capacity"
+    execution.error_detail = "temporary capacity"
+    execution.attempt_count = 1
+    execution.updated_at = datetime.now(UTC) - timedelta(minutes=2)
+    run.status = "paused"
+    run.pause_reason = "llm_capacity"
+    run.resume_blockers = [{"kind": "llm_capacity"}]
+    run.paused_at = datetime.now(UTC) - timedelta(minutes=2)
+    await db.commit()
+
+    resumed = await resume_temporary_capacity_pauses(db, min_age_seconds=60)
+
+    assert resumed == 1
+    await db.refresh(execution)
+    await db.refresh(run)
+    assert execution.status == "pending_dispatch"
+    assert execution.error_category is None
+    assert run.status == "queued"
+    assert run.resume_blockers == []
+
+
+async def test_usage_limit_pause_is_not_automatically_resumed(db):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="analysis_tasks.analyse_chapter",
+        processing_run=run,
+        chapter_number=2,
+        arguments={"book_id": str(book.id), "chapter_id": str(uuid.uuid4())},
+    )
+    execution.status = "paused"
+    execution.error_category = "llm_usage_limit"
+    execution.updated_at = datetime.now(UTC) - timedelta(minutes=2)
+    await db.commit()
+
+    assert await resume_temporary_capacity_pauses(db, min_age_seconds=60) == 0
+    await db.refresh(execution)
+    assert execution.status == "paused"
 
 
 async def test_dispatch_failure_returns_execution_to_pending(db, monkeypatch):
@@ -514,9 +638,7 @@ async def test_analysis_dispatch_respects_configured_capacity(db, monkeypatch):
     )
     db.add(chapter)
     await db.flush()
-    run = await get_or_create_processing_run(
-        db, user_id=user.id, book_id=book.id, chapters_total=1
-    )
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id, chapters_total=1)
     await ensure_task_execution(
         db,
         task_name="analysis_tasks.analyse_chapter",
@@ -530,6 +652,7 @@ async def test_analysis_dispatch_respects_configured_capacity(db, monkeypatch):
     assert await dispatch_pending_analysis_tasks(db) == 1
     assert len(dispatched) == 1
     assert await dispatch_pending_analysis_tasks(db) == 0
+    assert db.in_transaction() is False
 
 
 async def test_embedding_dispatch_respects_configured_capacity(db, monkeypatch):
@@ -561,3 +684,4 @@ async def test_embedding_dispatch_respects_configured_capacity(db, monkeypatch):
     assert await dispatch_pending_embedding_tasks(db) == 1
     assert len(dispatched) == 1
     assert await dispatch_pending_embedding_tasks(db) == 0
+    assert db.in_transaction() is False

@@ -2,6 +2,7 @@
 
 import io
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -11,7 +12,13 @@ from PIL import Image
 
 from app.models.book import Book, Chapter, ChapterMedia, ManuscriptAnnotation, NovelScene
 from app.models.character import Character, CharacterState
-from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
+from app.models.intelligence import (
+    ChapterSummary,
+    CharacterRelationship,
+    ContinuityScan,
+    PlotThread,
+    WorldElement,
+)
 from app.models.user import User
 from app.utils.advisor_scan_utils import build_advisor_suggestions_payload
 from app.utils.books import revision_analysis as revision_analysis_module
@@ -181,6 +188,10 @@ class _FakeExecuteDB:
     async def execute(self, statement):
         self.executed.append(statement)
         return self._execute_values.pop(0) if self._execute_values else _AllResult([])
+
+    @property
+    def no_autoflush(self):
+        return nullcontext()
 
     def add(self, value):
         self.added.append(value)
@@ -632,6 +643,7 @@ async def test_sync_chapter_content_from_novel_scenes_only_swallows_storage_io(m
 
     assert synced["chapter"] is chapter
     assert chapter.s3_key == "chapters/book/1.json"
+    assert db.executed[0]._for_update_arg is not None
 
     monkeypatch.setattr("app.utils.books.scene_sync.download_book", lambda _key: b"{}")
 
@@ -2058,6 +2070,18 @@ async def test_chapter_consistency_reports_load_full_context(db):
                 status="unassigned",
                 sort_order=1,
             ),
+            ContinuityScan(
+                book_id=book.id,
+                user_id=user.id,
+                scope="full_book",
+                status="ready",
+                continuity_status="clean",
+                detector_version="continuity-rules-v2",
+                chapter_versions={"1": 1, "2": 1},
+                coverage={"chapters_analyzed": 2},
+                duration_ms=420,
+                completed_at=datetime(2026, 7, 24, 9, 0, tzinfo=UTC),
+            ),
         ]
     )
     await db.commit()
@@ -2090,6 +2114,10 @@ async def test_chapter_consistency_reports_load_full_context(db):
     assert revision["summary"]["active_item_count"] >= 0
     assert revision["revision_plan"]
     assert isinstance(revision["knowledge_timeline"], list)
+    assert revision["continuity_status"] == "clean"
+    assert revision["continuity_scan_id"] is not None
+    assert revision["continuity_completed_at"] == datetime(2026, 7, 24, 9, 0, tzinfo=UTC)
+    assert revision["continuity_duration_ms"] == 420
 
     advisor_scan = await build_advisor_suggestions_payload(
         db=db,

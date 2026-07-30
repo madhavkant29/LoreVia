@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const pushMock = vi.hoisted(() => vi.fn())
 const searchParamsMock = vi.hoisted(() => new URLSearchParams("book=book-1"))
 const publicServerMock = vi.hoisted(() => ({ getBook: vi.fn(), getChapter: vi.fn() }))
+const jsonLdDataMock = vi.hoisted(() => new Map<string, unknown>())
 
 vi.mock("next/link", () => ({ default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a> }))
 vi.mock("next/navigation", () => ({
@@ -30,7 +31,12 @@ vi.mock("@/components/public/PublicChapterPageClient", () => ({
     <div data-book={props.bookId} data-chapter={props.chapterId}>Public chapter client {props.initialChapter ? "loaded" : "empty"}</div>
   ),
 }))
-vi.mock("@/components/seo/JsonLdScript", () => ({ JsonLdScript: ({ id }: { id: string }) => <script data-testid={id} /> }))
+vi.mock("@/components/seo/JsonLdScript", () => ({
+  JsonLdScript: ({ id, data }: { id: string; data: unknown }) => {
+    jsonLdDataMock.set(id, data)
+    return <script data-testid={id} />
+  },
+}))
 vi.mock("@/components/app/QueryProvider", () => ({ QueryProvider: ({ children }: { children: ReactNode }) => <>{children}</> }))
 vi.mock("@/components/billing/PricingPlans", () => ({ PricingPlans: ({ surface, nonce }: { surface: string; nonce?: string }) => <div>Plans {surface} {nonce}</div> }))
 vi.mock("@/components/layout/Navbar", () => ({ Navbar: () => <nav>Pricing navigation</nav> }))
@@ -44,6 +50,7 @@ let container: HTMLDivElement | null = null
 
 beforeEach(() => {
   pushMock.mockReset()
+  jsonLdDataMock.clear()
   publicServerMock.getBook.mockReset().mockResolvedValue({
     id: "book-1",
     public_slug: "gate-draft",
@@ -93,6 +100,16 @@ describe("previously uncovered runtime pages", () => {
     expect(container?.textContent).toContain("Choose the plan that")
     expect(container?.textContent).toContain("Plans public nonce-1")
     expect(container?.querySelectorAll("script")).toHaveLength(2)
+    const pricingJsonLd = jsonLdDataMock.get("pricing-software-jsonld") as {
+      offers: Array<{ name: string; price: string }>
+    }
+    expect(pricingJsonLd.offers.map(({ name, price }) => ({ name, price }))).toEqual([
+      { name: "Free", price: "0" },
+      { name: "Author Monthly", price: "19" },
+      { name: "Author Annual", price: "190" },
+      { name: "Architect Monthly", price: "39" },
+      { name: "Architect Annual", price: "390" },
+    ])
   })
 
   it("renders the dark add-chapter flow and returns to the library after upload", async () => {

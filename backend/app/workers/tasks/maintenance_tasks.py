@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC
 
 from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
+from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 
@@ -11,7 +12,7 @@ from app.workers.celery_app import celery_app
     bind=True,
     name="maintenance_tasks.maintain_task_executions",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def maintain_task_executions_task(self, *, limit: int = 500):
@@ -23,12 +24,16 @@ def maintain_task_executions_task(self, *, limit: int = 500):
             dispatch_pending_extraction_tasks,
             reconcile_stale_task_dispatch_outbox,
             release_stale_task_leases,
+            resume_temporary_capacity_pauses,
         )
 
         async with AsyncSessionLocal() as db:
             released = await release_stale_task_leases(db, limit=limit)
             reconciled_outbox = await reconcile_stale_task_dispatch_outbox(db, limit=limit)
-            await db.commit()
+            resumed_capacity_pauses = await resume_temporary_capacity_pauses(
+                db,
+                limit=limit,
+            )
             extraction_dispatched = await dispatch_pending_extraction_tasks(db)
             analysis_dispatched = await dispatch_pending_analysis_tasks(db)
             embedding_dispatched = await dispatch_pending_embedding_tasks(db)
@@ -38,26 +43,28 @@ def maintain_task_executions_task(self, *, limit: int = 500):
             return {
                 "released": released,
                 "reconciled_outbox": reconciled_outbox,
+                "resumed_capacity_pauses": resumed_capacity_pauses,
                 "extraction_dispatched": extraction_dispatched,
                 "analysis_dispatched": analysis_dispatched,
                 "embedding_dispatched": embedding_dispatched,
-                "dispatched": (
-                    extraction_dispatched + analysis_dispatched + embedding_dispatched
-                ),
+                "dispatched": (extraction_dispatched + analysis_dispatched + embedding_dispatched),
                 "llm_coordination": llm_coordination,
             }
 
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.release_stale_processing_reservations",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def release_stale_processing_reservations_task(self, *, limit: int = 500):
@@ -73,14 +80,17 @@ def release_stale_processing_reservations_task(self, *, limit: int = 500):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.repair_processing_books",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def repair_processing_books_task(self, *, book_id: str | None = None, limit: int = 50):
@@ -156,14 +166,17 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.send_due_trial_emails",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def send_due_trial_emails_task(self, *, limit: int = 100):
@@ -188,14 +201,17 @@ def send_due_trial_emails_task(self, *, limit: int = 100):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.process_beta_reads",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def process_beta_reads_task(self, *, limit: int = 100):
@@ -220,14 +236,17 @@ def process_beta_reads_task(self, *, limit: int = 100):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.process_data_deletion_requests",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def process_data_deletion_requests_task(self, *, limit: int = 50):
@@ -250,14 +269,17 @@ def process_data_deletion_requests_task(self, *, limit: int = 50):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.cleanup_expired_advisor_jobs",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def cleanup_expired_advisor_jobs_task(self, *, limit: int = 1000):
@@ -322,14 +344,17 @@ def cleanup_expired_advisor_jobs_task(self, *, limit: int = 1000):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.cleanup_expired_webhook_events",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def cleanup_expired_webhook_events_task(self, *, batch_size: int = 1000):
@@ -378,14 +403,17 @@ def cleanup_expired_webhook_events_task(self, *, batch_size: int = 1000):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.cleanup_expired_subscription_events",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def cleanup_expired_subscription_events_task(self, *, batch_size: int = 1000):
@@ -421,14 +449,17 @@ def cleanup_expired_subscription_events_task(self, *, batch_size: int = 1000):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
 
 
 @celery_app.task(
     bind=True,
     name="maintenance_tasks.refresh_public_rankings",
     queue="intelligence",
-    max_retries=2,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def refresh_public_rankings_task(self):
@@ -453,4 +484,7 @@ def refresh_public_rankings_task(self):
     try:
         return run_worker_coro(_run())
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
-        raise self.retry(exc=exc)
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )

@@ -1,5 +1,6 @@
-from types import SimpleNamespace
+import asyncio
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,6 +28,7 @@ async def test_persist_chapter_chunks_with_embeddings_adds_book_chunks(monkeypat
         return f"{chapter_number}:{chapter_title}:{text}"
 
     async def fake_embed_batch(batch, *, db, user_id, book_id, feature):
+        assert db is None
         calls.append(("embed", list(batch), user_id, book_id, feature))
         return [[1.0, 0.0], [0.0, 1.0]][: len(batch)]
 
@@ -37,8 +39,12 @@ async def test_persist_chapter_chunks_with_embeddings_adds_book_chunks(monkeypat
         fake_build_chunk_embedding_text,
     )
     monkeypatch.setattr(extraction_chapter_embedding_service, "embed_batch", fake_embed_batch)
-    monkeypatch.setattr(extraction_chapter_embedding_service.settings, "EXTRACTION_EMBED_BATCH_SIZE", 10)
-    monkeypatch.setattr(extraction_chapter_embedding_service.settings, "EXTRACTION_EMBED_CONCURRENCY", 2)
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service.settings, "EXTRACTION_EMBED_BATCH_SIZE", 10
+    )
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service.settings, "EXTRACTION_EMBED_CONCURRENCY", 2
+    )
 
     db = _FakeDb()
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4())
@@ -66,3 +72,53 @@ async def test_persist_chapter_chunks_with_embeddings_adds_book_chunks(monkeypat
         book.id,
         "chapter_chunk_embedding",
     )
+
+
+@pytest.mark.asyncio
+async def test_embedding_batch_failure_cancels_and_drains_siblings(monkeypatch):
+    sibling_cancelled = False
+
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service,
+        "chunk_text",
+        lambda *_args, **_kwargs: ["first", "second"],
+    )
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service,
+        "build_chunk_embedding_text",
+        lambda **kwargs: kwargs["text"],
+    )
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service.settings, "EXTRACTION_EMBED_BATCH_SIZE", 1
+    )
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service.settings, "EXTRACTION_EMBED_CONCURRENCY", 2
+    )
+
+    async def fake_embed_batch(batch, **_kwargs):
+        nonlocal sibling_cancelled
+        if batch == ["first"]:
+            await asyncio.sleep(0)
+            raise RuntimeError("embedding failed")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            sibling_cancelled = True
+            raise
+
+    monkeypatch.setattr(extraction_chapter_embedding_service, "embed_batch", fake_embed_batch)
+
+    db = _FakeDb()
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4())
+    chapter = SimpleNamespace(id=uuid.uuid4(), title="Storm")
+
+    with pytest.raises(RuntimeError, match="embedding failed"):
+        await persist_chapter_chunks_with_embeddings(
+            db,
+            book=book,
+            chapter=chapter,
+            chapter_number=3,
+            ch_data={"title": "Storm", "text": "chapter text"},
+        )
+
+    assert sibling_cancelled is True

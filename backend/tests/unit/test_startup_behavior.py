@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -124,7 +125,7 @@ async def test_ready_checks_database_and_redis(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ready_returns_503_when_dependency_check_fails(monkeypatch) -> None:
+async def test_ready_returns_503_when_dependency_check_fails(monkeypatch, caplog) -> None:
     class _BrokenConnection:
         async def __aenter__(self):
             raise RuntimeError("db down")
@@ -138,11 +139,14 @@ async def test_ready_returns_503_when_dependency_check_fails(monkeypatch) -> Non
 
     monkeypatch.setattr("app.core.database.engine", _BrokenEngine())
 
-    result = await ready()
+    with caplog.at_level(logging.WARNING, logger="lorevia.http"):
+        result = await ready()
 
     assert isinstance(result, Response)
     assert result.status_code == 503
     assert result.body == b"not ready"
+    assert "readiness_check_failed" in caplog.text
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
 @pytest.mark.asyncio

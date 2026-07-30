@@ -206,6 +206,7 @@ async def rate_limit_api(
 def _client_identifier(request: Request) -> str:
     return trusted_client_identifier(request)
 
+
 async def _auth_window(request: Request, bucket: str, limit: int, window: int) -> None:
     identifier = _client_identifier(request)
     ok = await _window(key_ratelimit(f"auth:{identifier}", bucket), limit, window)

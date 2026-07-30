@@ -20,13 +20,13 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import allowed_hosts, cors_middleware_options, settings
 from app.core.events import on_shutdown, on_startup
+from app.utils.exception_boundaries import HTTP_LAST_RESORT_EXCEPTIONS
 from app.utils.logging.errors import (
     public_error_message,
     request_log_context,
     sanitize_validation_errors,
     scrub_sentry_event,
 )
-from app.utils.exception_boundaries import HTTP_LAST_RESORT_EXCEPTIONS
 from app.utils.security_utils import apply_security_headers
 from app.utils.tunnel.cloudflare import CloudflareTunnelMiddleware
 
@@ -329,6 +329,6 @@ async def ready():
         r = await get_redis()
         await r.ping()
     except HTTP_LAST_RESORT_EXCEPTIONS:
-        log.exception("readiness_check_failed")
+        log.warning("readiness_check_failed", exc_info=True)
         return Response(status_code=503, content="not ready")
     return {"status": "ready"}

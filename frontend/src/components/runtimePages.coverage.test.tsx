@@ -28,6 +28,10 @@ vi.mock("@/components/layout/BrandLockup", () => ({
   BrandLockup: () => <span>LoreVia</span>,
 }))
 
+vi.mock("@/components/marketing/Reveal", () => ({
+  Reveal: ({ children }: { children: ReactNode }) => <>{children}</>,
+}))
+
 vi.mock("@/lib/api/billing", () => ({
   billingApi: {
     checkout: (...args: unknown[]) => checkout(...args),
@@ -44,6 +48,7 @@ vi.mock("@/lib/stores/preferencesStore", () => ({
 
 import { PricingPlans } from "@/components/billing/PricingPlans"
 import { TrustPage } from "@/components/legal/TrustPage"
+import { HomePricingSection } from "@/components/marketing/HomePricingSection"
 
 let root: Root | null = null
 let container: HTMLDivElement | null = null
@@ -96,6 +101,10 @@ describe("runtime marketing and legal pages", () => {
     expect(container?.textContent).toContain("Free")
     expect(container?.textContent).toContain("Author")
     expect(container?.textContent).toContain("Architect")
+    expect(container?.textContent).toContain("$19/mo")
+    expect(container?.textContent).toContain("$39/mo")
+    expect(container?.textContent).toContain("10 days free, then $19/mo")
+    expect(container?.textContent).toContain("10 days free, then $39/mo")
 
     await clickByText("Create free account")
     await clickByText("Create account for free trial")
@@ -117,8 +126,13 @@ describe("runtime marketing and legal pages", () => {
     await renderElement(<PricingPlans surface="app" />)
 
     await clickByText("Yearly")
-    expect(container?.textContent).toContain("Save more with yearly billing.")
-    expect(container?.textContent).toContain("Save $99 with yearly billing")
+    expect(container?.textContent).toContain("Get two months free with yearly billing.")
+    expect(container?.textContent).toContain("$190/year")
+    expect(container?.textContent).toContain("$390/year")
+    expect(container?.textContent).toContain("Save $38 with yearly billing")
+    expect(container?.textContent).toContain("Save $78 with yearly billing")
+    expect(container?.textContent).toContain("Billed yearly at $190/year")
+    expect(container?.textContent).toContain("Billed yearly at $390/year")
 
     await clickByText("Included with your account")
     expect(container?.textContent).toContain("Free is included with every account.")
@@ -126,6 +140,24 @@ describe("runtime marketing and legal pages", () => {
     await clickByText("Upgrade to Author")
     expect(checkout).toHaveBeenCalledWith("author_annual")
     expect(container?.textContent).toContain("Billing is disabled locally.")
+  })
+
+  it("renders homepage pricing in monthly and yearly modes", async () => {
+    await renderElement(<HomePricingSection ctaHref="/register" />)
+
+    expect(container?.textContent).toContain("$19/mo")
+    expect(container?.textContent).toContain("$39/mo")
+    expect(container?.textContent).toContain("10 days free, then $19/mo")
+    expect(container?.textContent).toContain("10 days free, then $39/mo")
+
+    await clickByText("Yearly")
+    expect(container?.textContent).toContain("Get two months free with yearly billing.")
+    expect(container?.textContent).toContain("$190/year")
+    expect(container?.textContent).toContain("$390/year")
+    expect(container?.textContent).toContain("Save $38 with yearly billing")
+    expect(container?.textContent).toContain("Save $78 with yearly billing")
+    expect(container?.textContent).toContain("Billed yearly at $190/year")
+    expect(container?.textContent).toContain("Billed yearly at $390/year")
   })
 
   it("renders trust page facts, sections, contacts, and resource links", async () => {

@@ -173,9 +173,7 @@ async def build_world_gap_analysis_payload(
     persist: bool = True,
 ) -> dict:
     story_by_name = collapse_elements([serialize_world_element(item) for item in story_elements])
-    world_by_name = collapse_elements(
-        [serialize_world_element(item) for item in document_elements]
-    )
+    world_by_name = collapse_elements([serialize_world_element(item) for item in document_elements])
     world_corpus_text = "\n".join(
         f"{item.get('canonical_name') or item.get('name') or ''} {' '.join(item.get('aliases') or [])} {item.get('description') or ''}"
         for item in world_by_name.values()

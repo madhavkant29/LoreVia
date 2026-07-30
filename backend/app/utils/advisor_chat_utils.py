@@ -34,7 +34,11 @@ from app.utils.advisor_retrieval_utils import (
 )
 from app.utils.advisor_story_context_utils import build_series_story_context, build_story_context
 from app.utils.advisor_world_context_utils import build_advisor_world_context
-from app.utils.llm_usage_utils import create_tracked_chat_completion, estimate_chat_completion_tokens
+from app.utils.llm_usage_utils import (
+    create_tracked_chat_completion,
+    estimate_chat_completion_tokens,
+)
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 
 async def classify_response_type(client: AsyncOpenAI | None, reply: str) -> str:
@@ -76,7 +80,7 @@ async def prepare_advisor_reply_context(
         return {"cached": {**cached, "cached": True}}
 
     history = messages[-20:]
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
     try:
         intent = classify_intent_fast(last_user_msg)
         story_context = await build_story_context(db, book.id, book.total_chapters or 0)
@@ -398,7 +402,7 @@ async def prepare_series_advisor_reply_context(
     return {
         "cached": None,
         "cache_key": cache_key,
-        "client": AsyncOpenAI(api_key=settings.OPENAI_API_KEY),
+        "client": AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES),
         "intent": classify_intent_fast(last_user_msg),
         "book_count": len(book_ids),
         "llm_messages": llm_messages,

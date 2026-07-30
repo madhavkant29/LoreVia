@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 
+import { ContinuityInbox } from "@/components/continuity/ContinuityInbox"
 import { FindingReviewPanel } from "@/components/reader/FindingReviewPanel"
 import { capture } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
@@ -9,6 +10,7 @@ import type { RevisionActionItem, RevisionIntelligence } from "@/types/book"
 
 type Props = {
   bookId: string
+  bookCreatedAt?: string | null
   bookTitle: string
   chapterCount: number
   isDark: boolean
@@ -19,6 +21,7 @@ type Props = {
 
 export function ActivationExperience({
   bookId,
+  bookCreatedAt,
   bookTitle,
   chapterCount,
   isDark,
@@ -89,7 +92,7 @@ export function ActivationExperience({
     ? "border-white/10 bg-[#0b1220] text-slate-100"
     : "border-stone-200 bg-white text-stone-950"
 
-  if (!revision.analysis_complete || findings.length === 0) {
+  if (!revision.analysis_complete) {
     return (
       <section className={`rounded-lg border p-6 sm:p-8 ${shell}`} data-testid="activation-incomplete">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-500">Analysis status</p>
@@ -115,23 +118,37 @@ export function ActivationExperience({
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-500">Analysis complete</p>
         <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">We analyzed {chapterCount} chapter{chapterCount === 1 ? "" : "s"} in {bookTitle}.</h1>
         <p className={`mt-4 text-base leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-          Start with the three findings most likely to affect continuity. Every finding shows its evidence and why LoreVia raised it.
+          Start in the Continuity Inbox. Verified conflicts show side-by-side evidence; a clean scan is a successful result.
         </p>
       </div>
 
       {error ? <p role="alert" className="mt-5 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
 
       <div className="mt-7">
-        <FindingReviewPanel
-          findings={findings}
-          selectedId={selectedId}
-          savingId={savingId}
+        <ContinuityInbox
+          bookId={bookId}
+          bookCreatedAt={bookCreatedAt}
+          chapterCount={chapterCount}
           isDark={isDark}
-          onOpen={openFinding}
-          onDecision={(finding, decision) => void decide(finding, decision)}
-          onOpenChapter={(finding) => onNavigate(`/${bookId}/manuscript?chapter=${finding.chapter_ref}&finding=${finding.id}`)}
+          revision={revision}
+          onNavigate={onNavigate}
         />
       </div>
+
+      {findings.length > 0 ? (
+        <div className="mt-7">
+          <p className={`mb-3 text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-500"}`}>Additional revision priorities</p>
+          <FindingReviewPanel
+            findings={findings}
+            selectedId={selectedId}
+            savingId={savingId}
+            isDark={isDark}
+            onOpen={openFinding}
+            onDecision={(finding, decision) => void decide(finding, decision)}
+            onOpenChapter={(finding) => onNavigate(`/${bookId}/manuscript?chapter=${finding.chapter_ref}&finding=${finding.id}`)}
+          />
+        </div>
+      ) : null}
     </section>
   )
 }

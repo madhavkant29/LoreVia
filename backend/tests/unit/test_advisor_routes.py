@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
@@ -8,8 +8,6 @@ from fastapi import HTTPException
 from fastapi.responses import Response
 from pydantic import ValidationError
 
-from tests.unit.route_patch_helpers import patch_route_dependency
-from tests.unit.route_facades import advisor
 from app.schemas.advisor import (
     AdvisorMessage,
     AdvisorRequest,
@@ -20,12 +18,16 @@ from app.schemas.advisor import (
     WhatsTheWordRequest,
 )
 from app.utils import advisor_scan_utils as advisor_scan_utils_module
+from tests.unit.route_facades import advisor
+from tests.unit.route_patch_helpers import patch_route_dependency
 
 
 @pytest.fixture(autouse=True)
 def _stub_llm_reservation_lifecycle(monkeypatch):
     async def reserve(**kwargs):
-        return SimpleNamespace(id="test-reservation", operation=kwargs["operation"], user_id=kwargs["user_id"])
+        return SimpleNamespace(
+            id="test-reservation", operation=kwargs["operation"], user_id=kwargs["user_id"]
+        )
 
     async def finish(*_args, **_kwargs):
         return None
@@ -251,7 +253,9 @@ async def test_advisor_message_returns_cached_payload(monkeypatch):
     user_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id, user_id=user_id, title="Atlas", total_chapters=8)
     cache = _AsyncCache({(str(book_id), "cached-key"): {"reply": "Cached", "intent": "direction"}})
-    patch_route_dependency(monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "cached-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "cached-key"
+    )
     _patch_route_caches(monkeypatch, cache)
     db = _FakeDB(get_values=[book])
 
@@ -286,7 +290,9 @@ async def test_advisor_message_enqueues_task_when_not_cached(monkeypatch):
     async def _fake_create_job(*_args, **_kwargs):
         return SimpleNamespace(id=job_id)
 
-    patch_route_dependency(monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "queued-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "queued-key"
+    )
     _patch_route_caches(monkeypatch, cache)
     patch_route_dependency(monkeypatch, advisor, "generate_advisor_reply_task", _Task())
     patch_route_dependency(monkeypatch, advisor, "create_advisor_job", _fake_create_job)
@@ -326,7 +332,9 @@ async def test_advisor_message_marks_job_failed_when_enqueue_fails(monkeypatch):
     async def _fake_mark_failed(*_args, **kwargs):
         failed.update(kwargs)
 
-    patch_route_dependency(monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "queued-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "queued-key"
+    )
     _patch_route_caches(monkeypatch, cache)
     patch_route_dependency(monkeypatch, advisor, "generate_advisor_reply_task", _Task())
     patch_route_dependency(monkeypatch, advisor, "create_advisor_job", _fake_create_job)
@@ -364,7 +372,9 @@ async def test_advisor_message_async_enqueues_task(monkeypatch):
     async def _fake_create_job(*_args, **_kwargs):
         return SimpleNamespace(id=job_id)
 
-    patch_route_dependency(monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "advisor-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "advisor-key"
+    )
     _patch_route_caches(monkeypatch, cache)
     patch_route_dependency(monkeypatch, advisor, "generate_advisor_reply_task", _Task())
     patch_route_dependency(monkeypatch, advisor, "create_advisor_job", _fake_create_job)
@@ -439,7 +449,9 @@ async def test_advisor_message_stream_hides_internal_errors(monkeypatch):
         raise RuntimeError("openai_api_key=sk-secret")
         yield
 
-    patch_route_dependency(monkeypatch, advisor, "stream_advisor_reply_payload", _fake_stream_advisor_reply_payload)
+    patch_route_dependency(
+        monkeypatch, advisor, "stream_advisor_reply_payload", _fake_stream_advisor_reply_payload
+    )
 
     response = await advisor.advisor_message_stream(
         book.id,
@@ -486,7 +498,7 @@ async def test_whats_the_word_validates_book_and_returns_result(monkeypatch):
         assert kwargs["previous_word"] == "smirk"
         return {"word": "acerbic", "gloss": "sharp with cutting contempt"}
 
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
     patch_route_dependency(monkeypatch, advisor, "generate_whats_the_word_result", _fake_generate)
 
     payload = await advisor.whats_the_word(
@@ -642,8 +654,8 @@ async def test_advisor_suggestions_adds_sparse_proactive_audit(monkeypatch):
         return "Story context"
 
     _patch_route_caches(monkeypatch, cache)
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
-    monkeypatch.setattr(advisor_scan_utils_module, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
+    monkeypatch.setattr(advisor_scan_utils_module, "AsyncOpenAI", lambda **_kwargs: client)
     monkeypatch.setattr(advisor_scan_utils_module, "build_story_context", _fake_story_context)
     monkeypatch.setattr(
         advisor_scan_utils_module, "make_editorial_cache_key", lambda *_args: "scan-cache"
@@ -716,7 +728,9 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
             }
         }
     )
-    patch_route_dependency(monkeypatch, advisor, "make_editorial_cache_key", lambda *_args: "editorial-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_editorial_cache_key", lambda *_args: "editorial-key"
+    )
     _patch_route_caches(monkeypatch, cache)
     db = _FakeDB(get_values=[book])
     cached_payload = await advisor.editorial_review(
@@ -748,13 +762,15 @@ async def test_editorial_review_validates_cache_and_happy_path(monkeypatch):
         return "Story context"
 
     _patch_route_caches(monkeypatch, cache)
-    patch_route_dependency(monkeypatch, advisor, "make_editorial_cache_key", lambda *_args: "editorial-build")
-    patch_route_dependency(monkeypatch, advisor, "semantic_search", _fake_semantic_search)
+    patch_route_dependency(
+        monkeypatch, advisor, "make_editorial_cache_key", lambda *_args: "editorial-build"
+    )
+    patch_route_dependency(monkeypatch, advisor, "hybrid_story_search", _fake_semantic_search)
     patch_route_dependency(monkeypatch, advisor, "build_story_context", _fake_story_context)
     monkeypatch.setattr(
         advisor, "normalize_editorial_review_result", lambda raw: {"overall_verdict": raw}
     )
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
     user = SimpleNamespace(id=user_id)
     db = _FakeDB(
         get_values=[book, user],
@@ -794,7 +810,7 @@ async def test_prose_tighten_requires_text_and_normalizes(monkeypatch):
         )
 
     client = _FakeClient('{"tightened_text":"Trimmed","changed":true,"rationale":["Sharper"]}')
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
     monkeypatch.setattr(
         advisor,
         "normalize_prose_tighten_result",
@@ -846,7 +862,9 @@ async def test_inline_continuity_check_uses_editorial_review_and_flags(monkeypat
         return ["Memory says the key stayed with Iris."]
 
     patch_route_dependency(monkeypatch, advisor, "editorial_review", _fake_editorial_review)
-    patch_route_dependency(monkeypatch, advisor, "detect_chapter_continuity_flags", _fake_detect_flags)
+    patch_route_dependency(
+        monkeypatch, advisor, "detect_chapter_continuity_flags", _fake_detect_flags
+    )
 
     payload = await advisor.inline_continuity_check(
         book_id,
@@ -889,7 +907,7 @@ async def test_manuscript_synopsis_requires_chapters_and_returns_coverage(monkey
         return "Story context"
 
     patch_route_dependency(monkeypatch, advisor, "build_story_context", _fake_story_context)
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
     monkeypatch.setattr(
         advisor,
         "normalize_synopsis_result",
@@ -922,7 +940,7 @@ async def test_manuscript_synopsis_caching(monkeypatch):
     )
     client = _FakeClient('{"synopsis":"A short synopsis."}', '{"synopsis":"Should not be called"}')
     patch_route_dependency(monkeypatch, advisor, "download_book", lambda _key: b"Chapter text")
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
 
     async def _fake_story_context(*_args, **_kwargs):
         return "Story context"
@@ -1037,12 +1055,18 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
 
     patch_route_dependency(monkeypatch, advisor, "semantic_search", _fake_semantic_search)
     patch_route_dependency(monkeypatch, advisor, "build_story_context", _fake_story_context)
-    patch_route_dependency(monkeypatch, advisor, "identify_character_mentions", lambda _text, rows: [rows[0]])
-    patch_route_dependency(monkeypatch, advisor, "extract_dialogue_samples_by_character", lambda *_args: {})
+    patch_route_dependency(
+        monkeypatch, advisor, "identify_character_mentions", lambda _text, rows: [rows[0]]
+    )
+    patch_route_dependency(
+        monkeypatch, advisor, "extract_dialogue_samples_by_character", lambda *_args: {}
+    )
     monkeypatch.setattr(
         advisor, "build_character_voice_context", lambda chars: f"chars:{len(chars)}"
     )
-    patch_route_dependency(monkeypatch, advisor, "normalize_voice_consistency_result", lambda raw: {"review": raw})
+    patch_route_dependency(
+        monkeypatch, advisor, "normalize_voice_consistency_result", lambda raw: {"review": raw}
+    )
     monkeypatch.setattr(
         advisor, "compute_voice_metrics", lambda samples: {"sample_dialogue_count": len(samples)}
     )
@@ -1051,7 +1075,7 @@ async def test_voice_consistency_review_builds_character_matches(monkeypatch):
         "score_voice_match",
         lambda _profile, metrics: (0.87 if metrics["sample_dialogue_count"] else 0.52, ["cadence"]),
     )
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
 
     user = SimpleNamespace(id=user_id)
     db = _FakeDB(
@@ -1142,7 +1166,9 @@ async def test_voice_consistency_review_respects_selected_character(monkeypatch)
 
     patch_route_dependency(monkeypatch, advisor, "semantic_search", _fake_semantic_search)
     patch_route_dependency(monkeypatch, advisor, "build_story_context", _fake_story_context)
-    patch_route_dependency(monkeypatch, advisor, "identify_character_mentions", lambda _text, rows: rows)
+    patch_route_dependency(
+        monkeypatch, advisor, "identify_character_mentions", lambda _text, rows: rows
+    )
     monkeypatch.setattr(
         advisor, "extract_dialogue_samples_by_character", lambda *_args: {"Iris": ["Hello there."]}
     )
@@ -1162,7 +1188,7 @@ async def test_voice_consistency_review_respects_selected_character(monkeypatch)
         "score_voice_match",
         lambda _profile, metrics: (87 if metrics["sample_dialogue_count"] else 52, ["cadence"]),
     )
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
 
     user = SimpleNamespace(id=user_id)
     db = _FakeDB(
@@ -1296,7 +1322,9 @@ async def test_voice_consistency_review_warns_when_selected_character_needs_full
 
     patch_route_dependency(monkeypatch, advisor, "semantic_search", _fake_semantic_search)
     patch_route_dependency(monkeypatch, advisor, "build_story_context", _fake_story_context)
-    patch_route_dependency(monkeypatch, advisor, "extract_dialogue_samples_by_character", lambda *_args: {})
+    patch_route_dependency(
+        monkeypatch, advisor, "extract_dialogue_samples_by_character", lambda *_args: {}
+    )
     monkeypatch.setattr(
         advisor, "build_character_voice_context", lambda chars: f"chars:{len(chars)}"
     )
@@ -1313,7 +1341,7 @@ async def test_voice_consistency_review_warns_when_selected_character_needs_full
         "score_voice_match",
         lambda _profile, metrics: (71 if metrics["sample_dialogue_count"] else 52, ["cadence"]),
     )
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
 
     user = SimpleNamespace(id=user_id)
     db = _FakeDB(
@@ -1373,7 +1401,9 @@ async def test_continuity_report_supports_markdown_and_pdf(monkeypatch):
 
     patch_route_dependency(monkeypatch, advisor, "editorial_review", _fake_editorial_review)
     patch_route_dependency(monkeypatch, advisor, "advisor_suggestions", _fake_suggestions)
-    patch_route_dependency(monkeypatch, advisor, "build_continuity_report_markdown", lambda **_kwargs: "# Report")
+    patch_route_dependency(
+        monkeypatch, advisor, "build_continuity_report_markdown", lambda **_kwargs: "# Report"
+    )
     monkeypatch.setattr(
         advisor, "build_continuity_report_pdf", lambda markdown, **_kwargs: markdown.encode("utf-8")
     )
@@ -1420,7 +1450,9 @@ async def test_series_advisor_message_enqueues_task(monkeypatch):
         return SimpleNamespace(id=job_id)
 
     _patch_route_caches(monkeypatch, cache)
-    patch_route_dependency(monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "series-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "series-key"
+    )
     patch_route_dependency(monkeypatch, advisor, "generate_series_advisor_reply_task", _Task())
     patch_route_dependency(monkeypatch, advisor, "create_advisor_job", _fake_create_job)
 
@@ -1469,7 +1501,9 @@ async def test_series_advisor_message_marks_job_failed_when_enqueue_fails(monkey
         failed.update(kwargs)
 
     _patch_route_caches(monkeypatch, cache)
-    patch_route_dependency(monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "series-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_advisor_cache_key", lambda *_args: "series-key"
+    )
     patch_route_dependency(monkeypatch, advisor, "generate_series_advisor_reply_task", _Task())
     patch_route_dependency(monkeypatch, advisor, "create_advisor_job", _fake_create_job)
     patch_route_dependency(monkeypatch, advisor, "mark_advisor_job_failed", _fake_mark_failed)
@@ -1531,7 +1565,9 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
     current_book = SimpleNamespace(id=book_id, user_id=user_id, title="Book Two")
     cache = _AsyncCache()
     _patch_route_caches(monkeypatch, cache)
-    patch_route_dependency(monkeypatch, advisor, "make_editorial_cache_key", lambda *_args: "series-cont-key")
+    patch_route_dependency(
+        monkeypatch, advisor, "make_editorial_cache_key", lambda *_args: "series-cont-key"
+    )
 
     body = advisor.SeriesContinuityRequest(
         messages=[AdvisorMessage(role="user", content="Check this")],
@@ -1571,11 +1607,13 @@ async def test_series_continuity_check_handles_no_prior_books_and_full_review(mo
         ]
 
     patch_route_dependency(monkeypatch, advisor, "build_series_story_context", _fake_story_context)
-    patch_route_dependency(monkeypatch, advisor, "retrieve_series_continuity_passages", _fake_series_hits)
+    patch_route_dependency(
+        monkeypatch, advisor, "retrieve_series_continuity_passages", _fake_series_hits
+    )
     monkeypatch.setattr(
         advisor, "normalize_series_continuity_result", lambda raw: {"overall_verdict": raw}
     )
-    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda api_key: client)
+    patch_route_dependency(monkeypatch, advisor, "AsyncOpenAI", lambda **_kwargs: client)
     user = SimpleNamespace(id=user_id)
     db = _FakeDB(
         get_values=[series, current_book, user],

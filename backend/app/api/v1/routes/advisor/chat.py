@@ -35,13 +35,14 @@ from app.services.advisor_jobs_service import (
     serialize_advisor_job,
 )
 from app.utils.advisor_chat_utils import stream_advisor_reply_payload
+from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.advisor_utils import (
     generate_whats_the_word_result,
     make_advisor_cache_key,
 )
-from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.billing_utils import require_author_access
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
 from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
 
@@ -256,7 +257,7 @@ async def whats_the_word(
         raise HTTPException(404)
     require_author_access(current_user)
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
     try:
         payload = await generate_whats_the_word_result(
             client=client,
@@ -284,7 +285,7 @@ async def whats_the_word_stream(
     require_author_access(current_user)
 
     async def event_stream():
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
         try:
             yield _advisor_sse("stage", {"message": "Finding the closest fit..."})
             payload = await generate_whats_the_word_result(

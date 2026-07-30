@@ -1,7 +1,9 @@
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
+from httpx import Request
+from openai import APIConnectionError
 
 from app.services import extraction_chapter_llm_service
 from app.services.extraction_chapter_llm_service import collect_chapter_llm_extraction
@@ -27,6 +29,7 @@ async def test_collect_chapter_llm_extraction_normalizes_entities_and_relationsh
     )
 
     async def fake_extract(batch_text, *, user_id, book_id, known_characters, usage_db, language):
+        assert usage_db is None
         calls.append((batch_text, user_id, book_id, known_characters, usage_db, language))
         return {
             "characters": [
@@ -137,3 +140,52 @@ async def test_collect_chapter_llm_extraction_falls_back_after_batch_failure(mon
     assert result.extraction_fallback_batches == 1
     assert result.extraction_fallback_character_count == 1
     assert [entity["name"] for entity in result.raw_character_entities] == ["Fallback Ada"]
+
+
+@pytest.mark.asyncio
+async def test_collect_chapter_llm_extraction_does_not_fallback_on_provider_failure(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), language="en")
+    fallback_calls = 0
+
+    monkeypatch.setattr(
+        extraction_chapter_llm_service,
+        "_group_chunks_for_extraction",
+        lambda chunks: [["chunk one"]],
+    )
+    monkeypatch.setattr(
+        extraction_chapter_llm_service,
+        "build_character_roster_snapshot",
+        lambda characters: [],
+    )
+
+    async def fake_extract(*_args, **_kwargs):
+        raise APIConnectionError(
+            request=Request("POST", "https://api.openai.com/v1/chat/completions")
+        )
+
+    async def fake_fallback(*_args, **_kwargs):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        return {"characters": [], "relationships": []}
+
+    monkeypatch.setattr(
+        extraction_chapter_llm_service,
+        "extract_characters_and_relationships",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        extraction_chapter_llm_service,
+        "fallback_character_mentions",
+        fake_fallback,
+    )
+
+    with pytest.raises(APIConnectionError):
+        await collect_chapter_llm_extraction(
+            object(),
+            book=book,
+            chapter_number=2,
+            chunks=["chunk one"],
+            existing_characters=[],
+        )
+
+    assert fallback_calls == 0

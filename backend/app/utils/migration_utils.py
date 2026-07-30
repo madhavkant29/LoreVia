@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import sqlalchemy as sa
@@ -146,6 +147,53 @@ def destructive_downgrade_revisions(versions_dir: Path) -> list[Path]:
             offending.append(path)
 
     return offending
+
+
+def unapplied_revision_paths(
+    revision_paths: Iterable[Path],
+    *,
+    script_directory: Any,
+    current_heads: Iterable[str],
+) -> list[Path]:
+    """Exclude migration files already present in the database revision ancestry."""
+
+    applied_paths: set[Path] = set()
+    for head in current_heads:
+        for revision in script_directory.walk_revisions(base="base", head=head):
+            revision_path = getattr(revision, "path", None)
+            if revision_path:
+                applied_paths.add(Path(revision_path).resolve())
+    return [path for path in revision_paths if path.resolve() not in applied_paths]
+
+
+def parse_revision_allowlist(raw_value: str | None) -> frozenset[str]:
+    """Parse a comma- or whitespace-separated Alembic revision allowlist."""
+
+    if not raw_value:
+        return frozenset()
+    return frozenset(part for part in re.split(r"[\s,]+", raw_value.strip()) if part)
+
+
+def revision_paths_excluding_allowlist(
+    revision_paths: Iterable[Path],
+    *,
+    script_directory: Any,
+    allowed_revision_ids: Iterable[str],
+) -> list[Path]:
+    """Exclude only migration paths whose exact revision IDs were reviewed."""
+
+    allowed_ids = set(allowed_revision_ids)
+    if not allowed_ids:
+        return list(revision_paths)
+
+    allowed_paths: set[Path] = set()
+    for revision in script_directory.walk_revisions():
+        revision_id = getattr(revision, "revision", None)
+        revision_path = getattr(revision, "path", None)
+        if revision_id in allowed_ids and revision_path:
+            allowed_paths.add(Path(revision_path).resolve())
+
+    return [path for path in revision_paths if path.resolve() not in allowed_paths]
 
 
 def should_reset_local_alembic_state(existing_tables: set[str]) -> bool:

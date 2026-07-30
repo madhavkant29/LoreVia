@@ -68,10 +68,9 @@ async def retry_terminal_execution(db: AsyncSession, execution_id: uuid.UUID) ->
     }
     if row.task_name not in supported_tasks:
         raise ValueError("This task type does not support administrative retry")
-    if (
-        row.task_name == "embedding_tasks.update_character_embedding"
-        and not (row.arguments_json or {}).get("character_id")
-    ):
+    if row.task_name == "embedding_tasks.update_character_embedding" and not (
+        row.arguments_json or {}
+    ).get("character_id"):
         raise ValueError("Embedding task is missing character identity")
     row.status = "pending_dispatch"
     row.completed_at = None
@@ -174,9 +173,7 @@ async def operations_metrics(db: AsyncSession) -> dict[str, Any]:
                 func.sum(case((TaskExecution.status == "failed_terminal", 1), else_=0)),
                 func.sum(func.greatest(TaskExecution.attempt_count - 1, 0)),
                 func.avg(
-                    func.extract(
-                        "epoch", TaskExecution.completed_at - TaskExecution.started_at
-                    )
+                    func.extract("epoch", TaskExecution.completed_at - TaskExecution.started_at)
                 ),
             ).group_by(TaskExecution.task_name)
         )
@@ -207,7 +204,9 @@ async def operations_metrics(db: AsyncSession) -> dict[str, Any]:
 async def quality_metrics(db: AsyncSession) -> dict[str, Any]:
     rows = (
         await db.execute(
-            select(AiQualityEvent.entity_type, AiQualityEvent.outcome, func.count(AiQualityEvent.id))
+            select(
+                AiQualityEvent.entity_type, AiQualityEvent.outcome, func.count(AiQualityEvent.id)
+            )
             .group_by(AiQualityEvent.entity_type, AiQualityEvent.outcome)
             .order_by(AiQualityEvent.entity_type, AiQualityEvent.outcome)
         )
@@ -340,9 +339,7 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
                 TaskExecution.book_id,
                 func.coalesce(
                     func.sum(
-                        func.extract(
-                            "epoch", TaskExecution.completed_at - TaskExecution.started_at
-                        )
+                        func.extract("epoch", TaskExecution.completed_at - TaskExecution.started_at)
                     ),
                     0,
                 ),
@@ -362,7 +359,9 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
         else month_start.replace(month=month_start.month + 1)
     )
     month_seconds = max((next_month - month_start).total_seconds(), 1)
-    elapsed_month_fraction = min(max((now - month_start).total_seconds(), 0), month_seconds) / month_seconds
+    elapsed_month_fraction = (
+        min(max((now - month_start).total_seconds(), 0), month_seconds) / month_seconds
+    )
     worker_cost = float(settings.MONTHLY_WORKER_INFRA_COST_USD) * elapsed_month_fraction
     if total_task_seconds:
         for feature, user_id, book_id, seconds in task_rows:
@@ -405,9 +404,7 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
         add_cost(user_book_totals, book_users.get(book_id), cost)
     relevant_user_ids = set(user_costs) | set(revenue_by_user)
     tier_rows = (
-        (
-            await db.execute(select(User.id, User.tier).where(User.id.in_(relevant_user_ids)))
-        ).all()
+        (await db.execute(select(User.id, User.tier).where(User.id.in_(relevant_user_ids)))).all()
         if relevant_user_ids
         else []
     )
@@ -425,9 +422,7 @@ async def contribution_margin(db: AsyncSession) -> dict[str, Any]:
             {
                 "feature": feature,
                 "direct_cost": round(cost, 6),
-                "allocated_revenue": round(revenue * cost / feature_base, 6)
-                if feature_base
-                else 0,
+                "allocated_revenue": round(revenue * cost / feature_base, 6) if feature_base else 0,
             }
             for feature, cost in sorted(feature_costs.items(), key=lambda item: -item[1])
         ],

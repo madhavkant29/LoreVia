@@ -9,18 +9,21 @@ from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book
 from app.models.user import User
 from app.schemas.beta_reads import BetaReadAssignmentDetailOut, BetaReadAssignmentOut
-from app.utils.beta_read_access_utils import _reader_match_clause, sync_reader_identity_for_beta_reads
+from app.utils.beta_read_access_utils import (
+    _reader_match_clause,
+    sync_reader_identity_for_beta_reads,
+)
 from app.utils.beta_read_feedback_utils import (
     _serialize_beta_read_feedback_items,
     _serialize_beta_read_questions,
     beta_feedback_summary,
 )
+from app.utils.beta_read_lifecycle_utils import expire_beta_assignment_if_due
 from app.utils.beta_read_output_utils import (
     _build_beta_read_assignment_out_from_context,
     load_beta_assignment_render_context,
 )
 from app.utils.beta_read_policy_utils import READER_VISIBLE_STATES, utc_now
-from app.utils.beta_read_lifecycle_utils import expire_beta_assignment_if_due
 
 
 async def build_beta_read_assignment_out(

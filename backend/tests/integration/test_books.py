@@ -43,7 +43,22 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
     db.add(book)
     await db.commit()
 
-    async def _fake_process_chapter(_db, _book, ch_data, queue_wait_ms=None):
+    process_chapter_calls: list[dict] = []
+
+    async def _fake_process_chapter(
+        _db,
+        _book,
+        ch_data,
+        queue_wait_ms=None,
+        dispatch_analysis=True,
+        check_book_completion=True,
+    ):
+        process_chapter_calls.append(
+            {
+                "dispatch_analysis": dispatch_analysis,
+                "check_book_completion": check_book_completion,
+            }
+        )
         _db.add(
             Chapter(
                 book_id=_book.id,
@@ -55,15 +70,20 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
         )
         await _db.flush()
 
-    monkeypatch.setattr("app.services.manuscript_import_service._process_chapter", _fake_process_chapter)
     monkeypatch.setattr(
-        "app.services.manuscript_import_service.extract_novel_scene_candidates", lambda **_kwargs: []
+        "app.services.manuscript_import_service._process_chapter", _fake_process_chapter
+    )
+    monkeypatch.setattr(
+        "app.services.manuscript_import_service.extract_novel_scene_candidates",
+        lambda **_kwargs: [],
     )
 
     async def _noop(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr("app.services.manuscript_import_service.replace_chapter_novel_scenes", _noop)
+    monkeypatch.setattr(
+        "app.services.manuscript_import_service.replace_chapter_novel_scenes", _noop
+    )
     monkeypatch.setattr(
         "app.services.manuscript_import_service.sync_chapter_content_from_novel_scenes", _noop
     )
@@ -101,6 +121,12 @@ async def test_manuscript_import_dispatches_analysis_async(client, db, monkeypat
     assert payload["status"] == "imported"
     assert payload["chapters_created"] == 1
     assert payload["analysis_dispatched"] == 1
+    assert process_chapter_calls == [
+        {
+            "dispatch_analysis": False,
+            "check_book_completion": False,
+        }
+    ]
     assert payload["analysis_tasks"][0]["task_id"] == "analysis-1"
     assert len(dispatched) == 1
     assert str(dispatched[0]["chapter_id"]) == payload["analysis_tasks"][0]["chapter_id"]

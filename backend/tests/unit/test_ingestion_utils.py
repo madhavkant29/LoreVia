@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from httpx import Request
+from openai import APIConnectionError
 
 from app.engine.analysis.summariser import derive_summary_modes_from_detailed
 from app.models.book import Book
@@ -271,6 +273,9 @@ def test_is_retryable_processing_error_distinguishes_transient_failures():
         pass
 
     assert is_retryable_processing_error(RetryableError("service unavailable"))
+    assert is_retryable_processing_error(
+        APIConnectionError(request=Request("POST", "https://api.openai.com/v1/embeddings"))
+    )
     assert not is_retryable_processing_error(PermanentError("parse failure"))
 
 
@@ -335,7 +340,9 @@ async def test_load_staged_chapter_payload_propagates_deserializer_bugs(monkeypa
     def _deserialize_bug(_raw: bytes) -> dict:
         raise RuntimeError("deserializer bug")
 
-    monkeypatch.setattr("app.utils.ingestion_utils.deserialize_manuscript_content", _deserialize_bug)
+    monkeypatch.setattr(
+        "app.utils.ingestion_utils.deserialize_manuscript_content", _deserialize_bug
+    )
 
     with pytest.raises(RuntimeError, match="deserializer bug"):
         await load_staged_chapter_payload(

@@ -206,7 +206,9 @@ async def test_resolve_reader_chapter_payload_merges_fallback_media_when_markers
 def test_download_stored_text_or_empty_swallows_storage_io_but_not_parser_bugs(monkeypatch):
     chapter = SimpleNamespace(s3_key="chapters/atlas/1.json")
     monkeypatch.setattr(
-        chapter_recovery_service, "download_book", lambda _key: (_ for _ in ()).throw(OSError("missing"))
+        chapter_recovery_service,
+        "download_book",
+        lambda _key: (_ for _ in ()).throw(OSError("missing")),
     )
     assert chapter_recovery_service.download_stored_text_or_empty(chapter) == ""
 

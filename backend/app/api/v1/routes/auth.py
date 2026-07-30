@@ -72,6 +72,7 @@ log = logging.getLogger("lorevia.auth")
 LEGAL_VERSION = "2026-04"
 SUPABASE_OAUTH_PERSISTENCE_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
 
+
 @router.post("/register", response_model=RegisterOut, status_code=201)
 async def register(
     request: Request,

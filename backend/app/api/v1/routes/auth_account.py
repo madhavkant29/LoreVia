@@ -9,6 +9,7 @@ from app.api.v1.routes.auth_shared import (
     _build_user_out,
     _record_login_activity,
 )
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
 from app.schemas.auth import (
@@ -19,7 +20,6 @@ from app.schemas.auth import (
     TierLimitsOut,
     UserOut,
 )
-from app.core.config import settings
 from app.services.privacy_service import build_user_data_export, request_account_deletion
 from app.utils.auth_cookies import clear_auth_cookies, get_device_cookie
 from app.utils.auth_utils import next_token_version
@@ -102,7 +102,7 @@ async def delete_my_account(
     )
 
 
-@router.patch("/me/reading-mode")
+@router.patch("/me/reading-mode", response_model=UserOut)
 async def set_reading_mode(
     mode: str,
     db: AsyncSession = Depends(get_db),
@@ -112,7 +112,8 @@ async def set_reading_mode(
         raise HTTPException(400, "Invalid mode")
     current_user.reading_mode = mode
     await db.commit()
-    return {"reading_mode": mode}
+    await db.refresh(current_user)
+    return await _build_user_out(current_user, db)
 
 
 @router.patch("/me/daily-word-goal", response_model=UserOut)

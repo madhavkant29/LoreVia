@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
@@ -7,13 +7,13 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from tests.unit.route_patch_helpers import patch_route_dependency
-from tests.unit.route_facades import public
 from app.core.redis import key_public_books
 from app.schemas.public import PublicBookManualIn, PublicBookShareBody, PublicChapterIn
 from app.services import public_publish_service
 from app.utils import public_utils
 from app.utils.public import content
+from tests.unit.route_facades import public
+from tests.unit.route_patch_helpers import patch_route_dependency
 
 
 class _ScalarList:
@@ -157,7 +157,9 @@ async def test_get_public_user_profile_is_not_blocked_by_forum_status(monkeypatc
             "created_at": "2026-05-16T00:00:00Z",
         }
 
-    patch_route_dependency(monkeypatch, public, "get_public_user_profile", _fake_get_public_user_profile)
+    patch_route_dependency(
+        monkeypatch, public, "get_public_user_profile", _fake_get_public_user_profile
+    )
 
     payload = await public.get_public_user_profile_endpoint(username="writer", db=_FakeDB())
 
@@ -238,7 +240,9 @@ async def test_list_public_beta_forum_posts_caches_anonymous_page(monkeypatch):
     patch_route_dependency(monkeypatch, public, "cache_get_int", _fake_cache_get_int)
     patch_route_dependency(monkeypatch, public, "cache_get", _fake_cache_get)
     patch_route_dependency(monkeypatch, public, "cache_set", _fake_cache_set)
-    patch_route_dependency(monkeypatch, public, "list_public_forum_posts", _fake_list_public_forum_posts)
+    patch_route_dependency(
+        monkeypatch, public, "list_public_forum_posts", _fake_list_public_forum_posts
+    )
 
     payload = await public.list_public_beta_forum_posts(
         db=_FakeDB(), q=" sky ", page=2, page_size=15, current_user=None
@@ -277,7 +281,9 @@ async def test_list_public_beta_forum_comments_uses_anonymous_cache(monkeypatch)
         return [comment_payload]
 
     patch_route_dependency(monkeypatch, public, "cache_get_int", _fake_cache_get_int)
-    patch_route_dependency(monkeypatch, public, "get_public_forum_comments_cache", _fake_get_comments_cache)
+    patch_route_dependency(
+        monkeypatch, public, "get_public_forum_comments_cache", _fake_get_comments_cache
+    )
 
     payload = await public.list_public_beta_forum_comments(
         post_id=uuid.uuid4(), db=_FakeDB(), current_user=None
@@ -321,8 +327,12 @@ async def test_list_public_beta_forum_comments_caches_anonymous_payload(monkeypa
         ]
 
     patch_route_dependency(monkeypatch, public, "cache_get_int", _fake_cache_get_int)
-    patch_route_dependency(monkeypatch, public, "get_public_forum_comments_cache", _fake_get_comments_cache)
-    patch_route_dependency(monkeypatch, public, "set_public_forum_comments_cache", _fake_set_comments_cache)
+    patch_route_dependency(
+        monkeypatch, public, "get_public_forum_comments_cache", _fake_get_comments_cache
+    )
+    patch_route_dependency(
+        monkeypatch, public, "set_public_forum_comments_cache", _fake_set_comments_cache
+    )
     patch_route_dependency(monkeypatch, public, "list_public_forum_comments", _fake_list_comments)
 
     post_id = uuid.uuid4()
@@ -336,7 +346,9 @@ async def test_list_public_beta_forum_comments_caches_anonymous_payload(monkeypa
 
 @pytest.mark.asyncio
 async def test_list_public_books_returns_cached_payload(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map
+    )
 
     async def _fake_cache_get(_key):
         return [{"id": "cached"}]
@@ -348,7 +360,9 @@ async def test_list_public_books_returns_cached_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_creator_public_uploads_uses_creator_catalog(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map
+    )
 
     async def _fake_list_public_books(**kwargs):
         return [{"id": "creator-book"}]
@@ -365,7 +379,9 @@ async def test_public_uploads_analytics_route_returns_overview(monkeypatch):
     async def _fake_build_overview(_db):
         return {"total_public_books": 2}
 
-    patch_route_dependency(monkeypatch, public, "build_public_uploads_overview", _fake_build_overview)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_uploads_overview", _fake_build_overview
+    )
 
     payload = await public.get_public_uploads_analytics(db=_FakeDB())
 
@@ -387,8 +403,12 @@ async def test_list_public_books_builds_and_caches_rows(monkeypatch):
 
     patch_route_dependency(monkeypatch, public, "cache_get", _fake_cache_get)
     patch_route_dependency(monkeypatch, public, "cache_set", _fake_cache_set)
-    patch_route_dependency(monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map)
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map)
+    patch_route_dependency(
+        monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map
+    )
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map
+    )
     book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -429,8 +449,12 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
 
     patch_route_dependency(monkeypatch, public, "cache_get", _fake_cache_get)
     patch_route_dependency(monkeypatch, public, "cache_set", _fake_cache_set)
-    patch_route_dependency(monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map)
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map)
+    patch_route_dependency(
+        monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map
+    )
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics_map", _async_empty_analytics_map
+    )
     demo_book = SimpleNamespace(
         id=uuid.uuid4(),
         is_public=True,
@@ -477,7 +501,9 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
 
 @pytest.mark.asyncio
 async def test_get_public_book_returns_cached_payload(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     async def _fake_cache_get(_key):
         return {"id": "cached"}
@@ -509,8 +535,12 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
 
     patch_route_dependency(monkeypatch, public, "cache_get", _fake_cache_get)
     patch_route_dependency(monkeypatch, public, "cache_set", _fake_cache_set)
-    patch_route_dependency(monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map)
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map
+    )
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -546,7 +576,9 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_book_ignores_cached_payload_when_book_is_no_longer_visible(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     async def _fake_cache_get(_key):
         return {"id": "cached"}
@@ -568,7 +600,9 @@ async def test_get_public_book_ignores_cached_payload_when_book_is_no_longer_vis
 
 @pytest.mark.asyncio
 async def test_get_public_book_raises_for_missing_or_hidden_book(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     async def _fake_cache_get(_key):
         return None
@@ -582,7 +616,9 @@ async def test_get_public_book_raises_for_missing_or_hidden_book(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_book_builds_payload(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     async def _fake_cache_get(_key):
         return None
@@ -597,7 +633,9 @@ async def test_get_public_book_builds_payload(monkeypatch):
 
     patch_route_dependency(monkeypatch, public, "cache_get", _fake_cache_get)
     patch_route_dependency(monkeypatch, public, "cache_set", _fake_cache_set)
-    patch_route_dependency(monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map)
+    patch_route_dependency(
+        monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map
+    )
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -632,7 +670,9 @@ async def test_get_public_book_builds_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_chapter_returns_cached_payload(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     async def _fake_cache_get(_key):
         return {"chapter_number": 1}
@@ -647,7 +687,9 @@ async def test_get_public_chapter_returns_cached_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_public_chapter_skips_cache_for_user_shared_samples(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     cache_get_calls = []
     cache_set_calls = []
@@ -665,7 +707,9 @@ async def test_get_public_chapter_skips_cache_for_user_shared_samples(monkeypatc
         public, "deserialize_manuscript_content", lambda _raw: {"text": "fresh text", "html": None}
     )
     patch_route_dependency(monkeypatch, public, "download_book", lambda _key: b"chapter")
-    patch_route_dependency(monkeypatch, public, "get_presigned_url", lambda key: f"https://signed/{key}")
+    patch_route_dependency(
+        monkeypatch, public, "get_presigned_url", lambda key: f"https://signed/{key}"
+    )
 
     book_id = uuid.uuid4()
     book = SimpleNamespace(
@@ -693,7 +737,9 @@ async def test_get_public_chapter_skips_cache_for_user_shared_samples(monkeypatc
 async def test_get_public_chapter_ignores_cached_payload_when_book_is_no_longer_visible(
     monkeypatch,
 ):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     async def _fake_cache_get(_key):
         return {"chapter_number": 1}
@@ -716,7 +762,9 @@ async def test_get_public_chapter_ignores_cached_payload_when_book_is_no_longer_
 
 @pytest.mark.asyncio
 async def test_get_public_chapter_raises_for_missing_book_or_chapter(monkeypatch):
-    patch_route_dependency(monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+    )
 
     async def _fake_cache_get(_key):
         return None
@@ -754,7 +802,9 @@ async def test_get_public_chapter_builds_payload(monkeypatch):
         lambda _raw: {"text": "chapter text", "html": "<p>x</p>"},
     )
     patch_route_dependency(monkeypatch, public, "download_book", lambda _key: b"chapter")
-    patch_route_dependency(monkeypatch, public, "get_presigned_url", lambda key: f"https://signed/{key}")
+    patch_route_dependency(
+        monkeypatch, public, "get_presigned_url", lambda key: f"https://signed/{key}"
+    )
 
     book_id = uuid.uuid4()
     book = SimpleNamespace(

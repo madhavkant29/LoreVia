@@ -8,6 +8,7 @@ from app.models.user import User
 from app.utils.books.manuscript import (
     serialize_manuscript_content,
 )
+from app.utils.world_building_document_workflow_utils import create_world_building_documents
 from app.utils.world_building_utils import (
     _claims_contradict,
     build_world_logic_response,
@@ -18,7 +19,6 @@ from app.utils.world_building_utils import (
     ingest_world_elements_from_chapter,
     save_canon_override,
 )
-from app.utils.world_building_document_workflow_utils import create_world_building_documents
 from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
 
 
@@ -42,7 +42,9 @@ async def test_detect_world_gap_and_integration_payloads(db, monkeypatch):
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
     monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
     monkeypatch.setattr(
         "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
@@ -111,7 +113,9 @@ async def test_detect_series_world_analysis_checks_lore_across_books(db, monkeyp
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
     monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
     monkeypatch.setattr(
         "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
@@ -207,7 +211,9 @@ async def test_generate_wiki_and_world_logic_response(db, monkeypatch):
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
     monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
     monkeypatch.setattr(
         "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
@@ -411,7 +417,9 @@ async def test_detect_world_gaps_matches_transliteration_variants_without_false_
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
     monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
     monkeypatch.setattr(
         "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
@@ -604,7 +612,9 @@ async def test_detect_world_gaps_uses_character_aliases_as_canonical_identity(db
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
     monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
     monkeypatch.setattr(
         "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
@@ -725,7 +735,9 @@ async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
     monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
     monkeypatch.setattr(
         "app.utils.world_building_candidate_record_utils.download_book", fake_download_book

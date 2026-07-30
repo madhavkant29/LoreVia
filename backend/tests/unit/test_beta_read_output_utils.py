@@ -1,6 +1,6 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-import uuid
 
 from app.models.beta_read import BetaReadAssignmentState, BetaReadScopeKind
 from app.utils.beta_read_output_utils import _build_beta_read_assignment_out_from_context

@@ -1,7 +1,7 @@
 import type { Page, Route } from "@playwright/test"
 import type { Character } from "@/types/character"
 import type { EmailPreferences } from "@/types/email"
-import type { PublicBook, RevisionIntelligence } from "@/types/book"
+import type { ContinuityFinding, PublicBook, RevisionIntelligence } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
 
 type SessionMode = "authenticated" | "guest"
@@ -2246,6 +2246,9 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         ],
         activation: { eligible: true, completed: false, completed_at: null, completion_action: null, completed_finding_id: null },
         analysis_complete: true,
+        continuity_status: "issues_found",
+        coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
+        stale_finding_count: 0,
         analysis_limitations: [],
       }
     : {
@@ -2253,8 +2256,69 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         priority_findings: [],
         activation: { eligible: false, completed: true, completed_at: "2026-05-01T00:00:00Z", completion_action: "added_to_revision_plan", completed_finding_id: "rev-impact-1" },
         analysis_complete: true,
+        continuity_status: "clean",
+        coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
+        stale_finding_count: 0,
         analysis_limitations: [],
       }) as unknown as RevisionIntelligence
+  let continuityFindings: ContinuityFinding[] = options.activationPending
+    ? [
+        {
+          id: "continuity-finding-1",
+          scan_id: "continuity-scan-1",
+          book_id: "book-1",
+          category: "knowledge",
+          severity: "high",
+          confidence: 0.94,
+          status: "pending",
+          title: "Nora may use gate knowledge before learning it",
+          explanation: "Chapter 1 shows Nora using the blood-oath rule before Chapter 2 establishes how she learned it.",
+          recommendation: "Add an earlier acquisition beat or revise the Chapter 1 action.",
+          subject_type: "character",
+          subject_id: "char-1",
+          subject_label: "Nora Vale",
+          detector_version: "continuity-rules-v1",
+          content_versions: { "1": 1, "2": 2 },
+          coverage: { chapters_analyzed: 3, citation_coverage: 1 },
+          is_stale: false,
+          decision: null,
+          action: null,
+          reason: null,
+          evidence: [
+            {
+              observation_id: "continuity-observation-1",
+              role: "premature_use",
+              evidence_order: 1,
+              subject_type: "character",
+              subject_id: "char-1",
+              subject_label: "Nora Vale",
+              predicate: "knowledge.used",
+              display_value: "the gate needs royal blood",
+              chapter_number: 1,
+              content_version: 1,
+              excerpt: "Nora pressed her cut palm to the gate before anyone explained the blood oath.",
+              confidence: 0.95,
+            },
+            {
+              observation_id: "continuity-observation-2",
+              role: "later_acquisition",
+              evidence_order: 2,
+              subject_type: "character",
+              subject_id: "char-1",
+              subject_label: "Nora Vale",
+              predicate: "knowledge.acquired",
+              display_value: "Kael explains the blood oath",
+              chapter_number: 2,
+              content_version: 2,
+              excerpt: "Kael finally told Nora that royal blood was the only key.",
+              confidence: 0.96,
+            },
+          ],
+          created_at: "2026-06-19T09:00:00Z",
+          updated_at: "2026-06-19T09:00:00Z",
+        },
+      ]
+    : []
   book.hidden_at = null
   book.is_public = false
   const mockUser = {
@@ -2537,6 +2601,15 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, { ok: true })
     }
 
+    if (path === "/api/v1/billing/checkout" && method === "POST") {
+      const payload = route.request().postDataJSON() as { plan?: string }
+      return json(route, {
+        billing_enabled: false,
+        checkout_url: null,
+        message: `Mock checkout requested for ${payload.plan ?? "unknown"}.`,
+      })
+    }
+
     if (path === "/api/v1/admin/session" && method === "GET") {
       const adminSession = buildAdminSession(admin)
       return adminSession ? json(route, adminSession) : json(route, { detail: "Admin only" }, 403)
@@ -2555,10 +2628,10 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         fully_configured_plan_count: 4,
         missing_configuration: [],
         plans: [
-          { code: "author_monthly", display_name: "Author", billing_interval: "monthly", price_usd: 29, configured: true, price_id_present: true },
-          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 249, configured: true, price_id_present: true },
-          { code: "architect_monthly", display_name: "Architect", billing_interval: "monthly", price_usd: 49, configured: true, price_id_present: true },
-          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 449, configured: true, price_id_present: true },
+          { code: "author_monthly", display_name: "Author", billing_interval: "monthly", price_usd: 19, configured: true, price_id_present: true },
+          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 190, configured: true, price_id_present: true },
+          { code: "architect_monthly", display_name: "Architect", billing_interval: "monthly", price_usd: 39, configured: true, price_id_present: true },
+          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 390, configured: true, price_id_present: true },
         ],
         webhook_endpoint_path: "/api/v1/webhooks/paddle",
         supported_webhook_events: ["transaction.completed", "subscription.updated"],
@@ -3303,6 +3376,55 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1/revision-intelligence" && method === "GET") {
       return json(route, activationRevision)
+    }
+
+    if (path === "/api/v1/books/book-1/continuity-findings" && method === "GET") {
+      return json(route, continuityFindings)
+    }
+
+    if (path === "/api/v1/books/book-1/continuity-scans" && method === "POST") {
+      return json(route, {
+        id: "continuity-scan-1",
+        book_id: "book-1",
+        scope: "full_book",
+        status: "ready",
+        continuity_status: continuityFindings.length ? "issues_found" : "clean",
+        detector_version: "continuity-rules-v1",
+        chapter_versions: { "1": 1, "2": 2, "3": 1 },
+        coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
+        metrics: { cost_usd_per_100k_words: 0, latency_ms_per_100k_words: 2400 },
+        word_count: 2400,
+        duration_ms: 58,
+        cost_usd: 0,
+        error_detail: null,
+        finding_count: continuityFindings.length,
+        stale_finding_count: 0,
+        findings: continuityFindings,
+        started_at: "2026-06-19T09:00:00Z",
+        completed_at: "2026-06-19T09:00:00Z",
+        created_at: "2026-06-19T09:00:00Z",
+      })
+    }
+
+    const continuityDecisionMatch = path.match(/^\/api\/v1\/books\/book-1\/continuity-findings\/([^/]+)$/)
+    if (continuityDecisionMatch && method === "PATCH") {
+      const body = route.request().postDataJSON() as {
+        decision?: ContinuityFinding["decision"]
+        action?: string | null
+        reason?: string | null
+      } | null
+      continuityFindings = continuityFindings.map((finding) =>
+        finding.id === continuityDecisionMatch[1]
+          ? {
+              ...finding,
+              status: body?.decision ?? finding.status,
+              decision: body?.decision ?? finding.decision,
+              action: body?.action ?? finding.action,
+              reason: body?.reason ?? finding.reason,
+            }
+          : finding,
+      )
+      return json(route, continuityFindings.find((finding) => finding.id === continuityDecisionMatch[1]))
     }
 
     if (path.match(/^\/api\/v1\/books\/book-1\/revision-findings\/[^/]+\/decision$/) && method === "POST") {

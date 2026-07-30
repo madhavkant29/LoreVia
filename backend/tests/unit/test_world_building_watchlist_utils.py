@@ -12,11 +12,14 @@ def test_find_matching_item_matches_aliases():
         "aliases": ["Harbor of Glass"],
     }
 
-    assert _find_matching_item(
-        "Harbor of Glass",
-        {"glass harbor": item},
-        aliases=["The Glass Port"],
-    ) is item
+    assert (
+        _find_matching_item(
+            "Harbor of Glass",
+            {"glass harbor": item},
+            aliases=["The Glass Port"],
+        )
+        is item
+    )
 
 
 def test_build_gap_item_preserves_world_and_story_evidence():

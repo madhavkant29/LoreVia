@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from typing import Any
 
 from app.engine.character.deduplicator import (
@@ -65,7 +66,13 @@ async def _accept_existing_character_match(
         char,
         {**entity, "name": char.name, "aliases": safe_aliases, "first_chapter": chapter_number},
     )
-    changed = _changed(char.trait_state or {}, updated["trait_state"])
+    previous_trait_state = deepcopy(char.trait_state or {})
+    state_snapshot = _build_observed_state_snapshot(
+        updated["trait_state"],
+        entity.get("traits"),
+    )
+    changed = _changed(previous_trait_state, state_snapshot)
+    prompt_delta = _diff(previous_trait_state, state_snapshot)
     _apply_character_update(char, updated)
     _refresh_character_key_cache(character_key_cache, char)
     pending_first_chapter_candidates[existing_id] = _first_chapter_lookup_candidates(
@@ -81,10 +88,11 @@ async def _accept_existing_character_match(
             CharacterState(
                 character_id=existing_id,
                 at_chapter=chapter_number,
-                trait_snapshot=updated["trait_state"],
+                trait_snapshot=state_snapshot,
+                observed_trait_keys=_observed_trait_keys(entity.get("traits")),
                 motivations_snapshot=updated.get("motivations") or [],
                 fears_snapshot=updated.get("fears") or [],
-                prompt_delta=_diff(char.trait_state or {}, updated["trait_state"]),
+                prompt_delta=prompt_delta,
                 arc_note=entity.get("arc_summary"),
                 growth_event=growth_event if isinstance(growth_event, dict) else None,
             )
@@ -142,6 +150,26 @@ async def _promote_new_character_from_entity(
     char = Character(**profile, embedding=embedding)
     db.add(char)
     await db.flush()
+    baseline_snapshot = deepcopy(profile.get("trait_state") or {})
+    db.add(
+        CharacterState(
+            character_id=char.id,
+            at_chapter=chapter_number,
+            trait_snapshot=baseline_snapshot,
+            observed_trait_keys=sorted(baseline_snapshot),
+            motivations_snapshot=list(profile.get("motivations") or []),
+            fears_snapshot=list(profile.get("fears") or []),
+            prompt_delta=_diff({}, baseline_snapshot),
+            arc_note=profile.get("arc_summary"),
+            growth_event=(
+                deepcopy(profile.get("growth_events")[0])
+                if isinstance(profile.get("growth_events"), list)
+                and profile.get("growth_events")
+                and isinstance(profile.get("growth_events")[0], dict)
+                else None
+            ),
+        )
+    )
     existing_characters.append(char)
     _refresh_character_key_cache(character_key_cache, char)
     await record_character_candidate(
@@ -303,6 +331,29 @@ def _apply_character_update(char: Character, updated: dict[str, Any]) -> None:
         setattr(char, key, value)
 
 
+def _build_observed_state_snapshot(
+    merged_trait_state: dict[str, Any] | None,
+    observed_traits: object,
+) -> dict[str, Any]:
+    snapshot = deepcopy(merged_trait_state or {})
+    if not isinstance(observed_traits, dict):
+        return snapshot
+    for key, value in observed_traits.items():
+        if isinstance(value, dict) and value.get("value") not in (None, ""):
+            snapshot[key] = deepcopy(value)
+    return snapshot
+
+
+def _observed_trait_keys(observed_traits: object) -> list[str]:
+    if not isinstance(observed_traits, dict):
+        return []
+    return sorted(
+        str(key)
+        for key, value in observed_traits.items()
+        if isinstance(value, dict) and value.get("value") not in (None, "")
+    )
+
+
 def _merge_alias_in_memory(char: Character | None, alias: str | None) -> None:
     if char is None or not is_valid_alias(alias):
         return
@@ -322,8 +373,13 @@ def _changed(old: dict, new: dict, delta: float = 0.15) -> bool:
     for key, value in new.items():
         if not isinstance(value, dict):
             continue
-        old_conf = old.get(key, {}).get("confidence", 0) if isinstance(old.get(key), dict) else 0
-        if value.get("confidence", 0) - old_conf >= delta:
+        old_value = old.get(key) if isinstance(old.get(key), dict) else {}
+        old_normalized = _normalized_trait_value(old_value.get("value"))
+        new_normalized = _normalized_trait_value(value.get("value"))
+        if new_normalized and new_normalized != old_normalized:
+            return True
+        old_conf = float(old_value.get("confidence") or 0)
+        if float(value.get("confidence") or 0) - old_conf >= delta:
             return True
     return False
 
@@ -335,8 +391,12 @@ def _diff(old: dict, new: dict) -> str:
             continue
         old_v = old.get(key, {}).get("value") if isinstance(old.get(key), dict) else None
         new_v = value.get("value")
-        if old_v and new_v and old_v != new_v:
+        if old_v and new_v and _normalized_trait_value(old_v) != _normalized_trait_value(new_v):
             changes.append(f"{key}: {old_v}->{new_v}")
         elif not old_v and new_v:
             changes.append(f"+{key}: {new_v}")
     return "; ".join(changes[:5]) or "minor update"
+
+
+def _normalized_trait_value(value: object) -> str:
+    return " ".join(str(value or "").split()).strip().casefold()

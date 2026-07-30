@@ -35,6 +35,7 @@ from app.services.advisor_jobs_service import (
     serialize_advisor_job,
 )
 from app.utils.advisor_chat_utils import stream_series_advisor_reply_payload
+from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.advisor_utils import (
     SERIES_CONTINUITY_SYSTEM,
     build_series_story_context,
@@ -43,10 +44,10 @@ from app.utils.advisor_utils import (
     normalize_series_continuity_result,
     retrieve_series_continuity_passages,
 )
-from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.billing_utils import require_author_access
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
 from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
 
@@ -332,7 +333,7 @@ async def series_continuity_check(
         f"--- RETRIEVED PASSAGES FROM EARLIER BOOKS ---\n{passages_block}"
     )
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
     try:
         response = await create_tracked_chat_completion(
             client=client,

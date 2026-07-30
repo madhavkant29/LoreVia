@@ -206,7 +206,16 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
     db.add(book)
     await db.commit()
 
-    async def _fake_process_chapter(_db, _book, ch_data, queue_wait_ms=None):
+    async def _fake_process_chapter(
+        _db,
+        _book,
+        ch_data,
+        queue_wait_ms=None,
+        dispatch_analysis=True,
+        check_book_completion=True,
+    ):
+        assert dispatch_analysis is False
+        assert check_book_completion is False
         chapter = (
             await _db.execute(
                 select(Chapter).where(
@@ -226,7 +235,9 @@ async def test_manuscript_import_syncs_chapter_scenes_and_reader_chapter_content
             )
             await _db.flush()
 
-    monkeypatch.setattr("app.services.manuscript_import_service._process_chapter", _fake_process_chapter)
+    monkeypatch.setattr(
+        "app.services.manuscript_import_service._process_chapter", _fake_process_chapter
+    )
 
     import_response = await client.post(
         f"/api/v1/books/{book.id}/manuscript/import",

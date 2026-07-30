@@ -27,6 +27,10 @@ EXTRACTION_TASK_NAMES = (
     "extraction_tasks.process_chapter",
     "extraction_tasks.repair_chapter_payload",
 )
+BOOK_SERIAL_EXTRACTION_TASK_NAMES = (
+    "extraction_tasks.process_chapter",
+    "extraction_tasks.repair_chapter_payload",
+)
 TASK_PUBLISH_EXCEPTIONS = (
     KombuOperationalError,
     RuntimeError,
@@ -170,21 +174,23 @@ async def get_or_create_processing_run(
     chapters_total: int = 0,
     reuse_active: bool = True,
 ) -> BookProcessingRun:
-    await db.execute(
-        select(func.pg_advisory_xact_lock(func.hashtext(f"processing_run:{book_id}")))
-    )
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"processing_run:{book_id}"))))
     if reuse_active:
         active = (
-            await db.execute(
-                select(BookProcessingRun)
-                .where(
-                    BookProcessingRun.book_id == book_id,
-                    BookProcessingRun.status.in_(("queued", "running", "paused")),
+            (
+                await db.execute(
+                    select(BookProcessingRun)
+                    .where(
+                        BookProcessingRun.book_id == book_id,
+                        BookProcessingRun.status.in_(("queued", "running", "paused")),
+                    )
+                    .order_by(BookProcessingRun.created_at.desc())
+                    .with_for_update()
                 )
-                .order_by(BookProcessingRun.created_at.desc())
-                .with_for_update()
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if active is not None:
             active.chapters_total = max(active.chapters_total, chapters_total)
             return active
@@ -309,7 +315,9 @@ async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
             ).scalar_one_or_none()
         )
         if reservation is not None:
-            await consume_processing_reservation(db, reservation.id, task_id=execution.celery_task_id)
+            await consume_processing_reservation(
+                db, reservation.id, task_id=execution.celery_task_id
+            )
         run = await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
         if run is not None:
             completed = await db.scalar(
@@ -376,6 +384,76 @@ async def pause_task_execution(
         run.paused_at = datetime.now(UTC)
     await db.commit()
     await cache_del(f"task_execution_lease:{execution.id}")
+
+
+async def resume_temporary_capacity_pauses(
+    db: AsyncSession,
+    *,
+    limit: int = 500,
+    min_age_seconds: int = 60,
+) -> int:
+    """Return temporary LLM-capacity pauses to durable dispatch after a cooldown."""
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=max(1, min_age_seconds))
+    executions = list(
+        (
+            await db.execute(
+                select(TaskExecution)
+                .where(
+                    TaskExecution.status == "paused",
+                    TaskExecution.error_category == "llm_capacity",
+                    TaskExecution.updated_at <= cutoff,
+                )
+                .order_by(TaskExecution.updated_at, TaskExecution.created_at)
+                .with_for_update(skip_locked=True)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    resumed = 0
+    now = datetime.now(UTC)
+    for execution in executions:
+        run = await db.get(
+            BookProcessingRun,
+            execution.processing_run_id,
+            with_for_update=True,
+        )
+        if execution.attempt_count >= execution.max_attempts:
+            execution.status = "failed_terminal"
+            execution.error_category = "attempt_exhausted"
+            execution.error_detail = "Temporary LLM capacity remained unavailable."
+            execution.completed_at = now
+            reservation_id = (execution.arguments_json or {}).get("processing_reservation_id")
+            if reservation_id:
+                from app.services.processing_allowance_service import (
+                    release_processing_reservation,
+                )
+
+                await release_processing_reservation(
+                    db,
+                    uuid.UUID(str(reservation_id)),
+                )
+            if run is not None:
+                run.status = "failed_terminal"
+                run.completed_at = now
+            continue
+
+        execution.status = "pending_dispatch"
+        execution.celery_task_id = None
+        execution.queued_at = None
+        execution.locked_until = None
+        execution.error_category = None
+        execution.error_detail = None
+        if run is not None:
+            run.status = "queued"
+            run.pause_reason = None
+            run.resume_blockers = []
+            run.paused_at = None
+        resumed += 1
+    await db.commit()
+    return resumed
 
 
 async def fail_task_execution(
@@ -599,9 +677,7 @@ async def publish_task_dispatch_outbox(
 
 
 async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
-    await db.execute(
-        select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:extraction")))
-    )
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:extraction"))))
     candidates = (
         (
             await db.execute(
@@ -619,6 +695,7 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
         .all()
     )
     if not candidates:
+        await db.commit()
         return 0
     waiting_users = {row.user_id for row in candidates if row.user_id is not None}
     per_user_limit = 1 if len(waiting_users) > 1 else settings.EXTRACTION_WORKER_CONCURRENCY
@@ -633,17 +710,60 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
         )
     ).all()
     active = {user_id: int(count) for user_id, count in active_rows}
+    active_book_ids = set(
+        (
+            await db.execute(
+                select(TaskExecution.book_id).where(
+                    TaskExecution.task_name.in_(BOOK_SERIAL_EXTRACTION_TASK_NAMES),
+                    TaskExecution.status.in_(ACTIVE_EXECUTION_STATUSES),
+                    TaskExecution.book_id.isnot(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pending_book_heads = {
+        book_id: int(chapter_number)
+        for book_id, chapter_number in (
+            await db.execute(
+                select(
+                    TaskExecution.book_id,
+                    func.min(TaskExecution.chapter_number),
+                )
+                .where(
+                    TaskExecution.task_name.in_(BOOK_SERIAL_EXTRACTION_TASK_NAMES),
+                    TaskExecution.status == "pending_dispatch",
+                    TaskExecution.book_id.isnot(None),
+                    TaskExecution.chapter_number.isnot(None),
+                )
+                .group_by(TaskExecution.book_id)
+            )
+        ).all()
+    }
     available_slots = max(
         int(settings.EXTRACTION_WORKER_CONCURRENCY) - sum(active.values()),
         0,
     )
     if available_slots == 0:
+        await db.commit()
         return 0
     selected: list[TaskExecution] = []
     for row in candidates:
         if active.get(row.user_id, 0) >= per_user_limit:
             continue
+        if row.task_name in BOOK_SERIAL_EXTRACTION_TASK_NAMES and row.book_id in active_book_ids:
+            continue
+        if (
+            row.task_name in BOOK_SERIAL_EXTRACTION_TASK_NAMES
+            and row.book_id is not None
+            and row.chapter_number is not None
+            and row.chapter_number != pending_book_heads.get(row.book_id)
+        ):
+            continue
         active[row.user_id] = active.get(row.user_id, 0) + 1
+        if row.task_name in BOOK_SERIAL_EXTRACTION_TASK_NAMES and row.book_id is not None:
+            active_book_ids.add(row.book_id)
         selected.append(row)
         if len(selected) >= available_slots:
             break
@@ -803,9 +923,7 @@ async def enqueue_analysis_execution(
 
 
 async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
-    await db.execute(
-        select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:analysis")))
-    )
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:analysis"))))
     active_count = int(
         await db.scalar(
             select(func.count(TaskExecution.id)).where(
@@ -817,6 +935,7 @@ async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
     )
     available_slots = max(int(settings.ANALYSIS_WORKER_CONCURRENCY) - active_count, 0)
     if available_slots == 0:
+        await db.commit()
         return 0
     candidates = (
         (
@@ -835,9 +954,11 @@ async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
         .all()
     )
     if not candidates:
+        await db.commit()
         return 0
     from app.models.user import User
     from app.utils.queue_utils import queue_for_user
+
     user_ids = {row.user_id for row in candidates if row.user_id is not None}
     users = (
         (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
@@ -864,9 +985,7 @@ async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
 
 
 async def dispatch_pending_embedding_tasks(db: AsyncSession) -> int:
-    await db.execute(
-        select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:embedding")))
-    )
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:embedding"))))
     active_count = int(
         await db.scalar(
             select(func.count(TaskExecution.id)).where(
@@ -878,6 +997,7 @@ async def dispatch_pending_embedding_tasks(db: AsyncSession) -> int:
     )
     available_slots = max(int(settings.EMBEDDING_WORKER_CONCURRENCY) - active_count, 0)
     if available_slots == 0:
+        await db.commit()
         return 0
     candidates = (
         (
@@ -896,6 +1016,7 @@ async def dispatch_pending_embedding_tasks(db: AsyncSession) -> int:
         .all()
     )
     if not candidates:
+        await db.commit()
         return 0
     now = datetime.now(UTC)
     for row in candidates:

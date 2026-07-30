@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 from fastapi import HTTPException
-from openai import OpenAIError
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAIError
 from openai.types.chat import ChatCompletion
 from openai.types.create_embedding_response import CreateEmbeddingResponse
 from sqlalchemy import func, select
@@ -56,6 +56,38 @@ async def _fail_llm_reservation_best_effort(
             getattr(reservation, "id", None),
             exc_info=True,
         )
+
+
+def is_transient_llm_provider_error(exc: BaseException) -> bool:
+    """Identify provider/network failures that are safe to retry."""
+    if isinstance(
+        exc,
+        (
+            APIConnectionError,
+            APITimeoutError,
+            httpx.TransportError,
+            TimeoutError,
+        ),
+    ):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in {408, 409, 429} or exc.status_code >= 500
+    return False
+
+
+def is_llm_call_error(exc: BaseException) -> bool:
+    """Identify failures raised at the provider/control boundary."""
+    return isinstance(exc, (OpenAIError, httpx.HTTPError, HTTPException, TimeoutError))
+
+
+def is_retryable_llm_call_error(exc: BaseException) -> bool:
+    """Identify failures that should be retried at one provider call, not at task level."""
+    if is_transient_llm_provider_error(exc):
+        return True
+    if not isinstance(exc, HTTPException) or exc.status_code not in {429, 503}:
+        return False
+    message = " ".join(str(exc.detail or "").lower().split())
+    return "llm capacity" in message or "llm coordination" in message
 
 
 def _coerce_uuid(value: object | None) -> uuid.UUID | None:

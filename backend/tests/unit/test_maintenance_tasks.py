@@ -14,12 +14,33 @@ from app.workers.tasks.maintenance_tasks import (
     cleanup_expired_advisor_jobs_task,
     cleanup_expired_subscription_events_task,
     cleanup_expired_webhook_events_task,
+    maintain_task_executions_task,
     process_beta_reads_task,
     process_data_deletion_requests_task,
     refresh_public_rankings_task,
+    release_stale_processing_reservations_task,
     repair_processing_books_task,
     send_due_trial_emails_task,
 )
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        maintain_task_executions_task,
+        release_stale_processing_reservations_task,
+        repair_processing_books_task,
+        send_due_trial_emails_task,
+        process_beta_reads_task,
+        process_data_deletion_requests_task,
+        cleanup_expired_advisor_jobs_task,
+        cleanup_expired_webhook_events_task,
+        cleanup_expired_subscription_events_task,
+        refresh_public_rankings_task,
+    ],
+)
+def test_non_llm_maintenance_tasks_allow_six_retries(task):
+    assert task.max_retries == 6
 
 
 def _fake_run_worker_coro(coro):

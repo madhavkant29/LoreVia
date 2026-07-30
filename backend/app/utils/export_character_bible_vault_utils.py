@@ -29,6 +29,7 @@ from app.utils.export_story_utils import (
 )
 from app.utils.relationship_utils import normalize_relationship_labels, relationship_label_display
 
+
 def _vault_note_title(value: object | None) -> str:
     cleaned = _clean_line(value)
     return cleaned or "Untitled"

@@ -5,6 +5,7 @@ import Script from "next/script"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
+import { capture } from "@/lib/analytics/posthog"
 import {
   buildPaddleCheckoutSettings,
   getBillingConfirmationToken,
@@ -26,17 +27,23 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
 
   const openCheckout = () => {
     if (!transactionId) {
+      capture("checkout_failed", { surface: "checkout_page", reason: "missing_transaction" })
       setMessage("This checkout link is missing its Paddle transaction reference.")
       return
     }
 
     const paddle = window.Paddle
     if (!paddle) {
+      capture("checkout_failed", { surface: "checkout_page", reason: "paddle_unavailable" })
       setMessage("Paddle checkout did not load correctly. Refresh and try again.")
       return
     }
 
     try {
+      capture("checkout_started", {
+        surface: "checkout_page",
+        transaction_id: transactionId,
+      })
       paddle.Checkout.open({
         settings: buildPaddleCheckoutSettings(),
         transactionId,
@@ -44,6 +51,11 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
       setOpenedTransactionId(transactionId)
       setMessage("Secure checkout is open. Complete payment in the modal to continue.")
     } catch {
+      capture("checkout_failed", {
+        surface: "checkout_page",
+        reason: "overlay_open_failed",
+        transaction_id: transactionId,
+      })
       setMessage("We could not open secure checkout right now. Refresh and try again.")
     }
   }
@@ -75,11 +87,19 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
         },
         eventCallback: (event) => {
           if (event.name === "checkout.closed") {
+            capture("checkout_closed", {
+              surface: "checkout_page",
+              transaction_id: transactionId,
+            })
             setMessage("Checkout was closed. Use the button below to reopen it if you still want to continue.")
           }
           if (event.name === "checkout.completed") {
             const checkoutTransactionId =
               typeof event.data?.transaction_id === "string" ? event.data.transaction_id : transactionId
+            capture("checkout_completed", {
+              surface: "checkout_page",
+              transaction_id: checkoutTransactionId,
+            })
             if (checkoutTransactionId && typeof window !== "undefined") {
               const params = new URLSearchParams({ txn: checkoutTransactionId })
               if (confirmationToken) {

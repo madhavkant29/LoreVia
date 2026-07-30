@@ -1,4 +1,4 @@
-﻿"""Tests for chapter validation in reader routes."""
+"""Tests for chapter validation in reader routes."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from tests.unit.route_patch_helpers import patch_route_dependency
 from tests.unit.route_facades import reader
+from tests.unit.route_patch_helpers import patch_route_dependency
 
 
 class _FakeDB:

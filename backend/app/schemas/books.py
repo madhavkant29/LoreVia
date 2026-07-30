@@ -1141,7 +1141,118 @@ class RevisionIntelligenceOut(BaseModel):
     priority_findings: list[RevisionActionItemOut] = Field(default_factory=list)
     activation: RevisionActivationOut = Field(default_factory=RevisionActivationOut)
     analysis_complete: bool = False
+    continuity_status: Literal[
+        "issues_found",
+        "clean",
+        "insufficient_evidence",
+        "stale",
+    ] = "insufficient_evidence"
+    continuity_scan_id: uuid.UUID | None = None
+    continuity_completed_at: datetime | None = None
+    continuity_duration_ms: int | None = None
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    stale_finding_count: int = 0
     analysis_limitations: list[str] = Field(default_factory=list)
+
+
+class ContinuityScanRequest(BaseModel):
+    scope: Literal["full_book", "targeted"] = "full_book"
+    chapter_numbers: list[int] = Field(default_factory=list, max_length=100)
+
+
+class ContinuityEvidenceOut(BaseModel):
+    observation_id: uuid.UUID
+    role: str
+    evidence_order: int
+    subject_type: str
+    subject_id: str | None = None
+    subject_label: str
+    predicate: str
+    display_value: str
+    chapter_number: int
+    content_version: int
+    excerpt: str
+    confidence: float
+
+
+class ContinuityFindingOut(BaseModel):
+    id: uuid.UUID
+    scan_id: uuid.UUID
+    book_id: uuid.UUID
+    category: str
+    severity: str
+    confidence: float
+    status: str
+    title: str
+    explanation: str
+    recommendation: str | None = None
+    subject_type: str
+    subject_id: str | None = None
+    subject_label: str
+    detector_version: str
+    content_versions: dict[str, int] = Field(default_factory=dict)
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    is_stale: bool = False
+    decision: str | None = None
+    action: str | None = None
+    reason: str | None = None
+    evidence: list[ContinuityEvidenceOut] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ContinuityScanOut(BaseModel):
+    id: uuid.UUID
+    book_id: uuid.UUID
+    scope: str
+    status: str
+    continuity_status: str
+    detector_version: str
+    chapter_versions: dict[str, int] = Field(default_factory=dict)
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    word_count: int = 0
+    duration_ms: int | None = None
+    cost_usd: float | None = None
+    error_detail: str | None = None
+    finding_count: int = 0
+    stale_finding_count: int = 0
+    findings: list[ContinuityFindingOut] = Field(default_factory=list)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class ContinuityFindingDecisionBody(BaseModel):
+    decision: Literal["accepted", "dismissed", "intentional", "resolved"]
+    action: (
+        Literal[
+            "added_to_revision_plan",
+            "saved_note",
+            "manuscript_edit",
+            "exported_report",
+        ]
+        | None
+    ) = None
+    reason: Literal["intentional", "incorrect", "not_relevant", "fixed", "other"] | None = None
+
+
+class CanonFactOut(BaseModel):
+    id: uuid.UUID
+    scan_id: uuid.UUID
+    subject_type: str
+    subject_id: str | None = None
+    subject_label: str
+    predicate: str
+    normalized_value: str
+    display_value: str
+    chapter_number: int
+    content_version: int
+    evidence_excerpt: str
+    confidence: float
+    extractor_version: str
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    is_author_confirmed: bool = False
 
 
 class ReadabilityMetricsOut(BaseModel):

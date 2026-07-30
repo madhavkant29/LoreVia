@@ -9,16 +9,10 @@ import pytest
 from fastapi import HTTPException, UploadFile
 
 from app.api.v1.router import api_router
-from tests.unit.route_patch_helpers import patch_route_dependency
-from tests.unit.route_facades import books
 from app.api.v1.routes.books import core as books_core
 from app.api.v1.routes.books import imports
 from app.api.v1.routes.books import intelligence as books_intelligence
 from app.api.v1.routes.books import lifecycle as books_lifecycle
-from app.utils.books import overview as books_overview
-from app.services import character_reprocess_service
-from app.services import manuscript_import_service
-from app.services import manuscript_reprocess_service
 from app.schemas.books import (
     BookModeBody,
     BookNoteBody,
@@ -45,7 +39,15 @@ from app.schemas.books import (
     VaultNoteBody,
     WriterWorkspaceBody,
 )
+from app.services import (
+    character_reprocess_service,
+    manuscript_import_service,
+    manuscript_reprocess_service,
+)
+from app.utils.books import overview as books_overview
 from app.utils.llm_usage_utils import LlmUsageSummary
+from tests.unit.route_facades import books
+from tests.unit.route_patch_helpers import patch_route_dependency
 
 
 @pytest.mark.asyncio
@@ -194,6 +196,14 @@ class _Result:
         return self._scalar
 
 
+class _FakeNoAutoflush:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
 class _FakeDB:
     def __init__(self, *, get_values=None, execute_values=None, scalar_values=None):
         self._get_values = list(get_values or [])
@@ -233,6 +243,10 @@ class _FakeDB:
 
     async def delete(self, value):
         self.deleted.append(value)
+
+    @property
+    def no_autoflush(self):
+        return _FakeNoAutoflush()
 
 
 def _async_value(value):
@@ -620,7 +634,9 @@ async def test_update_mode_and_events_routes(monkeypatch):
             "collaboration_role": getattr(collaborator, "role", None),
         }
 
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
     patch_route_dependency(monkeypatch, books, "book_out", _fake_book_out)
     monkeypatch.setattr(
         books,
@@ -783,7 +799,9 @@ async def test_update_mode_allows_owned_book_switch_without_paid_author_plan(mon
             "collaboration_role": getattr(collaborator, "role", None),
         }
 
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
     patch_route_dependency(monkeypatch, books, "book_out", _fake_book_out)
     monkeypatch.setattr(
         books,
@@ -816,9 +834,13 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
         return None
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     patch_route_dependency(monkeypatch, books, "next_chapter_number", _async_value(1))
-    patch_route_dependency(monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    patch_route_dependency(
+        monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel"
+    )
     patch_route_dependency(monkeypatch, books, "clean_manuscript_html", lambda value: value.strip())
     monkeypatch.setattr(
         books,
@@ -847,7 +869,9 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
     monkeypatch.setattr(
         books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"}
     )
-    patch_route_dependency(monkeypatch, books, "sync_chapter_content_from_novel_scenes", _fake_replace)
+    patch_route_dependency(
+        monkeypatch, books, "sync_chapter_content_from_novel_scenes", _fake_replace
+    )
     dispatched_tasks: list[dict] = []
 
     async def _fake_enqueue(_db, **kwargs):
@@ -861,7 +885,9 @@ async def test_import_manuscript_content_text_flow_updates_progress_and_reports(
     async def _fake_invalidate(*_args, **_kwargs):
         cache_invalidated["called"] += 1
 
-    patch_route_dependency(monkeypatch, books, "invalidate_advisor_caches_for_book", _fake_invalidate)
+    patch_route_dependency(
+        monkeypatch, books, "invalidate_advisor_caches_for_book", _fake_invalidate
+    )
 
     db = _FakeDB(
         execute_values=[
@@ -926,9 +952,13 @@ async def test_import_manuscript_content_rejects_stale_content_version(monkeypat
     )
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     patch_route_dependency(monkeypatch, books, "next_chapter_number", _async_value(2))
-    patch_route_dependency(monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    patch_route_dependency(
+        monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel"
+    )
     monkeypatch.setattr(
         books,
         "normalize_imported_chapters",
@@ -1004,20 +1034,26 @@ async def test_import_manuscript_content_carries_retained_media_references_on_re
         return False, 0, 0
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     patch_route_dependency(monkeypatch, books, "next_chapter_number", _async_value(2))
-    patch_route_dependency(monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
-    patch_route_dependency(monkeypatch, books, "deserialize_manuscript_content", lambda _raw: {"text": "Old body"})
+    patch_route_dependency(
+        monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel"
+    )
+    patch_route_dependency(
+        monkeypatch, books, "deserialize_manuscript_content", lambda _raw: {"text": "Old body"}
+    )
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b'{"text":"Old body"}')
     monkeypatch.setattr(
         manuscript_import_service,
         "snapshot_chapter_version",
         _async_value(SimpleNamespace(id=uuid.uuid4())),
     )
-    monkeypatch.setattr(
-        manuscript_import_service, "persist_editor_chapter_content", _fake_persist
+    monkeypatch.setattr(manuscript_import_service, "persist_editor_chapter_content", _fake_persist)
+    patch_route_dependency(
+        monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: []
     )
-    patch_route_dependency(monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: [])
     patch_route_dependency(monkeypatch, books, "replace_chapter_novel_scenes", _noop)
     patch_route_dependency(monkeypatch, books, "sync_chapter_content_from_novel_scenes", _noop)
     patch_route_dependency(monkeypatch, books, "invalidate_advisor_caches_for_book", _noop)
@@ -1072,7 +1108,9 @@ async def test_import_manuscript_content_rejects_author_titles_over_four_words(m
     book = _book(user_id=user.id, mode="author", total_chapters=1)
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await books.import_manuscript_content(
@@ -1120,7 +1158,16 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
     ]
     processed_numbers: list[int] = []
 
-    async def _fake_process(_db, _book, payload):
+    async def _fake_process(
+        _db,
+        _book,
+        payload,
+        *,
+        dispatch_analysis=True,
+        check_book_completion=True,
+    ):
+        assert dispatch_analysis is False
+        assert check_book_completion is False
         processed_numbers.append(int(payload["number"]))
         return None
 
@@ -1128,9 +1175,13 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         return None
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     patch_route_dependency(monkeypatch, books, "next_chapter_number", _async_value(1))
-    patch_route_dependency(monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    patch_route_dependency(
+        monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel"
+    )
     monkeypatch.setattr(
         books,
         "parse_book_upload_for_ingestion",
@@ -1139,15 +1190,23 @@ async def test_import_manuscript_content_preserves_source_chapter_count_for_long
         ),
     )
     patch_route_dependency(monkeypatch, books, "_process_chapter", _fake_process)
-    patch_route_dependency(monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: [])
+    patch_route_dependency(
+        monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: []
+    )
     patch_route_dependency(monkeypatch, books, "replace_chapter_novel_scenes", _fake_replace)
-    patch_route_dependency(monkeypatch, books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "add_daily_word_progress", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored text")
     monkeypatch.setattr(
         books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"}
     )
-    patch_route_dependency(monkeypatch, books, "sync_chapter_content_from_novel_scenes", _fake_replace)
-    patch_route_dependency(monkeypatch, books, "invalidate_advisor_caches_for_book", _async_value(None))
+    patch_route_dependency(
+        monkeypatch, books, "sync_chapter_content_from_novel_scenes", _fake_replace
+    )
+    patch_route_dependency(
+        monkeypatch, books, "invalidate_advisor_caches_for_book", _async_value(None)
+    )
     monkeypatch.setattr(
         "app.services.manuscript_import_service.enqueue_analysis_execution",
         _async_value(SimpleNamespace(id=uuid.uuid4())),
@@ -1190,7 +1249,16 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
     processed_payloads: list[dict] = []
     uploaded_cover: dict[str, object] = {}
 
-    async def _fake_process(_db, _book, payload):
+    async def _fake_process(
+        _db,
+        _book,
+        payload,
+        *,
+        dispatch_analysis=True,
+        check_book_completion=True,
+    ):
+        assert dispatch_analysis is False
+        assert check_book_completion is False
         processed_payloads.append(payload)
         return None
 
@@ -1198,9 +1266,13 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
         return None
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     patch_route_dependency(monkeypatch, books, "next_chapter_number", _async_value(1))
-    patch_route_dependency(monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    patch_route_dependency(
+        monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel"
+    )
     monkeypatch.setattr(
         books,
         "parse_book_upload_for_ingestion",
@@ -1226,15 +1298,23 @@ async def test_import_manuscript_content_preserves_images_and_extracts_pdf_cover
         ),
     )
     patch_route_dependency(monkeypatch, books, "_process_chapter", _fake_process)
-    patch_route_dependency(monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: [])
+    patch_route_dependency(
+        monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: []
+    )
     patch_route_dependency(monkeypatch, books, "replace_chapter_novel_scenes", _fake_replace)
-    patch_route_dependency(monkeypatch, books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "add_daily_word_progress", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored text")
     monkeypatch.setattr(
         books, "deserialize_manuscript_content", lambda _raw: {"text": "stored chapter text"}
     )
-    patch_route_dependency(monkeypatch, books, "sync_chapter_content_from_novel_scenes", _fake_replace)
-    patch_route_dependency(monkeypatch, books, "invalidate_advisor_caches_for_book", _async_value(None))
+    patch_route_dependency(
+        monkeypatch, books, "sync_chapter_content_from_novel_scenes", _fake_replace
+    )
+    patch_route_dependency(
+        monkeypatch, books, "invalidate_advisor_caches_for_book", _async_value(None)
+    )
     monkeypatch.setattr(books.analyse_chapter_task, "apply_async", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "app.parsers.pdf_parser.extract_first_page_cover",
@@ -1296,9 +1376,13 @@ async def test_editor_project_import_persists_parsed_images(monkeypatch):
         return None
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     patch_route_dependency(monkeypatch, books, "next_chapter_number", _async_value(1))
-    patch_route_dependency(monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel")
+    patch_route_dependency(
+        monkeypatch, books, "normalize_book_work_type", lambda *_args, **_kwargs: "novel"
+    )
     monkeypatch.setattr(
         books,
         "parse_book_upload_for_ingestion",
@@ -1324,13 +1408,17 @@ async def test_editor_project_import_persists_parsed_images(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr(
-        manuscript_import_service, "persist_editor_chapter_content", _fake_persist
+    monkeypatch.setattr(manuscript_import_service, "persist_editor_chapter_content", _fake_persist)
+    patch_route_dependency(
+        monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: []
     )
-    patch_route_dependency(monkeypatch, books, "extract_novel_scene_candidates", lambda **_kwargs: [])
     patch_route_dependency(monkeypatch, books, "replace_chapter_novel_scenes", _fake_replace)
-    patch_route_dependency(monkeypatch, books, "add_daily_word_progress", lambda *_args, **_kwargs: None)
-    patch_route_dependency(monkeypatch, books, "invalidate_advisor_caches_for_book", _async_value(None))
+    patch_route_dependency(
+        monkeypatch, books, "add_daily_word_progress", lambda *_args, **_kwargs: None
+    )
+    patch_route_dependency(
+        monkeypatch, books, "invalidate_advisor_caches_for_book", _async_value(None)
+    )
     monkeypatch.setattr(
         "app.services.editor_project_service.maybe_auto_reprocess_editor_project",
         _async_value((False, [], 0)),
@@ -1419,7 +1507,9 @@ async def test_series_routes_and_user_stats(monkeypatch):
     monkeypatch.setattr(
         books, "build_series_bible_payload", _async_value({"series_id": str(series.id)})
     )
-    patch_route_dependency(monkeypatch, books, "compute_words_read_for_books", _async_value({book.id: 1200}))
+    patch_route_dependency(
+        monkeypatch, books, "compute_words_read_for_books", _async_value({book.id: 1200})
+    )
     monkeypatch.setattr(
         books,
         "build_writing_dashboard_stats",
@@ -1637,7 +1727,9 @@ async def test_book_notes_vault_and_workspace_routes(monkeypatch):
         _async_value({"score": 82, "status": "healthy", "summary": "Good", "metrics": []}),
     )
     patch_route_dependency(monkeypatch, books, "list_chapter_consistency_reports", _async_value([]))
-    patch_route_dependency(monkeypatch, books, "list_chapter_versions", _async_value([chapter_version]))
+    patch_route_dependency(
+        monkeypatch, books, "list_chapter_versions", _async_value([chapter_version])
+    )
     monkeypatch.setattr(
         books_intelligence,
         "build_writer_workspace_response",
@@ -1652,8 +1744,12 @@ async def test_book_notes_vault_and_workspace_routes(monkeypatch):
     patch_route_dependency(monkeypatch, books, "get_writer_workspace_cache", _async_value(None))
     patch_route_dependency(monkeypatch, books, "set_writer_workspace_cache", _async_value(None))
     patch_route_dependency(monkeypatch, books, "mark_book_cache_dirty", _async_value(1))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
     monkeypatch.setattr(
         books,
         "estimate_readability",
@@ -1774,8 +1870,12 @@ async def test_novel_export_routes_dispatch_formats_and_workspace_preface(monkey
     chapter_id = uuid.uuid4()
     compiled_calls: list[dict[str, object]] = []
 
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         "app.utils.books.manuscript.download_book",
         lambda _key: b'{"text":"Chapter body","html":"<p>Chapter body</p>"}',
@@ -1935,13 +2035,27 @@ async def test_get_book_overview_and_writer_workspace_use_cache(monkeypatch):
         *key_parts, payload = key_parts_and_payload
         cache_store[("workspace", *(str(part) for part in key_parts))] = payload
 
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
-    patch_route_dependency(monkeypatch, books, "get_book_cache_version", _fake_get_book_cache_version)
-    patch_route_dependency(monkeypatch, books, "get_book_overview_cache", _fake_get_book_overview_cache)
-    patch_route_dependency(monkeypatch, books, "set_book_overview_cache", _fake_set_book_overview_cache)
-    patch_route_dependency(monkeypatch, books, "get_writer_workspace_cache", _fake_get_writer_workspace_cache)
-    patch_route_dependency(monkeypatch, books, "set_writer_workspace_cache", _fake_set_writer_workspace_cache)
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
+    patch_route_dependency(
+        monkeypatch, books, "get_book_cache_version", _fake_get_book_cache_version
+    )
+    patch_route_dependency(
+        monkeypatch, books, "get_book_overview_cache", _fake_get_book_overview_cache
+    )
+    patch_route_dependency(
+        monkeypatch, books, "set_book_overview_cache", _fake_set_book_overview_cache
+    )
+    patch_route_dependency(
+        monkeypatch, books, "get_writer_workspace_cache", _fake_get_writer_workspace_cache
+    )
+    patch_route_dependency(
+        monkeypatch, books, "set_writer_workspace_cache", _fake_set_writer_workspace_cache
+    )
     monkeypatch.setattr(books_overview, "get_book_cache_version", _fake_get_book_cache_version)
     monkeypatch.setattr(books_overview, "get_book_overview_cache", _fake_get_book_overview_cache)
     monkeypatch.setattr(books_overview, "set_book_overview_cache", _fake_set_book_overview_cache)
@@ -2145,11 +2259,15 @@ async def test_get_book_enqueues_stale_processing_repair_before_serializing(monk
         enqueued_book_ids.append(candidate.id)
         return True
 
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
     monkeypatch.setitem(
         books.get_book.__globals__, "enqueue_processing_state_repair_if_needed", _fake_enqueue
     )
-    patch_route_dependency(monkeypatch, books, "book_out", _async_value(SimpleNamespace(id=book.id)))
+    patch_route_dependency(
+        monkeypatch, books, "book_out", _async_value(SimpleNamespace(id=book.id))
+    )
 
     payload = await books.get_book(book.id, db=_FakeDB(), current_user=user)
 
@@ -2165,7 +2283,9 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     docx_calls: list[dict[str, object]] = []
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(books.storage, "download_book", lambda _key: b"stored")
     monkeypatch.setattr(
         books,
@@ -2183,8 +2303,12 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
     monkeypatch.setattr(
         books, "list_novel_scenes", _async_value([{"source": "manual", "status": "active"}])
     )
-    patch_route_dependency(monkeypatch, books, "list_vault_notes", _async_value([{"path": "Lore/Scene.md"}]))
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
+    patch_route_dependency(
+        monkeypatch, books, "list_vault_notes", _async_value([{"path": "Lore/Scene.md"}])
+    )
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
     monkeypatch.setattr(
         books,
         "manuscript_pdf_compiled",
@@ -2378,16 +2502,24 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         current_character.arc_summary = description.strip()
 
     patch_route_dependency(monkeypatch, books, "get_owned_book", _async_value(book))
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
     patch_route_dependency(monkeypatch, books, "consolidate_characters", _fake_consolidate)
-    patch_route_dependency(monkeypatch, books, "is_displayable_character", lambda current: current.name != "Ghost")
-    patch_route_dependency(monkeypatch, books, "relationship_summary_for_character", lambda *_args: "ally summary")
+    patch_route_dependency(
+        monkeypatch, books, "is_displayable_character", lambda current: current.name != "Ghost"
+    )
+    patch_route_dependency(
+        monkeypatch, books, "relationship_summary_for_character", lambda *_args: "ally summary"
+    )
     monkeypatch.setattr(
         books,
         "append_unique_summary",
         lambda mapping, keys, key, dedupe_key, summary: mapping.setdefault(key, []).append(summary),
     )
-    patch_route_dependency(monkeypatch, books, "dedupe_preserve_order", lambda items: list(dict.fromkeys(items)))
+    patch_route_dependency(
+        monkeypatch, books, "dedupe_preserve_order", lambda items: list(dict.fromkeys(items))
+    )
     monkeypatch.setattr(
         books,
         "serialize_book_character",
@@ -2444,16 +2576,26 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         },
     )
     patch_route_dependency(monkeypatch, books, "merge_characters", _async_value(character))
-    patch_route_dependency(monkeypatch, books, "partition_character", _async_value([character, other_character]))
+    patch_route_dependency(
+        monkeypatch, books, "partition_character", _async_value([character, other_character])
+    )
     monkeypatch.setattr(
         books,
         "clean_string_list",
         lambda values: [value.strip() for value in values if value.strip()],
     )
-    patch_route_dependency(monkeypatch, books, "apply_manual_character_description", _apply_description)
-    patch_route_dependency(monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None)
-    patch_route_dependency(monkeypatch, books, "create_asset_token", lambda *_args, **_kwargs: "signed-token")
-    patch_route_dependency(monkeypatch, books, "build_character_card_payload", _async_value({"name": "Iris"}))
+    patch_route_dependency(
+        monkeypatch, books, "apply_manual_character_description", _apply_description
+    )
+    patch_route_dependency(
+        monkeypatch, books, "require_author_access", lambda *_args, **_kwargs: None
+    )
+    patch_route_dependency(
+        monkeypatch, books, "create_asset_token", lambda *_args, **_kwargs: "signed-token"
+    )
+    patch_route_dependency(
+        monkeypatch, books, "build_character_card_payload", _async_value({"name": "Iris"})
+    )
     monkeypatch.setattr(
         books,
         "character_card_markdown",
@@ -2472,8 +2614,12 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     )
     patch_route_dependency(monkeypatch, books, "list_custom_tags_for_entity_ids", _async_value({}))
     patch_route_dependency(monkeypatch, books, "get_custom_tags_for_entity", _async_value([]))
-    patch_route_dependency(monkeypatch, books, "refresh_character_duplicate_suggestions", _async_value(None))
-    patch_route_dependency(monkeypatch, books, "mark_character_candidates_merged", _async_value(None))
+    patch_route_dependency(
+        monkeypatch, books, "refresh_character_duplicate_suggestions", _async_value(None)
+    )
+    patch_route_dependency(
+        monkeypatch, books, "mark_character_candidates_merged", _async_value(None)
+    )
 
     context = {
         "book": book,
@@ -2486,12 +2632,18 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         "rel_summaries": {str(character.id): ["ally summary"]},
         "thread_summaries": {str(character.id): ["Thread [ongoing]"]},
     }
-    patch_route_dependency(monkeypatch, books, "build_character_bible_vault_context", _async_value(context))
+    patch_route_dependency(
+        monkeypatch, books, "build_character_bible_vault_context", _async_value(context)
+    )
     monkeypatch.setattr(
         books, "load_vault_note_overrides", _async_value({"Character/Iris.md": "override"})
     )
-    patch_route_dependency(monkeypatch, books, "character_bible_vault_folder", lambda **_kwargs: (b"zip", "atlas"))
-    patch_route_dependency(monkeypatch, books, "character_bible_markdown", lambda **_kwargs: ("# Bible", "atlas"))
+    patch_route_dependency(
+        monkeypatch, books, "character_bible_vault_folder", lambda **_kwargs: (b"zip", "atlas")
+    )
+    patch_route_dependency(
+        monkeypatch, books, "character_bible_markdown", lambda **_kwargs: ("# Bible", "atlas")
+    )
     patch_route_dependency(monkeypatch, books, "character_bible_pdf", lambda **_kwargs: b"pdf")
     patch_route_dependency(monkeypatch, books, "character_bible_docx", lambda **_kwargs: b"docx")
     monkeypatch.setattr(
@@ -2565,7 +2717,9 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
         analysis_metadata={},
         is_manual=True,
     )
-    patch_route_dependency(monkeypatch, books, "build_manual_character", lambda **_kwargs: created_character)
+    patch_route_dependency(
+        monkeypatch, books, "build_manual_character", lambda **_kwargs: created_character
+    )
     create_db = _FakeDB()
     created = await books.create_book_character(
         book.id,
@@ -2577,7 +2731,8 @@ async def test_character_routes_cover_crud_and_exports(monkeypatch):
     assert created["role"] == "sc"
     assert created["is_manual"] is True
     assert created["analysis_metadata"]["persistence_reason"] == "manual_character"
-    assert create_db.added == [created_character]
+    assert create_db.added[0] is created_character
+    assert create_db.added[1].outcome == "missed_character"
     assert create_db.commits == 1
 
     db = _FakeDB(get_values=[character, character])
@@ -2949,7 +3104,9 @@ async def test_character_reprocess_routes_delegate_to_repair_workflow(monkeypatc
             return _FakeRepairResult(book_id=str(self.book_id), dry_run=False)
 
     monkeypatch.setattr(character_reprocess_service, "get_owned_book", _async_value(book))
-    monkeypatch.setattr(character_reprocess_service, "require_author_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        character_reprocess_service, "require_author_access", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(character_reprocess_service, "CharacterIdentityRepairJob", _FakeRepairJob)
 
     preview = await books.preview_book_character_reprocess(
@@ -3016,10 +3173,16 @@ async def test_get_book_characters_hides_low_trust_rows_in_author_mode(monkeypat
         is_manual=False,
     )
 
-    patch_route_dependency(monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None)))
-    patch_route_dependency(monkeypatch, books, "collaboration_has_resource", lambda *_args, **_kwargs: True)
+    patch_route_dependency(
+        monkeypatch, books, "get_book_with_collaboration_access", _async_value((book, None))
+    )
+    patch_route_dependency(
+        monkeypatch, books, "collaboration_has_resource", lambda *_args, **_kwargs: True
+    )
     patch_route_dependency(monkeypatch, books, "list_custom_tags_for_entity_ids", _async_value({}))
-    patch_route_dependency(monkeypatch, books, "relationship_summary_for_character", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, books, "relationship_summary_for_character", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         books,
         "serialize_book_character",

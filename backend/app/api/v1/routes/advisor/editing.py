@@ -24,7 +24,8 @@ from app.core.redis import (
     set_editorial_review_cache,
     set_prose_tighten_cache,
 )
-from app.engine.search.semantic import semantic_search
+from app.engine.analysis.summariser import _analysis_passages
+from app.engine.search.semantic import hybrid_story_search
 from app.models.book import Book
 from app.schemas.advisor import (
     EditorialReviewRequest,
@@ -41,12 +42,14 @@ from app.utils.advisor_utils import (
     PROSE_TIGHTEN_USER,
     build_story_context,
     make_editorial_cache_key,
+    merge_editorial_review_results,
     normalize_editorial_review_result,
     normalize_prose_tighten_result,
 )
 from app.utils.books.continuity import detect_chapter_continuity_flags
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
 
@@ -77,16 +80,16 @@ async def editorial_review(
         return {**cached, "cached": True}
 
     total_ch = book.total_chapters or 9999
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
 
     try:
-        hits = await semantic_search(
+        hits = await hybrid_story_search(
             db,
             book_id,
-            body.text[:600],
+            body.text,
             total_ch,
             limit=settings.ADVISOR_GENERAL_SEARCH_CHUNKS,
-            candidate_limit=settings.ADVISOR_GENERAL_SEARCH_CHUNKS,
+            candidate_limit=settings.ADVISOR_GENERAL_SEARCH_CHUNKS * 3,
             similarity_threshold=settings.ADVISOR_GENERAL_SEARCH_SIMILARITY_THRESHOLD,
             usage_user_id=current_user.id,
             usage_feature="advisor_editorial_search",
@@ -110,30 +113,38 @@ async def editorial_review(
             title=_safe_prompt_str(book.title),
             story_context=_safe_prompt_str(story_ctx),
         )
-        user_msg = EDITORIAL_USER.format(
-            chapter_hint=chapter_hint,
-            text=body.text[:4000],
-            passages=passages_block,
-        )
-
-        response = await create_tracked_chat_completion(
-            client=client,
-            feature="advisor_editorial_review",
-            model=settings.OPENAI_INTEL_MODEL,
-            db=db,
-            user_id=current_user.id,
-            book_id=book.id,
-            temperature=0.2,
-            max_tokens=1400,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": user_msg},
-            ],
-        )
-
-        raw = response.choices[0].message.content or "{}"
-        result = normalize_editorial_review_result(raw)
+        review_results: list[dict] = []
+        review_passages = _analysis_passages(body.text, max_chars=3800)
+        for part_index, review_passage in enumerate(review_passages, start=1):
+            part_hint = chapter_hint
+            if len(review_passages) > 1:
+                part_hint = (
+                    f"{chapter_hint} This is passage {part_index} of "
+                    f"{len(review_passages)} from the same submitted chapter."
+                )
+            user_msg = EDITORIAL_USER.format(
+                chapter_hint=part_hint,
+                text=review_passage,
+                passages=passages_block,
+            )
+            response = await create_tracked_chat_completion(
+                client=client,
+                feature="advisor_editorial_review",
+                model=settings.OPENAI_INTEL_MODEL,
+                db=db,
+                user_id=current_user.id,
+                book_id=book.id,
+                temperature=0.2,
+                max_tokens=1400,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            raw = response.choices[0].message.content or "{}"
+            review_results.append(normalize_editorial_review_result(raw))
+        result = merge_editorial_review_results(review_results)
         response_payload = {
             "review": result,
             "retrieved_passages": [
@@ -200,7 +211,7 @@ async def prose_tighten(
     if cached is not None:
         return ProseTightenResponse(**{**cached, "cached": True})
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
     try:
         chapter_hint = (
             f"This selection is from Chapter {body.chapter_num}."

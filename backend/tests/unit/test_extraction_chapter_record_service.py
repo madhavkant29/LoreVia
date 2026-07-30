@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -59,7 +59,7 @@ async def test_stage_chapter_for_extraction_updates_existing_chapter_and_resets_
         title="Old",
         description="Old description",
         chapter_kind="chapter",
-        processed=False,
+        processed=True,
         word_count=1,
         content_version=1,
         analysis_state={"status": "done"},
@@ -85,7 +85,7 @@ async def test_stage_chapter_for_extraction_updates_existing_chapter_and_resets_
     assert chapter.title == "New"
     assert chapter.description == "New description"
     assert chapter.chapter_kind == "prologue"
-    assert chapter.processed is True
+    assert chapter.processed is False
     assert chapter.word_count == 2
     assert chapter.content_version == 2
     assert chapter.analysis_state["status"] == "pending"

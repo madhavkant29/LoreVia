@@ -14,9 +14,9 @@ import os
 import sys
 import uuid
 from argparse import ArgumentParser
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 import sqlalchemy as sa
 from alembic import command
@@ -86,16 +86,12 @@ def _drop_database(maintenance_url: URL, database_name: str) -> None:
 def _temporary_alembic_environment(database_url: URL) -> Iterator[None]:
     previous = {
         "ALEMBIC_DATABASE_URL": os.environ.get("ALEMBIC_DATABASE_URL"),
-        "ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES": os.environ.get(
-            "ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES"
-        ),
+        "ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES": os.environ.get("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES"),
         "ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES": os.environ.get(
             "ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES"
         ),
     }
-    os.environ["ALEMBIC_DATABASE_URL"] = database_url.render_as_string(
-        hide_password=False
-    )
+    os.environ["ALEMBIC_DATABASE_URL"] = database_url.render_as_string(hide_password=False)
     os.environ["ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES"] = "1"
     os.environ["ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES"] = "1"
     try:
@@ -127,9 +123,7 @@ def _default_downgrade_target(config: Config) -> str:
     revision = _script_directory(config).get_revision(heads[0])
     down_revision = revision.down_revision
     if isinstance(down_revision, tuple):
-        raise RuntimeError(
-            f"Expected single-parent Alembic head {heads[0]}, got {down_revision}."
-        )
+        raise RuntimeError(f"Expected single-parent Alembic head {heads[0]}, got {down_revision}.")
     if not down_revision:
         return "base"
     return down_revision
@@ -213,9 +207,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        expected_downgraded_current = (
-            [] if downgrade_target == "base" else [downgrade_target]
-        )
+        expected_downgraded_current = [] if downgrade_target == "base" else [downgrade_target]
         if downgraded_current != expected_downgraded_current:
             print(
                 f"Expected Alembic revision {expected_downgraded_current} "

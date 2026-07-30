@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  buildPricingOffersJsonLd,
   pricingTierAccessLabel,
   pricingTierAnnualSavings,
   pricingTierGuestCtaLabel,
@@ -35,10 +36,13 @@ describe("pricing catalog", () => {
 
   it("returns cadence-aware prices and suffixes", () => {
     const authorTier = pricingTiers.find((tier) => tier.name === "Author")
+    const architectTier = pricingTiers.find((tier) => tier.name === "Architect")
     const freeTier = pricingTiers.find((tier) => tier.name === "Free")
 
-    expect(pricingTierPrice(authorTier!, "monthly")).toBe(29)
-    expect(pricingTierPrice(authorTier!, "annual")).toBe(249)
+    expect(pricingTierPrice(authorTier!, "monthly")).toBe(19)
+    expect(pricingTierPrice(authorTier!, "annual")).toBe(190)
+    expect(pricingTierPrice(architectTier!, "monthly")).toBe(39)
+    expect(pricingTierPrice(architectTier!, "annual")).toBe(390)
     expect(pricingTierPriceSuffix(authorTier!, "monthly")).toBe("/mo")
     expect(pricingTierPriceSuffix(authorTier!, "annual")).toBe("/year")
     expect(pricingTierPriceSuffix(freeTier!, "annual")).toBe("")
@@ -49,8 +53,30 @@ describe("pricing catalog", () => {
     const architectTier = pricingTiers.find((tier) => tier.name === "Architect")
     const freeTier = pricingTiers.find((tier) => tier.name === "Free")
 
-    expect(pricingTierAnnualSavings(authorTier!)).toBe(99)
-    expect(pricingTierAnnualSavings(architectTier!)).toBe(139)
+    expect(pricingTierAnnualSavings(authorTier!)).toBe(38)
+    expect(pricingTierAnnualSavings(architectTier!)).toBe(78)
     expect(pricingTierAnnualSavings(freeTier!)).toBe(0)
+  })
+
+  it("builds Free plus monthly and annual structured-data offers", () => {
+    const offers = buildPricingOffersJsonLd("https://getlorevia.com/pricing")
+
+    expect(offers).toHaveLength(5)
+    expect(offers.map((offer) => ({
+      name: offer.name,
+      price: offer.price,
+      sku: "sku" in offer ? offer.sku : null,
+      billingDuration: "priceSpecification" in offer
+        ? (offer.priceSpecification as { billingDuration: string }).billingDuration
+        : null,
+    }))).toEqual([
+      { name: "Free", price: "0", sku: null, billingDuration: null },
+      { name: "Author Monthly", price: "19", sku: "author_monthly", billingDuration: "P1M" },
+      { name: "Author Annual", price: "190", sku: "author_annual", billingDuration: "P1Y" },
+      { name: "Architect Monthly", price: "39", sku: "architect_monthly", billingDuration: "P1M" },
+      { name: "Architect Annual", price: "390", sku: "architect_annual", billingDuration: "P1Y" },
+    ])
+    expect(offers.every((offer) => offer.priceCurrency === "USD")).toBe(true)
+    expect(offers.every((offer) => offer.url === "https://getlorevia.com/pricing")).toBe(true)
   })
 })

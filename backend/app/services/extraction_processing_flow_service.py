@@ -53,6 +53,10 @@ async def finalize_book_completion_after_chapter(
     extraction_diagnostics: dict[str, Any] | None,
 ) -> bool:
     if not await _claim_book_completion(db, book.id):
+        # _claim_book_completion locks the shared book row. Do not return that
+        # lock to callers: import/scene synchronization may lock a chapter
+        # next, which would reverse the global chapter -> book lock order.
+        await db.commit()
         return False
 
     final_reconciled_alias_count = await reconcile_pending_first_name_alias_candidates(
@@ -123,12 +127,16 @@ async def finalize_book_completion_after_chapter(
 
     _, created_ready_notification = await upsert_book_ready_notification(db, book, ready_stats)
 
+    completion_email: str | None = None
+    if created_ready_notification and ready_stats.analysis_complete:
+        user = await db.get(User, book.user_id)
+        if user and user.email:
+            completion_email = user.email
     await db.commit()
 
-    user = await db.get(User, book.user_id)
-    if user and user.email and created_ready_notification and ready_stats.analysis_complete:
+    if completion_email:
         await send_processing_complete_with_stats(
-            user.email,
+            completion_email,
             book_title=book.title,
             character_count=ready_stats.character_count,
             relationship_count=ready_stats.relationship_count,

@@ -491,38 +491,12 @@ def _build_knowledge_matrix(
             for name in character_names
             if name.lower() in related_lookup
         ]
-        unknown_names = [name for name in character_names if name.lower() not in related_lookup]
-        entries.extend(
-            {
-                "character_name": name,
-                "chapter_learned": None,
-                "source": "No earlier evidence surfaced yet",
-            }
-            for name in unknown_names
-        )
-        warning = None
-        if unknown_names:
-            unknown_preview = ", ".join(unknown_names[:3])
-            if len(unknown_names) > 3:
-                unknown_preview = f"{unknown_preview}, and {len(unknown_names) - 3} more"
-            warning = f"LoreVia has no clear evidence yet that {unknown_preview} learned this before later story beats could depend on it."
-            surfaced_items.append(
-                revision_decisions._make_revision_action_item(
-                    category="knowledge",
-                    title=f'Knowledge dependency around "{thread.title}"',
-                    description=warning,
-                    severity="medium" if (thread.importance or 0) < 8 else "high",
-                    chapter_ref=thread.last_mentioned_at or thread.introduced_at,
-                    source_label="Character knowledge state",
-                    recommendation="Either plant the knowledge transfer earlier or keep later dialogue from assuming it happened off-page.",
-                )
-            )
         knowledge_facts.append(
             {
                 "fact": thread.title,
                 "chapter_ref": thread.introduced_at,
                 "entries": entries,
-                "warning": warning,
+                "warning": None,
             }
         )
     return knowledge_facts, surfaced_items

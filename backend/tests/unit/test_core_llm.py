@@ -208,6 +208,22 @@ def test_get_openai_client_reuses_instance(monkeypatch):
     assert client1 is client2
 
 
+def test_get_openai_client_disables_hidden_sdk_retries(monkeypatch):
+    captured: dict[str, object] = {}
+    client = object()
+
+    def fake_openai(**kwargs):
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr(llm, "_openai_client", None)
+    monkeypatch.setattr(llm, "AsyncOpenAI", fake_openai)
+    monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
+
+    assert llm._get_openai_client() is client
+    assert captured == {"api_key": "test-key", "max_retries": 0}
+
+
 def test_get_openai_client_returns_external_when_provided(monkeypatch):
     monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
 

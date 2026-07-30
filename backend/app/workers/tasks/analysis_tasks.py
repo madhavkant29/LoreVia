@@ -4,15 +4,16 @@ import httpx
 
 from app.core.database import AsyncSessionLocal
 from app.models.book import Chapter
+from app.utils.db_utils import is_retryable_transaction_db_error
 from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.ingestion_utils import (
-    LLM_USAGE_LIMIT_MAX_RETRIES,
-    LLM_USAGE_LIMIT_RETRY_SECONDS,
     extract_queue_wait_ms,
     is_llm_coordination_retry_error,
     is_llm_usage_limit_error,
     load_analysis_chapter_payload,
 )
+from app.utils.llm_usage_utils import is_transient_llm_provider_error
+from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
 from app.workers.consumers.analysis_consumer import analyse_chapter
@@ -21,6 +22,8 @@ log = logging.getLogger("lorevia.analysis_tasks")
 
 
 def _is_retryable_analysis_error(exc: Exception) -> bool:
+    if is_retryable_transaction_db_error(exc) or is_transient_llm_provider_error(exc):
+        return True
     if isinstance(exc, httpx.TimeoutException):
         return True
     if isinstance(exc, httpx.ConnectError):
@@ -58,7 +61,7 @@ def _is_retryable_analysis_error(exc: Exception) -> bool:
     bind=True,
     name="analysis_tasks.analyse_chapter",
     queue="analysis",
-    max_retries=3,
+    max_retries=NON_LLM_MAX_RETRIES,
     ignore_result=True,
 )
 def analyse_chapter_task(
@@ -71,7 +74,10 @@ def analyse_chapter_task(
     manual_reprocess: bool = False,
     execution_id: str | None = None,
 ):
+    analysis_work_started = False
+
     if execution_id:
+
         async def _claim_execution() -> bool:
             from app.services.task_execution_service import claim_task_execution
 
@@ -85,6 +91,8 @@ def analyse_chapter_task(
         if is_reprocessing is not None:
 
             async def analyse_stored_chapter() -> dict:
+                nonlocal analysis_work_started
+
                 async with AsyncSessionLocal() as db:
                     payload = await load_analysis_chapter_payload(
                         db,
@@ -93,6 +101,7 @@ def analyse_chapter_task(
                     )
                 if payload is None:
                     raise ValueError(f"chapter content missing: {chapter_id}")
+                analysis_work_started = True
                 return await analyse_chapter(
                     str(payload["chapter_id"]),
                     str(payload["text"]),
@@ -104,15 +113,19 @@ def analyse_chapter_task(
 
             result = run_worker_coro(analyse_stored_chapter())
         else:
-            result = run_worker_coro(analyse_chapter(
-                chapter_id,
-                chapter_text_or_book_id or "",
-                chapter_title,
-                queue_wait_ms=queue_wait_ms,
-                rebuild_run_id=rebuild_run_id,
-                manual_reprocess=manual_reprocess,
-            ))
+            analysis_work_started = True
+            result = run_worker_coro(
+                analyse_chapter(
+                    chapter_id,
+                    chapter_text_or_book_id or "",
+                    chapter_title,
+                    queue_wait_ms=queue_wait_ms,
+                    rebuild_run_id=rebuild_run_id,
+                    manual_reprocess=manual_reprocess,
+                )
+            )
         if execution_id:
+
             async def _complete_execution() -> None:
                 from app.services.task_execution_service import (
                     complete_task_execution,
@@ -128,6 +141,7 @@ def analyse_chapter_task(
     except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
         if is_llm_usage_limit_error(exc):
             if execution_id:
+
                 async def _pause_execution(error_detail: str = str(exc)) -> None:
                     from app.services.task_execution_service import pause_task_execution
 
@@ -140,36 +154,29 @@ def analyse_chapter_task(
                         )
 
                 run_worker_coro(_pause_execution())
-            retries = int(getattr(self.request, "retries", 0) or 0)
-            if retries >= LLM_USAGE_LIMIT_MAX_RETRIES:
-                return {"paused": "llm_usage_limit"}
-            raise self.retry(
-                exc=exc,
-                countdown=LLM_USAGE_LIMIT_RETRY_SECONDS,
-                max_retries=LLM_USAGE_LIMIT_MAX_RETRIES,
-            )
+            return {"paused": "llm_usage_limit"}
         if is_llm_coordination_retry_error(exc):
             if execution_id:
-                async def _record_capacity_retry(error: Exception = exc) -> None:
-                    from app.services.task_execution_service import fail_task_execution
+
+                async def _pause_capacity_execution(error_detail: str = str(exc)) -> None:
+                    from app.services.task_execution_service import pause_task_execution
 
                     async with AsyncSessionLocal() as db:
-                        await fail_task_execution(
+                        await pause_task_execution(
                             db,
                             execution_id,
-                            error=error,
-                            terminal=False,
-                            category="llm_capacity",
+                            reason="llm_capacity",
+                            blocker={"kind": "llm_capacity", "detail": error_detail},
                         )
 
-                run_worker_coro(_record_capacity_retry())
-            retry_after = int(getattr(exc, "headers", {}).get("Retry-After", 30))
-            raise self.retry(exc=exc, countdown=retry_after, max_retries=12)
-        retryable = _is_retryable_analysis_error(exc)
+                run_worker_coro(_pause_capacity_execution())
+            return {"paused": "llm_capacity"}
+        retryable = _is_retryable_analysis_error(exc) and not analysis_work_started
         error_text = str(exc)
         retries = int(getattr(self.request, "retries", 0) or 0)
-        max_retries = self.max_retries if isinstance(self.max_retries, int) else 3
+        max_retries = self.max_retries if isinstance(self.max_retries, int) else NON_LLM_MAX_RETRIES
         if execution_id:
+
             async def _record_execution_failure(error: Exception = exc) -> None:
                 from app.services.task_execution_service import fail_task_execution
 
@@ -209,4 +216,4 @@ def analyse_chapter_task(
                 exc,
             )
             raise
-        raise self.retry(exc=exc, countdown=30 * (self.request.retries + 1))
+        raise self.retry(exc=exc, countdown=exponential_backoff_seconds(retries))

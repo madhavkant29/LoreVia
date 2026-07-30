@@ -131,7 +131,7 @@ export function useManuscriptSaveActions({
       await completeFindingEdit()
       setStatusMessage(
         autoReprocessEnabled
-          ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
+          ? `Saved chapter ${importedChapter}. Story memory and Canon Guard refresh are queued.`
           : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
       )
     } catch (error) {
@@ -178,7 +178,7 @@ export function useManuscriptSaveActions({
       await completeFindingEdit()
       setStatusMessage(
         autoReprocessEnabled
-          ? `Saved chapter ${importedChapter}. Continuity, synopsis, and thread context refreshed.`
+          ? `Saved chapter ${importedChapter}. Story memory and Canon Guard refresh are queued.`
           : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
       )
     } catch (error) {

@@ -136,16 +136,14 @@ async def resolve_character_mention(
                 .scalars()
                 .all()
             )
-            full_name_match = next(
-                (
-                    character
-                    for character in candidates
-                    if len(normalize_name(character.name).split()) >= 2
-                    and normalize_name(character.name).split()[0] == token
-                ),
-                None,
-            )
-            if full_name_match is not None:
+            full_name_matches = [
+                character
+                for character in candidates
+                if len(normalize_name(character.name).split()) >= 2
+                and normalize_name(character.name).split()[0] == token
+            ]
+            if len(full_name_matches) == 1:
+                full_name_match = full_name_matches[0]
                 await add_character_alias(
                     db,
                     character=full_name_match,
@@ -156,6 +154,13 @@ async def resolve_character_mention(
                 )
                 return IdentityResolutionResult(
                     "auto_alias", full_name_match.id, 0.9, "single_token_first_name_alias"
+                )
+            if len(full_name_matches) > 1:
+                return IdentityResolutionResult(
+                    "needs_review",
+                    None,
+                    0.35,
+                    "ambiguous_single_token_first_name",
                 )
 
     if kind == CandidateKind.ROLE_DESCRIPTOR:

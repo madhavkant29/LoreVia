@@ -149,9 +149,7 @@ async def load_canon_override_lookup(db: AsyncSession, book: Book) -> dict[str, 
     return lookup
 
 
-async def apply_summary_mentions(
-    db: AsyncSession, book: Book, collapsed: dict[str, dict]
-) -> None:
+async def apply_summary_mentions(db: AsyncSession, book: Book, collapsed: dict[str, dict]) -> None:
     if not collapsed:
         return
     summary_rows = (

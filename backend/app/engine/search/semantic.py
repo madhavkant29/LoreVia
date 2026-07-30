@@ -132,6 +132,113 @@ async def semantic_search(
     return results[:final_limit]
 
 
+async def hybrid_story_search(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    query: str,
+    max_chapter: int,
+    limit: int = settings.SEARCH_MAX_CONTEXT_CHUNKS,
+    *,
+    candidate_limit: int | None = None,
+    similarity_threshold: float | None = None,
+    usage_user_id: uuid.UUID | None = None,
+    usage_feature: str = "hybrid_story_search",
+) -> list[dict]:
+    """Combine lexical and vector candidates, then rerank with chapter chronology."""
+    final_limit = max(1, int(limit))
+    retrieval_limit = max(final_limit * 3, int(candidate_limit or 0))
+    semantic_hits = await semantic_search(
+        db,
+        book_id,
+        query,
+        max_chapter,
+        limit=retrieval_limit,
+        candidate_limit=retrieval_limit,
+        similarity_threshold=similarity_threshold,
+        usage_user_id=usage_user_id,
+        usage_feature=usage_feature,
+    )
+    lexical_rows = await db.execute(
+        text(
+            """
+            SELECT
+                bc.text,
+                bc.chunk_index,
+                ch.number AS chapter_num,
+                ch.title AS chapter_title,
+                ts_rank_cd(
+                    to_tsvector('simple', bc.text),
+                    plainto_tsquery('simple', :query)
+                ) AS relevance
+            FROM book_chunks bc
+            JOIN chapters ch ON ch.id = bc.chapter_id
+            WHERE bc.book_id = :bid
+              AND ch.number <= :max_ch
+              AND to_tsvector('simple', bc.text) @@ plainto_tsquery('simple', :query)
+            ORDER BY relevance DESC, ch.number ASC
+            LIMIT :lim
+            """
+        ),
+        {
+            "query": query[:1600],
+            "bid": str(book_id),
+            "max_ch": max_chapter,
+            "lim": retrieval_limit,
+        },
+    )
+    combined: dict[tuple[int, int], dict] = {}
+    for hit in semantic_hits:
+        key = (int(hit["chapter_num"]), int(hit["chunk_index"]))
+        combined[key] = {
+            **hit,
+            "vector_relevance": float(hit.get("relevance") or 0),
+            "lexical_relevance": 0.0,
+        }
+    for row in lexical_rows.fetchall():
+        key = (int(row.chapter_num), int(row.chunk_index))
+        current = combined.get(key)
+        lexical_relevance = min(1.0, max(0.0, float(row.relevance or 0)))
+        if current is None:
+            current = build_search_result(
+                text=row.text,
+                chunk_index=row.chunk_index,
+                chapter_num=row.chapter_num,
+                chapter_title=row.chapter_title,
+                relevance=lexical_relevance,
+            )
+            current["vector_relevance"] = 0.0
+            combined[key] = current
+        current["lexical_relevance"] = lexical_relevance
+
+    candidates = []
+    for hit in combined.values():
+        chronology = 1 / (1 + abs(max_chapter - int(hit["chapter_num"])))
+        score = (
+            float(hit.get("vector_relevance") or 0) * 0.65
+            + float(hit.get("lexical_relevance") or 0) * 0.3
+            + chronology * 0.05
+        )
+        candidates.append({**hit, "score": round(score, 4), "relevance": round(score, 4)})
+
+    selected: list[dict] = []
+    remaining = list(candidates)
+    seen_chapters: set[int] = set()
+    while remaining and len(selected) < final_limit:
+        remaining.sort(
+            key=lambda item: (
+                -(
+                    float(item["score"])
+                    + (0.04 if int(item["chapter_num"]) not in seen_chapters else 0)
+                ),
+                int(item["chapter_num"]),
+            )
+        )
+        chosen = remaining.pop(0)
+        selected.append(chosen)
+        seen_chapters.add(int(chosen["chapter_num"]))
+    return selected
+
+
 async def find_context_for_tap(
     db: AsyncSession,
     book_id: uuid.UUID,

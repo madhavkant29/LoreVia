@@ -22,10 +22,16 @@ from app.utils.books.manuscript import (
     persist_editor_chapter_content,
 )
 from app.utils.books.normalization import SCENE_BREAK_LINE_RE
-from app.utils.books.scene_metadata import extract_novel_scene_candidates, refresh_screenplay_scene_rows
+from app.utils.books.scene_metadata import (
+    extract_novel_scene_candidates,
+    refresh_screenplay_scene_rows,
+)
 from app.utils.books.scene_ordering import replace_chapter_novel_scenes
 from app.utils.books.scene_sync import sync_chapter_content_from_novel_scenes
-from app.utils.books.writer_workspace import _append_recent_revision_edit, touch_public_book_updated_at
+from app.utils.books.writer_workspace import (
+    _append_recent_revision_edit,
+    touch_public_book_updated_at,
+)
 from app.utils.ingestion_utils import build_analysis_chapter_state
 from app.utils.notification_utils import build_upload_processing_notification
 from app.utils.user_utils import add_daily_word_progress, build_writing_activity_entry
@@ -90,13 +96,13 @@ async def persist_manuscript_import(
         source_version_id: str | None = None
         existing_media_payloads: list[dict[str, Any]] = []
         if replace_existing:
-            existing = (
-                await db.execute(
-                    select(Chapter)
-                    .where(Chapter.book_id == book.id, Chapter.number == job_number)
-                    .with_for_update()
-                )
-            ).scalar()
+            statement = (
+                select(Chapter)
+                .where(Chapter.book_id == book.id, Chapter.number == job_number)
+                .with_for_update()
+            )
+            with db.no_autoflush:
+                existing = (await db.execute(statement)).scalar()
             if existing is not None:
                 current_content_version = int(existing.content_version or 1)
                 if (
@@ -196,6 +202,8 @@ async def persist_manuscript_import(
                     "images": images,
                     "content_version": int(job.get("content_version") or 1),
                 },
+                dispatch_analysis=False,
+                check_book_completion=False,
             )
 
         if resolved_book_work_type != "screenplay":
@@ -357,6 +365,7 @@ async def persist_manuscript_import(
         )
 
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
+    await db.commit()
 
     return ManuscriptImportResult(
         status="imported",

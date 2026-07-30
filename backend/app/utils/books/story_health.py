@@ -21,6 +21,8 @@ from app.models.character import (
 )
 from app.models.intelligence import (
     CharacterRelationship,
+    ContinuityFinding,
+    ContinuityScan,
     PlotThread,
     WikiEntry,
     WorldBuildingDocument,
@@ -185,19 +187,83 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
 
     chapter_reports = await list_chapter_consistency_reports(db, book, limit=6)
     continuity_issue_count = sum(len(report.continuity_flags) for report in chapter_reports)
-    continuity_score = _clamp_score(
-        95
-        - (continuity_issue_count * 10)
-        - (max(0, len(major_characters) - major_with_states) * 4)
-        + min(len(chapter_reports) * 2, 6),
-        minimum=0,
-        maximum=96,
+    latest_continuity_scan = (
+        await db.execute(
+            select(ContinuityScan)
+            .where(
+                ContinuityScan.book_id == book.id,
+                ContinuityScan.scope == "full_book",
+                ContinuityScan.status == "ready",
+            )
+            .order_by(ContinuityScan.created_at.desc(), ContinuityScan.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest_continuity_scan is None:
+        latest_continuity_scan = (
+            await db.execute(
+                select(ContinuityScan)
+                .where(
+                    ContinuityScan.book_id == book.id,
+                    ContinuityScan.status == "ready",
+                )
+                .order_by(ContinuityScan.created_at.desc(), ContinuityScan.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    scan_findings = (
+        list(
+            (
+                await db.execute(
+                    select(ContinuityFinding).where(
+                        ContinuityFinding.scan_id == latest_continuity_scan.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if latest_continuity_scan is not None
+        else []
     )
-    continuity_detail = (
-        f"{continuity_issue_count} recent continuity flags across {len(chapter_reports)} reports; "
-        f"{major_with_states}/{len(major_characters) or 1} major characters are backed by state history. "
-        "Even when no acute break is logged, keep pressure-testing chapter-to-chapter state drift and role labeling."
+    analyzed_chapters = int(
+        (latest_continuity_scan.coverage or {}).get("chapters_analyzed", 0)
+        if latest_continuity_scan is not None
+        else 0
     )
+    total_chapters = max(int(book.total_chapters or 0), len(chapter_reports), 1)
+    coverage_ratio = min(1.0, analyzed_chapters / total_chapters)
+    verified_findings = sum(
+        1
+        for finding in scan_findings
+        if not finding.is_stale and finding.confidence >= 0.9 and finding.status != "review_needed"
+    )
+    review_needed_findings = sum(
+        1 for finding in scan_findings if not finding.is_stale and finding.status == "review_needed"
+    )
+    stale_findings = sum(1 for finding in scan_findings if finding.is_stale)
+    data_gap_count = max(total_chapters - analyzed_chapters, 0)
+    if latest_continuity_scan is None:
+        continuity_score = 0
+        continuity_detail = (
+            "No verified continuity scan is available yet. Coverage, findings, and data gaps "
+            "will replace this placeholder after the first scan."
+        )
+    else:
+        continuity_score = _clamp_score(
+            (coverage_ratio * 100)
+            - (verified_findings * 14)
+            - (review_needed_findings * 5)
+            - (stale_findings * 3),
+            minimum=0,
+            maximum=100,
+        )
+        continuity_detail = (
+            f"Coverage: {analyzed_chapters}/{total_chapters} chapters. "
+            f"Verified high-confidence findings: {verified_findings}; review needed: "
+            f"{review_needed_findings}; stale: {stale_findings}; data gaps: {data_gap_count}. "
+            f"Scan result: {latest_continuity_scan.continuity_status}."
+        )
 
     plot_threads = (
         (await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))).scalars().all()

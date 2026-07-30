@@ -1,22 +1,39 @@
 import logging
 import uuid
+from typing import Any
 
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
 from app.core.redis import get_embedding_cache, set_embedding_cache
 from app.parsers.chunker import count_tokens
-from app.utils.llm_usage_utils import create_tracked_embedding
+from app.utils.llm_usage_utils import (
+    create_tracked_embedding,
+    is_retryable_llm_call_error,
+)
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 log = logging.getLogger("lorevia.embedder")
 
 
 def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    # The explicit call-level retry below is the single retry owner.
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
 
 
 MAX_EMBED_BATCH_TOKENS = 250000
+
+
+@retry(
+    stop=stop_after_attempt(LLM_MAX_RETRIES + 1),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(is_retryable_llm_call_error),
+    reraise=True,
+)
+async def _create_embedding_with_retry(**kwargs: Any) -> Any:
+    return await create_tracked_embedding(**kwargs)
 
 
 async def embed_text(
@@ -39,7 +56,7 @@ async def embed_text(
 
     client = get_client()
     try:
-        r = await create_tracked_embedding(
+        r = await _create_embedding_with_retry(
             client=client,
             feature=feature,
             model=settings.OPENAI_EMBED_MODEL,
@@ -83,7 +100,7 @@ async def embed_batch(
         for text in cleaned:
             token_count = count_tokens(text)
             if batch and batch_tokens + token_count > MAX_EMBED_BATCH_TOKENS:
-                r = await create_tracked_embedding(
+                r = await _create_embedding_with_retry(
                     client=client,
                     feature=feature,
                     model=settings.OPENAI_EMBED_MODEL,
@@ -101,7 +118,7 @@ async def embed_batch(
             batch_tokens += token_count
 
         if batch:
-            r = await create_tracked_embedding(
+            r = await _create_embedding_with_retry(
                 client=client,
                 feature=feature,
                 model=settings.OPENAI_EMBED_MODEL,

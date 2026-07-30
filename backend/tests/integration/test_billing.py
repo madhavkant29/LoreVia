@@ -96,15 +96,23 @@ async def test_billing_status_reports_missing_configuration(client, db, monkeypa
     assert "subscription.resumed" in payload["supported_webhook_events"]
     assert "subscription.trialing" in payload["supported_webhook_events"]
     author_monthly = next(plan for plan in payload["plans"] if plan["code"] == "author_monthly")
+    author_annual = next(plan for plan in payload["plans"] if plan["code"] == "author_annual")
     architect_monthly = next(
         plan for plan in payload["plans"] if plan["code"] == "architect_monthly"
     )
+    architect_annual = next(plan for plan in payload["plans"] if plan["code"] == "architect_annual")
     assert author_monthly["display_name"] == "Author"
     assert author_monthly["billing_interval"] == "monthly"
-    assert author_monthly["price_usd"] == 29
+    assert author_monthly["price_usd"] == 19
+    assert author_annual["display_name"] == "Author"
+    assert author_annual["billing_interval"] == "annual"
+    assert author_annual["price_usd"] == 190
     assert architect_monthly["display_name"] == "Architect"
     assert architect_monthly["billing_interval"] == "monthly"
-    assert architect_monthly["price_usd"] == 49
+    assert architect_monthly["price_usd"] == 39
+    assert architect_annual["display_name"] == "Architect"
+    assert architect_annual["billing_interval"] == "annual"
+    assert architect_annual["price_usd"] == 390
 
 
 @pytest.mark.asyncio

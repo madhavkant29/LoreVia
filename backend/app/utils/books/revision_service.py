@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import (
@@ -23,7 +23,8 @@ from app.models.character import (
     CharacterVoiceProfile,
 )
 from app.models.intelligence import (
-    ChapterSummary,
+    ContinuityFinding,
+    ContinuityScan,
     PlotThread,
     WikiEntry,
 )
@@ -82,14 +83,6 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
         .scalars()
         .all()
     )
-    chapter_summary_rows = (
-        await db.execute(
-            select(Chapter.number, Chapter.title, ChapterSummary.key_events, ChapterSummary.clues)
-            .join(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
-            .where(Chapter.book_id == book.id)
-            .order_by(Chapter.number.asc())
-        )
-    ).all()
     scenes = (
         (
             await db.execute(
@@ -132,6 +125,44 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
         )
         .scalars()
         .all()
+    )
+    latest_continuity_scan = (
+        await db.execute(
+            select(ContinuityScan)
+            .where(
+                ContinuityScan.book_id == book.id,
+                ContinuityScan.scope == "full_book",
+                ContinuityScan.status == "ready",
+            )
+            .order_by(ContinuityScan.created_at.desc(), ContinuityScan.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest_continuity_scan is None:
+        latest_continuity_scan = (
+            await db.execute(
+                select(ContinuityScan)
+                .where(
+                    ContinuityScan.book_id == book.id,
+                    ContinuityScan.status == "ready",
+                )
+                .order_by(ContinuityScan.created_at.desc(), ContinuityScan.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    stale_finding_count = int(
+        (
+            await db.execute(
+                select(func.count(ContinuityFinding.id)).where(
+                    ContinuityFinding.book_id == book.id,
+                    ContinuityFinding.scan_id
+                    == (latest_continuity_scan.id if latest_continuity_scan is not None else None),
+                    ContinuityFinding.is_stale.is_(True),
+                    ContinuityFinding.status != "rechecked",
+                )
+            )
+        ).scalar_one()
+        or 0
     )
 
     major_characters = [
@@ -607,34 +638,6 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
         else f"{len(active_items)} revision item{'s' if len(active_items) != 1 else ''} are worth a structured pass."
     )
 
-    if not knowledge_matrix and chapter_summary_rows:
-        fallback_character_names = [
-            character.name for character in characters if str(character.name or "").strip()
-        ]
-        for chapter_number, _, key_events, clues in chapter_summary_rows:
-            facts = [
-                *revision_analysis._flatten_summary_points(clues),
-                *revision_analysis._flatten_summary_points(key_events),
-            ]
-            if not facts:
-                continue
-            knowledge_matrix.append(
-                {
-                    "fact": facts[0],
-                    "chapter_ref": chapter_number,
-                    "entries": [
-                        {
-                            "character_name": name,
-                            "chapter_learned": chapter_number if index == 0 else None,
-                            "source": "Chapter summary evidence"
-                            if index == 0
-                            else "No earlier evidence surfaced yet",
-                        }
-                        for index, name in enumerate(fallback_character_names)
-                    ],
-                    "warning": None,
-                }
-            )
     chapter_columns = [chapter.number for chapter in chapters]
     knowledge_timeline = revision_analysis._build_knowledge_timeline(
         knowledge_matrix=knowledge_matrix, chapter_numbers=chapter_columns
@@ -653,7 +656,15 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
     )
     if not pipeline_ready:
         analysis_limitations.append("Story intelligence is still processing.")
-    if len(priority_findings) < 3:
+    continuity_status = (
+        latest_continuity_scan.continuity_status
+        if latest_continuity_scan is not None
+        else "insufficient_evidence"
+    )
+    continuity_coverage = (
+        latest_continuity_scan.coverage or {} if latest_continuity_scan is not None else {}
+    )
+    if continuity_status == "insufficient_evidence" and len(priority_findings) < 3:
         analysis_limitations.append(
             f"LoreVia found {len(priority_findings)} evidence-backed revision finding{'s' if len(priority_findings) != 1 else ''}; more may appear after the next intelligence pass."
         )
@@ -691,6 +702,18 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
             "completed": bool(activation_state.get("completed_at")),
             **activation_state,
         },
-        "analysis_complete": bool(pipeline_ready and priority_findings),
+        "analysis_complete": pipeline_ready,
+        "continuity_status": continuity_status,
+        "continuity_scan_id": (
+            latest_continuity_scan.id if latest_continuity_scan is not None else None
+        ),
+        "continuity_completed_at": (
+            latest_continuity_scan.completed_at if latest_continuity_scan is not None else None
+        ),
+        "continuity_duration_ms": (
+            latest_continuity_scan.duration_ms if latest_continuity_scan is not None else None
+        ),
+        "coverage": continuity_coverage,
+        "stale_finding_count": stale_finding_count,
         "analysis_limitations": analysis_limitations,
     }

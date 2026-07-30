@@ -95,9 +95,7 @@ async def test_unsubscribe_accepts_json_body_token(client, db, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_list_unsubscribe_post_accepts_form_body_with_query_token(
-    client, db, auth_headers
-):
+async def test_list_unsubscribe_post_accepts_form_body_with_query_token(client, db, auth_headers):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     user = await db.get(User, uuid.UUID(me.json()["id"]))
     assert user is not None

@@ -186,9 +186,16 @@ describe("auth api", () => {
   })
 
   it("updates the reading mode using a query string", async () => {
-    await authApi.setReadingMode("author")
+    patchMock.mockResolvedValue({
+      data: { id: "user-1", email: "reader@example.com", reading_mode: "analyst" },
+    })
 
-    expect(patchMock).toHaveBeenCalledWith("/auth/me/reading-mode?mode=author")
+    await expect(authApi.setReadingMode("analyst")).resolves.toMatchObject({
+      id: "user-1",
+      email: "reader@example.com",
+      reading_mode: "analyst",
+    })
+    expect(patchMock).toHaveBeenCalledWith("/auth/me/reading-mode?mode=analyst")
   })
 
   it("updates the daily word goal with the api payload shape", async () => {

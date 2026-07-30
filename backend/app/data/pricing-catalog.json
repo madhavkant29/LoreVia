@@ -5,7 +5,7 @@
       "tier": "author",
       "display_name": "Author",
       "billing_interval": "monthly",
-      "price_usd": 29,
+      "price_usd": 19,
       "checkout_enabled": true,
       "price_id_env_keys": ["PADDLE_AUTHOR_MONTHLY_PRICE_ID", "PADDLE_PRO_MONTHLY_PRICE_ID"]
     },
@@ -14,7 +14,7 @@
       "tier": "author",
       "display_name": "Author",
       "billing_interval": "annual",
-      "price_usd": 249,
+      "price_usd": 190,
       "checkout_enabled": true,
       "price_id_env_keys": ["PADDLE_AUTHOR_ANNUAL_PRICE_ID", "PADDLE_PRO_ANNUAL_PRICE_ID"]
     },
@@ -23,7 +23,7 @@
       "tier": "architect",
       "display_name": "Architect",
       "billing_interval": "monthly",
-      "price_usd": 49,
+      "price_usd": 39,
       "checkout_enabled": true,
       "price_id_env_keys": ["PADDLE_ARCHITECT_MONTHLY_PRICE_ID", "PADDLE_POWER_MONTHLY_PRICE_ID"]
     },
@@ -32,7 +32,7 @@
       "tier": "architect",
       "display_name": "Architect",
       "billing_interval": "annual",
-      "price_usd": 449,
+      "price_usd": 390,
       "checkout_enabled": true,
       "price_id_env_keys": ["PADDLE_ARCHITECT_ANNUAL_PRICE_ID", "PADDLE_POWER_ANNUAL_PRICE_ID"]
     }
@@ -69,8 +69,8 @@
       "cta": "Upgrade to Author",
       "monthly_code": "author_monthly",
       "annual_code": "author_annual",
-      "price_monthly": 29,
-      "price_annual": 249,
+      "price_monthly": 19,
+      "price_annual": 190,
       "bullets": [
         "Everything in Free, plus:",
         "2 million active words and 1 million processed words monthly",
@@ -94,8 +94,8 @@
       "cta": "Upgrade to Architect",
       "monthly_code": "architect_monthly",
       "annual_code": "architect_annual",
-      "price_monthly": 49,
-      "price_annual": 449,
+      "price_monthly": 39,
+      "price_annual": 390,
       "bullets": [
         "Everything in Author, plus:",
         "8 million active words and 4 million processed words monthly",

@@ -24,7 +24,6 @@ from app.utils.billing_utils import require_author_access
 from app.utils.books.manuscript import serialize_manuscript_content
 from app.utils.storage_utils import delete_storage_keys_best_effort
 from app.utils.upload_security_utils import read_upload_bounded
-from app.utils.world_building_response_utils import serialize_world_document
 from app.utils.world_building_document_utils import (
     get_world_building_document,
     list_world_building_documents,
@@ -36,6 +35,7 @@ from app.utils.world_building_document_workflow_utils import (
     delete_world_building_document,
     update_world_building_document,
 )
+from app.utils.world_building_response_utils import serialize_world_document
 
 router = APIRouter()
 

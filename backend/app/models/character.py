@@ -191,9 +191,7 @@ class CharacterState(Base):
     """Spoiler-free snapshot at a given chapter."""
 
     __tablename__ = "character_states"
-    __table_args__ = (
-        Index("ix_character_states_character_chapter", "character_id", "at_chapter"),
-    )
+    __table_args__ = (Index("ix_character_states_character_chapter", "character_id", "at_chapter"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     character_id: Mapped[uuid.UUID] = mapped_column(
@@ -204,6 +202,7 @@ class CharacterState(Base):
     )
     at_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
     trait_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    observed_trait_keys: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     motivations_snapshot: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
     fears_snapshot: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
     prompt_delta: Mapped[str | None] = mapped_column(String)

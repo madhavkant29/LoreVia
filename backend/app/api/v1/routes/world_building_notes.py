@@ -18,9 +18,9 @@ from app.utils.tag_utils import (
     get_custom_tags_for_entity,
     list_custom_tags_for_entity_ids,
 )
-from app.utils.world_building_response_utils import serialize_world_note
 from app.utils.world_building_document_utils import get_world_building_document
 from app.utils.world_building_note_utils import save_world_note
+from app.utils.world_building_response_utils import serialize_world_note
 
 router = APIRouter()
 

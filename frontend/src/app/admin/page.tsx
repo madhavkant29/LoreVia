@@ -438,6 +438,23 @@ function BillingStatusPanel({ status }: { status: AdminBillingStatus }) {
       ) : (
         <p className="mt-2 text-[#1f6b3a]">All required billing configuration values are present.</p>
       )}
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {status.plans.map((plan) => (
+          <div key={plan.code} className="rounded-md border border-[#e3e8e1] bg-white px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-medium">
+                {plan.display_name} {plan.billing_interval === "annual" ? "Annual" : "Monthly"}
+              </p>
+              <StatusBadge tone={plan.configured ? "success" : "warning"}>
+                {plan.configured ? "Configured" : "Missing price ID"}
+              </StatusBadge>
+            </div>
+            <p className="mt-1 text-[#617065]">
+              ${plan.price_usd}/{plan.billing_interval === "annual" ? "year" : "mo"} · {plan.code}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

@@ -87,11 +87,7 @@ async def rehydrate_llm_coordination_state(*, force: bool = False) -> dict[str, 
         rate_cutoff = now - timedelta(seconds=60)
         async with AsyncSessionLocal() as db:
             reserved = (
-                (
-                    await db.execute(
-                        select(LlmUsageEvent).where(LlmUsageEvent.status == "reserved")
-                    )
-                )
+                (await db.execute(select(LlmUsageEvent).where(LlmUsageEvent.status == "reserved")))
                 .scalars()
                 .all()
             )
@@ -115,9 +111,7 @@ async def rehydrate_llm_coordination_state(*, force: bool = False) -> dict[str, 
                 created_at = created_at.replace(tzinfo=UTC)
             reservation_id = str(event.reservation_id or event.id)
             await redis.sadd(f"llm:concurrency:{event.user_id}", reservation_id)
-            await redis.expire(
-                f"llm:concurrency:{event.user_id}", _CONCURRENCY_TTL_SECONDS
-            )
+            await redis.expire(f"llm:concurrency:{event.user_id}", _CONCURRENCY_TTL_SECONDS)
             if created_at >= rate_cutoff:
                 member = f"{reservation_id}|{max(int(event.estimated_tokens or 0), 1)}"
                 rate_key = f"llm:rate:{event.operation}"

@@ -31,6 +31,57 @@ test("marketing home page renders the core value proposition", async ({ page }) 
   await expect(page.getByText("Includes a 10-day Author trial. No payment required.").first()).toBeVisible()
 })
 
+test("pricing and upgrade share current monthly and annual prices", async ({ page }) => {
+  await installMockApi(page)
+  const checkoutPlans: string[] = []
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/v1/billing/checkout") && request.method() === "POST") {
+      checkoutPlans.push((request.postDataJSON() as { plan: string }).plan)
+    }
+  })
+
+  await page.goto("/pricing")
+  const publicAuthorCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Author", exact: true }),
+  })
+  const publicArchitectCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Architect", exact: true }),
+  })
+  await expect(publicAuthorCard).toContainText("$19")
+  await expect(publicAuthorCard).toContainText("10 days free, then $19/mo")
+  await expect(publicArchitectCard).toContainText("$39")
+  await expect(publicArchitectCard).toContainText("10 days free, then $39/mo")
+
+  await page.getByRole("button", { name: "Yearly" }).click()
+  await expect(publicAuthorCard).toContainText("$190")
+  await expect(publicAuthorCard).toContainText("Save $38 with yearly billing")
+  await expect(publicArchitectCard).toContainText("$390")
+  await expect(publicArchitectCard).toContainText("Save $78 with yearly billing")
+
+  await page.goto("/upgrade")
+  const upgradeAuthorCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Author", exact: true }),
+  })
+  const upgradeArchitectCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Architect", exact: true }),
+  })
+  await expect(upgradeAuthorCard).toContainText("$19")
+  await expect(upgradeArchitectCard).toContainText("$39")
+  await upgradeAuthorCard.getByRole("button", { name: "Upgrade to Author" }).click()
+  await upgradeArchitectCard.getByRole("button", { name: "Upgrade to Architect" }).click()
+  await page.getByRole("button", { name: "Yearly" }).click()
+  await expect(upgradeAuthorCard).toContainText("$190")
+  await expect(upgradeArchitectCard).toContainText("$390")
+  await upgradeAuthorCard.getByRole("button", { name: "Upgrade to Author" }).click()
+  await upgradeArchitectCard.getByRole("button", { name: "Upgrade to Architect" }).click()
+  await expect.poll(() => checkoutPlans).toEqual([
+    "author_monthly",
+    "architect_monthly",
+    "author_annual",
+    "architect_annual",
+  ])
+})
+
 test("mobile marketing header keeps sign in and registration visible", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/")
@@ -453,16 +504,18 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(page.getByText("Manuscript progress")).toBeVisible()
 })
 
-test("analysis-complete overview guides an author through the first finding", async ({ page }) => {
+test("analysis-complete overview makes cited continuity review the primary result", async ({ page }) => {
   await installMockApi(page, { activationPending: true })
   await page.goto(BOOK_ROUTE)
 
   await expect(page.getByTestId("activation-experience")).toBeVisible()
-  await expect(page.getByRole("heading", { name: /We analyzed 3 chapters in Sky of Ash/i })).toBeVisible()
-  await page.getByRole("button", { name: /Chapter 2 assumption may break later payoff/i }).click()
-  await expect(page.getByText(/Nora crossed the silver gate/)).toBeVisible()
-  await page.getByRole("button", { name: "Add to revision plan" }).click()
-  await expect(page.getByText("Your author command center.")).toBeVisible()
+  await expect(page.getByTestId("continuity-inbox")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "1 findings need review" })).toBeVisible()
+  await page.getByRole("button", { name: /Nora may use gate knowledge before learning it/i }).click()
+  await expect(page.getByText(/pressed her cut palm to the gate/)).toBeVisible()
+  await expect(page.getByText(/Kael finally told Nora/)).toBeVisible()
+  await page.getByRole("button", { name: "Accept", exact: true }).click()
+  await expect(page.getByText("Marked accepted")).toBeVisible()
 })
 
 test("expired free owners are redirected away from author-only book routes", async ({ page }) => {

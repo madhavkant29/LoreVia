@@ -92,8 +92,7 @@ async def get_relationships(
     chars = list(chars_result.scalars().all())
 
     rels_result = await db.execute(
-        select(CharacterRelationship)
-        .where(
+        select(CharacterRelationship).where(
             CharacterRelationship.book_id == book_id,
             CharacterRelationship.from_chapter <= chapter,
         )

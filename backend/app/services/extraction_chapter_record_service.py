@@ -29,7 +29,9 @@ from app.utils.ingestion_utils import (
 )
 
 
-async def stage_chapter_for_extraction(db, book: Book, ch_data: dict, chapter_number: int) -> Chapter:
+async def stage_chapter_for_extraction(
+    db, book: Book, ch_data: dict, chapter_number: int
+) -> Chapter:
     chapter = (
         await db.execute(
             select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
@@ -57,7 +59,7 @@ async def stage_chapter_for_extraction(db, book: Book, ch_data: dict, chapter_nu
             ),
             s3_key=s3_key,
             word_count=_count_words(ch_data.get("text", "")),
-            processed=True,
+            processed=False,
         )
         db.add(chapter)
         await db.flush()
@@ -76,8 +78,8 @@ async def stage_chapter_for_extraction(db, book: Book, ch_data: dict, chapter_nu
         if next_chapter_kind != chapter.chapter_kind:
             chapter.chapter_kind = next_chapter_kind
             chapter_changed = True
-        if not chapter.processed:
-            chapter.processed = True
+        if chapter.processed:
+            chapter.processed = False
             chapter_changed = True
         next_word_count = _count_words(ch_data.get("text", ""))
         if next_word_count and chapter.word_count != next_word_count:

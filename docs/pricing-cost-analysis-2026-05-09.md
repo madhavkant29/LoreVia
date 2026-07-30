@@ -1,5 +1,7 @@
 # LoreVia Pricing, Cost, Profit, and Integration Analysis
 
+> **Superseded pricing notice (2026-07-24):** This dated analysis preserves the former $29/$249 Author and $49/$449 Architect catalog for historical context. Current pricing is $19/month or $190/year for Author and $39/month or $390/year for Architect.
+
 Last updated: 2026-05-25
 
 ## Executive Summary

@@ -9,8 +9,8 @@ from app.models.book import Book, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import PlotThread
 from app.models.user import User
-from app.utils import advisor_chat_utils
-from app.utils import advisor_utils
+from app.utils import advisor_chat_utils, advisor_utils
+from app.utils.advisor_story_context_utils import build_series_story_context, build_story_context
 from app.utils.advisor_utils import (
     advisor_retrieval_settings,
     build_advisor_world_context,
@@ -25,7 +25,6 @@ from app.utils.advisor_utils import (
     normalize_proactive_scan_result,
     retrieve_series_continuity_passages,
 )
-from app.utils.advisor_story_context_utils import build_series_story_context, build_story_context
 
 
 def test_build_fallback_advisor_suggestions_returns_three_items_without_focus_thread():
@@ -500,7 +499,9 @@ async def test_retrieve_series_continuity_passages_returns_empty_when_pgvector_e
                 Exception('type "vector" does not exist'),
             )
 
-    with patch("app.utils.advisor_retrieval_utils.embed_text", AsyncMock(return_value=[0.1] * 1536)):
+    with patch(
+        "app.utils.advisor_retrieval_utils.embed_text", AsyncMock(return_value=[0.1] * 1536)
+    ):
         payload = await retrieve_series_continuity_passages(
             db=_FakeDB(),
             prior_book_ids=[uuid.uuid4()],
@@ -741,7 +742,9 @@ async def test_stream_advisor_payload_records_usage_and_finalizes(monkeypatch):
         return None
 
     async def reserve(**kwargs):
-        return SimpleNamespace(id="advisor-reservation", operation="chat", user_id=kwargs["user_id"])
+        return SimpleNamespace(
+            id="advisor-reservation", operation="chat", user_id=kwargs["user_id"]
+        )
 
     async def finish(_reservation, **kwargs):
         usage.append(kwargs)

@@ -19,6 +19,7 @@ from app.models.character import (
 from app.services.character_identity.constraints import add_identity_constraint
 from app.services.character_identity.merge import record_identity_action
 from app.services.character_identity.normalization import normalize_name
+from app.services.quality_metrics_service import record_quality_review
 from app.utils.billing_utils import require_author_access
 from app.utils.books.notes import get_owned_book
 from app.utils.characters.constants import (
@@ -169,6 +170,24 @@ async def undo_character_identity_action_for_user(
         confidence=1.0,
         reason=f"undo:{action.action_type}",
         reversible=False,
+    )
+    record_quality_review(
+        db,
+        book_id=book.id,
+        user_id=current_user.id,
+        entity_type="character_identity_action",
+        entity_id=action.id,
+        outcome="incorrect_merge",
+        evidence={
+            "undone_action_type": action.action_type,
+            "source_character_id": str(action.source_character_id)
+            if action.source_character_id
+            else None,
+            "target_character_id": str(action.target_character_id)
+            if action.target_character_id
+            else None,
+            "reason": action.reason,
+        },
     )
     await refresh_character_duplicate_suggestions(db, book_id=book.id)
     await db.commit()

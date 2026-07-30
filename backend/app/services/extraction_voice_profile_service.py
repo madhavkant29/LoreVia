@@ -4,8 +4,8 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.models.character import Character, CharacterVoiceProfile
 from app.models.book import Book
+from app.models.character import Character, CharacterVoiceProfile
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
     extract_dialogue_samples_by_character,

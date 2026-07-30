@@ -21,9 +21,12 @@ from app.utils.migration_utils import (
     is_safe_test_database_url,
     legacy_bootstrap_metadata_tables,
     normalized_database_target,
+    parse_revision_allowlist,
     redact_database_target,
     resolve_alembic_database_url,
+    revision_paths_excluding_allowlist,
     should_reset_local_alembic_state,
+    unapplied_revision_paths,
 )
 
 
@@ -181,6 +184,58 @@ def downgrade() -> None:
     )
 
     assert destructive_downgrade_revisions(tmp_path) == [migration]
+
+
+def test_unapplied_revision_paths_excludes_current_revision_ancestry(tmp_path: Path) -> None:
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    pending = tmp_path / "pending.py"
+    script_directory = SimpleNamespace(
+        walk_revisions=lambda **_kwargs: [
+            SimpleNamespace(path=str(second)),
+            SimpleNamespace(path=str(first)),
+        ]
+    )
+
+    assert unapplied_revision_paths(
+        [first, second, pending],
+        script_directory=script_directory,
+        current_heads=["second"],
+    ) == [pending]
+
+
+def test_unapplied_revision_paths_keeps_every_revision_for_empty_database(
+    tmp_path: Path,
+) -> None:
+    migration = tmp_path / "pending.py"
+    script_directory = SimpleNamespace(walk_revisions=lambda **_kwargs: (_ for _ in ()))
+
+    assert unapplied_revision_paths(
+        [migration],
+        script_directory=script_directory,
+        current_heads=[],
+    ) == [migration]
+
+
+def test_parse_revision_allowlist_accepts_commas_and_whitespace() -> None:
+    assert parse_revision_allowlist("first, second\nthird") == {"first", "second", "third"}
+
+
+def test_revision_paths_excluding_allowlist_uses_exact_revision_ids(tmp_path: Path) -> None:
+    reviewed = tmp_path / "reviewed.py"
+    still_blocked = tmp_path / "still_blocked.py"
+    script_directory = SimpleNamespace(
+        walk_revisions=lambda: [
+            SimpleNamespace(revision="reviewed_revision", path=str(reviewed)),
+            SimpleNamespace(revision="blocked_revision", path=str(still_blocked)),
+        ]
+    )
+
+    assert revision_paths_excluding_allowlist(
+        [reviewed, still_blocked],
+        script_directory=script_directory,
+        allowed_revision_ids={"reviewed_revision"},
+    ) == [still_blocked]
 
 
 def test_should_reset_local_alembic_state_requires_core_tables() -> None:

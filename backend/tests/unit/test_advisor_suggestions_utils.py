@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 from app.utils.advisor_suggestions_utils import (
     build_relationship_drift_suggestions,

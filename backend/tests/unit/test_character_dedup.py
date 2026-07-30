@@ -16,6 +16,7 @@ from app.models.intelligence import (
     WikiEntry,
 )
 from app.models.user import User
+from app.utils.characters import partitioning as character_partitioning
 from app.utils.characters.extraction import (
     cluster_character_entities,
     resolve_character_reference_from_roster,
@@ -23,7 +24,6 @@ from app.utils.characters.extraction import (
 from app.utils.characters.identity import filter_character_identity_aliases
 from app.utils.characters.manual import apply_manual_character_description
 from app.utils.characters.merging import merge_characters
-from app.utils.characters import partitioning as character_partitioning
 from app.utils.characters.partitioning import partition_character
 from app.utils.characters.presentation import (
     build_character_dossier_summary,

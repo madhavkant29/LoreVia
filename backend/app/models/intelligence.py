@@ -14,8 +14,10 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -160,6 +162,227 @@ class ChapterSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     chapter = relationship("Chapter", back_populates="summaries")
+
+
+class ContinuityScan(Base):
+    """Version-aware full-book or targeted continuity analysis run."""
+
+    __tablename__ = "continuity_scans"
+    __table_args__ = (
+        Index("ix_continuity_scans_book_created", "book_id", "created_at"),
+        Index("ix_continuity_scans_book_status", "book_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    scope: Mapped[str] = mapped_column(String, nullable=False, default="full_book")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="queued", server_default="queued", index=True
+    )
+    continuity_status: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="insufficient_evidence",
+        server_default="insufficient_evidence",
+        index=True,
+    )
+    detector_version: Mapped[str] = mapped_column(String, nullable=False)
+    chapter_versions: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    coverage: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(14, 6))
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    observations = relationship(
+        "ContinuityObservation", back_populates="scan", cascade="all, delete-orphan"
+    )
+    findings = relationship(
+        "ContinuityFinding", back_populates="scan", cascade="all, delete-orphan"
+    )
+
+
+class ContinuityObservation(Base):
+    """Immutable, cited story fact observed in one manuscript version."""
+
+    __tablename__ = "continuity_observations"
+    __table_args__ = (
+        UniqueConstraint("identity_key", name="uq_continuity_observations_identity"),
+        Index(
+            "ix_continuity_observations_book_subject",
+            "book_id",
+            "subject_type",
+            "subject_id",
+        ),
+        Index(
+            "ix_continuity_observations_book_predicate_chapter",
+            "book_id",
+            "predicate",
+            "chapter_number",
+        ),
+        Index("ix_continuity_observations_scan", "scan_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    identity_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("continuity_scans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chapter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), index=True
+    )
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("novel_scenes.id", ondelete="SET NULL"), index=True
+    )
+    source_chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("book_chunks.id", ondelete="SET NULL"), index=True
+    )
+    subject_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    subject_id: Mapped[str | None] = mapped_column(String, index=True)
+    subject_label: Mapped[str] = mapped_column(String, nullable=False)
+    predicate: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    normalized_value: Mapped[str] = mapped_column(Text, nullable=False)
+    display_value: Mapped[str] = mapped_column(Text, nullable=False)
+    value_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    content_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    evidence_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    extractor_version: Mapped[str] = mapped_column(String, nullable=False)
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    is_author_confirmed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    scan = relationship("ContinuityScan", back_populates="observations")
+    evidence_links = relationship(
+        "ContinuityFindingEvidence",
+        back_populates="observation",
+        cascade="all, delete-orphan",
+    )
+
+
+class ContinuityFinding(Base):
+    """Actionable continuity result backed by ordered evidence."""
+
+    __tablename__ = "continuity_findings"
+    __table_args__ = (
+        Index("ix_continuity_findings_book_status", "book_id", "status"),
+        Index("ix_continuity_findings_book_category", "book_id", "category"),
+        Index("ix_continuity_findings_scan", "scan_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("continuity_scans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String, nullable=False, default="medium")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending", server_default="pending", index=True
+    )
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    recommendation: Mapped[str | None] = mapped_column(Text)
+    subject_type: Mapped[str] = mapped_column(String, nullable=False)
+    subject_id: Mapped[str | None] = mapped_column(String, index=True)
+    subject_label: Mapped[str] = mapped_column(String, nullable=False)
+    detector_version: Mapped[str] = mapped_column(String, nullable=False)
+    content_versions: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    coverage: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    is_stale: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false", index=True
+    )
+    decision: Mapped[str | None] = mapped_column(String)
+    action: Mapped[str | None] = mapped_column(String)
+    reason: Mapped[str | None] = mapped_column(String)
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    scan = relationship("ContinuityScan", back_populates="findings")
+    evidence = relationship(
+        "ContinuityFindingEvidence",
+        back_populates="finding",
+        cascade="all, delete-orphan",
+        order_by="ContinuityFindingEvidence.evidence_order",
+    )
+
+
+class ContinuityFindingEvidence(Base):
+    """Ordered evidence role connecting a finding to an immutable observation."""
+
+    __tablename__ = "continuity_finding_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "finding_id",
+            "evidence_order",
+            name="uq_continuity_finding_evidence_order",
+        ),
+        UniqueConstraint(
+            "finding_id",
+            "observation_id",
+            name="uq_continuity_finding_observation",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    finding_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("continuity_findings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    observation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("continuity_observations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    evidence_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False, default="supporting")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    finding = relationship("ContinuityFinding", back_populates="evidence")
+    observation = relationship("ContinuityObservation", back_populates="evidence_links")
 
 
 class WikiEntry(Base):

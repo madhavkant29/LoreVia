@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from tests.unit.route_patch_helpers import patch_route_dependency
-from tests.unit.route_facades import reader
 from app.schemas.reader import SaveQuoteBody, UpdatePlotThreadBody
+from tests.unit.route_facades import reader
+from tests.unit.route_patch_helpers import patch_route_dependency
 
 
 class _ScalarList:
@@ -133,7 +133,9 @@ async def test_search_uses_reader_specific_retrieval_settings(monkeypatch):
         return [{"chapter_num": 3, "chapter_title": "Storm", "text": "Result", "relevance": 0.9}]
 
     patch_route_dependency(monkeypatch, reader, "get_book_with_collaboration_access", _fake_access)
-    patch_route_dependency(monkeypatch, reader, "collaboration_allows_chapter", lambda *_args, **_kwargs: True)
+    patch_route_dependency(
+        monkeypatch, reader, "collaboration_allows_chapter", lambda *_args, **_kwargs: True
+    )
     patch_route_dependency(monkeypatch, reader, "cache_get", _fake_cache_get)
     patch_route_dependency(monkeypatch, reader, "cache_set", _fake_cache_set)
     patch_route_dependency(monkeypatch, reader, "semantic_search", _fake_semantic_search)
@@ -213,7 +215,9 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
         get_values=[book],
         execute_values=[_Result(scalar=None), _Result(scalars=[]), _Result(scalars=[])],
     )
-    patch_route_dependency(monkeypatch, reader, "consolidate_characters", lambda *_args, **_kwargs: None)
+    patch_route_dependency(
+        monkeypatch, reader, "consolidate_characters", lambda *_args, **_kwargs: None
+    )
 
     async def _fake_consolidate(*_args, **_kwargs):
         return None
@@ -232,7 +236,9 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
             "source_integrity": None,
         }
 
-    patch_route_dependency(monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_missing)
+    patch_route_dependency(
+        monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_missing
+    )
 
     async def _fake_available(*_args, **_kwargs):
         return True
@@ -317,7 +323,9 @@ async def test_get_chapter_supports_fallback_and_stored_content(monkeypatch):
             },
         }
 
-    patch_route_dependency(monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_stored)
+    patch_route_dependency(
+        monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_stored
+    )
     monkeypatch.setattr(
         reader,
         "serialize_reader_character",
@@ -397,7 +405,9 @@ async def test_get_chapter_uses_manual_scene_workspace_when_body_is_placeholder(
             "source_integrity": None,
         }
 
-    patch_route_dependency(monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_placeholder)
+    patch_route_dependency(
+        monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_placeholder
+    )
 
     payload = await reader.get_chapter(book.id, 2, db=db, current_user=_user(user_id))
 
@@ -465,7 +475,9 @@ async def test_get_chapter_blocks_copy_for_private_read_only_shares(monkeypatch)
             "source_integrity": None,
         }
 
-    patch_route_dependency(monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_private)
+    patch_route_dependency(
+        monkeypatch, reader, "resolve_reader_chapter_payload", _fake_resolve_private
+    )
 
     payload = await reader.get_chapter(book.id, 2, db=db, current_user=_user(user_id))
 
@@ -582,7 +594,9 @@ async def test_get_summary_handles_permissions_queue_and_success(monkeypatch):
         return None
 
     patch_route_dependency(monkeypatch, reader, "summary_mode_allowed", lambda *_args: True)
-    patch_route_dependency(monkeypatch, reader, "require_summary_access", _fake_require_summary_access)
+    patch_route_dependency(
+        monkeypatch, reader, "require_summary_access", _fake_require_summary_access
+    )
     patch_route_dependency(monkeypatch, reader, "read_chapter_set", _fake_read_set)
     patch_route_dependency(monkeypatch, reader, "is_local_mode", lambda: False)
     patch_route_dependency(monkeypatch, reader, "queue_analysis_if_missing", _fake_queue)
@@ -689,7 +703,9 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
         "collapse_graph_characters",
         lambda chars: (chars, {str(chars[0].id): str(chars[0].id)}),
     )
-    patch_route_dependency(monkeypatch, reader, "relationship_node_description", lambda c, *_args: c.name)
+    patch_route_dependency(
+        monkeypatch, reader, "relationship_node_description", lambda c, *_args: c.name
+    )
 
     async def _fake_semantic_search(*_args, **_kwargs):
         return []
@@ -706,7 +722,9 @@ async def test_reader_collection_routes_cover_events_relationships_search_and_ch
     async def _fake_summary_visible(*_args, **_kwargs):
         return {1}
 
-    patch_route_dependency(monkeypatch, reader, "summary_visible_chapter_set", _fake_summary_visible)
+    patch_route_dependency(
+        monkeypatch, reader, "summary_visible_chapter_set", _fake_summary_visible
+    )
     monkeypatch.setattr("app.utils.reader_utils.summary_visible_chapter_set", _fake_summary_visible)
     patch_route_dependency(monkeypatch, reader, "list_custom_tags_for_entity_ids", _async_value({}))
     monkeypatch.setattr("app.utils.reader_utils.list_custom_tags_for_entity_ids", _async_value({}))
@@ -852,8 +870,12 @@ async def test_get_relationships_returns_hidden_nodes_and_inactive_edges_for_aut
         "collapse_graph_characters",
         lambda chars: (chars, {str(char.id): str(char.id) for char in chars}),
     )
-    patch_route_dependency(monkeypatch, reader, "relationship_node_description", lambda c, *_args: c.name)
-    patch_route_dependency(monkeypatch, reader, "is_graph_character_visible", lambda char: char.name != "Murmur")
+    patch_route_dependency(
+        monkeypatch, reader, "relationship_node_description", lambda c, *_args: c.name
+    )
+    patch_route_dependency(
+        monkeypatch, reader, "is_graph_character_visible", lambda char: char.name != "Murmur"
+    )
     monkeypatch.setattr(
         reader,
         "graph_character_visibility_analysis",
@@ -947,7 +969,9 @@ async def test_get_relationships_collapses_reversed_duplicate_pair_rows(monkeypa
         "collapse_graph_characters",
         lambda chars: (chars, {str(char.id): str(char.id) for char in chars}),
     )
-    patch_route_dependency(monkeypatch, reader, "relationship_node_description", lambda c, *_args: c.name)
+    patch_route_dependency(
+        monkeypatch, reader, "relationship_node_description", lambda c, *_args: c.name
+    )
     patch_route_dependency(monkeypatch, reader, "is_graph_character_visible", lambda _char: True)
     monkeypatch.setattr(
         reader,
@@ -1013,9 +1037,15 @@ async def test_relationship_evolution_groups_reversed_pairs_into_one_timeline(mo
     )
 
     patch_route_dependency(monkeypatch, reader, "get_book_cache_version", _async_value(1))
-    patch_route_dependency(monkeypatch, reader, "get_reader_progress_cache_version", _async_value(1))
-    patch_route_dependency(monkeypatch, reader, "get_relationship_evolution_cache", _async_value(None))
-    patch_route_dependency(monkeypatch, reader, "set_relationship_evolution_cache", _async_value(None))
+    patch_route_dependency(
+        monkeypatch, reader, "get_reader_progress_cache_version", _async_value(1)
+    )
+    patch_route_dependency(
+        monkeypatch, reader, "get_relationship_evolution_cache", _async_value(None)
+    )
+    patch_route_dependency(
+        monkeypatch, reader, "set_relationship_evolution_cache", _async_value(None)
+    )
 
     db = _FakeDB(
         get_values=[book],
@@ -1062,8 +1092,12 @@ async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
     async def _cache_write(*_args, **_kwargs):
         return None
 
-    patch_route_dependency(monkeypatch, reader, "summary_visible_chapter_set", _fake_summary_visible)
-    patch_route_dependency(monkeypatch, reader, "timeline_visible_chapter_set", _fake_timeline_visible)
+    patch_route_dependency(
+        monkeypatch, reader, "summary_visible_chapter_set", _fake_summary_visible
+    )
+    patch_route_dependency(
+        monkeypatch, reader, "timeline_visible_chapter_set", _fake_timeline_visible
+    )
     patch_route_dependency(monkeypatch, reader, "queue_analysis_if_missing", _fake_queue)
     patch_route_dependency(monkeypatch, reader, "get_book_cache_version", _cache_version)
     patch_route_dependency(monkeypatch, reader, "get_reader_progress_cache_version", _cache_version)
@@ -1081,7 +1115,9 @@ async def test_reader_highlight_timeline_and_thematic_routes(monkeypatch):
         },
     )
     patch_route_dependency(monkeypatch, reader, "is_valid_timeline_character", lambda *_args: True)
-    patch_route_dependency(monkeypatch, reader, "timeline_character_detail", lambda name, *_args: f"detail:{name}")
+    patch_route_dependency(
+        monkeypatch, reader, "timeline_character_detail", lambda name, *_args: f"detail:{name}"
+    )
     monkeypatch.setattr(
         reader,
         "timeline_plot_thread_span",
@@ -1186,7 +1222,9 @@ async def test_reader_crud_progress_and_recall_routes(monkeypatch):
         dirty_calls.append((book_id, user_id))
         return 1
 
-    patch_route_dependency(monkeypatch, reader, "mark_reader_progress_cache_dirty", _mark_progress_dirty)
+    patch_route_dependency(
+        monkeypatch, reader, "mark_reader_progress_cache_dirty", _mark_progress_dirty
+    )
     db = _FakeDB(
         get_values=[book, book, book, book, book, book, book],
         execute_values=[
@@ -1426,9 +1464,15 @@ async def test_reader_events_timeline_and_relationship_evolution_return_cached_p
 
     patch_route_dependency(monkeypatch, reader, "get_book_cache_version", _cache_version)
     patch_route_dependency(monkeypatch, reader, "get_reader_progress_cache_version", _cache_version)
-    patch_route_dependency(monkeypatch, reader, "get_reader_events_cache", _async_value(major_payload))
-    patch_route_dependency(monkeypatch, reader, "get_reader_timeline_cache", _async_value(timeline_payload))
-    patch_route_dependency(monkeypatch, reader, "get_relationship_evolution_cache", _async_value(evolution_payload))
+    patch_route_dependency(
+        monkeypatch, reader, "get_reader_events_cache", _async_value(major_payload)
+    )
+    patch_route_dependency(
+        monkeypatch, reader, "get_reader_timeline_cache", _async_value(timeline_payload)
+    )
+    patch_route_dependency(
+        monkeypatch, reader, "get_relationship_evolution_cache", _async_value(evolution_payload)
+    )
 
     events = await reader.get_reader_events(
         book.id,

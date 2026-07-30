@@ -71,6 +71,29 @@ def test_generate_wiki_task_raises_value_error_when_book_missing(monkeypatch):
         intelligence_tasks.generate_wiki_task.run(str(uuid.uuid4()))
 
 
+def test_generate_wiki_task_does_not_retry_after_paid_work_starts(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4())
+    db = _Db(value=book)
+
+    async def fail_during_generation(*_args, **_kwargs):
+        raise ConnectionError("provider disconnected")
+
+    def retry(**_kwargs):
+        raise AssertionError("paid wiki work must not be replayed")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr(
+        "app.utils.world_building_wiki_utils.generate_wiki_from_manuscript",
+        fail_during_generation,
+    )
+    monkeypatch.setattr(intelligence_tasks.generate_wiki_task, "retry", retry)
+    intelligence_tasks.generate_wiki_task.request.retries = 0
+
+    with pytest.raises(ConnectionError, match="provider disconnected"):
+        intelligence_tasks.generate_wiki_task.run(str(book.id))
+
+
 def test_generate_advisor_reply_task_marks_running_and_complete(monkeypatch):
     job_id = uuid.uuid4()
     book_id = uuid.uuid4()
@@ -146,6 +169,87 @@ def test_generate_advisor_reply_task_marks_failed_for_inaccessible_book(monkeypa
     assert calls[-1][1]["error_code"] == "advisor_book_not_found"
 
 
+def test_generate_advisor_reply_task_does_not_replay_after_provider_work_starts(monkeypatch):
+    job_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    db = _Db(value=SimpleNamespace(id=book_id, user_id=user_id))
+    calls = []
+
+    async def mark_running(*_args, **_kwargs):
+        return None
+
+    async def mark_failed(*_args, **kwargs):
+        calls.append(("failed", kwargs))
+
+    async def build_payload(**_kwargs):
+        raise ConnectionError("provider disconnected")
+
+    def retry(**_kwargs):
+        raise AssertionError("paid advisor work must not be replayed")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_running", mark_running)
+    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_failed", mark_failed)
+    monkeypatch.setattr("app.utils.advisor_chat_utils.build_advisor_reply_payload", build_payload)
+    monkeypatch.setattr(intelligence_tasks.generate_advisor_reply_task, "retry", retry)
+    intelligence_tasks.generate_advisor_reply_task.request.retries = 0
+
+    with pytest.raises(ConnectionError, match="provider disconnected"):
+        intelligence_tasks.generate_advisor_reply_task.run(
+            job_id=str(job_id),
+            book_id=str(book_id),
+            user_id=str(user_id),
+            messages=[{"role": "user", "content": "Question"}],
+            total_chapters=1,
+        )
+
+    assert calls[-1][0] == "failed"
+    assert calls[-1][1]["error_code"] == "advisor_generation_failed"
+
+
+def test_generate_advisor_reply_task_retries_failure_before_paid_work(monkeypatch):
+    job_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    db = _Db(value=SimpleNamespace(id=book_id, user_id=user_id))
+    provider_calls = []
+
+    class RetryRequested(Exception):
+        pass
+
+    async def mark_running(*_args, **_kwargs):
+        raise ConnectionError("database unavailable")
+
+    async def build_payload(**_kwargs):
+        provider_calls.append(True)
+        return {"reply": "unexpected"}
+
+    def retry(*, exc, countdown):
+        assert isinstance(exc, ConnectionError)
+        assert countdown == 2
+        return RetryRequested("retry requested")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_running", mark_running)
+    monkeypatch.setattr("app.utils.advisor_chat_utils.build_advisor_reply_payload", build_payload)
+    monkeypatch.setattr(intelligence_tasks.generate_advisor_reply_task, "retry", retry)
+    intelligence_tasks.generate_advisor_reply_task.request.retries = 0
+
+    with pytest.raises(RetryRequested, match="retry requested"):
+        intelligence_tasks.generate_advisor_reply_task.run(
+            job_id=str(job_id),
+            book_id=str(book_id),
+            user_id=str(user_id),
+            messages=[{"role": "user", "content": "Question"}],
+            total_chapters=1,
+        )
+
+    assert provider_calls == []
+
+
 def test_generate_series_advisor_reply_task_marks_complete(monkeypatch):
     job_id = uuid.uuid4()
     series_id = uuid.uuid4()
@@ -184,6 +288,46 @@ def test_generate_series_advisor_reply_task_marks_complete(monkeypatch):
         messages=[{"role": "user", "content": "Series question"}],
     ) == {"reply": "Series answer"}
     assert calls[-1][0] == "complete"
+
+
+def test_generate_series_advisor_reply_task_does_not_replay_paid_work(monkeypatch):
+    job_id = uuid.uuid4()
+    series_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    db = _Db(value=SimpleNamespace(id=series_id, user_id=user_id))
+    failed = []
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def mark_failed(*_args, **kwargs):
+        failed.append(kwargs)
+
+    async def build_payload(**_kwargs):
+        raise ConnectionError("provider disconnected")
+
+    def retry(**_kwargs):
+        raise AssertionError("paid series advisor work must not be replayed")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_running", noop)
+    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_failed", mark_failed)
+    monkeypatch.setattr(
+        "app.utils.advisor_chat_utils.build_series_advisor_reply_payload", build_payload
+    )
+    monkeypatch.setattr(intelligence_tasks.generate_series_advisor_reply_task, "retry", retry)
+    intelligence_tasks.generate_series_advisor_reply_task.request.retries = 0
+
+    with pytest.raises(ConnectionError, match="provider disconnected"):
+        intelligence_tasks.generate_series_advisor_reply_task.run(
+            job_id=str(job_id),
+            series_id=str(series_id),
+            user_id=str(user_id),
+            messages=[{"role": "user", "content": "Question"}],
+        )
+
+    assert failed[-1]["error_code"] == "advisor_generation_failed"
 
 
 def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypatch):
@@ -232,7 +376,9 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
         "app.services.advisor_suggestion_jobs_service.mark_advisor_suggestion_job_complete",
         mark_complete,
     )
-    monkeypatch.setattr("app.utils.advisor_scan_utils.build_advisor_suggestions_payload", build_payload)
+    monkeypatch.setattr(
+        "app.utils.advisor_scan_utils.build_advisor_suggestions_payload", build_payload
+    )
     monkeypatch.setattr(
         "app.utils.advisor_utils.make_advisor_suggestions_cache_key",
         lambda **kwargs: f"scan:{kwargs['total_chapters']}:{kwargs['character_count']}",
@@ -250,6 +396,51 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
     assert db.commits == 1
     assert calls[-2] == ("cache", str(book_id), "scan:12:2", False)
     assert calls[-1][0] == "complete"
+
+
+def test_generate_advisor_suggestions_task_does_not_replay_paid_scan(monkeypatch):
+    job_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    db = _Db(value=SimpleNamespace(id=book_id, user_id=user_id))
+    failed = []
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def mark_failed(*_args, **kwargs):
+        failed.append(kwargs)
+
+    async def build_payload(**_kwargs):
+        raise ConnectionError("provider disconnected")
+
+    def retry(**_kwargs):
+        raise AssertionError("paid advisor scan must not be replayed")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr(
+        "app.services.advisor_suggestion_jobs_service.mark_advisor_suggestion_job_running", noop
+    )
+    monkeypatch.setattr(
+        "app.services.advisor_suggestion_jobs_service.mark_advisor_suggestion_job_failed",
+        mark_failed,
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_scan_utils.build_advisor_suggestions_payload", build_payload
+    )
+    monkeypatch.setattr(intelligence_tasks.generate_advisor_suggestions_task, "retry", retry)
+    intelligence_tasks.generate_advisor_suggestions_task.request.retries = 0
+
+    with pytest.raises(ConnectionError, match="provider disconnected"):
+        intelligence_tasks.generate_advisor_suggestions_task.run(
+            job_id=str(job_id),
+            book_id=str(book_id),
+            user_id=str(user_id),
+            total_chapters=12,
+        )
+
+    assert failed[-1]["error_code"] == "advisor_suggestions_failed"
 
 
 def test_update_character_embedding_task_filters_low_confidence_traits(monkeypatch):
@@ -278,3 +469,60 @@ def test_update_character_embedding_task_filters_low_confidence_traits(monkeypat
     assert embedded == [("Mira", {"eyes": {"value": "green", "confidence": 0.8}})]
     assert len(db.executed) == 1
     assert db.commits == 1
+
+
+def test_update_character_embedding_task_does_not_replay_paid_embedding(monkeypatch):
+    character_id = uuid.uuid4()
+    db = _Db(
+        value=SimpleNamespace(
+            id=character_id,
+            name="Mira",
+            trait_state={},
+        )
+    )
+
+    async def embed_character(*_args, **_kwargs):
+        raise ConnectionError("provider disconnected")
+
+    def retry(**_kwargs):
+        raise AssertionError("paid embedding work must not be replayed")
+
+    monkeypatch.setattr(embedding_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr("app.engine.embeddings.embedder.embed_character", embed_character)
+    monkeypatch.setattr(embedding_tasks.update_character_embedding_task, "retry", retry)
+    embedding_tasks.update_character_embedding_task.request.retries = 0
+
+    with pytest.raises(ConnectionError, match="provider disconnected"):
+        embedding_tasks.update_character_embedding_task.run(str(character_id))
+
+
+def test_update_character_embedding_task_retries_failure_before_paid_work(monkeypatch):
+    class FailingDb(_Db):
+        async def get(self, model, requested_id):
+            raise ConnectionError("database unavailable")
+
+    class RetryRequested(Exception):
+        pass
+
+    provider_calls = []
+
+    async def embed_character(*_args, **_kwargs):
+        provider_calls.append(True)
+        return [0.1]
+
+    def retry(*, exc, countdown):
+        assert isinstance(exc, ConnectionError)
+        assert countdown == 2
+        return RetryRequested("retry requested")
+
+    monkeypatch.setattr(embedding_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(FailingDb()))
+    monkeypatch.setattr("app.engine.embeddings.embedder.embed_character", embed_character)
+    monkeypatch.setattr(embedding_tasks.update_character_embedding_task, "retry", retry)
+    embedding_tasks.update_character_embedding_task.request.retries = 0
+
+    with pytest.raises(RetryRequested, match="retry requested"):
+        embedding_tasks.update_character_embedding_task.run(str(uuid.uuid4()))
+
+    assert provider_calls == []

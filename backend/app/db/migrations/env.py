@@ -5,6 +5,8 @@ from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import context
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -16,8 +18,11 @@ from app.utils.migration_utils import (
     destructive_downgrade_revisions,
     destructive_upgrade_revisions,
     is_local_database_url,
+    parse_revision_allowlist,
     redact_database_target,
     resolve_alembic_database_url,
+    revision_paths_excluding_allowlist,
+    unapplied_revision_paths,
 )
 
 if sys.platform == "win32":
@@ -170,17 +175,43 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
 
 
 if any(arg == "upgrade" for arg in sys.argv[1:]):
+    destructive_revisions = destructive_upgrade_revisions(versions_dir)
+    script_directory = ScriptDirectory.from_config(config)
+    revision_engine = create_engine(
+        db_url.replace("postgresql://", "postgresql+psycopg://"),
+        poolclass=pool.NullPool,
+        connect_args={"prepare_threshold": None},
+    )
+    try:
+        with revision_engine.connect() as revision_connection:
+            current_heads = MigrationContext.configure(revision_connection).get_current_heads()
+    finally:
+        revision_engine.dispose()
+    destructive_revisions = unapplied_revision_paths(
+        destructive_revisions,
+        script_directory=script_directory,
+        current_heads=current_heads,
+    )
     offending_revisions = [
         path
-        for path in destructive_upgrade_revisions(versions_dir)
+        for path in destructive_revisions
         if _destructive_upgrade_still_has_runtime_impact(path)
     ]
+    allowed_revision_ids = parse_revision_allowlist(
+        os.getenv("ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS")
+    )
+    offending_revisions = revision_paths_excluding_allowlist(
+        offending_revisions,
+        script_directory=script_directory,
+        allowed_revision_ids=allowed_revision_ids,
+    )
     if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1":
         offending_paths = ", ".join(str(path.name) for path in offending_revisions)
         raise RuntimeError(
             "Refusing to run migrations because destructive operations were found in upgrade() blocks: "
-            f"{offending_paths}. Remove them or set ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you "
-            "explicitly intend to drop data."
+            f"{offending_paths}. Remove them, add exact reviewed revision IDs to "
+            "ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS, or set "
+            "ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you explicitly intend to drop data."
         )
 
 if any(arg == "downgrade" for arg in sys.argv[1:]):

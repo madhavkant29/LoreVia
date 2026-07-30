@@ -202,10 +202,14 @@ async def admin_support_incidents(
     admin_user: User = Depends(require_super_admin),
 ):
     rows = (
-        await db.execute(
-            select(SupportIncident).order_by(SupportIncident.created_at.desc()).limit(200)
+        (
+            await db.execute(
+                select(SupportIncident).order_by(SupportIncident.created_at.desc()).limit(200)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": str(row.id),

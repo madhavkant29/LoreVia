@@ -66,6 +66,7 @@ from app.utils.books.consistency_reports import list_chapter_consistency_reports
 from app.utils.books.notes import (
     get_owned_book,
 )
+from app.utils.books.overview import build_book_overview_payload
 from app.utils.books.planning import (
     build_emotional_arc_payload,
     build_prewriting_check,
@@ -76,7 +77,6 @@ from app.utils.books.revision_decisions import (
 from app.utils.books.revision_service import (
     build_revision_intelligence_payload,
 )
-from app.utils.books.overview import build_book_overview_payload
 from app.utils.books.story_health import build_story_health_payload
 
 router = APIRouter()

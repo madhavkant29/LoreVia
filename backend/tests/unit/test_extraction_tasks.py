@@ -8,6 +8,9 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 from fastapi import HTTPException
+from httpx import Request
+from openai import APIConnectionError
+from sqlalchemy.exc import OperationalError
 
 from app.workers.tasks import extraction_tasks
 
@@ -99,7 +102,7 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
         extraction_tasks.process_chapter_task.run(str(book_id), 4)
 
 
-def test_process_chapter_task_retries_llm_usage_limit_without_failing(monkeypatch):
+def test_process_chapter_task_pauses_llm_usage_limit_without_replaying_paid_work(monkeypatch):
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -137,7 +140,7 @@ def test_process_chapter_task_retries_llm_usage_limit_without_failing(monkeypatc
 
     def _retry(**kwargs):
         retry_calls.append(kwargs)
-        raise RuntimeError("retry scheduled")
+        raise AssertionError("usage limits must not replay the chapter task")
 
     monkeypatch.setattr(extraction_tasks, "run_worker_coro", _fake_run_worker_coro)
     monkeypatch.setattr(extraction_tasks, "is_book_hidden", _visible)
@@ -152,12 +155,10 @@ def test_process_chapter_task_retries_llm_usage_limit_without_failing(monkeypatc
     monkeypatch.setitem(sys.modules, "app.core.database", fake_database_module)
     monkeypatch.setitem(sys.modules, "app.models.book", fake_models_module)
 
-    with pytest.raises(RuntimeError, match="retry scheduled"):
-        extraction_tasks.process_chapter_task.run(str(book_id), 4)
+    result = extraction_tasks.process_chapter_task.run(str(book_id), 4)
 
-    assert retry_calls
-    assert retry_calls[0]["countdown"] == extraction_tasks.LLM_USAGE_LIMIT_RETRY_SECONDS
-    assert retry_calls[0]["max_retries"] == extraction_tasks.LLM_USAGE_LIMIT_MAX_RETRIES
+    assert result == {"paused": "llm_usage_limit"}
+    assert retry_calls == []
     assert book.writer_workspace["processing"]["stage"] == "usage_limited"
     assert book.writer_workspace["processing"]["chapters_completed"] == 3
     assert "token limit exceeded" in book.writer_workspace["processing"]["last_error"]
@@ -165,7 +166,7 @@ def test_process_chapter_task_retries_llm_usage_limit_without_failing(monkeypatc
     assert fake_session.commits == 1
 
 
-def test_process_chapter_task_stays_paused_after_llm_usage_retry_budget(monkeypatch):
+def test_process_chapter_task_stays_paused_regardless_of_previous_retry_count(monkeypatch):
     calls: list[str] = []
 
     def _fake_run_worker_coro(coro):
@@ -180,14 +181,77 @@ def test_process_chapter_task_stays_paused_after_llm_usage_retry_budget(monkeypa
 
     monkeypatch.setattr(extraction_tasks, "run_worker_coro", _fake_run_worker_coro)
     monkeypatch.setattr(extraction_tasks.process_chapter_task, "retry", _retry)
-    extraction_tasks.process_chapter_task.request.retries = (
-        extraction_tasks.LLM_USAGE_LIMIT_MAX_RETRIES
-    )
+    extraction_tasks.process_chapter_task.request.retries = 7
 
     result = extraction_tasks.process_chapter_task.run(str(uuid.uuid4()), 4)
 
     assert result == {"paused": "llm_usage_limit"}
     assert calls == []
+
+
+def test_process_chapter_task_does_not_retry_transient_provider_failure(monkeypatch):
+    retry_calls: list[dict] = []
+
+    def _raise_provider_failure(coro):
+        coro.close()
+        raise APIConnectionError(request=Request("POST", "https://api.openai.com/v1/embeddings"))
+
+    def _retry(**kwargs):
+        retry_calls.append(kwargs)
+        raise AssertionError("provider failures must not replay the chapter task")
+
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", _raise_provider_failure)
+    monkeypatch.setattr(extraction_tasks.process_chapter_task, "retry", _retry)
+    extraction_tasks.process_chapter_task.request.retries = 0
+
+    with pytest.raises(APIConnectionError):
+        extraction_tasks.process_chapter_task.run(str(uuid.uuid4()), 4)
+
+    assert retry_calls == []
+
+
+def test_process_chapter_task_retries_transient_db_failure_before_work_starts(monkeypatch):
+    deadlock = OperationalError("SELECT books", {}, RuntimeError("deadlock detected"))
+    retry_calls: list[dict] = []
+
+    def _raise_before_work(coro):
+        coro.close()
+        raise deadlock
+
+    def _retry(**kwargs):
+        retry_calls.append(kwargs)
+        raise RuntimeError("retry scheduled")
+
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", _raise_before_work)
+    monkeypatch.setattr(extraction_tasks.process_chapter_task, "retry", _retry)
+    extraction_tasks.process_chapter_task.request.retries = 0
+
+    with pytest.raises(RuntimeError, match="retry scheduled"):
+        extraction_tasks.process_chapter_task.run(str(uuid.uuid4()), 4)
+
+    assert retry_calls[0]["exc"] is deadlock
+    assert retry_calls[0]["countdown"] == 2
+
+
+def test_process_chapter_task_does_not_retry_non_transient_failure(monkeypatch):
+    retry_calls: list[dict] = []
+
+    def _raise_permanent_failure(coro):
+        coro.close()
+        raise ValueError("parse failure")
+
+    def _retry(**kwargs):
+        retry_calls.append(kwargs)
+        raise AssertionError("non-transient failures must not be retried")
+
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", _raise_permanent_failure)
+    monkeypatch.setattr(extraction_tasks.process_chapter_task, "retry", _retry)
+    extraction_tasks.process_chapter_task.request.retries = 0
+
+    with pytest.raises(ValueError, match="parse failure"):
+        extraction_tasks.process_chapter_task.run(str(uuid.uuid4()), 4)
+
+    assert retry_calls == []
 
 
 def test_process_book_task_uses_shared_worker_runner(monkeypatch):
@@ -272,6 +336,61 @@ def test_process_chapter_task_successfully_processes_and_sets_reprocess_guard(mo
     assert processed[0]["queue_wait_ms"] == 23
     assert processed[0]["manual_reprocess"] is True
     assert redis_sets[0][0][0] == f"chapter_reprocess:{book_id}:1"
+
+
+def test_process_chapter_task_does_not_retry_db_failure_after_work_starts(monkeypatch):
+    book_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=book_id,
+        hidden_at=None,
+        work_type="novel",
+        total_chapters=1,
+        status="processing",
+    )
+    chapter = SimpleNamespace(title="Chapter 1", s3_key=f"chapters/{book_id}/1.txt")
+    fake_session = _FakeSession(book, chapter)
+    retry_calls: list[dict] = []
+    deadlock = OperationalError("INSERT book_chunks", {}, RuntimeError("deadlock detected"))
+
+    class Redis:
+        async def exists(self, _key):
+            return 0
+
+    async def get_redis():
+        return Redis()
+
+    async def visible(*_args, **_kwargs):
+        return False
+
+    async def payload(*_args, **_kwargs):
+        return {"number": 1, "title": "Chapter 1", "text": "Chapter text."}
+
+    async def process(*_args, **_kwargs):
+        raise deadlock
+
+    def retry(**kwargs):
+        retry_calls.append(kwargs)
+        raise AssertionError("database failure after paid work must not replay the task")
+
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", asyncio.run)
+    monkeypatch.setattr(extraction_tasks, "is_book_hidden", visible)
+    monkeypatch.setattr(extraction_tasks, "load_processing_chapter_payload", payload)
+    monkeypatch.setattr(extraction_tasks, "extract_queue_wait_ms", lambda _headers: 0)
+    monkeypatch.setattr(extraction_tasks, "_process_chapter", process)
+    monkeypatch.setattr(extraction_tasks.process_chapter_task, "retry", retry)
+    monkeypatch.setattr("app.core.redis.get_redis", get_redis)
+    monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
+    monkeypatch.setitem(
+        sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: fake_session)
+    )
+    monkeypatch.setitem(
+        sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel)
+    )
+
+    with pytest.raises(OperationalError):
+        extraction_tasks.process_chapter_task.run(str(book_id), 1)
+
+    assert retry_calls == []
 
 
 def test_repair_chapter_payload_task_covers_success_missing_and_hidden_paths(monkeypatch):

@@ -13,7 +13,9 @@ from app.schemas.intelligence import QARequest
 @pytest.fixture(autouse=True)
 def _stub_llm_reservation_lifecycle(monkeypatch):
     async def reserve(**kwargs):
-        return SimpleNamespace(id="test-reservation", operation=kwargs["operation"], user_id=kwargs["user_id"])
+        return SimpleNamespace(
+            id="test-reservation", operation=kwargs["operation"], user_id=kwargs["user_id"]
+        )
 
     async def finish(*_args, **_kwargs):
         return None

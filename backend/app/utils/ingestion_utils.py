@@ -26,6 +26,8 @@ from app.utils.books.processing import (
 from app.utils.books.writer_workspace import (
     normalize_writer_workspace,
 )
+from app.utils.db_utils import is_retryable_transaction_db_error
+from app.utils.llm_usage_utils import is_transient_llm_provider_error
 from app.utils.logging.errors import redact_sensitive_text
 from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 
@@ -761,6 +763,9 @@ def _estimate_ingestion_eta_seconds(
 
 
 def is_retryable_processing_error(exc: BaseException) -> bool:
+    if is_transient_llm_provider_error(exc) or is_retryable_transaction_db_error(exc):
+        return True
+
     status_code = getattr(getattr(exc, "response", None), "status_code", None) or getattr(
         exc, "status_code", None
     )
@@ -775,6 +780,7 @@ def is_retryable_processing_error(exc: BaseException) -> bool:
         "temporarily unavailable",
         "connection reset",
         "connection aborted",
+        "connection error",
         "broken pipe",
         "service unavailable",
         "gateway timeout",

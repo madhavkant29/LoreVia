@@ -24,9 +24,6 @@ from app.schemas.beta_reads import (
     BetaReadAssignmentCreateBody,
     BetaReadFeedbackItemCreateBody,
 )
-from app.utils.books.collaboration import (
-    normalize_collaboration_email,
-)
 from app.utils.beta_read_access_utils import (
     _upsert_beta_read_collaborator,
 )
@@ -36,6 +33,10 @@ from app.utils.beta_read_feedback_utils import (
     _resolve_feedback_question,
     _resolve_feedback_scene,
     list_beta_read_questions,
+)
+from app.utils.beta_read_lifecycle_utils import (
+    expire_beta_assignment_if_due,
+    sync_beta_assignment_progress,
 )
 from app.utils.beta_read_policy_utils import (
     ACTIVE_READER_STATES,
@@ -52,16 +53,16 @@ from app.utils.beta_read_policy_utils import (
     VALID_STATE_TRANSITIONS,
     apply_beta_submission_snapshot,
     apply_missed_beta_read_penalty,
-    assignment_scope_bounds,
     assert_valid_beta_transition,
+    assignment_scope_bounds,
     beta_feedback_item_author_metadata,
     beta_primary_action,
     beta_read_rating_sentiment,
     beta_submission_snapshot,
     ensure_timezone,
     normalize_author_feedback_item_status,
-    normalize_beta_read_rating,
     normalize_beta_read_questions,
+    normalize_beta_read_rating,
     normalize_feedback_kind,
     penalty_warning_for_user,
     reset_missed_beta_read_penalty,
@@ -70,14 +71,13 @@ from app.utils.beta_read_policy_utils import (
     validate_beta_read_scope,
     validate_beta_read_window,
 )
-from app.utils.beta_read_lifecycle_utils import (
-    expire_beta_assignment_if_due,
-    sync_beta_assignment_progress,
-)
 from app.utils.beta_read_progress_utils import (
     _assignment_progress_snapshot,
-    _requirements_met,
     _read_set_from_progress,
+    _requirements_met,
+)
+from app.utils.books.collaboration import (
+    normalize_collaboration_email,
 )
 
 

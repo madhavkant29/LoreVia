@@ -14,7 +14,10 @@ from app.utils.books.collaboration_access import (
     get_book_with_collaboration_access,
 )
 from app.utils.characters.governance import is_cast_visible_character, is_displayable_character
-from app.utils.characters.presentation import append_unique_summary, relationship_summary_for_character
+from app.utils.characters.presentation import (
+    append_unique_summary,
+    relationship_summary_for_character,
+)
 from app.utils.characters.serialization import serialize_book_character
 from app.utils.sparse_utils import filter_character_fields, include_requested
 from app.utils.tag_utils import ENTITY_TYPE_CHARACTER, list_custom_tags_for_entity_ids

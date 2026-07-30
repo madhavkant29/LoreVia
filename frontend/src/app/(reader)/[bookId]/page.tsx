@@ -672,6 +672,7 @@ export default function BookOverviewPage() {
             && (!normalizedProcessingStatus || normalizedProcessingStatus.ready) ? (
             <ActivationExperience
               bookId={bookId}
+              bookCreatedAt={book?.created_at}
               bookTitle={book?.title ?? "your manuscript"}
               chapterCount={chapterCount ?? 0}
               isDark={isDark}

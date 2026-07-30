@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.routes.books.bootstrap import router as bootstrap_router
 from app.api.v1.routes.books.characters import router as characters_router
+from app.api.v1.routes.books.continuity import router as continuity_router
 from app.api.v1.routes.books.core import BookOut, list_books
 from app.api.v1.routes.books.core import router as core_router
 from app.api.v1.routes.books.events import router as events_router
@@ -21,6 +22,7 @@ router = APIRouter()
 
 router.include_router(core_router)
 router.include_router(intelligence_router)
+router.include_router(continuity_router)
 router.include_router(bootstrap_router)
 router.include_router(lifecycle_router)
 router.include_router(imports_router)

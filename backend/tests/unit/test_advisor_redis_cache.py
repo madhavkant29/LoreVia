@@ -45,9 +45,7 @@ def test_cache_policy_registry_documents_major_namespaces():
     policies = {policy.namespace: policy for policy in redis_utils.CACHE_POLICIES}
 
     assert policies["advisor:book"].ttl_seconds == redis_utils.ADVISOR_CACHE_TTL_SECONDS
-    assert policies["book_overview"].invalidation.startswith(
-        "Book cache-version marker"
-    )
+    assert policies["book_overview"].invalidation.startswith("Book cache-version marker")
     assert policies["reader_timeline"].source_of_truth.startswith("Postgres")
     assert policies["embedding"].ttl_seconds == redis_utils.EMBEDDING_CACHE_TTL_SECONDS
 
@@ -187,17 +185,12 @@ async def test_mark_cache_dirty_updates_version_markers(monkeypatch):
     await redis_utils.mark_user_dashboard_cache_dirty("user-1")
     await redis_utils.mark_reader_progress_cache_dirty("book-1", "user-1")
     await redis_utils.mark_public_profile_cache_dirty("user-1")
-    await redis_utils.cache_set_version_marker(
-        redis_utils.key_public_forum_cache_version()
-    )
+    await redis_utils.cache_set_version_marker(redis_utils.key_public_forum_cache_version())
 
     assert redis_utils.key_book_cache_version("book-1") in fake_redis.values
     assert redis_utils.key_series_cache_version("series-1") in fake_redis.values
     assert redis_utils.key_user_dashboard_cache_version("user-1") in fake_redis.values
-    assert (
-        redis_utils.key_reader_progress_cache_version("book-1", "user-1")
-        in fake_redis.values
-    )
+    assert redis_utils.key_reader_progress_cache_version("book-1", "user-1") in fake_redis.values
     assert redis_utils.key_public_profile_cache_version("user-1") in fake_redis.values
     assert redis_utils.key_public_forum_cache_version() in fake_redis.values
 
@@ -231,6 +224,4 @@ async def test_redis_diagnostics_reports_memory_clients_and_prefixes(monkeypatch
         "embedding": 1,
         "public:forum": 1,
     }
-    assert diagnostics["key_prefix_samples"]["advisor:book"] == [
-        "advisor:book:book-1:message:a"
-    ]
+    assert diagnostics["key_prefix_samples"]["advisor:book"] == ["advisor:book:book-1:message:a"]

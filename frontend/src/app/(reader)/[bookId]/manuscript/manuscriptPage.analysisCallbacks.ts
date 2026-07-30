@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react"
 
 import { intelligenceApi } from "@/lib/api/intelligence"
+import { capture } from "@/lib/analytics/posthog"
 import type { Character } from "@/types/character"
 import type { Book } from "@/types/book"
 import {
@@ -75,6 +76,11 @@ export function useManuscriptAnalysisCallbacks({
     link.download = `${(book?.title || "lorevia").replace(/\s+/g, "-").toLowerCase()}-continuity-report.pdf`
     link.click()
     URL.revokeObjectURL(url)
+    capture("continuity_report_exported", {
+      book_id: bookId,
+      chapter_number: activeChapterNumber,
+      format: "pdf",
+    })
   }
 
   const changeNoteBody = (nextHtml: string, nextText: string) => {

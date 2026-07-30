@@ -174,9 +174,7 @@ async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] 
                 last_error=None,
                 progress_pct=0,
             )
-            await _dispatch_durable_book_processing(
-                db, book, run_kind="manual_retry"
-            )
+            await _dispatch_durable_book_processing(db, book, run_kind="manual_retry")
     else:
         book.status = "processing"
         await enqueue_processing_state_repair_if_needed(book)
@@ -200,13 +198,17 @@ async def continue_book_processing(db: AsyncSession, book: Book) -> dict[str, An
     )
 
     run = (
-        await db.execute(
-            select(BookProcessingRun)
-            .where(BookProcessingRun.book_id == book.id, BookProcessingRun.status == "paused")
-            .order_by(BookProcessingRun.created_at.desc())
-            .with_for_update()
+        (
+            await db.execute(
+                select(BookProcessingRun)
+                .where(BookProcessingRun.book_id == book.id, BookProcessingRun.status == "paused")
+                .order_by(BookProcessingRun.created_at.desc())
+                .with_for_update()
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if run is None:
         raise HTTPException(409, "Processing is not paused for this book.")
     user = await db.get(User, book.user_id)

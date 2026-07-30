@@ -4,9 +4,9 @@ from typing import BinaryIO
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redis import mark_book_cache_dirty, mark_user_dashboard_cache_dirty
 from app.core.storage import upload_book, upload_text
 from app.models.book import Book, Series, SeriesBook
-from app.core.redis import mark_book_cache_dirty, mark_user_dashboard_cache_dirty
 from app.utils.books.writer_workspace import (
     normalize_writer_workspace,
 )

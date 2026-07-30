@@ -48,7 +48,6 @@ from app.utils.characters.merging import (
 )
 from app.utils.characters.text import clean_optional_text, clean_string_list
 
-
 PARTITION_ENRICHMENT_EXCEPTIONS = (
     OpenAIError,
     TimeoutError,
