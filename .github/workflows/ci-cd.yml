@@ -176,9 +176,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
-    - name: Run Trivy vulnerability scanner
-      id: trivy
-      continue-on-error: true
+    - name: Generate Trivy SARIF report
       uses: aquasecurity/trivy-action@v0.36.0
       with:
         scan-type: 'fs'
@@ -187,18 +185,54 @@ jobs:
         output: 'trivy-results.sarif'
         severity: 'HIGH,CRITICAL'
         ignore-unfixed: true
-        exit-code: '1'
+        limit-severities-for-sarif: true
+        exit-code: '0'
 
     - name: Upload Trivy SARIF report
       if: always() && hashFiles('trivy-results.sarif') != ''
+      continue-on-error: true
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: 'trivy-results.sarif'
         category: 'trivy-filesystem'
 
+    - name: Preserve Trivy SARIF report
+      if: always() && hashFiles('trivy-results.sarif') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-sarif
+        path: trivy-results.sarif
+        retention-days: 14
+
     - name: Enforce vulnerability gate
-      if: steps.trivy.outcome == 'failure'
-      run: exit 1
+      if: always()
+      shell: python
+      run: |
+        import json
+        from pathlib import Path
+
+        report_path = Path("trivy-results.sarif")
+        if not report_path.is_file():
+            raise SystemExit("Trivy did not produce trivy-results.sarif")
+
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        findings = [
+            result
+            for run in report.get("runs", [])
+            for result in run.get("results", [])
+        ]
+        if findings:
+            rule_ids = sorted({
+                str(result.get("ruleId") or "unknown")
+                for result in findings
+            })
+            print(
+                f"Trivy found {len(findings)} blocking HIGH/CRITICAL "
+                f"finding(s): {', '.join(rule_ids)}"
+            )
+            raise SystemExit(1)
+
+        print("Trivy found no blocking HIGH/CRITICAL findings.")
 
   build-and-push-docker:
     needs: [backend-tests, frontend-tests, security-scan]
