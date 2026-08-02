@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func, select
@@ -14,12 +14,33 @@ from app.workers.tasks.maintenance_tasks import (
     cleanup_expired_advisor_jobs_task,
     cleanup_expired_subscription_events_task,
     cleanup_expired_webhook_events_task,
+    maintain_task_executions_task,
     process_beta_reads_task,
     process_data_deletion_requests_task,
     refresh_public_rankings_task,
+    release_stale_processing_reservations_task,
     repair_processing_books_task,
     send_due_trial_emails_task,
 )
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        maintain_task_executions_task,
+        release_stale_processing_reservations_task,
+        repair_processing_books_task,
+        send_due_trial_emails_task,
+        process_beta_reads_task,
+        process_data_deletion_requests_task,
+        cleanup_expired_advisor_jobs_task,
+        cleanup_expired_webhook_events_task,
+        cleanup_expired_subscription_events_task,
+        refresh_public_rankings_task,
+    ],
+)
+def test_non_llm_maintenance_tasks_allow_six_retries(task):
+    assert task.max_retries == 6
 
 
 def _fake_run_worker_coro(coro):
@@ -60,7 +81,7 @@ def _mock_async_session_local(monkeypatch, db):
 
 @pytest.mark.asyncio
 async def test_cleanup_webhook_events(db, monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     old_processed = PaddleWebhookEvent(
         id=uuid.uuid4(),
@@ -113,23 +134,26 @@ async def test_cleanup_webhook_events(db, monkeypatch):
     )
     assert remaining_count == 3
 
-    assert await db.scalar(
-        select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == old_id)
-    ) is None
-    assert await db.scalar(
-        select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == recent_id)
-    ) is not None
-    assert await db.scalar(
-        select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == pending_id)
-    ) is not None
-    assert await db.scalar(
-        select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == processing_id)
-    ) is not None
+    assert (
+        await db.scalar(select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == old_id)) is None
+    )
+    assert (
+        await db.scalar(select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == recent_id))
+        is not None
+    )
+    assert (
+        await db.scalar(select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == pending_id))
+        is not None
+    )
+    assert (
+        await db.scalar(select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == processing_id))
+        is not None
+    )
 
 
 @pytest.mark.asyncio
 async def test_cleanup_webhook_events_idempotent(db, monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     old = PaddleWebhookEvent(
         id=uuid.uuid4(),
@@ -144,8 +168,6 @@ async def test_cleanup_webhook_events_idempotent(db, monkeypatch):
 
     old_id = old.id
 
-    count_before = await db.scalar(select(func.count()).select_from(PaddleWebhookEvent))
-
     _mock_async_session_local(monkeypatch, db)
 
     first = cleanup_expired_webhook_events_task.run(batch_size=1000)
@@ -154,14 +176,14 @@ async def test_cleanup_webhook_events_idempotent(db, monkeypatch):
     second = cleanup_expired_webhook_events_task.run(batch_size=1000)
     assert second["deleted"] == 0
 
-    assert await db.scalar(
-        select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == old_id)
-    ) is None
+    assert (
+        await db.scalar(select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == old_id)) is None
+    )
 
 
 @pytest.mark.asyncio
 async def test_cleanup_webhook_events_batched(db, monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     event_ids = []
     for i in range(5):
@@ -185,14 +207,14 @@ async def test_cleanup_webhook_events_batched(db, monkeypatch):
     assert result["deleted"] >= 5
 
     for eid in event_ids:
-        assert await db.scalar(
-            select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == eid)
-        ) is None
+        assert (
+            await db.scalar(select(PaddleWebhookEvent).where(PaddleWebhookEvent.id == eid)) is None
+        )
 
 
 @pytest.mark.asyncio
 async def test_cleanup_subscription_events(db, monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     user = User(
         email=f"sub-cleanup-{uuid.uuid4().hex[:8]}@lorevia.app",
@@ -239,17 +261,16 @@ async def test_cleanup_subscription_events(db, monkeypatch):
     )
     assert remaining_count == 1
 
-    assert await db.scalar(
-        select(SubscriptionEvent).where(SubscriptionEvent.id == old_id)
-    ) is None
-    assert await db.scalar(
-        select(SubscriptionEvent).where(SubscriptionEvent.id == recent_id)
-    ) is not None
+    assert await db.scalar(select(SubscriptionEvent).where(SubscriptionEvent.id == old_id)) is None
+    assert (
+        await db.scalar(select(SubscriptionEvent).where(SubscriptionEvent.id == recent_id))
+        is not None
+    )
 
 
 @pytest.mark.asyncio
 async def test_cleanup_subscription_events_idempotent(db, monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     user = User(
         email=f"sub-idem-{uuid.uuid4().hex[:8]}@lorevia.app",
@@ -281,9 +302,7 @@ async def test_cleanup_subscription_events_idempotent(db, monkeypatch):
     second = cleanup_expired_subscription_events_task.run(batch_size=1000)
     assert second["deleted"] == 0
 
-    assert await db.scalar(
-        select(SubscriptionEvent).where(SubscriptionEvent.id == old_id)
-    ) is None
+    assert await db.scalar(select(SubscriptionEvent).where(SubscriptionEvent.id == old_id)) is None
 
 
 @pytest.mark.asyncio
@@ -379,13 +398,13 @@ async def test_remaining_locked_maintenance_tasks_run_services(db, monkeypatch):
         assert session is db
         return {"ranked": 11}
 
-    monkeypatch.setattr("app.utils.beta_read_utils.run_beta_read_jobs", run_beta_reads)
+    monkeypatch.setattr("app.utils.beta_read_job_utils.run_beta_read_jobs", run_beta_reads)
     monkeypatch.setattr(
         "app.services.privacy_service.process_due_data_deletion_requests",
         process_deletions,
     )
     monkeypatch.setattr(
-        "app.utils.public_utils.rebuild_public_book_rankings_snapshot",
+        "app.utils.public.ranking_service.rebuild_public_book_rankings_snapshot",
         rebuild_rankings,
     )
 

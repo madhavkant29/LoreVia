@@ -3,14 +3,9 @@
 import { useEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { authApi } from "@/lib/api/auth"
-import { captureTiming } from "@/lib/analytics/posthog"
+import { capture, captureTiming, identify } from "@/lib/analytics/posthog"
 import { shouldSkipAuthBootstrap } from "@/lib/routes"
 import { useAuthStore } from "@/lib/stores/authStore"
-
-function debug(label: string, ...args: unknown[]) {
-  if (process.env.NODE_ENV === "production") return
-  console.log(`[auth-bootstrap] ${label}`, ...args)
-}
 
 export function AuthBootstrap() {
   const { user, setUser, setHydrated, logout } = useAuthStore()
@@ -21,7 +16,6 @@ export function AuthBootstrap() {
 
   useEffect(() => {
     if (shouldSkipAuthBootstrap(pathname)) {
-      debug("skipped", pathname)
       setHydrated()
       captureTiming("auth_ready_ms", startedAt.current, { skipped: true })
       return
@@ -31,25 +25,25 @@ export function AuthBootstrap() {
     ran.current = true
 
     const redirectLogin = () => {
-      debug("redirect to login")
       router.replace(`/login?next=${encodeURIComponent(pathname)}`)
     }
 
     const restoreSession = async ({ cachedUser }: { cachedUser: boolean }) => {
-      debug(cachedUser ? "validate cached user via session" : "restore via session")
       try {
         const me = await authApi.session()
-        debug("session result", me ? "has user" : "null")
         if (me) {
-          debug("setting user", me.id)
           document.cookie = "lorevia_session_dead=; Max-Age=0; Path=/"
           setUser(me)
+          identify(me.id, { tier: me.tier, account_created_at: me.created_at })
+          const analyticsSessionKey = `lorevia:analytics-session:${me.id}`
+          if (!window.sessionStorage.getItem(analyticsSessionKey)) {
+            window.sessionStorage.setItem(analyticsSessionKey, "1")
+            capture("app_session_started", { tier: me.tier })
+          }
           captureTiming("auth_ready_ms", startedAt.current, { cached_user: cachedUser })
           return
         }
-      } catch {
-        debug("session failed")
-      }
+      } catch {}
 
       if (cachedUser) {
         logout()
@@ -64,7 +58,6 @@ export function AuthBootstrap() {
 
     if (user) {
       setHydrated()
-      debug("cached user found, validating", user.id)
       void restoreSession({ cachedUser: true })
       return
     }

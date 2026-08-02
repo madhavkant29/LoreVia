@@ -81,6 +81,7 @@ export interface BookOverviewPayload {
 }
 
 export interface ReaderBootstrapPayload {
+  profile?: "critical" | "full"
   overview: BookOverviewPayload
   notes: BookNote[]
   saved_quotes: SavedQuote[]
@@ -94,6 +95,7 @@ export interface ReaderBootstrapPayload {
 }
 
 export interface ManuscriptBootstrapPayload {
+  profile?: "critical" | "full"
   book: Book
   characters: Character[]
   writer_workspace: WriterWorkspace | null
@@ -472,6 +474,16 @@ export interface UserStats {
     llm_total_tokens?: number
     total_chapters_tracked: number
     saved_quotes: number
+    active_analyzed_words: number
+    active_word_limit: number
+    active_words_remaining: number
+    monthly_processed_words: number
+    monthly_processed_word_limit: number
+    monthly_processed_words_remaining: number
+    source_storage_bytes: number
+    source_storage_limit_bytes: number
+    source_storage_remaining_bytes: number
+    allowances_enforced: boolean
   }
   writing: WritingDashboardStats
 }
@@ -799,6 +811,28 @@ export interface RevisionActionItem {
   status: "pending" | "fixed" | "ignored" | "task_created" | string
   assigned_version_id?: string | null
   task_id?: string | null
+  why_flagged?: string
+  evidence_strength?: "strong" | "moderate" | "limited"
+  evidence?: RevisionEvidence[]
+  is_stale?: boolean
+  decision?: "accepted" | "dismissed" | "resolved" | null
+  action?: "added_to_revision_plan" | "saved_note" | "manuscript_edit" | "exported_report" | null
+  reason?: "intentional" | "incorrect" | "not_relevant" | "other" | null
+}
+
+export interface RevisionEvidence {
+  chapter_ref: number
+  source_label?: string | null
+  excerpt: string
+  source_content_version: number
+}
+
+export interface RevisionActivation {
+  eligible: boolean
+  completed: boolean
+  completed_at?: string | null
+  completion_action?: string | null
+  completed_finding_id?: string | null
 }
 
 export interface RevisionGenreCheck {
@@ -865,6 +899,97 @@ export interface RevisionIntelligence {
   scene_advice: RevisionActionItem[]
   confusion_map: RevisionActionItem[]
   voice_alerts: RevisionActionItem[]
+  priority_findings?: RevisionActionItem[]
+  activation?: RevisionActivation
+  analysis_complete?: boolean
+  continuity_status?: "issues_found" | "clean" | "insufficient_evidence" | "stale"
+  continuity_scan_id?: string | null
+  continuity_completed_at?: string | null
+  continuity_duration_ms?: number | null
+  coverage?: Record<string, unknown>
+  stale_finding_count?: number
+  analysis_limitations?: string[]
+}
+
+export interface ContinuityEvidence {
+  observation_id: string
+  role: string
+  evidence_order: number
+  subject_type: string
+  subject_id?: string | null
+  subject_label: string
+  predicate: string
+  display_value: string
+  chapter_number: number
+  content_version: number
+  excerpt: string
+  confidence: number
+}
+
+export interface ContinuityFinding {
+  id: string
+  scan_id: string
+  book_id: string
+  category: string
+  severity: string
+  confidence: number
+  status: string
+  title: string
+  explanation: string
+  recommendation?: string | null
+  subject_type: string
+  subject_id?: string | null
+  subject_label: string
+  detector_version: string
+  content_versions: Record<string, number>
+  coverage: Record<string, unknown>
+  is_stale: boolean
+  decision?: string | null
+  action?: string | null
+  reason?: string | null
+  evidence: ContinuityEvidence[]
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface ContinuityScan {
+  id: string
+  book_id: string
+  scope: "full_book" | "targeted"
+  status: "queued" | "processing" | "ready" | "failed"
+  continuity_status: "issues_found" | "clean" | "insufficient_evidence" | "stale"
+  detector_version: string
+  chapter_versions: Record<string, number>
+  coverage: Record<string, unknown>
+  metrics: Record<string, unknown>
+  word_count: number
+  duration_ms?: number | null
+  cost_usd?: number | null
+  error_detail?: string | null
+  finding_count: number
+  stale_finding_count: number
+  findings: ContinuityFinding[]
+  started_at?: string | null
+  completed_at?: string | null
+  created_at?: string | null
+}
+
+export interface CanonFact {
+  id: string
+  scan_id: string
+  subject_type: string
+  subject_id?: string | null
+  subject_label: string
+  predicate: string
+  normalized_value: string
+  display_value: string
+  chapter_number: number
+  content_version: number
+  evidence_excerpt: string
+  confidence: number
+  extractor_version: string
+  provenance: Record<string, unknown>
+  is_author_confirmed: boolean
 }
 
 export interface NovelScene {
@@ -958,6 +1083,12 @@ export interface BookProcessing {
   is_fully_ready?: boolean
   retry_actions?: string[]
   retry_available?: boolean
+  processing_run_id?: string | null
+  pause_reason?: string | null
+  resume_available?: boolean
+  resume_blockers?: Array<{ kind?: string; detail?: string }>
+  next_chapter_number?: number | null
+  next_resume_at?: string | null
   pipeline?: {
     extraction?: ProcessingPipelineStage | null
     analysis?: ProcessingPipelineStage | null
@@ -1098,6 +1229,15 @@ export interface ImportPreview {
   front_matter_count: number
   confidence: number
   warnings: ImportWarning[]
+  total_words: number
+  source_size_bytes: number
+  allowance_allowed: boolean
+  projected_active_words: number
+  active_word_limit: number
+  projected_monthly_processed_words: number
+  monthly_processed_word_limit: number
+  projected_source_storage_bytes: number
+  source_storage_limit_bytes: number
 }
 
 export interface BookEventsItem {

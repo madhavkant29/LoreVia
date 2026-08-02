@@ -286,7 +286,7 @@ class PublicForumCommentOut(BaseModel):
     dislike_count: int = 0
     reaction: str | None = None
     can_edit: bool = False
-    replies: list["PublicForumCommentOut"] = Field(default_factory=list)
+    replies: list[PublicForumCommentOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

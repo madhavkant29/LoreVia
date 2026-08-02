@@ -85,7 +85,11 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
     chapter_tag = await client.put(
         f"/api/v1/books/{book.id}/revision-tags",
         headers=auth_headers,
-        json={"entity_type": "chapter", "chapter_number": 1, "tags": ["Needs Rewrite", " final pass "]},
+        json={
+            "entity_type": "chapter",
+            "chapter_number": 1,
+            "tags": ["Needs Rewrite", " final pass "],
+        },
     )
     assert chapter_tag.status_code == 200
     assert sorted(chapter_tag.json()["tags"]) == ["final pass", "needs rewrite"]
@@ -93,7 +97,11 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
     comment_tag = await client.put(
         f"/api/v1/books/{book.id}/revision-tags",
         headers=auth_headers,
-        json={"entity_type": "comment", "entity_id": str(note.id), "tags": ["beta feedback", "Too Slow"]},
+        json={
+            "entity_type": "comment",
+            "entity_id": str(note.id),
+            "tags": ["beta feedback", "Too Slow"],
+        },
     )
     assert comment_tag.status_code == 200
     assert comment_tag.json()["tags"] == ["beta feedback", "too slow"]
@@ -108,7 +116,11 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
     scene_tag = await client.put(
         f"/api/v1/books/{book.id}/revision-tags",
         headers=auth_headers,
-        json={"entity_type": "scene", "entity_id": str(scene.id), "tags": ["battle scene", "foreshadowing"]},
+        json={
+            "entity_type": "scene",
+            "entity_id": str(scene.id),
+            "tags": ["battle scene", "foreshadowing"],
+        },
     )
     assert scene_tag.status_code == 200
 
@@ -122,7 +134,11 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
     world_note_tag = await client.put(
         f"/api/v1/books/{book.id}/revision-tags",
         headers=auth_headers,
-        json={"entity_type": "world_note", "entity_id": str(world_note.id), "tags": ["check continuity"]},
+        json={
+            "entity_type": "world_note",
+            "entity_id": str(world_note.id),
+            "tags": ["check continuity"],
+        },
     )
     assert world_note_tag.status_code == 200
 
@@ -134,7 +150,9 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
     assert notes_response.status_code == 200
     assert notes_response.json()[0]["tags"] == ["beta feedback", "too slow"]
 
-    characters_response = await client.get(f"/api/v1/books/{book.id}/characters", headers=auth_headers)
+    characters_response = await client.get(
+        f"/api/v1/books/{book.id}/characters", headers=auth_headers
+    )
     assert characters_response.status_code == 200
     assert characters_response.json()[0]["tags"] == ["villain pov"]
 
@@ -142,10 +160,14 @@ async def test_revision_tags_round_trip_across_revision_entities(client, db, aut
     assert scenes_response.status_code == 200
     assert scenes_response.json()[0]["tags"] == ["battle scene", "foreshadowing"]
 
-    threads_response = await client.get(f"/api/v1/reader/{book.id}/plot-threads", headers=auth_headers)
+    threads_response = await client.get(
+        f"/api/v1/reader/{book.id}/plot-threads", headers=auth_headers
+    )
     assert threads_response.status_code == 200
     assert threads_response.json()[0]["tags"] == ["romance arc"]
 
-    world_notes_response = await client.get(f"/api/v1/intelligence/{book.id}/world-building/notes", headers=auth_headers)
+    world_notes_response = await client.get(
+        f"/api/v1/intelligence/{book.id}/world-building/notes", headers=auth_headers
+    )
     assert world_notes_response.status_code == 200
     assert world_notes_response.json()[0]["tags"] == ["check continuity"]

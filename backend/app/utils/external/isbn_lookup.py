@@ -16,6 +16,6 @@ def extract_isbn_from_pdf(raw_bytes: bytes) -> str | None:
                 doc.close()
                 return m.group().replace("-", "").replace(" ", "")
         doc.close()
-    except Exception:
+    except (RuntimeError, ValueError, TypeError):
         pass
     return None

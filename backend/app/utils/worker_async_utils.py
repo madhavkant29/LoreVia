@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable
-from typing import TypeVar
-
-T = TypeVar("T")
 
 _worker_loop: asyncio.AbstractEventLoop | None = None
 
@@ -21,7 +18,7 @@ def get_worker_loop() -> asyncio.AbstractEventLoop:
     return _worker_loop
 
 
-def run_worker_coro(coro: Awaitable[T]) -> T:
+def run_worker_coro[T](coro: Awaitable[T]) -> T:
     loop = get_worker_loop()
     asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)

@@ -12,7 +12,9 @@ def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:
     return {"Cookie": f"lorevia_access_token={create_access_token(str(user_id))}"}
 
 
-async def _create_user(db, *, email: str, username: str, messaging_permission: str = "anyone") -> User:
+async def _create_user(
+    db, *, email: str, username: str, messaging_permission: str = "anyone"
+) -> User:
     user = User(
         email=email,
         username=username,
@@ -29,7 +31,9 @@ async def _create_user(db, *, email: str, username: str, messaging_permission: s
 @pytest.mark.asyncio
 async def test_anyone_permission_allows_direct_messages_without_friendship(client, db):
     sender = await _create_user(db, email="sender@lorevia.test", username="sender")
-    recipient = await _create_user(db, email="recipient@lorevia.test", username="recipient", messaging_permission="anyone")
+    recipient = await _create_user(
+        db, email="recipient@lorevia.test", username="recipient", messaging_permission="anyone"
+    )
 
     search_response = await client.get(
         "/api/v1/social/users/search",
@@ -73,7 +77,10 @@ async def test_anyone_permission_allows_direct_messages_without_friendship(clien
         headers=_auth_headers(recipient.id),
     )
     assert recipient_messages.status_code == 200
-    assert recipient_messages.json()["items"][0]["body"] == "Hey there, I would love to talk about your manuscript."
+    assert (
+        recipient_messages.json()["items"][0]["body"]
+        == "Hey there, I would love to talk about your manuscript."
+    )
 
     mark_read_response = await client.post(
         f"/api/v1/social/conversations/{conversation_id}/read",
@@ -99,7 +106,12 @@ async def test_anyone_permission_allows_direct_messages_without_friendship(clien
 @pytest.mark.asyncio
 async def test_friends_only_requires_request_acceptance_before_dm(client, db):
     sender = await _create_user(db, email="gated-sender@lorevia.test", username="gatedsender")
-    recipient = await _create_user(db, email="gated-recipient@lorevia.test", username="gatedrecipient", messaging_permission="friends_only")
+    recipient = await _create_user(
+        db,
+        email="gated-recipient@lorevia.test",
+        username="gatedrecipient",
+        messaging_permission="friends_only",
+    )
 
     blocked_response = await client.post(
         "/api/v1/social/conversations/direct",
@@ -135,7 +147,9 @@ async def test_friends_only_requires_request_acceptance_before_dm(client, db):
         headers=_auth_headers(sender.id),
     )
     assert sender_notifications.status_code == 200
-    assert any(item["kind"] == "friend_request_accepted" for item in sender_notifications.json()["items"])
+    assert any(
+        item["kind"] == "friend_request_accepted" for item in sender_notifications.json()["items"]
+    )
 
     search_response = await client.get(
         "/api/v1/social/users/search",

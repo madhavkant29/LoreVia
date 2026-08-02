@@ -51,6 +51,7 @@ Once the stack is up, use Docker for service-level logs:
 - `docker compose -f docker-compose.yml logs -f backend`
 - `docker compose -f docker-compose.yml logs -f worker-extraction`
 - `docker compose -f docker-compose.yml logs -f worker-analysis`
+- `docker compose -f docker-compose.yml logs -f worker-embedding`
 - `docker compose -f docker-compose.yml logs -f worker-intelligence`
 - `docker compose -f docker-compose.yml logs -f celery-beat`
 
@@ -64,11 +65,13 @@ Once the stack is up, use Docker for service-level logs:
 
 ## Worker tuning
 
-- Production worker concurrency is env-driven through `backend/.env`.
+- Production worker concurrency defaults and validation live in `backend/app/core/config.py`.
+  Pydantic settings allow VPS environment overrides without changing Compose commands.
 - Current recommended CCX13 baseline:
-  - `EXTRACTION_CONCURRENCY=2`
-  - `ANALYSIS_CONCURRENCY=1`
-  - `INTELLIGENCE_CONCURRENCY=1`
+  - `EXTRACTION_WORKER_CONCURRENCY=2`
+  - `ANALYSIS_WORKER_CONCURRENCY=1`
+  - `INTELLIGENCE_WORKER_CONCURRENCY=1`
+  - `EMBEDDING_WORKER_CONCURRENCY=1`
 - Extraction is the main throughput lever for manuscript ingest because each extraction task performs chapter chunking, embeddings, LLM extraction, deduplication, and chapter persistence in one worker slot.
 - Keep analysis at `1` for the first rollout so extraction gets the speedup without oversubscribing a 2 vCPU VPS.
 

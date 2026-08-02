@@ -54,7 +54,9 @@ def test_canonical_relationship_pair_ids_treats_reversed_pairs_as_identical():
     left_id = uuid.uuid4()
     right_id = uuid.uuid4()
 
-    assert canonical_relationship_pair_ids(left_id, right_id) == canonical_relationship_pair_ids(right_id, left_id)
+    assert canonical_relationship_pair_ids(left_id, right_id) == canonical_relationship_pair_ids(
+        right_id, left_id
+    )
 
 
 def test_normalize_relationship_labels_handles_aliases_and_supersession():
@@ -90,7 +92,9 @@ def test_canonicalize_relationship_rows_merges_same_state_later_batch():
     assert kept == [first]
     assert removed == [duplicate]
     assert first.to_chapter is None
-    assert (first.character_a_id, first.character_b_id) == canonical_relationship_pair_ids(left_id, right_id)
+    assert (first.character_a_id, first.character_b_id) == canonical_relationship_pair_ids(
+        left_id, right_id
+    )
 
 
 def test_canonicalize_relationship_rows_closes_previous_state_on_transition():
@@ -174,7 +178,9 @@ def test_canonicalize_relationship_rows_splits_overlapping_manual_window():
         to_chapter=8,
     )
 
-    kept, removed = canonicalize_relationship_rows([original, inserted], preferred_relationship_id=inserted.id)
+    kept, removed = canonicalize_relationship_rows(
+        [original, inserted], preferred_relationship_id=inserted.id
+    )
 
     assert removed == []
     assert len(kept) == 3
@@ -207,7 +213,9 @@ def test_canonicalize_relationship_rows_preserves_tail_when_replacing_same_start
         to_chapter=7,
     )
 
-    kept, removed = canonicalize_relationship_rows([original, inserted], preferred_relationship_id=inserted.id)
+    kept, removed = canonicalize_relationship_rows(
+        [original, inserted], preferred_relationship_id=inserted.id
+    )
 
     assert removed == [original]
     assert len(kept) == 2
@@ -241,7 +249,9 @@ def test_canonicalize_relationship_rows_processes_preferred_same_start_row_after
     original.id = uuid.uuid4()
     inserted.id = uuid.uuid4()
 
-    kept, removed = canonicalize_relationship_rows([original, inserted], preferred_relationship_id=inserted.id)
+    kept, removed = canonicalize_relationship_rows(
+        [original, inserted], preferred_relationship_id=inserted.id
+    )
 
     assert removed == [original]
     assert [(row.rel_type, row.from_chapter, row.to_chapter) for row in kept] == [
@@ -293,14 +303,20 @@ def test_canonicalize_relationship_book_rows_accepts_sparse_row_objects():
 
     assert removed == []
     assert kept == [rel]
-    assert (rel.character_a_id, rel.character_b_id) == canonical_relationship_pair_ids(left_id, right_id)
+    assert (rel.character_a_id, rel.character_b_id) == canonical_relationship_pair_ids(
+        left_id, right_id
+    )
     assert rel.to_chapter is None
     assert rel.description == "Bonds"
 
 
 @pytest.mark.asyncio
 async def test_upsert_relationship_timeline_state_preserves_omitted_label_facets(db):
-    user = User(email="relationship-label-preserve@example.com", username="relationship-label-preserve", password_hash="hash")
+    user = User(
+        email="relationship-label-preserve@example.com",
+        username="relationship-label-preserve",
+        password_hash="hash",
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -370,8 +386,14 @@ async def test_upsert_relationship_timeline_state_preserves_omitted_label_facets
 
 
 @pytest.mark.asyncio
-async def test_reconcile_extracted_relationships_repairs_generated_rows_and_preserves_manual_rows(db):
-    user = User(email="relationship-reconcile@example.com", username="relationship-reconcile", password_hash="hash")
+async def test_reconcile_extracted_relationships_repairs_generated_rows_and_preserves_manual_rows(
+    db,
+):
+    user = User(
+        email="relationship-reconcile@example.com",
+        username="relationship-reconcile",
+        password_hash="hash",
+    )
     db.add(user)
     await db.flush()
     book = Book(
@@ -463,17 +485,23 @@ async def test_reconcile_extracted_relationships_repairs_generated_rows_and_pres
         reason_codes=["relationship_auto_reconciled"],
         evidence={"relationship_auto_reconciled": True},
     )
-    db.add_all([generated_hidden, curated_hidden, curated_visible, candidate, invalid_auto_candidate])
+    db.add_all(
+        [generated_hidden, curated_hidden, curated_visible, candidate, invalid_auto_candidate]
+    )
     await db.flush()
 
     result = await reconcile_extracted_relationships(db, book_id=book.id)
     await db.flush()
 
     relationships = (
-        await db.execute(
-            select(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     relationship_ids = {relationship.id for relationship in relationships}
     visible_pair = canonical_relationship_pair_ids(gregor.id, grete.id)
 

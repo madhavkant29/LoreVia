@@ -1,6 +1,7 @@
 """
 Notification utility helpers for building and storing in-app notifications.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,10 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book, Chapter
 from app.models.character import Character
-from app.models.intelligence import ChapterSummary, Notification
-from app.models.intelligence import CharacterRelationship, PlotThread
+from app.models.intelligence import ChapterSummary, CharacterRelationship, Notification, PlotThread
 from app.schemas.books import ChapterConsistencyReport
-from app.utils.book_utils import build_revision_intelligence_payload, detect_chapter_continuity_flags
+from app.utils.books.continuity import detect_chapter_continuity_flags
+from app.utils.books.revision_service import (
+    build_revision_intelligence_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -34,15 +37,25 @@ class BookReadyStats:
 
 
 def _compose_book_ready_title(book: Book, stats: BookReadyStats) -> str:
-    return f"{book.title} is ready" if stats.analysis_complete else f"{book.title} finished processing"
+    return (
+        f"{book.title} is ready" if stats.analysis_complete else f"{book.title} finished processing"
+    )
 
 
 def _character_extraction_failures(book: Book) -> int:
     raw_workspace = getattr(book, "writer_workspace", None)
     workspace = raw_workspace if isinstance(raw_workspace, dict) else {}
-    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
-    parser_diagnostics = processing.get("parser_diagnostics") if isinstance(processing, dict) else {}
-    extraction = parser_diagnostics.get("character_extraction") if isinstance(parser_diagnostics, dict) else {}
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
+    parser_diagnostics = (
+        processing.get("parser_diagnostics") if isinstance(processing, dict) else {}
+    )
+    extraction = (
+        parser_diagnostics.get("character_extraction")
+        if isinstance(parser_diagnostics, dict)
+        else {}
+    )
     failed_batches = extraction.get("failed_batches") if isinstance(extraction, dict) else 0
     return int(failed_batches or 0)
 
@@ -50,7 +63,9 @@ def _character_extraction_failures(book: Book) -> int:
 def _analysis_pipeline_status(book: Book) -> str:
     raw_workspace = getattr(book, "writer_workspace", None)
     workspace = raw_workspace if isinstance(raw_workspace, dict) else {}
-    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
     pipeline = processing.get("pipeline") if isinstance(processing.get("pipeline"), dict) else {}
     analysis = pipeline.get("analysis") if isinstance(pipeline.get("analysis"), dict) else {}
     return " ".join(str(analysis.get("status") or "").split()).strip() or "pending"
@@ -59,9 +74,17 @@ def _analysis_pipeline_status(book: Book) -> str:
 def _book_ready_diagnostic_totals(book: Book) -> tuple[int, int]:
     raw_workspace = getattr(book, "writer_workspace", None)
     workspace = raw_workspace if isinstance(raw_workspace, dict) else {}
-    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
-    parser_diagnostics = processing.get("parser_diagnostics") if isinstance(processing, dict) else {}
-    extraction = parser_diagnostics.get("character_extraction") if isinstance(parser_diagnostics, dict) else {}
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
+    parser_diagnostics = (
+        processing.get("parser_diagnostics") if isinstance(processing, dict) else {}
+    )
+    extraction = (
+        parser_diagnostics.get("character_extraction")
+        if isinstance(parser_diagnostics, dict)
+        else {}
+    )
     totals = extraction.get("totals") if isinstance(extraction.get("totals"), dict) else {}
     return (
         int(totals.get("saved_characters") or 0),
@@ -102,7 +125,9 @@ def _compose_book_ready_body(book: Book, stats: BookReadyStats) -> str:
 
     saved_findings: list[str] = []
     if stats.character_count > 0:
-        saved_findings.append(f"{stats.character_count} character{'s' if stats.character_count != 1 else ''}")
+        saved_findings.append(
+            f"{stats.character_count} character{'s' if stats.character_count != 1 else ''}"
+        )
     if stats.relationship_count > 0:
         saved_findings.append(
             f"{stats.relationship_count} relationship{'s' if stats.relationship_count != 1 else ''}"
@@ -130,6 +155,8 @@ def _compose_book_ready_body(book: Book, stats: BookReadyStats) -> str:
 def _build_book_ready_data(book: Book, stats: BookReadyStats) -> dict[str, Any]:
     analysis_status = _analysis_pipeline_status(book)
     data: dict[str, Any] = {
+        "book_id": str(book.id),
+        "href": f"/{book.id}?activation=1",
         "book_title": book.title,
         "analysis_complete": stats.analysis_complete,
         "analysis_status": analysis_status,
@@ -206,7 +233,11 @@ def _revision_digest_signature(payload: dict[str, Any]) -> str:
     active = int(summary.get("active_item_count") or 0)
     high = int(summary.get("high_severity_count") or 0)
     recent_edit_label = str(summary.get("recent_edit_label") or "").strip()
-    top_ids = [str(item.get("id") or "") for item in (payload.get("change_impacts") or [])[:3] if isinstance(item, dict)]
+    top_ids = [
+        str(item.get("id") or "")
+        for item in (payload.get("change_impacts") or [])[:3]
+        if isinstance(item, dict)
+    ]
     return f"{active}:{high}:{recent_edit_label}:{'|'.join(top_ids)}"
 
 
@@ -238,16 +269,22 @@ def _revision_item_has_specific_title(item: dict[str, Any]) -> bool:
 
 
 def _revision_item_priority(index: int, item: dict[str, Any]) -> tuple[int, int, int]:
-    severity_rank = {"high": 0, "medium": 1, "low": 2}.get(str(item.get("severity") or "").lower(), 3)
+    severity_rank = {"high": 0, "medium": 1, "low": 2}.get(
+        str(item.get("severity") or "").lower(), 3
+    )
     specific_rank = 0 if _revision_item_has_specific_title(item) else 1
     return (severity_rank, specific_rank, index)
 
 
 def _select_revision_digest_top_item(payload: dict[str, Any]) -> dict[str, Any] | None:
-    active_items = [item for item in _revision_digest_items(payload) if _revision_item_is_active(item)]
+    active_items = [
+        item for item in _revision_digest_items(payload) if _revision_item_is_active(item)
+    ]
     if not active_items:
         return None
-    return min(enumerate(active_items), key=lambda indexed: _revision_item_priority(indexed[0], indexed[1]))[1]
+    return min(
+        enumerate(active_items), key=lambda indexed: _revision_item_priority(indexed[0], indexed[1])
+    )[1]
 
 
 def _revision_digest_body(active: int, high: int) -> str:
@@ -399,7 +436,9 @@ async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadySta
     chapter_count = int(
         (
             await db.execute(
-                select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id, Chapter.word_count > 0)
+                select(func.count())
+                .select_from(Chapter)
+                .where(Chapter.book_id == book.id, Chapter.word_count > 0)
             )
         ).scalar_one()
     )
@@ -427,7 +466,9 @@ async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadySta
     relationship_count = int(
         (
             await db.execute(
-                select(func.count()).select_from(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+                select(func.count())
+                .select_from(CharacterRelationship)
+                .where(CharacterRelationship.book_id == book.id)
             )
         ).scalar_one()
     )
@@ -446,13 +487,15 @@ async def collect_book_ready_stats(db: AsyncSession, book: Book) -> BookReadySta
     if chapter_count > 0 and analyzed_chapter_count >= chapter_count:
         chapter_rows = (
             await db.execute(
-              select(Chapter.number)
-              .where(Chapter.book_id == book.id, Chapter.word_count > 0)
+                select(Chapter.number)
+                .where(Chapter.book_id == book.id, Chapter.word_count > 0)
                 .order_by(Chapter.number)
             )
         ).all()
         for (chapter_number,) in chapter_rows:
-            continuity_issue_count += len(await detect_chapter_continuity_flags(db, book.id, chapter_number))
+            continuity_issue_count += len(
+                await detect_chapter_continuity_flags(db, book.id, chapter_number)
+            )
 
     return BookReadyStats(
         character_count=character_count,
@@ -503,23 +546,31 @@ async def upsert_book_ready_notification(
 
 async def sync_revision_digest_notifications(db: AsyncSession, user_id, *, limit: int = 6) -> None:
     books = (
-        await db.execute(
-            select(Book)
-            .where(Book.user_id == user_id, Book.mode == "author", Book.status == "ready")
-            .order_by(Book.created_at.desc())
-            .limit(max(1, min(limit, 10)))
+        (
+            await db.execute(
+                select(Book)
+                .where(Book.user_id == user_id, Book.mode == "author", Book.status == "ready")
+                .order_by(Book.created_at.desc())
+                .limit(max(1, min(limit, 10)))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not books:
         return
 
     existing = (
-        await db.execute(
-            select(Notification)
-            .where(Notification.user_id == user_id, Notification.kind == "revision_digest")
-            .order_by(Notification.created_at.desc())
+        (
+            await db.execute(
+                select(Notification)
+                .where(Notification.user_id == user_id, Notification.kind == "revision_digest")
+                .order_by(Notification.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     latest_by_book_id: dict[str, Notification] = {}
     stale_notifications: list[Notification] = []
     for notification in existing:
@@ -547,7 +598,11 @@ async def sync_revision_digest_notifications(db: AsyncSession, user_id, *, limit
                 changed = True
             continue
         next_signature = str((next_notification.data or {}).get("signature") or "")
-        current_signature = str((latest.data or {}).get("signature") or "") if latest is not None and isinstance(latest.data, dict) else ""
+        current_signature = (
+            str((latest.data or {}).get("signature") or "")
+            if latest is not None and isinstance(latest.data, dict)
+            else ""
+        )
         if latest is not None and current_signature == next_signature:
             continue
         if latest is None:

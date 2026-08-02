@@ -1,5 +1,7 @@
 # LoreVia Revenue, Cost, and Profit/Loss Scenarios
 
+> **Superseded pricing notice (2026-07-24):** This dated scenario model preserves the former $29/month Author and $49/month Architect assumptions for historical context. Current pricing is $19/month or $190/year for Author and $39/month or $390/year for Architect.
+
 Last updated: 2026-05-24
 
 ## Purpose

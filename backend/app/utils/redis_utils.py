@@ -1,11 +1,8 @@
-from collections.abc import Awaitable
-from typing import TypeVar
 import inspect
+from collections.abc import Awaitable
 
-T = TypeVar("T")
 
-
-async def maybe_await(value: T | Awaitable[T]) -> T:
+async def maybe_await[T](value: T | Awaitable[T]) -> T:
     if inspect.isawaitable(value):
         return await value
     return value

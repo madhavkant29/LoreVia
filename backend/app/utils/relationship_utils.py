@@ -264,15 +264,52 @@ RELATIONSHIP_SUPERSEDES: dict[str, set[str]] = {
 }
 
 RELATIONSHIP_PRIMARY_PRIORITY: tuple[str, ...] = (
-    "half_sister", "half_brother", "sister", "brother", "spouse", "husband", "wife",
-    "father", "mother", "son", "daughter", "lover", "ex_lover", "boyfriend", "girlfriend",
-    "forbidden_romance", "mentor", "teacher", "student", "master", "slave", "owner",
-    "captor", "prisoner", "enemy", "rival", "friend_toxic", "friend_romantic", "friend",
-    "workplace_friend", "colleague", "ally", "family", "romantic", "political", "neutral",
+    "half_sister",
+    "half_brother",
+    "sister",
+    "brother",
+    "spouse",
+    "husband",
+    "wife",
+    "father",
+    "mother",
+    "son",
+    "daughter",
+    "lover",
+    "ex_lover",
+    "boyfriend",
+    "girlfriend",
+    "forbidden_romance",
+    "mentor",
+    "teacher",
+    "student",
+    "master",
+    "slave",
+    "owner",
+    "captor",
+    "prisoner",
+    "enemy",
+    "rival",
+    "friend_toxic",
+    "friend_romantic",
+    "friend",
+    "workplace_friend",
+    "colleague",
+    "ally",
+    "family",
+    "romantic",
+    "political",
+    "neutral",
 )
 
 GENERIC_RELATIONSHIP_TYPES = {
-    "connection", "neutral", "family", "romantic", "ally", "friend", "political",
+    "connection",
+    "neutral",
+    "family",
+    "romantic",
+    "ally",
+    "friend",
+    "political",
 }
 
 
@@ -341,7 +378,14 @@ def derive_relationship_primary_type(
         + normalize_relationship_labels(shared_labels)
     )
     if labels and normalized_type in GENERIC_RELATIONSHIP_TYPES:
-        ranked = sorted(labels, key=lambda label: RELATIONSHIP_PRIMARY_PRIORITY.index(label) if label in RELATIONSHIP_PRIMARY_PRIORITY else len(RELATIONSHIP_PRIMARY_PRIORITY))
+        ranked = sorted(
+            labels,
+            key=lambda label: (
+                RELATIONSHIP_PRIMARY_PRIORITY.index(label)
+                if label in RELATIONSHIP_PRIMARY_PRIORITY
+                else len(RELATIONSHIP_PRIMARY_PRIORITY)
+            ),
+        )
         return ranked[0]
     return normalized_type
 
@@ -391,10 +435,13 @@ def relationship_pair_matches(
     character_b_id: uuid.UUID,
 ) -> bool:
     pair = canonical_relationship_pair_ids(character_a_id, character_b_id)
-    return canonical_relationship_pair_ids(
-        getattr(relationship, "character_a_id"),
-        getattr(relationship, "character_b_id"),
-    ) == pair
+    return (
+        canonical_relationship_pair_ids(
+            getattr(relationship, "character_a_id"),
+            getattr(relationship, "character_b_id"),
+        )
+        == pair
+    )
 
 
 def relationship_pair_key_for_row(relationship: CharacterRelationship) -> tuple[str, str]:
@@ -460,7 +507,9 @@ def _relationship_sort_key(
 ) -> tuple[int, int, float, str]:
     relationship_id = getattr(relationship, "id", None)
     to_chapter = getattr(relationship, "to_chapter", None)
-    preferred_order = 1 if preferred_relationship_id and relationship_id == preferred_relationship_id else 0
+    preferred_order = (
+        1 if preferred_relationship_id and relationship_id == preferred_relationship_id else 0
+    )
     return (
         int(getattr(relationship, "from_chapter", 0) or 0),
         preferred_order,
@@ -515,8 +564,12 @@ def canonicalize_relationship_rows(
                 relationship.character_a_to_b_labels,
             )
         relationship.shared_labels = normalize_relationship_labels(relationship.shared_labels)
-        relationship.character_a_to_b_labels = normalize_relationship_labels(relationship.character_a_to_b_labels)
-        relationship.character_b_to_a_labels = normalize_relationship_labels(relationship.character_b_to_a_labels)
+        relationship.character_a_to_b_labels = normalize_relationship_labels(
+            relationship.character_a_to_b_labels
+        )
+        relationship.character_b_to_a_labels = normalize_relationship_labels(
+            relationship.character_b_to_a_labels
+        )
         relationship.rel_type = derive_relationship_primary_type(
             relationship.rel_type,
             shared_labels=relationship.shared_labels,
@@ -528,7 +581,10 @@ def canonicalize_relationship_rows(
 
         if relationship.from_chapter < 1:
             relationship.from_chapter = 1
-        if relationship.to_chapter is not None and relationship.to_chapter < relationship.from_chapter:
+        if (
+            relationship.to_chapter is not None
+            and relationship.to_chapter < relationship.from_chapter
+        ):
             relationship.to_chapter = relationship.from_chapter
 
         if not kept:
@@ -585,10 +641,13 @@ def canonicalize_relationship_rows(
                     preferred_relationship_id=preferred_relationship_id,
                 )
                 for offset in range(index + 1, len(rows)):
-                    if _relationship_sort_key(
-                        rows[offset],
-                        preferred_relationship_id=preferred_relationship_id,
-                    ) > tail_sort_key:
+                    if (
+                        _relationship_sort_key(
+                            rows[offset],
+                            preferred_relationship_id=preferred_relationship_id,
+                        )
+                        > tail_sort_key
+                    ):
                         insert_at = offset
                         break
                 rows.insert(insert_at, tail)
@@ -624,10 +683,13 @@ def canonicalize_relationship_rows(
                     preferred_relationship_id=preferred_relationship_id,
                 )
                 for offset in range(index + 1, len(rows)):
-                    if _relationship_sort_key(
-                        rows[offset],
-                        preferred_relationship_id=preferred_relationship_id,
-                    ) > tail_sort_key:
+                    if (
+                        _relationship_sort_key(
+                            rows[offset],
+                            preferred_relationship_id=preferred_relationship_id,
+                        )
+                        > tail_sort_key
+                    ):
                         insert_at = offset
                         break
                 rows.insert(insert_at, tail)
@@ -671,22 +733,26 @@ async def normalize_relationship_pair_timeline(
 ) -> tuple[list[CharacterRelationship], list[CharacterRelationship]]:
     left_id, right_id = canonical_relationship_pair_ids(character_a_id, character_b_id)
     rows = (
-        await db.execute(
-            select(CharacterRelationship).where(
-                CharacterRelationship.book_id == book_id,
-                or_(
-                    and_(
-                        CharacterRelationship.character_a_id == left_id,
-                        CharacterRelationship.character_b_id == right_id,
+        (
+            await db.execute(
+                select(CharacterRelationship).where(
+                    CharacterRelationship.book_id == book_id,
+                    or_(
+                        and_(
+                            CharacterRelationship.character_a_id == left_id,
+                            CharacterRelationship.character_b_id == right_id,
+                        ),
+                        and_(
+                            CharacterRelationship.character_a_id == right_id,
+                            CharacterRelationship.character_b_id == left_id,
+                        ),
                     ),
-                    and_(
-                        CharacterRelationship.character_a_id == right_id,
-                        CharacterRelationship.character_b_id == left_id,
-                    ),
-                ),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     kept, removed = canonicalize_relationship_rows(
         rows,
         preferred_relationship_id=preferred_relationship_id,
@@ -746,11 +812,17 @@ async def upsert_relationship_timeline_state(
             else character_a_to_b_labels is not None
         )
         if shared_labels is None:
-            normalized_shared = normalize_relationship_labels(getattr(target_relationship, "shared_labels", None))
+            normalized_shared = normalize_relationship_labels(
+                getattr(target_relationship, "shared_labels", None)
+            )
         if not canonical_a_to_b_provided:
-            normalized_a_to_b = normalize_relationship_labels(getattr(target_relationship, "character_a_to_b_labels", None))
+            normalized_a_to_b = normalize_relationship_labels(
+                getattr(target_relationship, "character_a_to_b_labels", None)
+            )
         if not canonical_b_to_a_provided:
-            normalized_b_to_a = normalize_relationship_labels(getattr(target_relationship, "character_b_to_a_labels", None))
+            normalized_b_to_a = normalize_relationship_labels(
+                getattr(target_relationship, "character_b_to_a_labels", None)
+            )
         if label_evidence is None:
             label_evidence = dict(getattr(target_relationship, "label_evidence", None) or {})
         normalized_type = derive_relationship_primary_type(
@@ -761,12 +833,14 @@ async def upsert_relationship_timeline_state(
         )
     if target_relationship is None:
         _existing_curated = await db.execute(
-            select(CharacterRelationship).where(
+            select(CharacterRelationship)
+            .where(
                 CharacterRelationship.book_id == book_id,
                 CharacterRelationship.character_a_id == left_id,
                 CharacterRelationship.character_b_id == right_id,
-                CharacterRelationship.edited_by_author == True,
-            ).limit(1)
+                CharacterRelationship.edited_by_author.is_(True),
+            )
+            .limit(1)
         )
         curated = _existing_curated.scalar_one_or_none()
         if curated is not None:
@@ -833,10 +907,14 @@ async def repair_relationship_timelines(
     book_id: uuid.UUID,
 ) -> dict[str, int]:
     rows = (
-        await db.execute(
-            select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     removed_total = 0
     repaired_pairs = 0
     normalized_rows = 0
@@ -884,12 +962,16 @@ async def repair_relationship_timelines(
                 await db.delete(relationship)
 
     candidate_rows = (
-        await db.execute(
-            select(CharacterRelationshipCandidate).where(
-                CharacterRelationshipCandidate.book_id == book_id
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book_id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     updated_candidates = 0
     for candidate in candidate_rows:
         evidence = dict(candidate.evidence or {})
@@ -928,17 +1010,17 @@ async def reconcile_extracted_relationships(
     book_id: uuid.UUID,
 ) -> dict[str, int]:
     from app.engine.character.deduplicator import resolve_character_match_ids
-    from app.utils.character_utils import (
-        filter_character_identity_aliases,
+    from app.utils.characters.extraction import resolve_character_reference_from_roster
+    from app.utils.characters.governance import is_cast_visible_character
+    from app.utils.characters.identity import (
         family_role_reference,
-        is_cast_visible_character,
-        is_protected_character,
-        resolve_character_reference_from_roster,
+        filter_character_identity_aliases,
     )
+    from app.utils.characters.serialization import is_protected_character
 
     characters = (
-        await db.execute(select(Character).where(Character.book_id == book_id))
-    ).scalars().all()
+        (await db.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
+    )
     sanitized_aliases = 0
     for character in characters:
         if is_protected_character(character):
@@ -948,18 +1030,31 @@ async def reconcile_extracted_relationships(
             character.aliases = aliases
             sanitized_aliases += 1
 
-    visible_characters = [character for character in characters if is_cast_visible_character(character)]
+    visible_characters = [
+        character for character in characters if is_cast_visible_character(character)
+    ]
     visible_ids = {character.id for character in visible_characters}
-    roster = [(character.id, character.name, character.aliases or []) for character in visible_characters]
+    roster = [
+        (character.id, character.name, character.aliases or []) for character in visible_characters
+    ]
 
     removed_hidden_relationships = 0
     relationship_rows = (
-        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book_id))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     for relationship in relationship_rows:
         if getattr(relationship, "edited_by_author", False):
             continue
-        if relationship.character_a_id in visible_ids and relationship.character_b_id in visible_ids:
+        if (
+            relationship.character_a_id in visible_ids
+            and relationship.character_b_id in visible_ids
+        ):
             continue
         await db.delete(relationship)
         removed_hidden_relationships += 1
@@ -981,13 +1076,19 @@ async def reconcile_extracted_relationships(
         return [resolved.id] if resolved is not None else []
 
     candidates = (
-        await db.execute(
-            select(CharacterRelationshipCandidate).where(
-                CharacterRelationshipCandidate.book_id == book_id,
-                CharacterRelationshipCandidate.status.in_(("pending", "suppressed", "accepted")),
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book_id,
+                    CharacterRelationshipCandidate.status.in_(
+                        ("pending", "suppressed", "accepted")
+                    ),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     reconciled_candidates = 0
     demoted_candidates = 0
     for candidate in candidates:
@@ -1012,7 +1113,9 @@ async def reconcile_extracted_relationships(
                 demoted_candidates += 1
             continue
         evidence = dict(candidate.evidence or {})
-        extracted_relationship = evidence.get("relationship") if isinstance(evidence.get("relationship"), dict) else {}
+        extracted_relationship = (
+            evidence.get("relationship") if isinstance(evidence.get("relationship"), dict) else {}
+        )
         relationship, _created = await upsert_relationship_timeline_state(
             db,
             book_id=book_id,
@@ -1025,7 +1128,9 @@ async def reconcile_extracted_relationships(
             shared_labels=extracted_relationship.get("shared_labels"),
             character_a_to_b_labels=extracted_relationship.get("character_a_to_b_labels"),
             character_b_to_a_labels=extracted_relationship.get("character_b_to_a_labels"),
-            label_evidence=extracted_relationship.get("label_evidence") if isinstance(extracted_relationship.get("label_evidence"), dict) else evidence,
+            label_evidence=extracted_relationship.get("label_evidence")
+            if isinstance(extracted_relationship.get("label_evidence"), dict)
+            else evidence,
         )
         candidate.matched_character_a_id = relationship.character_a_id
         candidate.matched_character_b_id = relationship.character_b_id

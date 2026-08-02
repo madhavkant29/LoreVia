@@ -1,8 +1,8 @@
 """Unit coverage for admin principal and platform service operations."""
 
+import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
-import uuid
 
 import pytest
 
@@ -63,9 +63,9 @@ class FakeDB:
 
 
 def test_normalize_and_check_admin_scopes():
-    assert admin_service.normalize_admin_scopes([" SUPER_ADMIN ", "billing_admin", "billing_admin"]) == [
-        "billing_admin", "super_admin"
-    ]
+    assert admin_service.normalize_admin_scopes(
+        [" SUPER_ADMIN ", "billing_admin", "billing_admin"]
+    ) == ["billing_admin", "super_admin"]
     with pytest.raises(ValueError, match="Invalid admin scopes"):
         admin_service.normalize_admin_scopes(["unknown"])
     assert admin_service.principal_scope_snapshot(None) == []
@@ -98,9 +98,15 @@ async def test_grant_admin_principal_creates_and_reactivates_records():
     assert create_db.added == [created]
 
     existing = SimpleNamespace(
-        status="revoked", is_owner=False, scopes=[], grant_reason=None,
-        revoke_reason="old", revoked_by_user_id=uuid.uuid4(), revoked_at=datetime.now(UTC),
-        granted_by_user_id=None, updated_at=None,
+        status="revoked",
+        is_owner=False,
+        scopes=[],
+        grant_reason=None,
+        revoke_reason="old",
+        revoked_by_user_id=uuid.uuid4(),
+        revoked_at=datetime.now(UTC),
+        granted_by_user_id=None,
+        updated_at=None,
     )
     updated = await admin_service.grant_admin_principal(
         FakeDB(existing),
@@ -120,10 +126,20 @@ async def test_grant_admin_principal_creates_and_reactivates_records():
 @pytest.mark.asyncio
 async def test_revoke_admin_principal_updates_user_token_version(monkeypatch):
     user = SimpleNamespace(token_version=4)
-    principal = SimpleNamespace(user_id=uuid.uuid4(), status="active", revoke_reason=None, revoked_by_user_id=None, revoked_at=None, updated_at=None)
+    principal = SimpleNamespace(
+        user_id=uuid.uuid4(),
+        status="active",
+        revoke_reason=None,
+        revoked_by_user_id=None,
+        revoked_at=None,
+        updated_at=None,
+    )
     monkeypatch.setattr(admin_service, "next_token_version", lambda value: value.token_version + 1)
     await admin_service.revoke_admin_principal(
-        FakeDB(user=user), principal=principal, revoked_by_user_id=uuid.uuid4(), reason="  Access removed  "
+        FakeDB(user=user),
+        principal=principal,
+        revoked_by_user_id=uuid.uuid4(),
+        reason="  Access removed  ",
     )
     assert principal.status == "revoked" and principal.revoke_reason == "Access removed"
     assert principal.revoked_at.tzinfo is UTC and user.token_version == 5
@@ -131,19 +147,30 @@ async def test_revoke_admin_principal_updates_user_token_version(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_platform_metrics_counts_records_and_reports_redis_memory(monkeypatch):
-    class Redis:
-        async def info(self, section):
-            assert section == "memory"
-            return {"used_memory": 3 * 1024 * 1024 + 512 * 1024}
+    async def get_redis_diagnostics():
+        return {
+            "memory_mb": 3.5,
+            "key_count": 12,
+            "connected_clients": 2,
+            "key_prefix_counts": {"advisor:book": 3, "public:forum": 1},
+            "key_prefix_samples": {"advisor:book": ["advisor:book:book-1:message:a"]},
+            "key_scan_truncated": False,
+        }
 
-    async def get_redis():
-        return Redis()
-
-    monkeypatch.setattr("app.core.redis.get_redis", get_redis)
+    monkeypatch.setattr("app.core.redis.get_redis_diagnostics", get_redis_diagnostics)
     result = await admin_service.get_platform_metrics(FakeDB(10, 8, 30, 120, 40))
     assert result == {
-        "users": 10, "books": 8, "characters": 30,
-        "chunks_indexed": 120, "summaries_cached": 40, "redis_memory_mb": 3.5,
+        "users": 10,
+        "books": 8,
+        "characters": 30,
+        "chunks_indexed": 120,
+        "summaries_cached": 40,
+        "redis_memory_mb": 3.5,
+        "redis_key_count": 12,
+        "redis_connected_clients": 2,
+        "redis_key_prefix_counts": {"advisor:book": 3, "public:forum": 1},
+        "redis_key_prefix_samples": {"advisor:book": ["advisor:book:book-1:message:a"]},
+        "redis_key_scan_truncated": False,
     }
 
 
@@ -165,7 +192,9 @@ async def test_apply_creator_strike_records_moderation_and_audit(monkeypatch):
     monkeypatch.setattr(admin_service, "add_moderation_action", moderation)
     monkeypatch.setattr(admin_service, "record_admin_audit_event", audit)
     principal = SimpleNamespace(status="active", is_owner=False, scopes=["moderation_admin"])
-    request = SimpleNamespace(state=SimpleNamespace(admin_principal=principal), headers={}, client=None)
+    request = SimpleNamespace(
+        state=SimpleNamespace(admin_principal=principal), headers={}, client=None
+    )
     user_id = uuid.uuid4()
     admin_id = uuid.uuid4()
     output = await admin_service.apply_creator_strike(

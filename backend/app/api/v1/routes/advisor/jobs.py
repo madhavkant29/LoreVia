@@ -20,7 +20,11 @@ from app.api.v1.routes.advisor.chat import (
 )
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import get_series_advisor_response_cache, get_series_continuity_cache, set_series_continuity_cache
+from app.core.redis import (
+    get_series_advisor_response_cache,
+    get_series_continuity_cache,
+    set_series_continuity_cache,
+)
 from app.models.book import Book, Series, SeriesBook
 from app.models.intelligence import AdvisorJob
 from app.schemas.advisor import AdvisorRequest, AdvisorTaskStatusResponse
@@ -30,7 +34,8 @@ from app.services.advisor_jobs_service import (
     mark_advisor_job_failed,
     serialize_advisor_job,
 )
-from app.utils.billing_utils import require_author_access
+from app.utils.advisor_chat_utils import stream_series_advisor_reply_payload
+from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.advisor_utils import (
     SERIES_CONTINUITY_SYSTEM,
     build_series_story_context,
@@ -38,10 +43,12 @@ from app.utils.advisor_utils import (
     make_editorial_cache_key,
     normalize_series_continuity_result,
     retrieve_series_continuity_passages,
-    stream_series_advisor_reply_payload,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
+from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_series_advisor_reply_task
 
 router = APIRouter()
@@ -82,7 +89,7 @@ async def _enqueue_series_advisor_task(
                 "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
             },
         )
-    except Exception as exc:
+    except TASK_ENQUEUE_ERRORS:
         await mark_advisor_job_failed(
             db,
             job_id=job.id,
@@ -95,6 +102,7 @@ async def _enqueue_series_advisor_task(
 
 
 # ─── Series Ask endpoint ──────────────────────────────────────────────────────
+
 
 @router.post("/series/{series_id}/advisor/message")
 async def series_advisor_message(
@@ -154,7 +162,7 @@ async def series_advisor_message_stream(
                 messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
             ):
                 yield _advisor_sse(item["event"], item["data"])
-        except Exception as exc:
+        except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 
     return StreamingResponse(
@@ -164,7 +172,9 @@ async def series_advisor_message_stream(
     )
 
 
-@router.get("/series/{series_id}/advisor/message/{task_id}", response_model=AdvisorTaskStatusResponse)
+@router.get(
+    "/series/{series_id}/advisor/message/{task_id}", response_model=AdvisorTaskStatusResponse
+)
 async def series_advisor_message_status(
     series_id: uuid.UUID,
     task_id: str,
@@ -179,13 +189,18 @@ async def series_advisor_message_status(
     job = await db.get(AdvisorJob, _parse_advisor_job_id(task_id))
     if job is None:
         raise HTTPException(404, detail="advisor task not found")
-    if job.user_id != current_user.id or job.scope != ADVISOR_SCOPE_SERIES or job.series_id != series.id:
+    if (
+        job.user_id != current_user.id
+        or job.scope != ADVISOR_SCOPE_SERIES
+        or job.series_id != series.id
+    ):
         raise HTTPException(403, detail="advisor task does not belong to this series")
     return serialize_advisor_job(job)
 
 
 class SeriesContinuityRequest(AdvisorRequest):
     """Reuse AdvisorRequest shape but add book_id and optional chapter_num."""
+
     book_id: uuid.UUID
     chapter_num: int | None = None
     text: str
@@ -224,7 +239,9 @@ async def series_continuity_check(
         body.text,
         body.chapter_num,
     )
-    cached_series = await get_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key)
+    cached_series = await get_series_continuity_cache(
+        str(series.id), str(current_book.id), series_cache_key
+    )
     if cached_series is not None:
         return {**cached_series, "cached": True}
 
@@ -244,7 +261,8 @@ async def series_continuity_check(
     # Prior books = those with a lower series position, or all others if unordered
     if current_position is not None:
         prior_book_ids = [
-            row.book_id for row in memberships
+            row.book_id
+            for row in memberships
             if row.book_id != body.book_id and (row.position or 999) < current_position
         ]
     else:
@@ -258,7 +276,10 @@ async def series_continuity_check(
             "review": {
                 "continuity_issues": [],
                 "cross_book_opportunities": [],
-                "thematic_fit": {"score": "strong", "notes": "No prior books in series to compare against."},
+                "thematic_fit": {
+                    "score": "strong",
+                    "notes": "No prior books in series to compare against.",
+                },
                 "overall_verdict": "This is the first book in the series — no cross-book continuity check possible.",
             },
             "retrieved_passages": [],
@@ -272,8 +293,11 @@ async def series_continuity_check(
 
     # Build prior series context
     story_ctx = await build_series_story_context(
-        db, prior_book_ids, prior_titles,
-        max_chars_per_book=8, max_threads_per_book=5,
+        db,
+        prior_book_ids,
+        prior_titles,
+        max_chars_per_book=8,
+        max_threads_per_book=5,
     )
 
     # RAG: retrieve relevant passages from prior books only (cross-series search)
@@ -285,15 +309,17 @@ async def series_continuity_check(
         book_id=current_book.id,
     )
 
-    passages_block = "\n\n".join(
-        f"[{h['book_title']} — Ch. {h['chapter_num']}]: {h['text'][:300]}"
-        for h in hits
-    ) or "No closely matching passages found in earlier books."
+    passages_block = (
+        "\n\n".join(
+            f"[{h['book_title']} — Ch. {h['chapter_num']}]: {h['text'][:300]}" for h in hits
+        )
+        or "No closely matching passages found in earlier books."
+    )
 
     chapter_hint = (
-        f"This passage will appear in Chapter {body.chapter_num} of \"{current_book.title}\"."
+        f'This passage will appear in Chapter {body.chapter_num} of "{current_book.title}".'
         if body.chapter_num
-        else f"Chapter number not specified. Book: \"{current_book.title}\"."
+        else f'Chapter number not specified. Book: "{current_book.title}".'
     )
 
     system_msg = SERIES_CONTINUITY_SYSTEM.format(
@@ -307,7 +333,7 @@ async def series_continuity_check(
         f"--- RETRIEVED PASSAGES FROM EARLIER BOOKS ---\n{passages_block}"
     )
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
     try:
         response = await create_tracked_chat_completion(
             client=client,
@@ -341,7 +367,9 @@ async def series_continuity_check(
             ],
             "cached": False,
         }
-        await set_series_continuity_cache(str(series.id), str(current_book.id), series_cache_key, response_payload)
+        await set_series_continuity_cache(
+            str(series.id), str(current_book.id), series_cache_key, response_payload
+        )
         return response_payload
     finally:
         await client.close()
@@ -368,7 +396,7 @@ async def series_continuity_check_stream(
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
             yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
-        except Exception:
+        except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 
     return _advisor_stream_response(event_stream())

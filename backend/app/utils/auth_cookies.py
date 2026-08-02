@@ -124,7 +124,9 @@ def resolve_device_id_optional(request: Request, requested_device_id: str | None
         return None
 
 
-def get_auth_token(request: Request, bearer_token: str | None = None, cookie_name: str = ACCESS_TOKEN_COOKIE_NAME) -> str | None:
+def get_auth_token(
+    request: Request, bearer_token: str | None = None, cookie_name: str = ACCESS_TOKEN_COOKIE_NAME
+) -> str | None:
     cookie_token = get_request_cookie(request, cookie_name)
     if cookie_token:
         return cookie_token

@@ -41,7 +41,7 @@ async def read_upload_bounded(upload: UploadFile, max_bytes: int, label: str) ->
 def validate_cover_magic(raw: bytes) -> tuple[str, str]:
     """Return (extension, mime_type) after validating image magic bytes."""
     for magic, (suffix, mime) in _COVER_MAGIC.items():
-        if raw[:len(magic)] == magic:
+        if raw[: len(magic)] == magic:
             if mime == "image/webp" and raw[8:12] != b"WEBP":
                 continue
             return suffix, mime
@@ -109,7 +109,9 @@ def validate_zip_archive_safety(
             total_uncompressed = 0
             for member in members:
                 if _zip_member_is_suspicious(member, max_compression_ratio):
-                    raise HTTPException(400, f"{label} appears to contain an unsafe compressed file.")
+                    raise HTTPException(
+                        400, f"{label} appears to contain an unsafe compressed file."
+                    )
                 total_uncompressed += int(member.file_size or 0)
                 if total_uncompressed > max_total_uncompressed_bytes:
                     raise HTTPException(400, f"{label} expands beyond the maximum allowed size.")

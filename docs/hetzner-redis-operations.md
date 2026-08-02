@@ -54,7 +54,7 @@ vi backend/.env
 Manual Docker Compose deployment:
 
 ```bash
-docker compose -f docker-compose.yml up -d --build redis nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
+docker compose -f docker-compose.yml up -d --build redis nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
 ```
 
 Only use the manual Compose command to restart an already-migrated release. Use `./deploy.sh` whenever application code or Alembic revisions change so the schema is upgraded before the containers restart.
@@ -78,7 +78,7 @@ docker compose -f docker-compose.yml ps
 Restart async services after config changes:
 
 ```bash
-docker compose -f docker-compose.yml restart worker-extraction worker-analysis worker-intelligence celery-beat
+docker compose -f docker-compose.yml restart worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
 ```
 
 Application checklist:
@@ -124,7 +124,7 @@ Redis should not be treated as the only copy of important application state. Bac
 4. Redeploy the application services:
 
 ```bash
-docker compose -f docker-compose.yml up -d backend worker-extraction worker-analysis worker-intelligence celery-beat
+docker compose -f docker-compose.yml up -d backend worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
 ```
 
 5. After rollback is stable, optionally stop the internal Redis container:

@@ -1,9 +1,20 @@
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.security import create_access_token
+from app.models.operations import TaskExecution
+
+
+@pytest.fixture(autouse=True)
+async def _isolate_durable_dispatch_capacity(db):
+    await db.execute(
+        update(TaskExecution)
+        .where(TaskExecution.status.in_(("pending_dispatch", "queued", "running")))
+        .values(status="succeeded")
+    )
+    await db.commit()
 
 
 async def _register_author(client, email: str, monkeypatch) -> tuple[dict[str, str], uuid.UUID]:
@@ -25,14 +36,11 @@ async def _register_author(client, email: str, monkeypatch) -> tuple[dict[str, s
         "app.api.v1.routes.books.imports.require_author_access",
         lambda *_args, **_kwargs: None,
     )
-
-    async def _fake_check_upload_limit(*_args, **_kwargs):
-        return None
-
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.check_upload_limit",
-        _fake_check_upload_limit,
+        "app.services.manuscript_reprocess_service.require_author_access",
+        lambda *_args, **_kwargs: None,
     )
+
     return headers, user_id
 
 
@@ -85,7 +93,8 @@ async def test_reprocess_uploaded_manuscript_success(client, db, monkeypatch):
         client, f"repr-uploaded-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
     )
 
-    from app.models.book import Book, BookUploadCharge
+    from app.models.book import Book
+    from app.models.user import ProcessingUsageEvent
 
     dispatched: list = []
 
@@ -119,20 +128,25 @@ async def test_reprocess_uploaded_manuscript_success(client, db, monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["upload_charge_consumed"] is True
-    assert body["charge_kind"] == "manual_reprocess"
+    assert body["upload_charge_consumed"] is False
+    assert body["charge_kind"] is None
+    assert body["processed_words_reserved"] == 9
     assert body["chapters_queued"] == 2
-    assert len(dispatched) == 2
+    assert len(dispatched) == 1
     assert all(item["kwargs"]["kwargs"]["rebuild_run_id"] for item in dispatched)
-    charge = (
-        await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book.id))
+    usage_event = (
+        await db.execute(
+            select(ProcessingUsageEvent).where(ProcessingUsageEvent.book_id == book.id)
+        )
     ).scalar_one()
-    assert charge.quantity == 1
-    from app.utils.billing_utils import calculate_upload_usage_summary
+    assert usage_event.usage_kind == "manual_reprocess"
+    assert usage_event.word_count == 9
+    assert usage_event.status == "consumed"
     from app.models.user import User
+    from app.utils.billing_utils import calculate_upload_usage_summary
 
     usage = await calculate_upload_usage_summary(db, await db.get(User, user_id))
-    assert usage.manuscript_uploads == 2
+    assert usage.manuscript_uploads == 1
 
 
 @pytest.mark.asyncio
@@ -188,7 +202,7 @@ async def test_reprocess_duplicate_run(client, db, monkeypatch):
     db.add(book)
     await db.commit()
 
-    chapter = await _add_chapter(db, book_id)
+    await _add_chapter(db, book_id)
 
     response = await client.post(
         f"/api/v1/books/{book_id}/manuscript/reprocess",
@@ -241,8 +255,8 @@ async def test_reprocess_success(client, db, monkeypatch):
     db.add(book)
     await db.commit()
 
-    chapter1 = await _add_chapter(db, book_id, 1, "First chapter content here.")
-    chapter2 = await _add_chapter(db, book_id, 2, "Second chapter content too.")
+    await _add_chapter(db, book_id, 1, "First chapter content here.")
+    await _add_chapter(db, book_id, 2, "Second chapter content too.")
 
     response = await client.post(
         f"/api/v1/books/{book_id}/manuscript/reprocess",
@@ -261,10 +275,15 @@ async def test_reprocess_success(client, db, monkeypatch):
     assert book_after.status == "processing"
     ws = book_after.writer_workspace or {}
     assert ws.get("processing", {}).get("rebuild_run_id") is not None
-    charge = (
-        await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book_id))
+    from app.models.user import ProcessingUsageEvent
+
+    usage_event = (
+        await db.execute(
+            select(ProcessingUsageEvent).where(ProcessingUsageEvent.book_id == book_id)
+        )
     ).scalar_one()
-    assert charge.charge_kind == "manual_reprocess"
+    assert usage_event.usage_kind == "manual_reprocess"
+    assert usage_event.status == "consumed"
 
 
 @pytest.mark.asyncio
@@ -282,7 +301,7 @@ async def test_reprocess_charge_failure_invalidates_queued_rebuild(client, db, m
         dispatched.append({"args": args, "kwargs": kwargs})
         return type("Result", (), {"id": f"task-{len(dispatched)}"})()
 
-    async def _fail_charge(*_args, **_kwargs):
+    async def _fail_usage_consumption(*_args, **_kwargs):
         raise RuntimeError("ledger unavailable")
 
     monkeypatch.setattr(
@@ -290,8 +309,8 @@ async def test_reprocess_charge_failure_invalidates_queued_rebuild(client, db, m
         _fake_apply_async,
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.record_book_upload_charge",
-        _fail_charge,
+        "app.services.manuscript_reprocess_service.consume_processing_reservation",
+        _fail_usage_consumption,
     )
 
     book = Book(
@@ -319,9 +338,9 @@ async def test_reprocess_charge_failure_invalidates_queued_rebuild(client, db, m
     assert book.status == "failed"
     assert get_rebuild_run_id(book) is None
     charge_count = len(
-        (
-            await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book.id))
-        ).scalars().all()
+        (await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book.id)))
+        .scalars()
+        .all()
     )
     assert charge_count == 0
 
@@ -377,7 +396,7 @@ async def test_reprocess_requires_author_access(client, db, monkeypatch):
     await db.commit()
 
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.require_author_access",
+        "app.services.manuscript_reprocess_service.require_author_access",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             __import__("fastapi").HTTPException(403, "Requires Author plan")
         ),
@@ -399,6 +418,7 @@ async def test_reprocess_rejects_when_upload_capacity_is_exhausted(client, db, m
     )
 
     from fastapi import HTTPException
+
     from app.models.book import Book, BookUploadCharge
 
     book = Book(
@@ -412,12 +432,12 @@ async def test_reprocess_rejects_when_upload_capacity_is_exhausted(client, db, m
     await db.commit()
     await _add_chapter(db, book.id)
 
-    async def _reject_upload_limit(*_args, **_kwargs):
+    async def _reject_processing_allowance(*_args, **_kwargs):
         raise HTTPException(403, "Author tier includes 15 uploads. You have 0 remaining.")
 
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.check_upload_limit",
-        _reject_upload_limit,
+        "app.services.manuscript_reprocess_service.reserve_processing_words",
+        _reject_processing_allowance,
     )
 
     response = await client.post(
@@ -429,15 +449,17 @@ async def test_reprocess_rejects_when_upload_capacity_is_exhausted(client, db, m
     assert response.status_code == 403
     assert "0 remaining" in response.json()["detail"]
     charge_count = len(
-        (
-            await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book.id))
-        ).scalars().all()
+        (await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book.id)))
+        .scalars()
+        .all()
     )
     assert charge_count == 0
 
 
 @pytest.mark.asyncio
-async def test_editor_project_import_auto_reprocesses_once_at_word_threshold_without_charge(client, db, monkeypatch):
+async def test_editor_project_import_auto_reprocesses_once_at_word_threshold_without_charge(
+    client, db, monkeypatch
+):
     headers, user_id = await _register_author(
         client, f"repr-auto-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
     )
@@ -473,9 +495,9 @@ async def test_editor_project_import_auto_reprocesses_once_at_word_threshold_wit
         await db.execute(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 1))
     ).scalar_one()
     charge_count = len(
-        (
-            await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book.id))
-        ).scalars().all()
+        (await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == book.id)))
+        .scalars()
+        .all()
     )
 
     assert chapter.word_count >= 2000
@@ -488,7 +510,9 @@ async def test_editor_project_import_auto_reprocesses_once_at_word_threshold_wit
 
 
 @pytest.mark.asyncio
-async def test_manual_reprocess_mode_marks_saved_chapter_pending_without_queue(client, db, monkeypatch):
+async def test_manual_reprocess_mode_marks_saved_chapter_pending_without_queue(
+    client, db, monkeypatch
+):
     headers, user_id = await _register_author(
         client, f"repr-manual-mode-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
     )
@@ -525,14 +549,18 @@ async def test_manual_reprocess_mode_marks_saved_chapter_pending_without_queue(c
 
     assert response.status_code == 200
     assert dispatched == []
-    workspace = (await client.get(f"/api/v1/books/{book_id}/writer-workspace", headers=headers)).json()
+    workspace = (
+        await client.get(f"/api/v1/books/{book_id}/writer-workspace", headers=headers)
+    ).json()
     assert workspace["reprocess"]["auto_reprocess_enabled"] is False
     assert workspace["reprocess"]["pending_chapters"] == [1]
     assert workspace["reprocess"]["last_mode_changed_at"]
 
 
 @pytest.mark.asyncio
-async def test_manual_chapter_reprocess_queues_one_chapter_without_upload_charge(client, db, monkeypatch):
+async def test_manual_chapter_reprocess_queues_one_chapter_without_upload_charge(
+    client, db, monkeypatch
+):
     headers, user_id = await _register_author(
         client, f"repr-one-chapter-{uuid.uuid4().hex[:8]}@lorevia.app", monkeypatch
     )
@@ -562,7 +590,7 @@ async def test_manual_chapter_reprocess_queues_one_chapter_without_upload_charge
         return type("Result", (), {"id": f"task-{len(dispatched)}"})()
 
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.process_chapter_task.apply_async",
+        "app.workers.tasks.extraction_tasks.process_chapter_task.apply_async",
         _fake_apply_async,
     )
 
@@ -577,14 +605,18 @@ async def test_manual_chapter_reprocess_queues_one_chapter_without_upload_charge
     assert body["upload_charge_consumed"] is False
     assert len(dispatched) == 1
     assert dispatched[0]["kwargs"]["args"] == [book_id, 1]
-    assert dispatched[0]["kwargs"]["kwargs"] == {"manual_reprocess": True}
+    assert dispatched[0]["kwargs"]["kwargs"]["manual_reprocess"] is True
     from app.models.book import Book, BookUploadCharge
 
     book = await db.get(Book, uuid.UUID(book_id))
     assert book.writer_workspace["reprocess"]["pending_chapters"] == []
     charge_count = len(
         (
-            await db.execute(select(BookUploadCharge).where(BookUploadCharge.book_id == uuid.UUID(book_id)))
-        ).scalars().all()
+            await db.execute(
+                select(BookUploadCharge).where(BookUploadCharge.book_id == uuid.UUID(book_id))
+            )
+        )
+        .scalars()
+        .all()
     )
     assert charge_count == 0

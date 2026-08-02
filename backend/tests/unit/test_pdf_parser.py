@@ -22,15 +22,15 @@ from app.parsers.pdf_parser import (
 
 
 def test_extract_heading_handles_decorated_prologue():
-    assert _extract_heading("\u2600 Prologue \U0001F312.") == "Prologue"
+    assert _extract_heading("\u2600 Prologue \U0001f312.") == "Prologue"
 
 
 def test_extract_heading_handles_decorated_epilogue():
-    assert _extract_heading("\u2600 Epilogue \U0001F312.") == "Epilogue"
+    assert _extract_heading("\u2600 Epilogue \U0001f312.") == "Epilogue"
 
 
 def test_extract_heading_handles_decorated_chapter():
-    assert _extract_heading("\u2600 Chapter 1 \U0001F312") == "Chapter 1"
+    assert _extract_heading("\u2600 Chapter 1 \U0001f312") == "Chapter 1"
 
 
 def test_extract_heading_handles_roman_numeral_chapter():
@@ -44,10 +44,13 @@ def test_extract_heading_handles_short_standalone_roman_numerals():
 
 
 def test_extract_heading_rejects_page_number_only_lines():
-    assert _extract_heading(
-        "100",
-        next_text="This line begins the next page of prose with enough words to look substantial.",
-    ) is None
+    assert (
+        _extract_heading(
+            "100",
+            next_text="This line begins the next page of prose with enough words to look substantial.",
+        )
+        is None
+    )
 
 
 def test_extract_heading_handles_named_section():
@@ -59,26 +62,38 @@ def test_extract_heading_does_not_promote_regular_sentence_with_part_keyword():
 
 
 def test_extract_heading_does_not_promote_prose_starting_with_part():
-    assert _extract_heading("part of his body was in serious pain but he no longer gave any attention to it") is None
+    assert (
+        _extract_heading(
+            "part of his body was in serious pain but he no longer gave any attention to it"
+        )
+        is None
+    )
 
 
 def test_extract_heading_does_not_promote_wrapped_prose_starting_with_part():
-    assert _extract_heading("part of his body was in\nserious pain but he no longer gave any attention to it") is None
+    assert (
+        _extract_heading(
+            "part of his body was in\nserious pain but he no longer gave any attention to it"
+        )
+        is None
+    )
 
 
 def test_heading_remainder_keeps_following_text():
-    text = "\u2600 Prologue \U0001F312\nThis is the actual first paragraph."
+    text = "\u2600 Prologue \U0001f312\nThis is the actual first paragraph."
     assert _extract_heading(text) == "Prologue"
     assert _heading_remainder(text, "Prologue") == "This is the actual first paragraph."
 
 
 def test_front_matter_is_removed_from_leading_text():
     cleaned = _assemble_text_parts(
-        _drop_front_matter_text_parts([
-            "Volume 2 - The Twin Towers at Iselma\n\nTranslated by TwilightsCall",
-            "Compiled/formatted by Bonfire",
-            "This is the real opening paragraph of the story, and it definitely belongs in the chapter.",
-        ])
+        _drop_front_matter_text_parts(
+            [
+                "Volume 2 - The Twin Towers at Iselma\n\nTranslated by TwilightsCall",
+                "Compiled/formatted by Bonfire",
+                "This is the real opening paragraph of the story, and it definitely belongs in the chapter.",
+            ]
+        )
     )
     assert "Translated by" not in cleaned
     assert "Compiled/formatted by" not in cleaned
@@ -86,11 +101,13 @@ def test_front_matter_is_removed_from_leading_text():
 
 
 def test_front_matter_cleanup_preserves_leading_image_markers():
-    parts = _drop_front_matter_text_parts([
-        "[[IMAGE:test]]",
-        "Translated by TwilightsCall",
-        "This is the real opening paragraph.",
-    ])
+    parts = _drop_front_matter_text_parts(
+        [
+            "[[IMAGE:test]]",
+            "Translated by TwilightsCall",
+            "This is the real opening paragraph.",
+        ]
+    )
 
     assert parts == ["[[IMAGE:test]]", "This is the real opening paragraph."]
 
@@ -118,9 +135,13 @@ def test_page_margin_noise_detector_uses_geometry_and_page_context():
 
 
 def test_inline_page_artifact_scrubber_removes_embedded_footer_counter():
-    raw = "that he would have to pay 966 of 967 dearly for it, that it would cost him great striving."
+    raw = (
+        "that he would have to pay 966 of 967 dearly for it, that it would cost him great striving."
+    )
     cleaned, removed = _scrub_inline_page_artifacts(raw, total_pages=967, page_number=966)
-    assert cleaned == "that he would have to pay dearly for it, that it would cost him great striving."
+    assert (
+        cleaned == "that he would have to pay dearly for it, that it would cost him great striving."
+    )
     assert removed == 1
 
 
@@ -210,7 +231,9 @@ def test_blocks_to_paragraphs_keeps_closed_sentence_starting_new_paragraph():
 
 
 def test_should_merge_across_pages_for_unfinished_paragraph():
-    assert _should_merge_across_pages("The sentence carries over", "into the next page without punctuation")
+    assert _should_merge_across_pages(
+        "The sentence carries over", "into the next page without punctuation"
+    )
 
 
 def test_should_not_merge_across_pages_when_next_block_is_heading():
@@ -363,7 +386,9 @@ def test_normalize_chapters_drops_title_page_and_numeric_page_sections():
     chapters = [
         {
             "title": "TOME 2: LES ABYSSES",
-            "text_parts": ["Les chroniques legendaires d'Animaris TOME 2: LES ABYSSES Du meme auteur"],
+            "text_parts": [
+                "Les chroniques legendaires d'Animaris TOME 2: LES ABYSSES Du meme auteur"
+            ],
             "images": [],
             "section_type": "part",
         },

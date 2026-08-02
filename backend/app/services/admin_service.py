@@ -15,13 +15,15 @@ from app.models.moderation import CreatorStrike
 from app.models.user import AdminAuditEvent, AdminPrincipal, User
 from app.schemas.admin import CreatorStrikeOut, PendingPublicShareOut
 from app.utils.auth_utils import next_token_version
-from app.utils.public_utils import (
-    PUBLIC_SHARE_STATUS_PENDING,
-    USER_PUBLIC_SHARE_SOURCE_KIND,
+from app.utils.client_identity import trusted_client_ip
+from app.utils.public.moderation import (
     active_serious_strike_count,
     add_moderation_action,
 )
-
+from app.utils.public_utils import (
+    PUBLIC_SHARE_STATUS_PENDING,
+    USER_PUBLIC_SHARE_SOURCE_KIND,
+)
 
 ADMIN_SCOPE_MODERATION = "moderation_admin"
 ADMIN_SCOPE_BILLING = "billing_admin"
@@ -32,7 +34,9 @@ ADMIN_STATUS_REVOKED = "revoked"
 
 
 def normalize_admin_scopes(scopes: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
-    normalized = sorted({str(scope).strip().lower() for scope in (scopes or []) if str(scope).strip()})
+    normalized = sorted(
+        {str(scope).strip().lower() for scope in (scopes or []) if str(scope).strip()}
+    )
     invalid = [scope for scope in normalized if scope not in ADMIN_SCOPES]
     if invalid:
         raise ValueError(f"Invalid admin scopes: {', '.join(invalid)}")
@@ -55,13 +59,17 @@ def principal_has_scope(principal: AdminPrincipal | None, required_scope: str) -
 
 async def get_active_admin_principal(db: AsyncSession, user_id: uuid.UUID) -> AdminPrincipal | None:
     return (
-        await db.execute(
-            select(AdminPrincipal).where(
-                AdminPrincipal.user_id == user_id,
-                AdminPrincipal.status == ADMIN_STATUS_ACTIVE,
+        (
+            await db.execute(
+                select(AdminPrincipal).where(
+                    AdminPrincipal.user_id == user_id,
+                    AdminPrincipal.status == ADMIN_STATUS_ACTIVE,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
 
 async def list_admin_principals(
@@ -78,7 +86,9 @@ async def list_admin_principals(
                 .offset(offset)
                 .limit(limit)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
 
@@ -93,8 +103,10 @@ async def grant_admin_principal(
 ) -> AdminPrincipal:
     resolved_scopes = normalize_admin_scopes(scopes)
     principal = (
-        await db.execute(select(AdminPrincipal).where(AdminPrincipal.user_id == target_user.id))
-    ).scalars().first()
+        (await db.execute(select(AdminPrincipal).where(AdminPrincipal.user_id == target_user.id)))
+        .scalars()
+        .first()
+    )
     if principal is None:
         principal = AdminPrincipal(
             user_id=target_user.id,
@@ -151,10 +163,7 @@ async def record_admin_audit_event(
     target_refund_review_id: uuid.UUID | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> AdminAuditEvent:
-    forwarded_for = request.headers.get("x-forwarded-for") if request is not None else None
-    ip_address = (forwarded_for or "").split(",", 1)[0].strip() if forwarded_for else None
-    if not ip_address and request is not None and request.client is not None:
-        ip_address = request.client.host
+    ip_address = trusted_client_ip(request)
     event = AdminAuditEvent(
         actor_user_id=actor_user_id,
         target_user_id=target_user_id,
@@ -183,9 +192,7 @@ async def record_admin_read(
     reason: str,
     metadata: dict[str, object] | None = None,
 ) -> None:
-    scopes_snapshot = principal_scope_snapshot(
-        getattr(request.state, "admin_principal", None)
-    )
+    scopes_snapshot = principal_scope_snapshot(getattr(request.state, "admin_principal", None))
     await record_admin_audit_event(
         db,
         actor_user_id=admin_user.id,
@@ -246,15 +253,19 @@ async def get_platform_metrics(db: AsyncSession) -> dict:
     chars = (await db.execute(select(func.count()).select_from(Character))).scalar()
     chunks = (await db.execute(select(func.count()).select_from(BookChunk))).scalar()
     summaries = (await db.execute(select(func.count()).select_from(ChapterSummary))).scalar()
-    r = await app.core.redis.get_redis()
-    mem = await r.info("memory")
+    redis_diagnostics = await app.core.redis.get_redis_diagnostics()
     return {
         "users": users,
         "books": books,
         "characters": chars,
         "chunks_indexed": chunks,
         "summaries_cached": summaries,
-        "redis_memory_mb": round(mem.get("used_memory", 0) / 1024 / 1024, 2),
+        "redis_memory_mb": redis_diagnostics["memory_mb"],
+        "redis_key_count": redis_diagnostics["key_count"],
+        "redis_connected_clients": redis_diagnostics["connected_clients"],
+        "redis_key_prefix_counts": redis_diagnostics["key_prefix_counts"],
+        "redis_key_prefix_samples": redis_diagnostics["key_prefix_samples"],
+        "redis_key_scan_truncated": redis_diagnostics["key_scan_truncated"],
     }
 
 
@@ -270,9 +281,7 @@ async def apply_creator_strike(
     admin_user_id: uuid.UUID,
     request: Request,
 ) -> CreatorStrikeOut:
-    scopes_snapshot = principal_scope_snapshot(
-        getattr(request.state, "admin_principal", None)
-    )
+    scopes_snapshot = principal_scope_snapshot(getattr(request.state, "admin_principal", None))
     strike = CreatorStrike(
         user_id=user_id,
         book_id=book_id,

@@ -1,10 +1,11 @@
 from app.parsers.text_parser import (
     MIN_BODY_WORDS_AFTER_HEADING,
-    parse_text_chapters,
     _extract_clean_heading,
+    parse_text_chapters,
 )
 
 # ── Basic splitting ────────────────────────────────────────────────────────
+
 
 def test_parse_english_chapters():
     body = "work " * 120
@@ -59,6 +60,7 @@ def test_parse_portuguese_chapters():
 
 # ── Section type classification ────────────────────────────────────────────
 
+
 def test_classifies_prologue():
     body = "content " * 120
     text = f"Prologue\n{body}\n\nChapter 1\n{body}"
@@ -86,6 +88,7 @@ def test_classifies_preface():
 
 # ── Fallback behavior ──────────────────────────────────────────────────────
 
+
 def test_single_chapter_fallback_no_headings():
     text = "This is just a regular document with no chapter headings at all." * 10
     chapters = parse_text_chapters(text, language="en")
@@ -108,6 +111,7 @@ def test_single_chapter_fallback_one_heading_only():
 
 
 # ── TOC exclusion ──────────────────────────────────────────────────────────
+
 
 def test_skips_toc_entries():
     body = "content " * 120
@@ -142,6 +146,7 @@ def test_toc_with_dotted_leaders_is_skipped():
 
 # ── Auto language detection ────────────────────────────────────────────────
 
+
 def test_auto_detects_language():
     body = "travail " * 120
     text = f"Chapitre 1: Introduction\n{body}\n\nChapitre 2: Suite\n{body}"
@@ -158,6 +163,7 @@ def test_auto_detects_english():
 
 
 # ── Edge cases ─────────────────────────────────────────────────────────────
+
 
 def test_empty_text():
     chapters = parse_text_chapters("")
@@ -203,6 +209,7 @@ def test_numbering_is_sequential():
 
 # ── Chapter text integrity ─────────────────────────────────────────────────
 
+
 def test_chapter_text_excludes_heading():
     body = "The body text starts here."
     text = f"Chapter 1: The Beginning\n{body}"
@@ -223,12 +230,14 @@ def test_chapter_boundary_preserves_blank_lines():
 
 # ── MIN_BODY_WORDS_AFTER_HEADING constant ──────────────────────────────────
 
+
 def test_min_body_words_constant():
     assert MIN_BODY_WORDS_AFTER_HEADING > 0
     assert MIN_BODY_WORDS_AFTER_HEADING < 1000
 
 
 # ── Title truncation (body text merged onto heading line) ──────────────────
+
 
 def test_clean_title_unchanged():
     """A clean heading line with no body text remains intact."""
@@ -278,9 +287,7 @@ def test_truncates_body_text_with_day_first_date():
 
 def test_short_title_within_word_limit_stays():
     """A multi-word title within MAX_TITLE_WORDS is kept whole."""
-    title, extra = _extract_clean_heading(
-        "Chapter 5: A Very Long Descriptive Title About Dragons"
-    )
+    title, extra = _extract_clean_heading("Chapter 5: A Very Long Descriptive Title About Dragons")
     assert title == "Chapter 5: A Very Long Descriptive Title About Dragons"
     assert extra == ""
 
@@ -300,20 +307,15 @@ def test_body_text_recovered_in_chapter():
 def test_no_date_truncates_at_word_limit():
     """Without a date pattern, over-long titles are truncated at word limit."""
     long_title = " ".join(f"word{i}" for i in range(20))
-    title, extra = _extract_clean_heading(
-        f"Chapter 10: {long_title}"
-    )
+    title, extra = _extract_clean_heading(f"Chapter 10: {long_title}")
     # Should truncate to MAX_TITLE_WORDS (12) words after the separator
     words_after_sep = title.split(": ", 1)[1].split()
     assert len(words_after_sep) <= 12
     assert extra  # has leftover body text
 
 
-
 def test_no_separator_returns_base_heading():
     """When no separator follows the heading number, rest is treated as body."""
-    title, extra = _extract_clean_heading(
-        "CHAPTER II JONATHAN HARKER'S JOURNAL continued 5 May"
-    )
+    title, extra = _extract_clean_heading("CHAPTER II JONATHAN HARKER'S JOURNAL continued 5 May")
     assert title == "CHAPTER II"
     assert "JONATHAN" in extra

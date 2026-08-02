@@ -3,22 +3,27 @@ import os
 import sys
 from pathlib import Path
 
-from alembic import context
 import sqlalchemy as sa
+from alembic import context
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
 from app.db.base import Base  # noqa
+from app.utils.logging import get_logger
 from app.utils.migration_utils import (
     destructive_downgrade_revisions,
     destructive_upgrade_revisions,
     is_local_database_url,
+    parse_revision_allowlist,
     redact_database_target,
     resolve_alembic_database_url,
+    revision_paths_excluding_allowlist,
+    unapplied_revision_paths,
 )
-from app.utils.logging import get_logger
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -66,7 +71,10 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
             tables = _table_names(inspector)
 
             if path.name == "20260517_finalize_subscription_events_and_remove_monetization.py":
-                if any(table_name in tables for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")):
+                if any(
+                    table_name in tables
+                    for table_name in ("rewarded_ad_sessions", "referrals", "point_ledger_entries")
+                ):
                     return True
 
                 if "users" in tables and "referral_code" in _column_names(inspector, "users"):
@@ -165,18 +173,45 @@ def _destructive_upgrade_still_has_runtime_impact(path: Path) -> bool:
     finally:
         engine.dispose()
 
+
 if any(arg == "upgrade" for arg in sys.argv[1:]):
+    destructive_revisions = destructive_upgrade_revisions(versions_dir)
+    script_directory = ScriptDirectory.from_config(config)
+    revision_engine = create_engine(
+        db_url.replace("postgresql://", "postgresql+psycopg://"),
+        poolclass=pool.NullPool,
+        connect_args={"prepare_threshold": None},
+    )
+    try:
+        with revision_engine.connect() as revision_connection:
+            current_heads = MigrationContext.configure(revision_connection).get_current_heads()
+    finally:
+        revision_engine.dispose()
+    destructive_revisions = unapplied_revision_paths(
+        destructive_revisions,
+        script_directory=script_directory,
+        current_heads=current_heads,
+    )
     offending_revisions = [
         path
-        for path in destructive_upgrade_revisions(versions_dir)
+        for path in destructive_revisions
         if _destructive_upgrade_still_has_runtime_impact(path)
     ]
+    allowed_revision_ids = parse_revision_allowlist(
+        os.getenv("ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS")
+    )
+    offending_revisions = revision_paths_excluding_allowlist(
+        offending_revisions,
+        script_directory=script_directory,
+        allowed_revision_ids=allowed_revision_ids,
+    )
     if offending_revisions and os.getenv("ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES") != "1":
         offending_paths = ", ".join(str(path.name) for path in offending_revisions)
         raise RuntimeError(
             "Refusing to run migrations because destructive operations were found in upgrade() blocks: "
-            f"{offending_paths}. Remove them or set ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you "
-            "explicitly intend to drop data."
+            f"{offending_paths}. Remove them, add exact reviewed revision IDs to "
+            "ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS, or set "
+            "ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES=1 only if you explicitly intend to drop data."
         )
 
 if any(arg == "downgrade" for arg in sys.argv[1:]):
@@ -202,8 +237,12 @@ def do_run(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        include_object=lambda obj, name, type_, reflected, compare_to: not (
-            type_ == "table" and reflected and getattr(obj, "schema", None) not in (None, "public")
+        include_object=lambda obj, name, type_, reflected, compare_to: (
+            not (
+                type_ == "table"
+                and reflected
+                and getattr(obj, "schema", None) not in (None, "public")
+            )
         ),
     )
     with context.begin_transaction():
@@ -231,8 +270,12 @@ def run_migrations_offline() -> None:
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
-        include_object=lambda obj, name, type_, reflected, compare_to: not (
-            type_ == "table" and reflected and getattr(obj, "schema", None) not in (None, "public")
+        include_object=lambda obj, name, type_, reflected, compare_to: (
+            not (
+                type_ == "table"
+                and reflected
+                and getattr(obj, "schema", None) not in (None, "public")
+            )
         ),
     )
     with context.begin_transaction():

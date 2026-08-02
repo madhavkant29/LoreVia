@@ -3,6 +3,7 @@ Reader utility helpers — timeline and relationship-graph filtering,
 chapter media serialization, summary normalization, and chapter
 intelligence availability checks extracted from the reader route.
 """
+
 from __future__ import annotations
 
 import base64
@@ -15,6 +16,7 @@ from typing import Any
 import bleach  # type: ignore[import-untyped]
 from fastapi import HTTPException
 from sqlalchemy import and_, desc, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -26,57 +28,120 @@ from app.engine.character.entity_filters import (
     VISIBILITY_THRESHOLD,
     character_visibility_score,
 )
+from app.engine.character.profile_builder import build_description
+from app.models.book import Book, Chapter, ChapterMedia
+from app.models.character import Character
+from app.models.intelligence import ChapterSummary, PlotThread
+from app.models.progress import ReadingProgress
+from app.utils.billing_utils import has_paid_reading_access
+from app.utils.books.collaboration import (
+    build_book_access_context,
+    normalize_collaboration_scope,
+)
+from app.utils.books.collaboration_access import (
+    collaboration_allows_chapter,
+)
+from app.utils.books.manuscript import (
+    deserialize_manuscript_content,
+)
+from app.utils.characters.graph import get_graph_visibility_override
+from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS, apply_chapter_number_strategy
 from app.utils.plot_thread_utils import (
     build_plot_thread_payload,
     normalize_plot_thread_status,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
 from app.utils.tag_utils import (
     ENTITY_TYPE_CHAPTER,
     ENTITY_TYPE_PLOT_THREAD,
     get_custom_tags_for_entity,
     list_custom_tags_for_entity_ids,
 )
-from app.utils.billing_utils import has_paid_reading_access
-from app.utils.character_utils import get_graph_visibility_override
-from app.utils.queue_utils import queue_for_user
-from app.engine.character.profile_builder import build_description
-from app.models.book import Book, Chapter, ChapterMedia
-from app.models.character import Character
-from app.models.intelligence import ChapterSummary, PlotThread
-from app.models.progress import ReadingProgress
-from app.utils.book_utils import (
-    build_book_access_context,
-    collaboration_allows_chapter,
-    deserialize_manuscript_content,
-    normalize_collaboration_scope,
-)
-from app.utils.ingestion_utils import ANALYSIS_INFLIGHT_TTL_SECONDS
-from app.utils.ingestion_utils import apply_chapter_number_strategy
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 log = logging.getLogger("lorevia.reader_utils")
+SOURCE_PARSE_EXCEPTIONS = (RuntimeError, ValueError, OSError)
+ANALYSIS_QUEUE_DISPATCH_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
 
 # ─── Character stopwords / filter sets ───────────────────────────────────────
 
 TIMELINE_CHARACTER_STOPWORDS = {
-    "after", "and", "but", "faculty", "goodbye", "indeed", "just", "lady",
-    "leaving", "maybe", "miss", "now", "once", "regardless", "seeing", "she",
-    "that", "the narrator", "this", "though", "using", "very", "well", "what",
-    "when", "with", "yes", "you", "my brother", "recalling", "considering",
-    "looking", "taking", "matching", "hearing", "creation",
+    "after",
+    "and",
+    "but",
+    "faculty",
+    "goodbye",
+    "indeed",
+    "just",
+    "lady",
+    "leaving",
+    "maybe",
+    "miss",
+    "now",
+    "once",
+    "regardless",
+    "seeing",
+    "she",
+    "that",
+    "the narrator",
+    "this",
+    "though",
+    "using",
+    "very",
+    "well",
+    "what",
+    "when",
+    "with",
+    "yes",
+    "you",
+    "my brother",
+    "recalling",
+    "considering",
+    "looking",
+    "taking",
+    "matching",
+    "hearing",
+    "creation",
 }
 TIMELINE_CHARACTER_PREFIXES = ("the ",)
 TIMELINE_CHARACTER_EXACT_BLOCKLIST = {
-    "Clock Tower", "Far East", "Fourth Holy Grail", "Great Ritual", "Mage's Association",
-    "Magic Circles", "Magic Circuits", "Magic Crest", "Milky Way", "Modern Magecraft",
-    "Mystic Codes", "New Age", "Nuclear Energy", "Seven Wonders", "Source Crest",
-    "The Twin Towers", "United States",
+    "Clock Tower",
+    "Far East",
+    "Fourth Holy Grail",
+    "Great Ritual",
+    "Mage's Association",
+    "Magic Circles",
+    "Magic Circuits",
+    "Magic Crest",
+    "Milky Way",
+    "Modern Magecraft",
+    "Mystic Codes",
+    "New Age",
+    "Nuclear Energy",
+    "Seven Wonders",
+    "Source Crest",
+    "The Twin Towers",
+    "United States",
 }
-TIMELINE_CHARACTER_SUFFIXES = (" Association", " Convention", " Fundamentals", " Energy", " Sequence")
-GRAPH_CHARACTER_STOPWORDS = TIMELINE_CHARACTER_STOPWORDS | {"lord", "lords", "war", "are", "around", "however"}
+TIMELINE_CHARACTER_SUFFIXES = (
+    " Association",
+    " Convention",
+    " Fundamentals",
+    " Energy",
+    " Sequence",
+)
+GRAPH_CHARACTER_STOPWORDS = TIMELINE_CHARACTER_STOPWORDS | {
+    "lord",
+    "lords",
+    "war",
+    "are",
+    "around",
+    "however",
+}
 
 
 # ─── Timeline helpers ─────────────────────────────────────────────────────────
+
 
 def normalize_timeline_label(value: str | None) -> str:
     return re.sub(r"\s+", " ", (value or "").strip()).casefold()
@@ -136,16 +201,20 @@ def is_valid_timeline_character(
     short_word_penalty = -3 if len(words) == 1 and len(words[0]) <= 3 else 0
 
     # ── Composite score ────────────────────────────────────────────────────
-    score = character_visibility_score(
-        name,
-        role=role,
-        aliases=aliases or [],
-        arc_summary=arc_summary,
-        stopwords=frozenset(TIMELINE_CHARACTER_STOPWORDS),
-        exact_blocklist=frozenset(TIMELINE_CHARACTER_EXACT_BLOCKLIST),
-        concept_suffixes=tuple(TIMELINE_CHARACTER_SUFFIXES),
-        use_ner=True,
-    ) + gerund_penalty + short_word_penalty
+    score = (
+        character_visibility_score(
+            name,
+            role=role,
+            aliases=aliases or [],
+            arc_summary=arc_summary,
+            stopwords=frozenset(TIMELINE_CHARACTER_STOPWORDS),
+            exact_blocklist=frozenset(TIMELINE_CHARACTER_EXACT_BLOCKLIST),
+            concept_suffixes=tuple(TIMELINE_CHARACTER_SUFFIXES),
+            use_ner=True,
+        )
+        + gerund_penalty
+        + short_word_penalty
+    )
 
     return score >= VISIBILITY_THRESHOLD
 
@@ -221,6 +290,7 @@ def timeline_plot_thread_span(
 
 # ─── Relationship graph helpers ───────────────────────────────────────────────
 
+
 def relationship_node_description(
     char: Character,
     trait_snapshot: dict,
@@ -238,10 +308,15 @@ def relationship_node_description(
         segments.append(f"Wants: {', '.join(char.motivations[:2])}.")
     if relationship_summaries:
         segments.append(" ".join(relationship_summaries[:2]))
-    return " ".join(segment.strip() for segment in segments if segment).strip() or "No narrative details discovered yet."
+    return (
+        " ".join(segment.strip() for segment in segments if segment).strip()
+        or "No narrative details discovered yet."
+    )
 
 
-def graph_character_visibility_analysis(char: Character, relationship_count: int = 0) -> dict[str, Any]:
+def graph_character_visibility_analysis(
+    char: Character, relationship_count: int = 0
+) -> dict[str, Any]:
     name = " ".join((getattr(char, "name", "") or "").split())
     override = get_graph_visibility_override(char)
     reasons: list[str] = []
@@ -264,7 +339,11 @@ def graph_character_visibility_analysis(char: Character, relationship_count: int
         reasons.append("has_aliases")
     if getattr(char, "arc_summary", None):
         reasons.append("has_arc_summary")
-    if getattr(char, "personality_tags", None) or getattr(char, "motivations", None) or getattr(char, "fears", None):
+    if (
+        getattr(char, "personality_tags", None)
+        or getattr(char, "motivations", None)
+        or getattr(char, "fears", None)
+    ):
         reasons.append("profile_details")
 
     # Possessive forms ("Author's note", "Narrator's voice") -> strip
@@ -274,7 +353,14 @@ def graph_character_visibility_analysis(char: Character, relationship_count: int
             "visible": False if override != "include" else True,
             "score": -8,
             "override": override,
-            "reasons": (["author_override_include"] if override == "include" else ["author_override_exclude"] if override == "exclude" else []) + reasons,
+            "reasons": (
+                ["author_override_include"]
+                if override == "include"
+                else ["author_override_exclude"]
+                if override == "exclude"
+                else []
+            )
+            + reasons,
         }
 
     words = re.findall(r"[A-Za-z][A-Za-z'-]*", name)
@@ -293,7 +379,14 @@ def graph_character_visibility_analysis(char: Character, relationship_count: int
             "visible": False if override != "include" else True,
             "score": -7,
             "override": override,
-            "reasons": (["author_override_include"] if override == "include" else ["author_override_exclude"] if override == "exclude" else []) + reasons,
+            "reasons": (
+                ["author_override_include"]
+                if override == "include"
+                else ["author_override_exclude"]
+                if override == "exclude"
+                else []
+            )
+            + reasons,
         }
 
     score = character_visibility_score(
@@ -354,15 +447,25 @@ def is_graph_character_visible(char: Character) -> bool:
       - Possessive suffix ("'s")   → not a character label
       - Single all-lowercase word  → not a proper name
     """
-    return bool(graph_character_visibility_analysis(char, getattr(char, "_graph_relationship_count", 0)).get("visible"))
+    return bool(
+        graph_character_visibility_analysis(
+            char, getattr(char, "_graph_relationship_count", 0)
+        ).get("visible")
+    )
 
 
 def character_evidence_score(char: Character) -> tuple[int, int]:
     score = sum(
         1
         for value in [
-            char.role, char.aliases, char.personality_tags, char.motivations,
-            char.fears, char.arc_summary, char.archetype, char.trait_state,
+            char.role,
+            char.aliases,
+            char.personality_tags,
+            char.motivations,
+            char.fears,
+            char.arc_summary,
+            char.archetype,
+            char.trait_state,
         ]
         if value
     )
@@ -378,7 +481,9 @@ def collapse_graph_characters(chars: list[Character]) -> tuple[list[Character], 
             (
                 existing
                 for existing in canonical
-                if names_equivalent(char.name, char.aliases or [], existing.name, existing.aliases or [])
+                if names_equivalent(
+                    char.name, char.aliases or [], existing.name, existing.aliases or []
+                )
             ),
             None,
         )
@@ -398,7 +503,12 @@ def collapse_graph_characters(chars: list[Character]) -> tuple[list[Character], 
 
         merged_aliases = {
             alias.strip()
-            for alias in [*(primary.aliases or []), *(duplicate.aliases or []), primary.name, duplicate.name]
+            for alias in [
+                *(primary.aliases or []),
+                *(duplicate.aliases or []),
+                primary.name,
+                duplicate.name,
+            ]
             if alias and alias.strip() and alias.strip().lower() != primary.name.strip().lower()
         }
         primary.aliases = sorted(merged_aliases)
@@ -437,6 +547,7 @@ def collapse_graph_characters(chars: list[Character]) -> tuple[list[Character], 
 
 # ─── Summary normalization ────────────────────────────────────────────────────
 
+
 def normalize_summary_response(content, key_events, char_changes, clues) -> dict:
     if isinstance(content, str):
         stripped = content.strip()
@@ -451,7 +562,7 @@ def normalize_summary_response(content, key_events, char_changes, clues) -> dict
                     "char_changes": parsed.get("char_changes") or char_changes or [],
                     "clues": parsed.get("clues") or clues or [],
                 }
-        except Exception:
+        except json.JSONDecodeError:
             pass
 
     return {
@@ -475,25 +586,37 @@ def strip_json_fence(content: str) -> str:
 
 # ─── Chapter intelligence / access ───────────────────────────────────────────
 
-async def require_summary_access(db: AsyncSession, book: Book, current_user, chapter_num: int | None = None) -> None:
+
+async def require_summary_access(
+    db: AsyncSession, book: Book, current_user, chapter_num: int | None = None
+) -> None:
     if has_paid_reading_access(current_user):
         return
     if not book.is_truncated:
         return
     if chapter_num is None:
-        raise HTTPException(402, "This book has reached the Starter plan reading capacity. Upgrade to Pro to unlock more summaries and intelligence views.")
+        raise HTTPException(
+            402,
+            "This book has reached the Starter plan reading capacity. Upgrade to Pro to unlock more summaries and intelligence views.",
+        )
     if not await chapter_intelligence_available(db, book, current_user, chapter_num):
-        raise HTTPException(402, f"Chapter {chapter_num} summary is unavailable because this book has reached the Starter plan reading capacity. Upgrade to Pro to continue.")
+        raise HTTPException(
+            402,
+            f"Chapter {chapter_num} summary is unavailable because this book has reached the Starter plan reading capacity. Upgrade to Pro to continue.",
+        )
 
 
 async def read_chapter_set(db: AsyncSession, user_id: uuid.UUID, book_id: uuid.UUID) -> set[int]:
     from app.models.progress import ReadingProgress
-    progress = (await db.execute(
-        select(ReadingProgress).where(
-            ReadingProgress.user_id == user_id,
-            ReadingProgress.book_id == book_id,
+
+    progress = (
+        await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == user_id,
+                ReadingProgress.book_id == book_id,
+            )
         )
-    )).scalar()
+    ).scalar()
     if not progress:
         return set()
     explicit = set(progress.chapters_read or [])
@@ -586,7 +709,9 @@ async def build_reading_progress_payload(
             current_chapter = start
 
     chapters_read = sorted(set((progress.chapters_read or []) if progress else []))
-    chapters_read = [chapter for chapter in chapters_read if collaboration_allows_chapter(collaborator, chapter)]
+    chapters_read = [
+        chapter for chapter in chapters_read if collaboration_allows_chapter(collaborator, chapter)
+    ]
     if not chapters_read and progress and progress.current_chapter:
         chapters_read = [
             chapter
@@ -614,7 +739,9 @@ async def build_chapter_list_payload(
     progress: ReadingProgress | None = None,
     intelligence_map: dict[int, bool] | None = None,
 ) -> dict[str, Any]:
-    collaboration_scope = normalize_collaboration_scope(collaborator.scope) if collaborator else None
+    collaboration_scope = (
+        normalize_collaboration_scope(collaborator.scope) if collaborator else None
+    )
     if progress is None:
         progress = (
             await db.execute(
@@ -631,7 +758,8 @@ async def build_chapter_list_payload(
         select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number)
     )
     chapters = [
-        chapter for chapter in chapters_result.scalars().all()
+        chapter
+        for chapter in chapters_result.scalars().all()
         if collaboration_allows_chapter(collaborator, chapter.number)
     ]
     chapter_start = collaboration_scope.get("chapter_start") if collaboration_scope else None
@@ -716,7 +844,11 @@ async def build_summary_collection_payload(
         db, book, current_user, collaborator, availability=intelligence_map
     )
     if collaborator is not None:
-        available_set = {chapter for chapter in available_set if collaboration_allows_chapter(collaborator, chapter)}
+        available_set = {
+            chapter
+            for chapter in available_set
+            if collaboration_allows_chapter(collaborator, chapter)
+        }
 
     if not available_set:
         return {"read_upto": 0, "summaries": []}
@@ -726,28 +858,33 @@ async def build_summary_collection_payload(
         read_upto = max(available_set)
 
     chapters = (
-        await db.execute(
-            select(Chapter)
-            .where(Chapter.book_id == book.id, Chapter.number.in_(sorted(available_set)))
-            .order_by(Chapter.number)
+        (
+            await db.execute(
+                select(Chapter)
+                .where(Chapter.book_id == book.id, Chapter.number.in_(sorted(available_set)))
+                .order_by(Chapter.number)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     summary_rows = (
         await db.execute(
             select(ChapterSummary.chapter_id, ChapterSummary.content, ChapterSummary.key_events)
             .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
-            .where(Chapter.book_id == book.id, Chapter.number.in_(sorted(available_set)), ChapterSummary.mode == "short")
+            .where(
+                Chapter.book_id == book.id,
+                Chapter.number.in_(sorted(available_set)),
+                ChapterSummary.mode == "short",
+            )
         )
     ).all()
     summary_by_chapter_id = {
-        str(row[0]): {"content": row[1], "key_events": row[2] or []}
-        for row in summary_rows
+        str(row[0]): {"content": row[1], "key_events": row[2] or []} for row in summary_rows
     }
     missing_summary_chapters = [
-        chapter
-        for chapter in chapters
-        if str(chapter.id) not in summary_by_chapter_id
+        chapter for chapter in chapters if str(chapter.id) not in summary_by_chapter_id
     ]
     detailed_summary_chapter_ids: set[uuid.UUID] = set()
     if enqueue_missing_analysis and missing_summary_chapters:
@@ -755,11 +892,15 @@ async def build_summary_collection_payload(
             (
                 await db.execute(
                     select(ChapterSummary.chapter_id).where(
-                        ChapterSummary.chapter_id.in_([chapter.id for chapter in missing_summary_chapters]),
+                        ChapterSummary.chapter_id.in_(
+                            [chapter.id for chapter in missing_summary_chapters]
+                        ),
                         ChapterSummary.mode == "detailed",
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     queued_chapter_ids: set[uuid.UUID] = set()
@@ -819,14 +960,23 @@ async def queue_analysis_if_missing(
         ANALYSIS_INFLIGHT_TTL_SECONDS,
     ):
         return False
-    from app.workers.tasks.analysis_tasks import analyse_chapter_task
     try:
-        analyse_chapter_task.apply_async(
-            args=[str(chapter.id), str(chapter.book_id)],
-            kwargs={"is_reprocessing": False},
-            queue=queue_for_user(current_user, "analysis") if current_user else "analysis",
+        from app.models.book import Book
+        from app.services.task_execution_service import enqueue_analysis_execution
+
+        book = await db.get(Book, chapter.book_id)
+        if book is None:
+            await cache_del(queued_key)
+            return False
+        await enqueue_analysis_execution(
+            db,
+            chapter_id=chapter.id,
+            book_id=chapter.book_id,
+            user_id=book.user_id,
+            chapter_number=chapter.number,
+            chapters_total=1,
         )
-    except Exception as exc:
+    except ANALYSIS_QUEUE_DISPATCH_EXCEPTIONS as exc:
         await cache_del(queued_key)
         log.warning(
             "analysis_queue_dispatch_failed chapter_id=%s error=%s",
@@ -840,16 +990,20 @@ async def queue_analysis_if_missing(
 async def chapter_has_detailed_summary(db: AsyncSession, chapter_id: uuid.UUID) -> bool:
     row = (
         await db.execute(
-            select(ChapterSummary.id).where(
+            select(ChapterSummary.id)
+            .where(
                 ChapterSummary.chapter_id == chapter_id,
                 ChapterSummary.mode == "detailed",
-            ).limit(1)
+            )
+            .limit(1)
         )
     ).first()
     return row is not None
 
 
-async def chapter_intelligence_available(db: AsyncSession, book: Book, current_user, chapter_num: int) -> bool:
+async def chapter_intelligence_available(
+    db: AsyncSession, book: Book, current_user, chapter_num: int
+) -> bool:
     availability = await chapter_intelligence_map(db, book, current_user)
     return availability.get(chapter_num, False)
 
@@ -861,9 +1015,7 @@ def chapter_analysis_status(chapter: Chapter | None) -> dict[str, Any] | None:
     payload = {
         "status": " ".join(str(source.get("status") or "").split()).strip() or "pending",
         "generated_modes": [
-            str(mode).strip()
-            for mode in (source.get("generated_modes") or [])
-            if str(mode).strip()
+            str(mode).strip() for mode in (source.get("generated_modes") or []) if str(mode).strip()
         ],
         "attempt_count": int(source.get("attempt_count") or 0),
         "last_error": " ".join(str(source.get("last_error") or "").split()).strip() or None,
@@ -884,27 +1036,34 @@ def chapter_source_integrity(chapter: Chapter | None) -> dict[str, Any] | None:
         "text_present": bool(source.get("text_present")),
         "media_marker_count": int(source.get("media_marker_count") or 0),
         "stored_media_count": int(source.get("stored_media_count") or 0),
-        "recovery_status": " ".join(str(source.get("recovery_status") or "").split()).strip() or "ok",
-        "last_recovery_error": " ".join(str(source.get("last_recovery_error") or "").split()).strip() or None,
+        "recovery_status": " ".join(str(source.get("recovery_status") or "").split()).strip()
+        or "ok",
+        "last_recovery_error": " ".join(
+            str(source.get("last_recovery_error") or "").split()
+        ).strip()
+        or None,
         "updated_at": source.get("updated_at"),
     }
 
 
 async def chapter_intelligence_map(db: AsyncSession, book: Book, current_user) -> dict[int, bool]:
     from app.models.book import Chapter as Ch
+
     if has_paid_reading_access(current_user):
-        rows = (await db.execute(
-            select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number)
-        )).all()
+        rows = (
+            await db.execute(select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number))
+        ).all()
         return {number: True for (number,) in rows}
     if not book.is_truncated:
-        rows = (await db.execute(
-            select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number)
-        )).all()
+        rows = (
+            await db.execute(select(Ch.number).where(Ch.book_id == book.id).order_by(Ch.number))
+        ).all()
         return {number: True for (number,) in rows}
-    rows = (await db.execute(
-        select(Ch.number, Ch.token_count).where(Ch.book_id == book.id).order_by(Ch.number)
-    )).all()
+    rows = (
+        await db.execute(
+            select(Ch.number, Ch.token_count).where(Ch.book_id == book.id).order_by(Ch.number)
+        )
+    ).all()
     running_total = 0
     availability: dict[int, bool] = {}
     for number, token_count in rows:
@@ -967,8 +1126,10 @@ async def serialize_chapter_media(
         }
         if get_presigned_url(row.storage_key) is None:
             try:
-                item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode("ascii")
-            except Exception:
+                item["content_base64"] = base64.b64encode(download_book(row.storage_key)).decode(
+                    "ascii"
+                )
+            except STORAGE_IO_EXCEPTIONS:
                 item["content_base64"] = None
         items.append(item)
     return items
@@ -981,15 +1142,17 @@ def serialize_inline_images(images: list[dict]) -> list[dict]:
         marker = image.get("marker")
         if not raw or not marker:
             continue
-        serialized.append({
-            "marker": marker,
-            "asset_type": "image",
-            "content_type": image.get("content_type"),
-            "caption": None,
-            "sort_order": index,
-            "url": None,
-            "content_base64": base64.b64encode(raw).decode("ascii"),
-        })
+        serialized.append(
+            {
+                "marker": marker,
+                "asset_type": "image",
+                "content_type": image.get("content_type"),
+                "caption": None,
+                "sort_order": index,
+                "url": None,
+                "content_base64": base64.b64encode(raw).decode("ascii"),
+            }
+        )
     return serialized
 
 
@@ -1013,10 +1176,13 @@ def merge_media_items(primary: list[dict], fallback: list[dict]) -> list[dict]:
 def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
     try:
         raw = download_book(book.s3_key)
-    except Exception:
+    except STORAGE_IO_EXCEPTIONS:
         return None
     try:
-        preserve_numbers = bool(book.preserve_chapter_numbers or getattr(book, "preserve_source_chapters", False)) and book.work_type != "screenplay"
+        preserve_numbers = (
+            bool(book.preserve_chapter_numbers or getattr(book, "preserve_source_chapters", False))
+            and book.work_type != "screenplay"
+        )
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
 
@@ -1030,7 +1196,7 @@ def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
             preserve_chapter_numbers=preserve_numbers,
             generic_titles=book.work_type != "screenplay" and not preserve_numbers,
         )
-    except Exception:
+    except SOURCE_PARSE_EXCEPTIONS:
         return None
     chapter = next((item for item in chapters if item.get("number") == chapter_num), None)
     return chapter or None
@@ -1045,14 +1211,19 @@ def timeline_relationship_detail(
     character_a_to_b_labels: object | None = None,
     character_b_to_a_labels: object | None = None,
 ) -> tuple[str, str]:
-    from app.utils.relationship_utils import normalize_relationship_labels, relationship_label_display
+    from app.utils.relationship_utils import (
+        normalize_relationship_labels,
+        relationship_label_display,
+    )
 
     labels = (
         normalize_relationship_labels(character_a_to_b_labels)
         + normalize_relationship_labels(character_b_to_a_labels)
         + normalize_relationship_labels(shared_labels)
     )
-    relation = ", ".join(relationship_label_display(label) for label in labels[:4]) or (rel_type or "connection").replace("_", " ")
+    relation = ", ".join(relationship_label_display(label) for label in labels[:4]) or (
+        rel_type or "connection"
+    ).replace("_", " ")
     title = f"{character_a} and {character_b}"
     if description and description.strip():
         return title, description.strip()
@@ -1093,7 +1264,9 @@ async def list_plot_threads(
     if chapter is not None:
         query = query.where(PlotThread.introduced_at <= chapter)
     threads_result = await db.execute(
-        query.order_by(PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title)
+        query.order_by(
+            PlotThread.importance.desc(), desc(PlotThread.introduced_at), PlotThread.title
+        )
     )
     threads = threads_result.scalars().all()
     current_chapter = chapter
@@ -1106,7 +1279,9 @@ async def list_plot_threads(
         book_id=book_id,
     )
     return [
-        serialize_plot_thread(thread, current_chapter=current_chapter, tags=tags_by_thread.get(thread.id, []))
+        serialize_plot_thread(
+            thread, current_chapter=current_chapter, tags=tags_by_thread.get(thread.id, [])
+        )
         for thread in threads
     ]
 
@@ -1126,7 +1301,14 @@ async def update_plot_thread_note(
     if thread is None:
         return None
 
-    cleaned = str(bleach.clean(" ".join(str(note or "").split()).strip(), tags=BLEACH_EMPTY_TAGS, strip=True)) or None
+    cleaned = (
+        str(
+            bleach.clean(
+                " ".join(str(note or "").split()).strip(), tags=BLEACH_EMPTY_TAGS, strip=True
+            )
+        )
+        or None
+    )
     thread.note = cleaned
     thread.edited_by_author = True
     if status is not None:

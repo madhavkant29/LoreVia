@@ -2,6 +2,7 @@
 Summary service - thin wrapper around cached analysis state.
 Called by the reader route for summary retrieval without request-time LLM work.
 """
+
 import uuid
 from typing import Any, cast
 
@@ -55,7 +56,9 @@ async def get_or_generate_summary(
             "char_changes": row.char_changes,
             "clues": row.clues,
         }
-        await cache_set(key_chapter_summary(str(chapter.id), mode), data, settings.REDIS_TTL_SUMMARY)
+        await cache_set(
+            key_chapter_summary(str(chapter.id), mode), data, settings.REDIS_TTL_SUMMARY
+        )
         return {"status": "ready", **data, "diagnostics": {"source": "database"}}
 
     analysis_state = chapter.analysis_state if isinstance(chapter.analysis_state, dict) else {}

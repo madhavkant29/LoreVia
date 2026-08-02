@@ -3,6 +3,7 @@ Download a public domain test book for development.
 Uses Project Gutenberg (public domain - no copyright issues).
 Usage: python scripts/download_test_book.py
 """
+
 import os
 
 import httpx
@@ -21,7 +22,9 @@ def download() -> None:
         with open(OUTPUT_PATH, "wb") as f:
             for chunk in r.iter_bytes():
                 f.write(chunk)
-    log.info("downloaded_test_book", extra={"path": OUTPUT_PATH, "bytes": os.path.getsize(OUTPUT_PATH)})
+    log.info(
+        "downloaded_test_book", extra={"path": OUTPUT_PATH, "bytes": os.path.getsize(OUTPUT_PATH)}
+    )
 
 
 if __name__ == "__main__":

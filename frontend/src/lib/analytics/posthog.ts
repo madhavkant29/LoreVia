@@ -2,6 +2,8 @@ export type AnalyticsProps = Record<string, unknown>
 
 type PostHogCaptureClient = {
   capture: (event: string, properties?: AnalyticsProps) => void
+  identify: (userId: string, properties?: AnalyticsProps) => void
+  reset: () => void
 }
 
 declare global {
@@ -27,6 +29,15 @@ export function captureTiming(event: string, startedAt: number, properties?: Ana
       ...properties,
       duration_ms: durationMs,
     })
+  } catch {
+    // never block UX on analytics
+  }
+}
+
+export function identify(userId: string, properties?: AnalyticsProps) {
+  try {
+    if (typeof window === "undefined" || !userId) return
+    window.__loreviaPosthog?.identify(userId, properties)
   } catch {
     // never block UX on analytics
   }

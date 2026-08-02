@@ -31,7 +31,9 @@ async def suppress_candidate(
                 CharacterSuppression.book_id == book_id,
                 CharacterSuppression.normalized_text == normalized,
                 CharacterSuppression.reason == reason,
-                CharacterSuppression.chapter_number.is_(chapter_number) if chapter_number is None else CharacterSuppression.chapter_number == chapter_number,
+                CharacterSuppression.chapter_number.is_(chapter_number)
+                if chapter_number is None
+                else CharacterSuppression.chapter_number == chapter_number,
             )
         )
     ).scalar_one_or_none()

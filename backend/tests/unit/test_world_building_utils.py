@@ -5,23 +5,27 @@ from app.models.book import Book, Chapter, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import WorldCanonicalIdentity, WorldElement
 from app.models.user import User
-from app.utils.book_utils import serialize_manuscript_content
+from app.utils.books.manuscript import (
+    serialize_manuscript_content,
+)
+from app.utils.world_building_document_workflow_utils import create_world_building_documents
 from app.utils.world_building_utils import (
     _claims_contradict,
     build_world_logic_response,
     classify_world_intent,
-    create_world_building_documents,
     detect_integration_analysis,
     detect_series_world_analysis,
     detect_world_gaps,
-    generate_wiki_from_manuscript,
     ingest_world_elements_from_chapter,
     save_canon_override,
 )
+from app.utils.world_building_wiki_utils import generate_wiki_from_manuscript
 
 
 def test_classify_world_intent_prefers_integration_for_story_use_queries():
-    assert classify_world_intent("How can I use the northern kingdom better?") == "story_integration"
+    assert (
+        classify_world_intent("How can I use the northern kingdom better?") == "story_integration"
+    )
     assert classify_world_intent("What gaps am I missing in the magic system?") == "gap_detection"
 
 
@@ -38,13 +42,20 @@ async def test_detect_world_gap_and_integration_payloads(db, monkeypatch):
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(email="world-utils@lorevia.app", username="worldutils", password_hash="hash")
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="World Test", format="pdf", s3_key="world/test.pdf", status="ready")
+    book = Book(
+        user_id=user.id, title="World Test", format="pdf", s3_key="world/test.pdf", status="ready"
+    )
     db.add(book)
     await db.flush()
     db.add(
@@ -79,9 +90,14 @@ async def test_detect_world_gap_and_integration_payloads(db, monkeypatch):
 
     assert gap_payload["mode"] == "gap_detection"
     assert any(group["key"] == "story_conflicts" for group in gap_payload["gap_groups"])
-    assert any(item["title"].startswith("Northreach conflicts") for item in gap_payload["priority_gaps"])
+    assert any(
+        item["title"].startswith("Northreach conflicts") for item in gap_payload["priority_gaps"]
+    )
     assert integration_payload["mode"] == "story_integration"
-    assert any(item["element_name"] == "The Ember Rite" for item in integration_payload["integration_opportunities"])
+    assert any(
+        item["element_name"] == "The Ember Rite"
+        for item in integration_payload["integration_opportunities"]
+    )
 
 
 @pytest.mark.asyncio
@@ -97,17 +113,38 @@ async def test_detect_series_world_analysis_checks_lore_across_books(db, monkeyp
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
-    user = User(email="world-series-utils@lorevia.app", username="worldseriesutils", password_hash="hash")
+    user = User(
+        email="world-series-utils@lorevia.app", username="worldseriesutils", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
     series = Series(user_id=user.id, name="The Northreach Cycle")
     db.add(series)
     await db.flush()
-    first_book = Book(user_id=user.id, title="Ice Gates", format="pdf", s3_key="series/ice.pdf", status="ready", primary_series_id=series.id)
-    second_book = Book(user_id=user.id, title="Glass Market", format="pdf", s3_key="series/glass.pdf", status="ready", primary_series_id=series.id)
+    first_book = Book(
+        user_id=user.id,
+        title="Ice Gates",
+        format="pdf",
+        s3_key="series/ice.pdf",
+        status="ready",
+        primary_series_id=series.id,
+    )
+    second_book = Book(
+        user_id=user.id,
+        title="Glass Market",
+        format="pdf",
+        s3_key="series/glass.pdf",
+        status="ready",
+        primary_series_id=series.id,
+    )
     db.add_all([first_book, second_book])
     await db.flush()
     db.add_all(
@@ -151,8 +188,14 @@ async def test_detect_series_world_analysis_checks_lore_across_books(db, monkeyp
 
     assert payload["book_count"] == 2
     assert payload["gap_analysis"]["mode"] == "series_gap_detection"
-    assert any(item["title"].startswith("Northreach conflicts") for item in payload["gap_analysis"]["priority_gaps"])
-    assert any(flag["title"] == "Conflicting definition for Northreach" for flag in payload["gap_analysis"]["consistency_flags"])
+    assert any(
+        item["title"].startswith("Northreach conflicts")
+        for item in payload["gap_analysis"]["priority_gaps"]
+    )
+    assert any(
+        flag["title"] == "Conflicting definition for Northreach"
+        for flag in payload["gap_analysis"]["consistency_flags"]
+    )
 
 
 @pytest.mark.asyncio
@@ -168,13 +211,20 @@ async def test_generate_wiki_and_world_logic_response(db, monkeypatch):
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     user = User(email="wiki-utils@lorevia.app", username="wikiutils", password_hash="hash")
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Wiki Test", format="pdf", s3_key="wiki/test.pdf", status="ready")
+    book = Book(
+        user_id=user.id, title="Wiki Test", format="pdf", s3_key="wiki/test.pdf", status="ready"
+    )
     db.add(book)
     await db.flush()
     db.add(
@@ -205,7 +255,9 @@ async def test_generate_wiki_and_world_logic_response(db, monkeypatch):
     await db.commit()
 
     entries = await generate_wiki_from_manuscript(db, book)
-    logic = await build_world_logic_response(db, book, "How would Aurelia react to a trade blockade?", "story_integration")
+    logic = await build_world_logic_response(
+        db, book, "How would Aurelia react to a trade blockade?", "story_integration"
+    )
 
     assert any(entry.name == "Aurelia" for entry in entries)
     assert logic["mode"] == "story_integration"
@@ -328,12 +380,16 @@ def test_claim_contradiction_detects_negation_flip():
 
 
 @pytest.mark.asyncio
-async def test_detect_world_gaps_matches_transliteration_variants_without_false_missing_items(db, monkeypatch):
+async def test_detect_world_gaps_matches_transliteration_variants_without_false_missing_items(
+    db, monkeypatch
+):
     user = User(email="world-alias@lorevia.app", username="worldalias", password_hash="hash")
     db.add(user)
     await db.flush()
 
-    book = Book(user_id=user.id, title="Alias Test", format="pdf", s3_key="world/alias.pdf", status="ready")
+    book = Book(
+        user_id=user.id, title="Alias Test", format="pdf", s3_key="world/alias.pdf", status="ready"
+    )
     db.add(book)
     await db.flush()
 
@@ -361,8 +417,13 @@ async def test_detect_world_gaps_matches_transliteration_variants_without_false_
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
     await create_world_building_documents(
         db,
@@ -396,12 +457,25 @@ async def test_detect_world_gaps_surfaces_internal_magic_rule_conflicts(db, monk
         return stored[key]
 
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
-    user = User(email="world-magic-conflict@lorevia.app", username="worldmagicconflict", password_hash="hash")
+    user = User(
+        email="world-magic-conflict@lorevia.app",
+        username="worldmagicconflict",
+        password_hash="hash",
+    )
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Magic Conflict", format="pdf", s3_key="story/magic.pdf", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Magic Conflict",
+        format="pdf",
+        s3_key="story/magic.pdf",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
 
@@ -417,15 +491,33 @@ async def test_detect_world_gaps_surfaces_internal_magic_rule_conflicts(db, monk
     ).encode("utf-8")
     db.add_all(
         [
-            Chapter(book_id=book.id, number=2, title="The Price", s3_key=chapter_two_key, word_count=4, processed=True),
-            Chapter(book_id=book.id, number=15, title="The Shortcut", s3_key=chapter_fifteen_key, word_count=6, processed=True),
+            Chapter(
+                book_id=book.id,
+                number=2,
+                title="The Price",
+                s3_key=chapter_two_key,
+                word_count=4,
+                processed=True,
+            ),
+            Chapter(
+                book_id=book.id,
+                number=15,
+                title="The Shortcut",
+                s3_key=chapter_fifteen_key,
+                word_count=6,
+                processed=True,
+            ),
         ]
     )
     await db.commit()
 
     payload = await detect_world_gaps(db, book)
-    story_conflicts = next(group for group in payload["gap_groups"] if group["key"] == "story_conflicts")
-    magic_conflict = next(item for item in story_conflicts["items"] if item["canonical_name"] == "Magic System")
+    story_conflicts = next(
+        group for group in payload["gap_groups"] if group["key"] == "story_conflicts"
+    )
+    magic_conflict = next(
+        item for item in story_conflicts["items"] if item["canonical_name"] == "Magic System"
+    )
 
     assert "requires blood sacrifice" in magic_conflict["description"]
     assert "without blood sacrifice" in magic_conflict["description"]
@@ -441,12 +533,23 @@ async def test_detect_world_gaps_surfaces_internal_geography_conflicts(db, monke
         return stored[key]
 
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
-    user = User(email="world-geo-conflict@lorevia.app", username="worldgeoconflict", password_hash="hash")
+    user = User(
+        email="world-geo-conflict@lorevia.app", username="worldgeoconflict", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Geography Conflict", format="pdf", s3_key="story/geo.pdf", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Geography Conflict",
+        format="pdf",
+        s3_key="story/geo.pdf",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
 
@@ -462,15 +565,33 @@ async def test_detect_world_gaps_surfaces_internal_geography_conflicts(db, monke
     ).encode("utf-8")
     db.add_all(
         [
-            Chapter(book_id=book.id, number=6, title="North Bank", s3_key=chapter_six_key, word_count=6, processed=True),
-            Chapter(book_id=book.id, number=21, title="South Bank", s3_key=chapter_twenty_one_key, word_count=6, processed=True),
+            Chapter(
+                book_id=book.id,
+                number=6,
+                title="North Bank",
+                s3_key=chapter_six_key,
+                word_count=6,
+                processed=True,
+            ),
+            Chapter(
+                book_id=book.id,
+                number=21,
+                title="South Bank",
+                s3_key=chapter_twenty_one_key,
+                word_count=6,
+                processed=True,
+            ),
         ]
     )
     await db.commit()
 
     payload = await detect_world_gaps(db, book)
-    story_conflicts = next(group for group in payload["gap_groups"] if group["key"] == "story_conflicts")
-    vael_conflict = next(item for item in story_conflicts["items"] if item["canonical_name"] == "Vael")
+    story_conflicts = next(
+        group for group in payload["gap_groups"] if group["key"] == "story_conflicts"
+    )
+    vael_conflict = next(
+        item for item in story_conflicts["items"] if item["canonical_name"] == "Vael"
+    )
 
     assert "north of the river" in vael_conflict["description"]
     assert "south of the river" in vael_conflict["description"]
@@ -491,13 +612,26 @@ async def test_detect_world_gaps_uses_character_aliases_as_canonical_identity(db
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
-    user = User(email="world-character@lorevia.app", username="worldcharacter", password_hash="hash")
+    user = User(
+        email="world-character@lorevia.app", username="worldcharacter", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Character Alias Test", format="pdf", s3_key="world/character-alias.pdf", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Character Alias Test",
+        format="pdf",
+        s3_key="world/character-alias.pdf",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
 
@@ -519,7 +653,11 @@ async def test_detect_world_gaps_uses_character_aliases_as_canonical_identity(db
             name="Rodya",
             description="Rodya wrestles with the consequences of his crime.",
             usage_count=4,
-            analysis_metadata={"chapter_number": 1, "chapter_title": "Fever Dream", "presence_score": 0.8},
+            analysis_metadata={
+                "chapter_number": 1,
+                "chapter_title": "Fever Dream",
+                "presence_score": 0.8,
+            },
         )
     )
     await db.flush()
@@ -552,7 +690,13 @@ async def test_save_canon_override_persists_alias_merges(db):
     user = User(email="world-override@lorevia.app", username="worldoverride", password_hash="hash")
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Override Test", format="pdf", s3_key="world/override.pdf", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Override Test",
+        format="pdf",
+        s3_key="world/override.pdf",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
 
@@ -577,7 +721,9 @@ async def test_save_canon_override_persists_alias_merges(db):
 
 
 @pytest.mark.asyncio
-async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_exist(db, monkeypatch):
+async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_exist(
+    db, monkeypatch
+):
     stored: dict[str, bytes] = {}
 
     def fake_upload_binary(key: str, raw: bytes, content_type: str | None = None) -> str:
@@ -589,13 +735,26 @@ async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_
 
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary", fake_upload_binary
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
 
-    user = User(email="world-watchlist@lorevia.app", username="worldwatchlist", password_hash="hash")
+    user = User(
+        email="world-watchlist@lorevia.app", username="worldwatchlist", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Coverage Watchlist", format="pdf", s3_key="story/watchlist.pdf", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Coverage Watchlist",
+        format="pdf",
+        s3_key="story/watchlist.pdf",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
 
@@ -636,13 +795,16 @@ async def test_detect_world_gaps_adds_coverage_watchlist_when_no_hard_conflicts_
 
     payload = await detect_world_gaps(db, book)
     total_review_targets = len(payload["priority_gaps"]) + len(payload["consistency_flags"])
-    coverage_group = next((group for group in payload["gap_groups"] if group["key"] == "coverage_watchlist"), None)
+    coverage_group = next(
+        (group for group in payload["gap_groups"] if group["key"] == "coverage_watchlist"), None
+    )
 
     assert total_review_targets >= 3
     if coverage_group is not None:
         assert coverage_group["items"]
         assert any(
-            "needs a clearer canon note" in item["title"] or "needs one more story anchor" in item["title"]
+            "needs a clearer canon note" in item["title"]
+            or "needs one more story anchor" in item["title"]
             for item in coverage_group["items"]
         )
 

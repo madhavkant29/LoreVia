@@ -1,3 +1,4 @@
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from app.utils.logging import get_logger
 
 router = APIRouter()
 log = get_logger("lorevia.billing")
+PADDLE_ROUTE_ERRORS = (RuntimeError, httpx.HTTPError, KeyError, ValueError)
 
 
 @router.post("/checkout", dependencies=[Depends(rate_limit_api)])
@@ -48,12 +50,16 @@ async def start_checkout(
         }
 
     existing = (
-        await db.execute(
-            select(Subscription)
-            .where(Subscription.user_id == current_user.id)
-            .order_by(Subscription.created_at.desc())
+        (
+            await db.execute(
+                select(Subscription)
+                .where(Subscription.user_id == current_user.id)
+                .order_by(Subscription.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if not existing:
         existing = Subscription(
@@ -75,8 +81,10 @@ async def start_checkout(
             plan,
             existing_customer_id=existing.paddle_customer_id,
         )
-    except Exception:
-        log.exception("paddle_checkout_failed", extra={"user_id": str(current_user.id), "plan": plan})
+    except PADDLE_ROUTE_ERRORS:
+        log.exception(
+            "paddle_checkout_failed", extra={"user_id": str(current_user.id), "plan": plan}
+        )
         raise HTTPException(502, "Unable to start Paddle checkout.")
 
     existing.paddle_customer_id = customer_id
@@ -113,8 +121,11 @@ async def get_checkout_confirmation(
                 credentials=None,
                 db=db,
             )
-        except Exception:
-            current_user = None
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                current_user = None
+            else:
+                raise
     if current_user is None and not token_is_valid:
         raise HTTPException(401, "A valid confirmation token is required.")
 
@@ -133,7 +144,7 @@ async def get_checkout_confirmation(
 
     try:
         summary = await get_transaction_summary(normalized_transaction_id)
-    except Exception:
+    except PADDLE_ROUTE_ERRORS:
         log.exception(
             "paddle_confirmation_failed",
             extra={
@@ -162,7 +173,8 @@ async def get_checkout_confirmation(
         invoice_number=summary.invoice_number,
         invoice_pdf_url=summary.invoice_pdf_url,
         subscription_id=summary.subscription_id or subscription.paddle_sub_id,
-        customer_email=summary.customer_email or (current_user.email if current_user is not None else None),
+        customer_email=summary.customer_email
+        or (current_user.email if current_user is not None else None),
     )
 
 
@@ -179,12 +191,19 @@ async def open_portal(
         }
 
     subscription = (
-        await db.execute(
-            select(Subscription)
-            .where(Subscription.user_id == current_user.id, Subscription.paddle_customer_id.is_not(None))
-            .order_by(Subscription.created_at.desc())
+        (
+            await db.execute(
+                select(Subscription)
+                .where(
+                    Subscription.user_id == current_user.id,
+                    Subscription.paddle_customer_id.is_not(None),
+                )
+                .order_by(Subscription.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if not subscription or not subscription.paddle_customer_id:
         raise HTTPException(404, "No billing account found")
@@ -194,7 +213,7 @@ async def open_portal(
             subscription.paddle_customer_id,
             [subscription.paddle_sub_id] if subscription.paddle_sub_id else None,
         )
-    except Exception:
+    except PADDLE_ROUTE_ERRORS:
         log.exception("paddle_portal_failed", extra={"user_id": str(current_user.id)})
         raise HTTPException(502, "Unable to open Paddle portal.")
     return {"portal_url": portal_url, "billing_enabled": True}

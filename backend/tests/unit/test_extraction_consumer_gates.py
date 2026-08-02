@@ -1,14 +1,18 @@
 import uuid
 
 from app.models.character import Character
-from app.workers.consumers.extraction_consumer import (
-    _blocked_character_ids,
+from app.services.extraction_chapter_content_service import _prepare_chapter_rich_content
+from app.services.extraction_character_decision_service import (
     _can_auto_save_character,
     _character_save_decision,
-    _merge_alias_in_memory,
-    _prepare_chapter_rich_content,
-    _relationship_resolution_candidates,
     _should_update_existing_character,
+)
+from app.services.extraction_character_persistence_service import (
+    _blocked_character_ids,
+    _merge_alias_in_memory,
+)
+from app.services.extraction_relationship_service import (
+    _relationship_resolution_candidates,
 )
 
 
@@ -35,10 +39,10 @@ def test_prepare_chapter_rich_content_extracts_editor_images_and_retains_stored_
             "number": 1,
             "text": "Intro Outro",
             "html": (
-                '<p>Intro</p>'
+                "<p>Intro</p>"
                 '<p><img src="/api/v1/reader/media/1" alt="[[IMAGE:kept]]"></p>'
                 '<p><img src="data:image/png;base64,QUJD" alt="New map"></p>'
-                '<p>Outro</p>'
+                "<p>Outro</p>"
             ),
             "images": [
                 {
@@ -87,7 +91,7 @@ def test_can_auto_save_character_allows_multi_mention_person():
                     "confidence_band": "accept",
                     "is_person_like": True,
                     "reasons": ["local_person_context"],
-                }
+                },
             },
         },
     }
@@ -152,7 +156,7 @@ def test_can_auto_save_character_blocks_single_token_even_with_profile_signal_wh
                     "confidence_band": "accept",
                     "is_person_like": True,
                     "reasons": ["llm_confirmed_person"],
-                }
+                },
             },
         },
     }
@@ -242,7 +246,7 @@ def test_can_auto_save_character_blocks_first_pass_single_token_even_when_verifi
                     "confidence_band": "accept",
                     "is_person_like": True,
                     "reasons": ["llm_confirmed_person"],
-                }
+                },
             },
         },
     }
@@ -274,7 +278,7 @@ def test_can_auto_save_character_allows_strong_deterministic_fallback_single_tok
                     "confidence_band": "accept",
                     "is_person_like": True,
                     "reasons": [],
-                }
+                },
             },
         },
     }
@@ -312,8 +316,12 @@ def test_should_update_existing_character_allows_profile_only_enrichment():
 
 
 def test_blocked_character_ids_respects_anti_merge_names():
-    blocked = Character(id=uuid.uuid4(), book_id=uuid.uuid4(), name="Saitou Masami", first_chapter=1)
-    allowed = Character(id=uuid.uuid4(), book_id=blocked.book_id, name="Saitou Kengo", first_chapter=1)
+    blocked = Character(
+        id=uuid.uuid4(), book_id=uuid.uuid4(), name="Saitou Masami", first_chapter=1
+    )
+    allowed = Character(
+        id=uuid.uuid4(), book_id=blocked.book_id, name="Saitou Kengo", first_chapter=1
+    )
 
     entity = {
         "name": "Saitou Kengo",
@@ -377,8 +385,11 @@ def test_relationship_resolution_candidates_ignores_non_visible_character():
         "Gregor's sister",
         context_text="Grete, Gregor's sister, pleaded with him to eat something.",
     ) == [grete.id]
-    assert _relationship_resolution_candidates(
-        [hidden, visible, grete],
-        "Gregor's mother",
-        context_text="Gregor's mother cares for him but struggles with the changes in their relationship.",
-    ) == []
+    assert (
+        _relationship_resolution_candidates(
+            [hidden, visible, grete],
+            "Gregor's mother",
+            context_text="Gregor's mother cares for him but struggles with the changes in their relationship.",
+        )
+        == []
+    )

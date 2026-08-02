@@ -123,6 +123,14 @@ async function flushUi(times = 4) {
   }
 }
 
+async function waitForText(container: HTMLElement, text: string, attempts = 12) {
+  for (let index = 0; index < attempts; index += 1) {
+    if (container.textContent?.includes(text)) return
+    await flushUi()
+  }
+  expect(container.textContent).toContain(text)
+}
+
 function clickByText(container: HTMLElement, text: string, index = 0) {
   const matches = Array.from(container.querySelectorAll("button, a")).filter((element) =>
     element.textContent?.includes(text)
@@ -381,8 +389,8 @@ describe("WorldbuildingWorkspace", () => {
 
     await flushUi(8)
 
-    expect(container.textContent).toContain("World Bible")
-    expect(container.textContent).toContain("Canon gaps")
+    await waitForText(container, "World Bible")
+    await waitForText(container, "Canon gaps")
     expect(container.textContent).toContain("Aster Sea")
 
     clickByText(container, "Run gap detection")

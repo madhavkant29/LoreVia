@@ -10,6 +10,24 @@ from app.api.v1.routes import intelligence
 from app.schemas.intelligence import QARequest
 
 
+@pytest.fixture(autouse=True)
+def _stub_llm_reservation_lifecycle(monkeypatch):
+    async def reserve(**kwargs):
+        return SimpleNamespace(
+            id="test-reservation", operation=kwargs["operation"], user_id=kwargs["user_id"]
+        )
+
+    async def finish(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(intelligence, "reserve_llm_call", reserve)
+    monkeypatch.setattr(intelligence, "finish_llm_reservation_counts", finish)
+    monkeypatch.setattr(intelligence, "fail_llm_reservation", finish)
+    monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", reserve)
+    monkeypatch.setattr("app.services.llm_control_service.finish_llm_reservation", finish)
+    monkeypatch.setattr("app.services.llm_control_service.fail_llm_reservation", finish)
+
+
 class _ScalarList:
     def __init__(self, items):
         self._items = items
@@ -125,6 +143,7 @@ class _ExplodingStreamingClient:
 
 def test_cosine_similarity_handles_edge_cases():
     from app.utils.intelligence_utils import _cosine_similarity
+
     assert _cosine_similarity(None, [1.0]) == 0.0
     assert _cosine_similarity([1.0], [1.0, 2.0]) == 0.0
     assert _cosine_similarity([0.0, 0.0], [1.0, 1.0]) == 0.0
@@ -150,7 +169,14 @@ async def test_qa_endpoint_returns_cached_payload(monkeypatch):
     async def _fake_cache_get(_key):
         return {
             "answer": "Cached answer",
-            "citations": [{"chapter_num": 1, "chapter_title": "One", "excerpt": "Snippet", "source_type": "summary"}],
+            "citations": [
+                {
+                    "chapter_num": 1,
+                    "chapter_title": "One",
+                    "excerpt": "Snippet",
+                    "source_type": "summary",
+                }
+            ],
         }
 
     monkeypatch.setattr(intelligence, "cache_get", _fake_cache_get)
@@ -181,10 +207,19 @@ async def test_qa_endpoint_builds_answer_and_caches(monkeypatch):
 
     monkeypatch.setattr(intelligence, "cache_get", _fake_cache_get)
     monkeypatch.setattr(intelligence, "cache_set", _fake_cache_set)
+
     async def _fake_build_grounded_qa_context(**_kwargs):
         return (
             ["Context block"],
-            [{"chapter_num": 2, "chapter_title": "Two", "excerpt": "Evidence", "source_type": "passage", "relevance": 0.9}],
+            [
+                {
+                    "chapter_num": 2,
+                    "chapter_title": "Two",
+                    "excerpt": "Evidence",
+                    "source_type": "passage",
+                    "relevance": 0.9,
+                }
+            ],
         )
 
     monkeypatch.setattr(intelligence, "build_grounded_qa_context", _fake_build_grounded_qa_context)
@@ -194,7 +229,7 @@ async def test_qa_endpoint_builds_answer_and_caches(monkeypatch):
     user = SimpleNamespace(id=book.user_id)
     db = _FakeDB(
         get_values=[book, user],
-        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)],
     )
 
     payload = await intelligence.qa_endpoint(
@@ -224,7 +259,15 @@ async def test_qa_stream_endpoint_streams_and_caches(monkeypatch):
     async def _fake_build_grounded_qa_context(**_kwargs):
         return (
             ["Context block"],
-            [{"chapter_num": 2, "chapter_title": "Two", "excerpt": "Evidence", "source_type": "passage", "relevance": 0.9}],
+            [
+                {
+                    "chapter_num": 2,
+                    "chapter_title": "Two",
+                    "excerpt": "Evidence",
+                    "source_type": "passage",
+                    "relevance": 0.9,
+                }
+            ],
         )
 
     monkeypatch.setattr(intelligence, "cache_get", _fake_cache_get)
@@ -235,8 +278,7 @@ async def test_qa_stream_endpoint_streams_and_caches(monkeypatch):
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
     user = SimpleNamespace(id=book.user_id)
     db = _FakeDB(
-        get_values=[book],
-        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+        get_values=[book], execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
     )
 
     response = await intelligence.qa_stream_endpoint(
@@ -270,8 +312,7 @@ async def test_qa_stream_endpoint_hides_internal_errors(monkeypatch):
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
     user = SimpleNamespace(id=book.user_id)
     db = _FakeDB(
-        get_values=[book],
-        execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
+        get_values=[book], execute_values=[_Result(scalar=0), _Result(scalar=0), _Result(scalar=0)]
     )
 
     response = await intelligence.qa_stream_endpoint(
@@ -292,7 +333,9 @@ async def test_qa_stream_endpoint_hides_internal_errors(monkeypatch):
 async def test_cross_book_intelligence_validates_book(monkeypatch):
     db = _FakeDB(get_values=[None])
     with pytest.raises(HTTPException) as exc:
-        await intelligence.cross_book_intelligence(uuid.uuid4(), db=db, current_user=SimpleNamespace(id=uuid.uuid4()))
+        await intelligence.cross_book_intelligence(
+            uuid.uuid4(), db=db, current_user=SimpleNamespace(id=uuid.uuid4())
+        )
     assert exc.value.status_code == 404
 
 
@@ -352,7 +395,9 @@ async def test_cross_book_intelligence_returns_series_matches(monkeypatch):
         ],
     )
 
-    payload = await intelligence.cross_book_intelligence(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+    payload = await intelligence.cross_book_intelligence(
+        book_id, db=db, current_user=SimpleNamespace(id=user_id)
+    )
 
     assert payload.series_name == "Saga"
     assert payload.character_matches[0].left_name == "Aoi"
@@ -392,7 +437,9 @@ async def test_cross_book_intelligence_returns_cached_result(monkeypatch):
         ],
     )
 
-    payload = await intelligence.cross_book_intelligence(book_id, db=db, current_user=SimpleNamespace(id=user_id))
+    payload = await intelligence.cross_book_intelligence(
+        book_id, db=db, current_user=SimpleNamespace(id=user_id)
+    )
 
     assert payload.cached is True
     assert payload.series_name == "Saga"

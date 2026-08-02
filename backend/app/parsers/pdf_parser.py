@@ -77,16 +77,26 @@ PAGINATION_RE = re.compile(
 )
 
 
-def parse_pdf(raw_bytes: bytes, *, split_large_chapters: bool = True, language: str | None = None) -> list[dict]:
-    chapters, _ = parse_pdf_with_diagnostics(raw_bytes, split_large_chapters=split_large_chapters, language=language)
+def parse_pdf(
+    raw_bytes: bytes, *, split_large_chapters: bool = True, language: str | None = None
+) -> list[dict]:
+    chapters, _ = parse_pdf_with_diagnostics(
+        raw_bytes, split_large_chapters=split_large_chapters, language=language
+    )
     return chapters
 
 
-def parse_pdf_with_diagnostics(raw_bytes: bytes, *, split_large_chapters: bool = True, language: str | None = None) -> tuple[list[dict], dict[str, Any]]:
-    return _parse_pdf_internal(raw_bytes, split_large_chapters=split_large_chapters, language=language)
+def parse_pdf_with_diagnostics(
+    raw_bytes: bytes, *, split_large_chapters: bool = True, language: str | None = None
+) -> tuple[list[dict], dict[str, Any]]:
+    return _parse_pdf_internal(
+        raw_bytes, split_large_chapters=split_large_chapters, language=language
+    )
 
 
-def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, language: str | None = None) -> tuple[list[dict], dict[str, Any]]:
+def _parse_pdf_internal(
+    raw_bytes: bytes, *, split_large_chapters: bool, language: str | None = None
+) -> tuple[list[dict], dict[str, Any]]:
     doc = cast(Any, fitz).open(stream=raw_bytes, filetype="pdf")
     try:
         total_pages = int(doc.page_count or 0)
@@ -158,9 +168,7 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, languag
         detected_language_confidence: float | None = None
         if detected_language is None:
             sample_text = " ".join(
-                item.get("text", "")
-                for item in stream
-                if item.get("type") == "text"
+                item.get("text", "") for item in stream if item.get("type") == "text"
             )[:5000]
             lang_result = detect_language(sample_text, max_chars=5000)
             detected_language = lang_result["detected"]
@@ -188,14 +196,18 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, languag
                 chapters = permissive_chapters
                 fallback_strategy = "permissive_heading_retry"
 
-        effective_split = split_large_chapters or _needs_forced_large_chapter_split(chapters, total_pages=total_pages)
+        effective_split = split_large_chapters or _needs_forced_large_chapter_split(
+            chapters, total_pages=total_pages
+        )
         normalized_chapters = _normalize_chapters(
             chapters,
             split_large_chapters=effective_split,
             total_pages=total_pages,
             diagnostics_state=diagnostics_state,
         )
-        final_anomalies = _collect_parse_anomalies(chapters, total_pages=total_pages, normalized_chapters=normalized_chapters)
+        final_anomalies = _collect_parse_anomalies(
+            chapters, total_pages=total_pages, normalized_chapters=normalized_chapters
+        )
         diagnostics = _build_parser_diagnostics(
             chapters,
             normalized_chapters=normalized_chapters,
@@ -208,7 +220,9 @@ def _parse_pdf_internal(raw_bytes: bytes, *, split_large_chapters: bool, languag
             detected_language=detected_language,
             detected_language_confidence=detected_language_confidence,
         )
-        return normalized_chapters or [{"number": 1, "title": "Full Text", "text": "", "images": [], "section_type": "unknown"}], diagnostics
+        return normalized_chapters or [
+            {"number": 1, "title": "Full Text", "text": "", "images": [], "section_type": "unknown"}
+        ], diagnostics
     finally:
         doc.close()
 
@@ -290,10 +304,7 @@ def _line_items_to_paragraph_items(
         return []
 
     typical_line_height = _median(
-        [
-            max(1.0, float(line["bbox"][3]) - float(line["bbox"][1]))
-            for line in lines
-        ]
+        [max(1.0, float(line["bbox"][3]) - float(line["bbox"][1])) for line in lines]
     )
     paragraphs: list[dict] = []
     current: list[dict] = []
@@ -324,7 +335,9 @@ def _line_items_to_paragraph_items(
     return paragraphs
 
 
-def _should_break_between_lines(previous_line: dict, current_line: dict, typical_line_height: float) -> bool:
+def _should_break_between_lines(
+    previous_line: dict, current_line: dict, typical_line_height: float
+) -> bool:
     previous_text = str(previous_line.get("text") or "").strip()
     current_text = str(current_line.get("text") or "").strip()
     if not previous_text or not current_text:
@@ -351,9 +364,13 @@ def _paragraph_item_from_lines(
     total_pages: int,
     diagnostics_state: dict[str, Any] | None = None,
 ) -> dict | None:
-    text = "\n".join(str(line.get("text") or "") for line in lines if str(line.get("text") or "").strip())
+    text = "\n".join(
+        str(line.get("text") or "") for line in lines if str(line.get("text") or "").strip()
+    )
     cleaned = _clean_text(text)
-    cleaned, removed_count = _scrub_inline_page_artifacts(cleaned, total_pages=total_pages, page_number=page_number)
+    cleaned, removed_count = _scrub_inline_page_artifacts(
+        cleaned, total_pages=total_pages, page_number=page_number
+    )
     if diagnostics_state is not None:
         diagnostics_state["inline_artifacts_removed"] += removed_count
     if not cleaned:
@@ -429,7 +446,9 @@ def _build_chapters(
 
     # ── TOC detection: scan first ~10% of text items for TOC signals ─────
     toc_range: tuple[int, int] | None = None
-    text_items = [item for item in stream if item.get("type") == "text" and item.get("text", "").strip()]
+    text_items = [
+        item for item in stream if item.get("type") == "text" and item.get("text", "").strip()
+    ]
     if text_items:
         toc_scan_count = max(5, len(text_items) // 10)
         toc_sample_lines = [
@@ -569,7 +588,11 @@ def _normalize_chapters(
             diagnostics_state=diagnostics_state,
         )
         for embedded_title, embedded_text_parts, embedded_section_type in embedded_sections:
-            split_parts = _split_large_chapter_parts(embedded_text_parts) if split_large_chapters else [embedded_text_parts]
+            split_parts = (
+                _split_large_chapter_parts(embedded_text_parts)
+                if split_large_chapters
+                else [embedded_text_parts]
+            )
             source_number = _extract_source_number_from_heading(embedded_title)
             for part_index, text_parts_part in enumerate(split_parts, start=1):
                 text = _assemble_text_parts(text_parts_part, total_pages=total_pages)
@@ -774,7 +797,13 @@ def _is_repeated_noise(text: str, repeated_noise: set[str]) -> bool:
     return lowered in repeated_noise or lowered.isdigit() or _is_pagination_noise(text)
 
 
-def _extract_heading(text: str, *, next_text: str | None = None, permissive: bool = False, heading_regex: re.Pattern | None = None) -> str | None:
+def _extract_heading(
+    text: str,
+    *,
+    next_text: str | None = None,
+    permissive: bool = False,
+    heading_regex: re.Pattern | None = None,
+) -> str | None:
     lines = [line.strip() for line in text.replace("\r", "\n").splitlines() if line.strip()]
     if not lines:
         return None
@@ -897,14 +926,17 @@ def _is_page_margin_noise(
     total_pages: int,
     page_number: int,
 ) -> bool:
-    return _page_margin_noise_reason(
-        text,
-        bbox=bbox,
-        page_height=page_height,
-        repeated_noise=repeated_noise,
-        total_pages=total_pages,
-        page_number=page_number,
-    ) is not None
+    return (
+        _page_margin_noise_reason(
+            text,
+            bbox=bbox,
+            page_height=page_height,
+            repeated_noise=repeated_noise,
+            total_pages=total_pages,
+            page_number=page_number,
+        )
+        is not None
+    )
 
 
 def _heading_remainder(text: str, heading: str) -> str:
@@ -926,7 +958,7 @@ def _heading_remainder(text: str, heading: str) -> str:
     match = re.match(re.escape(heading) + r"[\s:.\-]*", flattened, flags=re.IGNORECASE)
     if not match:
         return ""
-    remainder = flattened[match.end():].strip()
+    remainder = flattened[match.end() :].strip()
     # Clean the remainder to remove any remaining ornaments
     return _clean_text(remainder)
 
@@ -1011,7 +1043,9 @@ def _drop_front_matter_text_parts(text_parts: list[str]) -> list[str]:
         if not normalized:
             parts.pop(0)
             continue
-        if _is_probable_front_matter(normalized) and not INLINE_NUMBERED_HEADING_RE.search(normalized):
+        if _is_probable_front_matter(normalized) and not INLINE_NUMBERED_HEADING_RE.search(
+            normalized
+        ):
             parts.pop(0)
             continue
         break
@@ -1060,11 +1094,7 @@ def _can_close_section(parts: list[str]) -> bool:
 
 
 def _images_for_text_parts(text_parts: list[str], images: list[dict]) -> list[dict]:
-    markers = {
-        match.group(0)
-        for part in text_parts
-        for match in MEDIA_MARKER_RE.finditer(part)
-    }
+    markers = {match.group(0) for part in text_parts for match in MEDIA_MARKER_RE.finditer(part)}
     return [image for image in images if image.get("marker") in markers]
 
 
@@ -1105,7 +1135,9 @@ def _is_probable_front_matter(text: str) -> bool:
     return False
 
 
-def _should_merge_across_pages(previous: str, current: str, *, heading_regex: re.Pattern | None = None) -> bool:
+def _should_merge_across_pages(
+    previous: str, current: str, *, heading_regex: re.Pattern | None = None
+) -> bool:
     previous = _clean_text(previous)
     current = _clean_text(current)
     if not previous or not current:
@@ -1116,7 +1148,9 @@ def _should_merge_across_pages(previous: str, current: str, *, heading_regex: re
 
 
 def _needs_forced_large_chapter_split(chapters: list[dict], *, total_pages: int) -> bool:
-    word_counts = [_chapter_word_count(chapter) for chapter in chapters if _chapter_word_count(chapter) > 0]
+    word_counts = [
+        _chapter_word_count(chapter) for chapter in chapters if _chapter_word_count(chapter) > 0
+    ]
     if not word_counts:
         return False
 
@@ -1141,7 +1175,9 @@ def _collect_parse_anomalies(
     normalized_chapters: Sequence[dict] | None = None,
 ) -> list[str]:
     anomalies: list[str] = []
-    word_counts = [_chapter_word_count(chapter) for chapter in chapters if _chapter_word_count(chapter) > 0]
+    word_counts = [
+        _chapter_word_count(chapter) for chapter in chapters if _chapter_word_count(chapter) > 0
+    ]
     if word_counts:
         largest = max(word_counts)
         median_words = _median([float(count) for count in word_counts])
@@ -1152,7 +1188,10 @@ def _collect_parse_anomalies(
         anomalies.append("heading_style_dropout")
 
     if normalized_chapters:
-        residual_artifacts = sum(_count_residual_page_artifacts(str(chapter.get("text") or ""), total_pages=total_pages) for chapter in normalized_chapters)
+        residual_artifacts = sum(
+            _count_residual_page_artifacts(str(chapter.get("text") or ""), total_pages=total_pages)
+            for chapter in normalized_chapters
+        )
         if residual_artifacts:
             anomalies.append("residual_page_artifacts")
 
@@ -1164,9 +1203,7 @@ def _has_heading_style_dropout(chapters: Sequence[dict]) -> bool:
         return False
 
     explicit_indices = [
-        index
-        for index, chapter in enumerate(chapters)
-        if str(chapter.get("title") or "").strip()
+        index for index, chapter in enumerate(chapters) if str(chapter.get("title") or "").strip()
     ]
     if len(explicit_indices) < 3:
         return False
@@ -1174,17 +1211,25 @@ def _has_heading_style_dropout(chapters: Sequence[dict]) -> bool:
     if last_explicit_index >= len(chapters) - 1:
         return False
 
-    trailing_word_count = sum(_chapter_word_count(chapter) for chapter in chapters[last_explicit_index + 1 :])
+    trailing_word_count = sum(
+        _chapter_word_count(chapter) for chapter in chapters[last_explicit_index + 1 :]
+    )
     return trailing_word_count >= MIN_SUSPICIOUS_CHAPTER_WORDS
 
 
-def _should_retry_with_permissive_headings(chapters: Sequence[dict], *, anomalies: Sequence[str]) -> bool:
+def _should_retry_with_permissive_headings(
+    chapters: Sequence[dict], *, anomalies: Sequence[str]
+) -> bool:
     return any(flag in {"oversized_chapter_outlier", "heading_style_dropout"} for flag in anomalies)
 
 
 def _parse_quality_score(chapters: Sequence[dict]) -> tuple[int, int, int, int]:
-    explicit_heading_count = sum(1 for chapter in chapters if str(chapter.get("title") or "").strip())
-    word_counts = [_chapter_word_count(chapter) for chapter in chapters if _chapter_word_count(chapter) > 0]
+    explicit_heading_count = sum(
+        1 for chapter in chapters if str(chapter.get("title") or "").strip()
+    )
+    word_counts = [
+        _chapter_word_count(chapter) for chapter in chapters if _chapter_word_count(chapter) > 0
+    ]
     largest = max(word_counts) if word_counts else 0
     return (
         explicit_heading_count,
@@ -1198,7 +1243,9 @@ def _count_residual_page_artifacts(text: str, *, total_pages: int) -> int:
     if not text:
         return 0
     count = 0
-    for match in re.finditer(r"(?<!\w)(?:page\s+)?\d+\s*(?:of|/)\s*\d+(?:\s+[A-Za-z])?(?!\w)", text, flags=re.IGNORECASE):
+    for match in re.finditer(
+        r"(?<!\w)(?:page\s+)?\d+\s*(?:of|/)\s*\d+(?:\s+[A-Za-z])?(?!\w)", text, flags=re.IGNORECASE
+    ):
         if _is_pagination_noise(match.group(0), total_pages=total_pages):
             count += 1
     return count
@@ -1217,13 +1264,26 @@ def _build_parser_diagnostics(
     detected_language: str = "en",
     detected_language_confidence: float | None = None,
 ) -> dict[str, Any]:
-    word_counts = [_count_words(str(chapter.get("text") or "")) for chapter in normalized_chapters if str(chapter.get("text") or "").strip()]
-    headings = [str(chapter.get("title") or "").strip() for chapter in chapters if str(chapter.get("title") or "").strip()]
-    residual_artifacts = sum(_count_residual_page_artifacts(str(chapter.get("text") or ""), total_pages=total_pages) for chapter in normalized_chapters)
+    word_counts = [
+        _count_words(str(chapter.get("text") or ""))
+        for chapter in normalized_chapters
+        if str(chapter.get("text") or "").strip()
+    ]
+    headings = [
+        str(chapter.get("title") or "").strip()
+        for chapter in chapters
+        if str(chapter.get("title") or "").strip()
+    ]
+    residual_artifacts = sum(
+        _count_residual_page_artifacts(str(chapter.get("text") or ""), total_pages=total_pages)
+        for chapter in normalized_chapters
+    )
 
     chapter_word_stats = {
         "min": min(word_counts) if word_counts else 0,
-        "median": int(round(_median([float(count) for count in word_counts]))) if word_counts else 0,
+        "median": int(round(_median([float(count) for count in word_counts])))
+        if word_counts
+        else 0,
         "max": max(word_counts) if word_counts else 0,
     }
 
@@ -1232,10 +1292,14 @@ def _build_parser_diagnostics(
         stype = chapter.get("section_type", "unknown")
         section_type_counts[stype] = section_type_counts.get(stype, 0) + 1
 
-    toc_detected = section_type_counts.get("toc", 0) > 0 or bool(diagnostics_state.get("toc_detected"))
+    toc_detected = section_type_counts.get("toc", 0) > 0 or bool(
+        diagnostics_state.get("toc_detected")
+    )
     front_matter_count = sum(
-        count for stype, count in section_type_counts.items()
-        if stype in {"preface", "foreword", "acknowledgements", "dedication", "copyright", "title_page"}
+        count
+        for stype, count in section_type_counts.items()
+        if stype
+        in {"preface", "foreword", "acknowledgements", "dedication", "copyright", "title_page"}
     )
 
     return {

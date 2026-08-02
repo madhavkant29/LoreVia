@@ -44,16 +44,22 @@ async def send_due_trial_emails(
     current = now or datetime.now(UTC)
     current = current if current.tzinfo else current.replace(tzinfo=UTC)
     stale_sending_rows = (
-        await db.execute(
-            select(TrialEmailEvent).where(
-                TrialEmailEvent.status == "sending",
-                TrialEmailEvent.updated_at < current - timedelta(minutes=30),
+        (
+            await db.execute(
+                select(TrialEmailEvent).where(
+                    TrialEmailEvent.status == "sending",
+                    TrialEmailEvent.updated_at < current - timedelta(minutes=30),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for event in stale_sending_rows:
         event.status = "failed"
-        event.last_error = "Previous send attempt did not finalize. Review delivery logs before retrying."
+        event.last_error = (
+            "Previous send attempt did not finalize. Review delivery logs before retrying."
+        )
 
     due_rows = (
         await db.execute(
@@ -115,7 +121,9 @@ async def send_due_trial_emails(
             ).scalar_one_or_none()
             if existing_book is not None:
                 event.status = "skipped"
-                event.last_error = "User already created a manuscript workspace before the nudge was due."
+                event.last_error = (
+                    "User already created a manuscript workspace before the nudge was due."
+                )
                 await db.commit()
                 continue
         delivered = await send_trial_email(user.email, event.email_type)

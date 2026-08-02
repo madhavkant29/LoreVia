@@ -1,3 +1,4 @@
+import logging
 import re
 from dataclasses import dataclass
 
@@ -8,18 +9,36 @@ from app.core.config import settings
 MEDIA_MARKER_RE = re.compile(r"\[\[IMAGE:[^\]]+\]\]")
 
 _enc: tiktoken.Encoding | None = None
+_encoding_load_failed = False
+log = logging.getLogger("lorevia.chunker")
 
 
-def _get_encoding() -> tiktoken.Encoding:
-    global _enc
-    if _enc is None:
-        _enc = tiktoken.encoding_for_model(settings.OPENAI_ENCODING_MODEL)
+def _get_encoding() -> tiktoken.Encoding | None:
+    global _enc, _encoding_load_failed
+    if _enc is None and not _encoding_load_failed:
+        try:
+            _enc = tiktoken.encoding_for_model(settings.OPENAI_ENCODING_MODEL)
+        except Exception as exc:
+            _encoding_load_failed = True
+            log.warning(
+                "Tokenizer asset unavailable; using conservative UTF-8 token estimate: %s",
+                exc,
+            )
     return _enc
 
 
 def count_tokens(text: str) -> int:
     sanitized = MEDIA_MARKER_RE.sub(" ", text)
-    return len(_get_encoding().encode(sanitized))
+    encoding = _get_encoding()
+    if encoding is not None:
+        return len(encoding.encode(sanitized))
+    if not sanitized:
+        return 0
+    # Three UTF-8 bytes per token is deliberately conservative for English
+    # prose and remains usable for multibyte scripts. It keeps ingestion and
+    # chunking available when a cold or network-isolated host cannot download
+    # the optional tiktoken vocabulary.
+    return (len(sanitized.encode("utf-8")) + 2) // 3
 
 
 @dataclass(frozen=True)
@@ -54,7 +73,13 @@ def chunk_text(
     *,
     config: ChunkingConfig | None = None,
 ) -> list[str]:
-    cfg = config or ChunkingConfig(target_tokens=max_tokens, max_tokens=max_tokens, min_tokens=0, overlap_tokens=overlap, overlap_ratio=0.0)
+    cfg = config or ChunkingConfig(
+        target_tokens=max_tokens,
+        max_tokens=max_tokens,
+        min_tokens=0,
+        overlap_tokens=overlap,
+        overlap_ratio=0.0,
+    )
     target_tokens = max(1, int(cfg.target_tokens))
     max_tokens = max(1, int(cfg.max_tokens))
     min_tokens = max(0, int(cfg.min_tokens))
@@ -214,7 +239,11 @@ def _sentence_segments(paragraph: str) -> list[str]:
     }
     for source, target in abbreviations.items():
         protected = protected.replace(source, target)
-    segments = [segment.replace("<dot>", ".").strip() for segment in re.split(r"(?<=[.!?])\s+", protected) if segment.strip()]
+    segments = [
+        segment.replace("<dot>", ".").strip()
+        for segment in re.split(r"(?<=[.!?])\s+", protected)
+        if segment.strip()
+    ]
     return segments
 
 

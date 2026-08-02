@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test"
 import { installMockApi } from "./support/mockApi"
 
 const BOOK_ROUTE = "/sky-of-ash--book-1"
+const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
+const E2E_APP_ORIGIN = process.env.E2E_APP_ORIGIN ?? `http://localhost:${process.env.E2E_PORT ?? "3001"}`
 
 function watchBrowserSignals(page: Page) {
   const consoleMessages: string[] = []
@@ -23,8 +25,104 @@ test("marketing home page renders the core value proposition", async ({ page }) 
 
   await expect(page.getByRole("heading", { name: /find plot holes before your readers do/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /^analyze my manuscript$/i }).first()).toBeVisible()
+  await expect(page.getByRole("link", { name: /^see a sample finding$/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /^see a sample finding$/i })).toHaveAttribute("href", "/demo/workspace")
+  await expect(page.getByText("Includes a 10-day Author trial. No payment required.").first()).toBeVisible()
+})
+
+test("pricing and upgrade share current monthly and annual prices", async ({ page }) => {
+  await installMockApi(page)
+  const checkoutPlans: string[] = []
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/v1/billing/checkout") && request.method() === "POST") {
+      checkoutPlans.push((request.postDataJSON() as { plan: string }).plan)
+    }
+  })
+
+  await page.goto("/pricing")
+  const publicAuthorCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Author", exact: true }),
+  })
+  const publicArchitectCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Architect", exact: true }),
+  })
+  await expect(publicAuthorCard).toContainText("$19")
+  await expect(publicAuthorCard).toContainText("10 days free, then $19/mo")
+  await expect(publicArchitectCard).toContainText("$39")
+  await expect(publicArchitectCard).toContainText("10 days free, then $39/mo")
+
+  await page.getByRole("button", { name: "Yearly" }).click()
+  await expect(publicAuthorCard).toContainText("$190")
+  await expect(publicAuthorCard).toContainText("Save $38 with yearly billing")
+  await expect(publicArchitectCard).toContainText("$390")
+  await expect(publicArchitectCard).toContainText("Save $78 with yearly billing")
+
+  await page.goto("/upgrade")
+  const upgradeAuthorCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Author", exact: true }),
+  })
+  const upgradeArchitectCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Architect", exact: true }),
+  })
+  await expect(upgradeAuthorCard).toContainText("$19")
+  await expect(upgradeArchitectCard).toContainText("$39")
+  await upgradeAuthorCard.getByRole("button", { name: "Upgrade to Author" }).click()
+  await upgradeArchitectCard.getByRole("button", { name: "Upgrade to Architect" }).click()
+  await page.getByRole("button", { name: "Yearly" }).click()
+  await expect(upgradeAuthorCard).toContainText("$190")
+  await expect(upgradeArchitectCard).toContainText("$390")
+  await upgradeAuthorCard.getByRole("button", { name: "Upgrade to Author" }).click()
+  await upgradeArchitectCard.getByRole("button", { name: "Upgrade to Architect" }).click()
+  await expect.poll(() => checkoutPlans).toEqual([
+    "author_monthly",
+    "architect_monthly",
+    "author_annual",
+    "architect_annual",
+  ])
+})
+
+test("mobile marketing header keeps sign in and registration visible", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/")
+
+  await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^start free$/i }).first()).toBeVisible()
-  await expect(page.getByText("Start analyzing your manuscript")).toBeVisible()
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  )
+  expect(hasHorizontalOverflow).toBe(false)
+
+  await page.getByRole("link", { name: /^sign in$/i }).click()
+  await expect(page).toHaveURL(/\/login$/)
+})
+
+test("interactive demo reviews findings without API calls or mobile overflow", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const apiRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/")) apiRequests.push(request.url())
+  })
+  await page.goto("/demo/workspace")
+
+  await expect(page.getByRole("heading", { name: "Review Dracula continuity findings" })).toBeVisible()
+  const desktopOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(desktopOverflow).toBe(false)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(page.getByText("0/3 reviewed")).toBeVisible()
+  await page.getByRole("button", { name: "Add to revision plan" }).click()
+  await expect(page.getByText("1/3 reviewed")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Revision plan" })).toBeVisible()
+  await page.getByRole("button", { name: "Reset demo" }).click()
+  await expect(page.getByText("0/3 reviewed")).toBeVisible()
+
+  const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(hasHorizontalOverflow).toBe(false)
+  expect(apiRequests).toEqual([])
+  expect(pageErrors).toEqual([])
+  expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
 })
 
 test("public SEO content hubs render without auth and link into article clusters", async ({ page }) => {
@@ -141,16 +239,85 @@ test("auth redirects protect private pages and skip login for active sessions", 
 
 test("admin route returns 404 when the request is not allowed", async ({ page }) => {
   await installMockApi(page, { admin: "none" })
+  await page.goto("/")
+  const response = await page.evaluate(async () => {
+    const result = await fetch("/api/v1/admin/session")
+    return { status: result.status, body: await result.json() }
+  })
+
+  expect(response.status).toBe(403)
+  expect(response.body).toEqual({ detail: "Admin only" })
+
   await page.goto("/admin")
 
   await expect(page.getByText("This page could not be found.")).toBeVisible()
 })
 
-test.skip("admin route loads the operations console for owner admins", async ({ page }) => {
-  // TODO: This test is currently skipped due to Next.js hot reload timing issues in E2E environment
-  // The test passes inconsistently depending on when the webServer completes its reload
+test("admin session accepts owner admins in the E2E mock", async ({ page }) => {
   await installMockApi(page, { admin: "owner" })
-  await page.goto("/admin")
+  await page.goto("/")
+  const response = await page.evaluate(async () => {
+    const result = await fetch("/api/v1/admin/session")
+    return { status: result.status, body: await result.json() }
+  })
+
+  expect(response.status).toBe(200)
+  expect(response.body).toMatchObject({
+    is_admin: true,
+    is_owner: true,
+    requires_step_up: false,
+  })
+  expect(response.body.scopes).toEqual(["moderation_admin", "billing_admin", "super_admin"])
+})
+
+test("admin route loads the operations console for owner admins", async ({ page }) => {
+  await installMockApi(page, { admin: "owner" })
+  await page.route("**/api/v1/admin/session", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: {
+        "access-control-allow-credentials": "true",
+        "access-control-allow-origin": E2E_APP_ORIGIN,
+      },
+      body: JSON.stringify({
+        is_admin: true,
+        scopes: ["moderation_admin", "billing_admin", "super_admin"],
+        is_owner: true,
+        requires_step_up: false,
+        session_expires_at: null,
+      }),
+    })
+  })
+  await page.goto("/")
+  const response = await page.evaluate(async () => {
+    const result = await fetch("/api/v1/admin/session")
+    return { status: result.status, body: await result.json() }
+  })
+
+  expect(response.status).toBe(200)
+  expect(response.body).toMatchObject({
+    is_admin: true,
+    is_owner: true,
+    requires_step_up: false,
+  })
+  expect(response.body.scopes).toEqual(["moderation_admin", "billing_admin", "super_admin"])
+
+  await page.setExtraHTTPHeaders({
+    "x-lorevia-admin-test-session": `owner:${ADMIN_TEST_SESSION_SECRET}`,
+  })
+  await page.evaluate((value) => {
+    document.cookie = `lorevia_admin_test_session=${encodeURIComponent(value)}; Path=/; SameSite=Lax`
+  }, `owner:${ADMIN_TEST_SESSION_SECRET}`)
+  await page.context().addCookies([
+    {
+      name: "lorevia_admin_test_session",
+      value: `owner:${ADMIN_TEST_SESSION_SECRET}`,
+      url: E2E_APP_ORIGIN,
+      sameSite: "Lax",
+    },
+  ])
+  await page.goto(`/admin?e2e=${Date.now()}`)
 
   await expect(page.getByRole("heading", { name: "Operations Console" })).toBeVisible()
   await expect(page.getByText("Billing setup")).toBeVisible()
@@ -197,6 +364,18 @@ test("settings page updates promotional email preferences", async ({ page }) => 
   await page.getByRole("button", { name: /Product updates/i }).click()
 
   await expect(page.getByText("Email preferences updated.")).toBeVisible()
+  await page.getByRole("button", { name: "Unsubscribe from promotional emails" }).click()
+  await expect(page.getByRole("button", { name: "Promotional emails unsubscribed" })).toBeVisible()
+})
+
+test("email unsubscribe link suppresses promotional email", async ({ page }) => {
+  await installMockApi(page, { session: "guest" })
+  await page.goto("/unsubscribe?token=mock-unsubscribe-token")
+
+  await expect(page.getByRole("heading", { name: "You are unsubscribed" })).toBeVisible()
+  await expect(page.getByText("author@getlorevia.com")).toBeVisible()
+  await expect(page.getByText(/product updates or marketing emails/i)).toBeVisible()
+  await expect(page.getByRole("link", { name: "Manage preferences" })).toHaveAttribute("href", "/settings#emails")
 })
 
 test("settings data export triggers a download request", async ({ page }) => {
@@ -235,15 +414,14 @@ test("settings sidebar follows the current section while scrolling", async ({ pa
 
 test("library permanent book deletion requires confirmation and removes the project", async ({ page }) => {
   await installMockApi(page)
-  page.on("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("DELETE BOOK")
-    await dialog.accept("DELETE BOOK")
-  })
   await page.goto("/library")
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.locator('button[aria-label="Open actions for Sky of Ash"]').first().click()
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click()
+  const deleteDialog = page.getByRole("dialog", { name: "Delete Sky of Ash permanently?" })
+  await deleteDialog.getByLabel("Confirmation phrase").fill("DELETE BOOK")
+  await deleteDialog.getByRole("button", { name: "Delete permanently" }).click()
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" })).toHaveCount(0)
 })
@@ -324,6 +502,20 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(page).toHaveURL(/\/(?:[^/]+--)?book-1\/manuscript$/, { timeout: 15000 })
   await expect(page.getByText("Story manuscript")).toBeVisible()
   await expect(page.getByText("Manuscript progress")).toBeVisible()
+})
+
+test("analysis-complete overview makes cited continuity review the primary result", async ({ page }) => {
+  await installMockApi(page, { activationPending: true })
+  await page.goto(BOOK_ROUTE)
+
+  await expect(page.getByTestId("activation-experience")).toBeVisible()
+  await expect(page.getByTestId("continuity-inbox")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "1 findings need review" })).toBeVisible()
+  await page.getByRole("button", { name: /Nora may use gate knowledge before learning it/i }).click()
+  await expect(page.getByText(/pressed her cut palm to the gate/)).toBeVisible()
+  await expect(page.getByText(/Kael finally told Nora/)).toBeVisible()
+  await page.getByRole("button", { name: "Accept", exact: true }).click()
+  await expect(page.getByText("Marked accepted")).toBeVisible()
 })
 
 test("expired free owners are redirected away from author-only book routes", async ({ page }) => {
@@ -537,6 +729,24 @@ test("manuscript processing state refreshes back into a reprocess action", async
 
   await expect(page.getByRole("button", { name: "Processing 53% ~3min left" })).toBeDisabled()
   await expect(page.getByRole("button", { name: "Reprocess manuscript" })).toBeEnabled({ timeout: 8000 })
+})
+
+test("allowance-paused manuscript continues from its checkpoint", async ({ page }) => {
+  await installMockApi(page, { manuscriptProcessing: "allowance-paused" })
+  const continueRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/processing/continue") && request.method() === "POST") {
+      continueRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  const continueButton = page.getByRole("button", { name: "Continue processing" }).first()
+  await expect(continueButton).toBeVisible()
+  await continueButton.click()
+  await expect(page.getByText("Processing continuation started.")).toBeVisible()
+  expect(continueRequests).toHaveLength(1)
 })
 
 test("manual chapter reprocess marks saved edits pending and starts without upload charge", async ({ page }) => {

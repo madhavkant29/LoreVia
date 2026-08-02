@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from redis.exceptions import RedisError
 
 from app.models.user import UserRateLimitOverride
 from app.utils import rate_limit_utils
@@ -75,6 +76,65 @@ async def test_limit_for_user_caches_database_override(monkeypatch):
     assert db.execute_count == 1
     assert stored == {
         "key": rate_limit_utils.rate_limit_override_cache_key(user_id),
-        "value": {"api_per_minute": 75, **{field: None for field in rate_limit_utils._OVERRIDE_FIELDS if field != "api_per_minute"}},
+        "value": {
+            "api_per_minute": 75,
+            **{
+                field: None
+                for field in rate_limit_utils._OVERRIDE_FIELDS
+                if field != "api_per_minute"
+            },
+        },
         "ttl": rate_limit_utils.RATE_LIMIT_OVERRIDE_CACHE_TTL_SECONDS,
     }
+
+
+@pytest.mark.asyncio
+async def test_limit_for_user_treats_redis_cache_get_failure_as_miss(monkeypatch):
+    user_id = uuid.uuid4()
+    override = UserRateLimitOverride(user_id=user_id, api_per_minute=81)
+
+    async def fail_cache_get(_key):
+        raise RedisError("redis unavailable")
+
+    async def fake_cache_set(_key, _value, _ttl):
+        return None
+
+    monkeypatch.setattr(rate_limit_utils, "cache_get", fail_cache_get)
+    monkeypatch.setattr(rate_limit_utils, "cache_set", fake_cache_set)
+    db = _Db(override)
+
+    assert await rate_limit_utils.limit_for_user(db, user_id, "api_per_minute", 300) == 81
+    assert db.execute_count == 1
+
+
+@pytest.mark.asyncio
+async def test_limit_for_user_propagates_unexpected_cache_get_failure(monkeypatch):
+    user_id = uuid.uuid4()
+
+    async def fail_cache_get(_key):
+        raise RuntimeError("bug in cache client")
+
+    monkeypatch.setattr(rate_limit_utils, "cache_get", fail_cache_get)
+    db = _Db(None)
+
+    with pytest.raises(RuntimeError, match="bug in cache client"):
+        await rate_limit_utils.limit_for_user(db, user_id, "api_per_minute", 300)
+
+
+@pytest.mark.asyncio
+async def test_limit_for_user_propagates_unexpected_cache_set_failure(monkeypatch):
+    user_id = uuid.uuid4()
+    override = UserRateLimitOverride(user_id=user_id, api_per_minute=91)
+
+    async def fake_cache_get(_key):
+        return None
+
+    async def fail_cache_set(_key, _value, _ttl):
+        raise RuntimeError("serialization regression")
+
+    monkeypatch.setattr(rate_limit_utils, "cache_get", fake_cache_get)
+    monkeypatch.setattr(rate_limit_utils, "cache_set", fail_cache_set)
+    db = _Db(override)
+
+    with pytest.raises(RuntimeError, match="serialization regression"):
+        await rate_limit_utils.limit_for_user(db, user_id, "api_per_minute", 300)

@@ -45,9 +45,7 @@ async def _insert_test_user(engine) -> str:
     user_id = uuid.uuid4()
     async with engine.connect() as conn:
         await conn.execute(
-            sa.text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_activity_dates DATE[]"
-            ),
+            sa.text("ALTER TABLE users ADD COLUMN IF NOT EXISTS login_activity_dates DATE[]"),
         )
         await conn.execute(
             sa.text(
@@ -76,7 +74,7 @@ async def _get_table_rows(engine, user_id: str) -> list[date]:
         rows = []
         for row in result:
             val = row[0]
-            if hasattr(val, 'date'):
+            if hasattr(val, "date"):
                 val = val.date()
             rows.append(val)
         return rows
@@ -101,9 +99,7 @@ async def test_upgrade_creates_table_and_index(setup_engine, setup_db, monkeypat
                 row[0]
                 for row in (
                     await conn.execute(
-                        sa.text(
-                            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-                        )
+                        sa.text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
                     )
                 ).fetchall()
             }
@@ -132,9 +128,7 @@ async def test_backfill_from_login_activity_dates(setup_engine, setup_db, monkey
 
     async with _conftest.engine_test.connect() as conn:
         await conn.execute(
-            sa.text(
-                "UPDATE users SET login_activity_dates = :dates WHERE id = :uid"
-            ),
+            sa.text("UPDATE users SET login_activity_dates = :dates WHERE id = :uid"),
             {
                 "dates": [date(2026, 5, 10), date(2026, 5, 11), date(2026, 5, 12)],
                 "uid": user_id,
@@ -224,9 +218,7 @@ async def test_upgrade_is_idempotent(setup_engine, setup_db, monkeypatch) -> Non
 
     async with _conftest.engine_test.connect() as conn:
         await conn.execute(
-            sa.text(
-                "UPDATE users SET login_activity_dates = :dates WHERE id = :uid"
-            ),
+            sa.text("UPDATE users SET login_activity_dates = :dates WHERE id = :uid"),
             {
                 "dates": [date(2026, 5, 14), date(2026, 5, 15)],
                 "uid": user_id,

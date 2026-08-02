@@ -30,7 +30,9 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 
 @pytest.mark.asyncio
 async def test_reader_timeline_keeps_plot_threads_visible_when_progress_is_sparse(client, db):
-    headers, user_id = await _register_user(client, f"timeline-api-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"timeline-api-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
 
     book = Book(
         user_id=user_id,
@@ -79,7 +81,9 @@ async def test_reader_timeline_keeps_plot_threads_visible_when_progress_is_spars
 
 @pytest.mark.asyncio
 async def test_reader_timeline_keeps_plot_threads_visible_when_intro_chapter_is_missing(client, db):
-    headers, user_id = await _register_user(client, f"timeline-null-intro-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"timeline-null-intro-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
 
     book = Book(
         user_id=user_id,

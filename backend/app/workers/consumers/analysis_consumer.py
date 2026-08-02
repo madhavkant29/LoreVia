@@ -1,14 +1,17 @@
 """
 Analysis consumer: summaries + plot tracking for one chapter.
 """
+
 import logging
 import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from openai import AsyncOpenAI
+from fastapi import HTTPException
+from openai import AsyncOpenAI, OpenAIError
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -28,18 +31,26 @@ from app.models.intelligence import ChapterSummary, Notification, PlotThread
 from app.models.user import User
 from app.services.email_service import send_processing_complete_with_stats
 from app.services.event_linking_service import link_summary_events
-from app.utils.character_utils import resolve_character_reference_from_roster
+from app.utils.books.chapter_titles import (
+    build_chapter_title_from_summary,
+    chapter_title_is_placeholder,
+)
+from app.utils.characters.extraction import resolve_character_reference_from_roster
+from app.utils.db_utils import is_retryable_transaction_db_error
+from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.ingestion_utils import (
     ANALYSIS_INFLIGHT_TTL_SECONDS,
     build_analysis_chapter_state,
     elapsed_ms,
     is_book_hidden,
+    is_llm_coordination_retry_error,
+    is_llm_usage_limit_error,
     mark_book_processing_cancelled,
     merge_processing_pipeline,
 )
-from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
-from app.utils.book_utils import build_chapter_title_from_summary, chapter_title_is_placeholder
+from app.utils.llm_usage_utils import is_transient_llm_provider_error
 from app.utils.logging.errors import public_error_message
+from app.utils.notification_utils import collect_book_ready_stats, upsert_book_ready_notification
 from app.utils.plot_thread_utils import (
     merge_plot_thread_status,
     normalize_plot_thread_status,
@@ -47,6 +58,7 @@ from app.utils.plot_thread_utils import (
     normalize_plot_thread_type,
     normalize_related_characters,
     plot_thread_lookup_key,
+    resolve_plot_thread_identity,
 )
 from app.utils.world_building_utils import ingest_world_elements_from_chapter
 
@@ -61,9 +73,10 @@ async def analyse_chapter(
     rebuild_run_id: str | None = None,
     manual_reprocess: bool = False,
 ) -> dict:
+    chapter_uuid = uuid.UUID(chapter_id)
     async with AsyncSessionLocal() as db:
         db_load_started = time.perf_counter()
-        chapter = await db.get(Chapter, uuid.UUID(chapter_id))
+        chapter = await db.get(Chapter, chapter_uuid)
         if not chapter:
             return {"error": "chapter not found"}
         book = await db.get(Book, chapter.book_id)
@@ -75,9 +88,14 @@ async def analyse_chapter(
         if rebuild_run_id is not None and active_rebuild_run_id != rebuild_run_id:
             log.info("Skipping stale rebuild analysis chapter_id=%s", chapter_id)
             return {"error": "stale_rebuild_run"}
-        if getattr(book, "is_editor_project", False) and not active_rebuild_run_id and not manual_reprocess:
+        if (
+            getattr(book, "is_editor_project", False)
+            and not active_rebuild_run_id
+            and not manual_reprocess
+        ):
             log.info("Skipping stale editor-project analysis chapter_id=%s", chapter_id)
             return {"error": "stale_editor_project_run"}
+        source_content_version = int(getattr(chapter, "content_version", 1) or 1)
         log.info(
             "analysis_timing stage=db_load chapter_id=%s elapsed_ms=%s",
             chapter_id,
@@ -101,8 +119,37 @@ async def analyse_chapter(
             chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
             status="running",
         )
-        await _refresh_book_analysis_pipeline(db, book)
-        await db.commit()
+        try:
+            # Flush the chapter first, then lock and refresh the shared book
+            # row. Every analysis/import path therefore takes chapter -> book
+            # locks in the same order.
+            await db.flush()
+            locked_book = await db.scalar(
+                select(Book)
+                .where(Book.id == book.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if locked_book is None:
+                await db.rollback()
+                await cache_del(inflight_key)
+                await cache_del(key_analysis_queued(chapter_id))
+                return {"error": "book not found"}
+            book = locked_book
+            await _refresh_book_analysis_pipeline(db, book)
+            await db.commit()
+        except FATAL_TASK_BOUNDARY_EXCEPTIONS:
+            try:
+                await db.rollback()
+            except SQLAlchemyError:
+                log.warning(
+                    "analysis_initial_rollback_failed chapter_id=%s",
+                    chapter_id,
+                    exc_info=True,
+                )
+            await cache_del(inflight_key)
+            await cache_del(key_analysis_queued(chapter_id))
+            raise
 
         try:
             existing_modes = set(
@@ -110,16 +157,46 @@ async def analyse_chapter(
                     await db.execute(
                         select(ChapterSummary.mode).where(ChapterSummary.chapter_id == chapter.id)
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
-            pending_modes = [mode for mode in ["short", "detailed", "key_points"] if mode not in existing_modes]
+            pending_modes = [
+                mode for mode in ["short", "detailed", "key_points"] if mode not in existing_modes
+            ]
 
             results: dict[str, str] = {}
             detailed_payload: dict[str, Any] | None = None
             summary_payloads: dict[str, dict[str, Any]] = {}
+            if "detailed" not in pending_modes and (
+                "short" in pending_modes or "key_points" in pending_modes
+            ):
+                existing_detailed = (
+                    await db.execute(
+                        select(ChapterSummary).where(
+                            ChapterSummary.chapter_id == chapter.id,
+                            ChapterSummary.mode == "detailed",
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing_detailed is not None:
+                    detailed_payload = {
+                        "content": existing_detailed.content,
+                        "key_events": existing_detailed.key_events,
+                        "char_changes": existing_detailed.char_changes,
+                        "clues": existing_detailed.clues,
+                        "themes": existing_detailed.themes,
+                    }
+            # Do not keep a database connection checked out while waiting for
+            # summary and plot-thread providers.
+            await db.commit()
 
             llm_started = time.perf_counter()
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+            client = (
+                AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
+                if settings.OPENAI_API_KEY
+                else None
+            )
             try:
                 if "detailed" in pending_modes:
                     try:
@@ -131,29 +208,29 @@ async def analyse_chapter(
                             user_id=book.user_id,
                             book_id=book.id,
                         )
-                    except Exception:
+                    except (
+                        HTTPException,
+                        OpenAIError,
+                        RuntimeError,
+                        TimeoutError,
+                        TypeError,
+                        ValueError,
+                    ) as exc:
+                        if (
+                            is_llm_usage_limit_error(exc)
+                            or is_llm_coordination_retry_error(exc)
+                            or is_transient_llm_provider_error(exc)
+                        ):
+                            raise
+                        log.warning(
+                            "analysis_detailed_summary_unavailable chapter_id=%s",
+                            chapter_id,
+                            exc_info=True,
+                        )
                         summary_payload = None
                     if summary_payload is not None:
                         detailed_payload = cast(dict[str, Any], summary_payload)
                         summary_payloads["detailed"] = detailed_payload
-                elif "short" in pending_modes or "key_points" in pending_modes:
-                    existing_detailed = (
-                        await db.execute(
-                            select(ChapterSummary).where(
-                                ChapterSummary.chapter_id == chapter.id,
-                                ChapterSummary.mode == "detailed",
-                            )
-                        )
-                    ).scalar_one_or_none()
-                    if existing_detailed is not None:
-                        detailed_payload = {
-                            "content": existing_detailed.content,
-                            "key_events": existing_detailed.key_events,
-                            "char_changes": existing_detailed.char_changes,
-                            "clues": existing_detailed.clues,
-                            "themes": existing_detailed.themes,
-                        }
-
                 if detailed_payload is not None:
                     derived_payloads = derive_summary_modes_from_detailed(detailed_payload)
                     for mode in ("short", "key_points"):
@@ -177,6 +254,29 @@ async def analyse_chapter(
                 elapsed_ms(llm_started),
                 pending_modes,
             )
+
+            locked_chapter = await db.scalar(
+                select(Chapter)
+                .where(Chapter.id == chapter_uuid)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if locked_chapter is None:
+                log.info("Skipping analysis for replaced chapter_id=%s", chapter_id)
+                return {"skipped": "chapter_replaced"}
+            if int(getattr(locked_chapter, "content_version", 1) or 1) != source_content_version:
+                log.info("Skipping stale chapter analysis chapter_id=%s", chapter_id)
+                return {"skipped": "stale_chapter_content"}
+            chapter = locked_chapter
+            locked_book = await db.scalar(
+                select(Book)
+                .where(Book.id == chapter.book_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if locked_book is None:
+                return {"error": "book not found"}
+            book = locked_book
 
             if await is_book_hidden(db, book.id):
                 await mark_book_processing_cancelled(
@@ -229,7 +329,9 @@ async def analyse_chapter(
                 if chapter_title_is_placeholder(chapter.title, chapter_number=chapter.number):
                     derived_title = build_chapter_title_from_summary(
                         cast(str | None, detailed_payload.get("content")),
-                        key_events=cast(list[dict[str, Any]] | None, detailed_payload.get("key_events")),
+                        key_events=cast(
+                            list[dict[str, Any]] | None, detailed_payload.get("key_events")
+                        ),
                     )
                     if derived_title:
                         chapter.title = derived_title
@@ -275,6 +377,35 @@ async def analyse_chapter(
             from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 
             await invalidate_advisor_caches_for_book(db, book_id=book.id)
+            completion_email: str | None = None
+            if ready_stats.analysis_complete and not prior_ready_state:
+                user = await db.get(User, book.user_id)
+                if user and user.email:
+                    completion_email = user.email
+            # Cache invalidation and the optional user lookup open a new read
+            # transaction after the result commit. Release that connection
+            # before email/network I/O and before returning to the worker.
+            await db.commit()
+            try:
+                from app.services.continuity.scan_service import (
+                    run_live_canon_guard_if_needed,
+                )
+
+                await run_live_canon_guard_if_needed(
+                    db,
+                    book_id=book.id,
+                    user_id=book.user_id,
+                    chapter_number=chapter.number,
+                    content_version=int(getattr(chapter, "content_version", 1) or 1),
+                    author_mode=getattr(book, "mode", None) == "author",
+                )
+            except SQLAlchemyError:
+                log.warning(
+                    "live_canon_guard_dispatch_failed chapter_id=%s",
+                    chapter_id,
+                    exc_info=True,
+                )
+                await db.rollback()
             log.info(
                 "analysis_timing stage=db_commit chapter_id=%s elapsed_ms=%s summaries=%s threads=%s",
                 chapter_id,
@@ -282,41 +413,58 @@ async def analyse_chapter(
                 len(results),
                 len(threads),
             )
-            if ready_stats.analysis_complete and not prior_ready_state:
-                user = await db.get(User, book.user_id)
-                if user and user.email:
-                    await send_processing_complete_with_stats(
-                        user.email,
-                        book_title=book.title,
-                        character_count=ready_stats.character_count,
-                        relationship_count=ready_stats.relationship_count,
-                        plot_thread_count=ready_stats.plot_thread_count,
-                        continuity_issue_count=ready_stats.continuity_issue_count,
-                    )
+            if completion_email:
+                await send_processing_complete_with_stats(
+                    completion_email,
+                    book_title=book.title,
+                    character_count=ready_stats.character_count,
+                    relationship_count=ready_stats.relationship_count,
+                    plot_thread_count=ready_stats.plot_thread_count,
+                    continuity_issue_count=ready_stats.continuity_issue_count,
+                )
             if settings.DEBUG:
                 log.info("analysed_chapter %s %s", chapter_id, results)
             return {"chapter_id": chapter_id, "summaries": results}
-        except Exception as exc:
+        except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
             try:
                 await db.rollback()
-            except Exception:
+            except SQLAlchemyError:
+                log.warning("analysis_rollback_failed chapter_id=%s", chapter_id, exc_info=True)
                 pass
             try:
-                fresh_chapter = await db.get(Chapter, chapter.id)
+                fresh_chapter = await db.get(Chapter, chapter_uuid)
                 if fresh_chapter is not None:
+                    retry_later = (
+                        is_llm_usage_limit_error(exc)
+                        or is_llm_coordination_retry_error(exc)
+                        or is_transient_llm_provider_error(exc)
+                        or is_retryable_transaction_db_error(exc)
+                    )
                     fresh_chapter.analysis_state = build_analysis_chapter_state(
-                        fresh_chapter.analysis_state if isinstance(fresh_chapter.analysis_state, dict) else None,
-                        status="failed",
-                        last_error=public_error_message(500),
+                        fresh_chapter.analysis_state
+                        if isinstance(fresh_chapter.analysis_state, dict)
+                        else None,
+                        status="queued" if retry_later else "failed",
+                        last_error=None if retry_later else public_error_message(500),
                     )
                     fresh_book = await db.get(Book, fresh_chapter.book_id)
                     if fresh_book is not None:
                         await _refresh_book_analysis_pipeline(db, fresh_book)
                 await db.commit()
-            except Exception:
+            except SQLAlchemyError:
+                log.warning(
+                    "analysis_failure_state_update_failed chapter_id=%s",
+                    chapter_id,
+                    exc_info=True,
+                )
                 try:
                     await db.rollback()
-                except Exception:
+                except SQLAlchemyError:
+                    log.warning(
+                        "analysis_failure_state_rollback_failed chapter_id=%s",
+                        chapter_id,
+                        exc_info=True,
+                    )
                     pass
             raise
         finally:
@@ -324,15 +472,19 @@ async def analyse_chapter(
             await cache_del(key_analysis_queued(chapter_id))
 
 
-async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[dict[str, Any]]) -> None:
+async def _upsert_plot_threads(
+    db, book: Book, chapter: Chapter, threads: list[dict[str, Any]]
+) -> None:
     character_rows = (
-        await db.execute(select(Character).where(Character.book_id == chapter.book_id))
-    ).scalars().all()
+        (await db.execute(select(Character).where(Character.book_id == chapter.book_id)))
+        .scalars()
+        .all()
+    )
     existing_threads = (
-        await db.execute(
-            select(PlotThread).where(PlotThread.book_id == chapter.book_id)
-        )
-    ).scalars().all()
+        (await db.execute(select(PlotThread).where(PlotThread.book_id == chapter.book_id)))
+        .scalars()
+        .all()
+    )
     existing_by_key: dict[str, PlotThread] = {}
     for existing in existing_threads:
         key = plot_thread_lookup_key(existing.title)
@@ -362,7 +514,7 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
             if part
         )
         resolved_character_names_raw: list[str] = []
-        for item in (raw_thread.get("characters_involved") or []):
+        for item in raw_thread.get("characters_involved") or []:
             candidate = str(item).strip()
             if not candidate:
                 continue
@@ -371,7 +523,9 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
                 candidate,
                 context_text=thread_context,
             )
-            resolved_character_names_raw.append(resolved.name if resolved is not None else candidate)
+            resolved_character_names_raw.append(
+                resolved.name if resolved is not None else candidate
+            )
         resolved_character_names = normalize_related_characters(resolved_character_names_raw)
         bucket = candidate_threads.setdefault(
             key,
@@ -379,7 +533,9 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
                 "title": title,
                 "description": str(raw_thread.get("description") or "").strip() or None,
                 "type": normalize_plot_thread_type(raw_thread.get("type")),
-                "status": normalize_plot_thread_status(raw_thread.get("status"), default="introduced"),
+                "status": normalize_plot_thread_status(
+                    raw_thread.get("status"), default="introduced"
+                ),
                 "characters_involved": resolved_character_names,
                 "importance": int(raw_thread.get("importance") or 5),
             },
@@ -387,15 +543,28 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
         if not bucket.get("description") and raw_thread.get("description"):
             bucket["description"] = str(raw_thread.get("description") or "").strip() or None
         if raw_thread.get("type"):
-            bucket["type"] = normalize_plot_thread_type(raw_thread.get("type")) or bucket.get("type")
+            bucket["type"] = normalize_plot_thread_type(raw_thread.get("type")) or bucket.get(
+                "type"
+            )
         bucket["status"] = merge_plot_thread_status(bucket.get("status"), raw_thread.get("status"))
-        bucket["importance"] = max(int(bucket.get("importance") or 5), int(raw_thread.get("importance") or 5))
+        bucket["importance"] = max(
+            int(bucket.get("importance") or 5), int(raw_thread.get("importance") or 5)
+        )
         bucket["characters_involved"] = normalize_related_characters(
             [*(bucket.get("characters_involved") or []), *resolved_character_names]
         )
 
     for key, candidate in candidate_threads.items():
         thread = existing_by_key.get(key)
+        if thread is None:
+            thread = resolve_plot_thread_identity(
+                existing_threads,
+                title=candidate["title"],
+                description=candidate.get("description"),
+                thread_type=candidate.get("type"),
+                character_names=candidate.get("characters_involved", []),
+                chapter_number=chapter.number,
+            )
         if thread is None:
             db.add(
                 PlotThread(
@@ -406,7 +575,9 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
                     status=candidate.get("status", "introduced"),
                     introduced_at=chapter.number,
                     last_mentioned_at=chapter.number,
-                    resolved_at=chapter.number if candidate.get("status") in {"resolved", "abandoned"} else None,
+                    resolved_at=chapter.number
+                    if candidate.get("status") in {"resolved", "abandoned"}
+                    else None,
                     mention_count=1,
                     character_ids=candidate.get("characters_involved", []),
                     importance=candidate.get("importance", 5),
@@ -423,11 +594,15 @@ async def _upsert_plot_threads(db, book: Book, chapter: Chapter, threads: list[d
         if candidate.get("type"):
             thread.thread_type = candidate["type"]
         thread.status = merge_plot_thread_status(thread.status, candidate.get("status"))
-        thread.introduced_at = min(
-            value for value in [thread.introduced_at, chapter.number] if value is not None
-        ) if thread.introduced_at is not None else chapter.number
+        thread.introduced_at = (
+            min(value for value in [thread.introduced_at, chapter.number] if value is not None)
+            if thread.introduced_at is not None
+            else chapter.number
+        )
         thread.last_mentioned_at = max(
-            value for value in [thread.last_mentioned_at, thread.introduced_at, chapter.number] if value is not None
+            value
+            for value in [thread.last_mentioned_at, thread.introduced_at, chapter.number]
+            if value is not None
         )
         thread.mention_count = int(thread.mention_count or 0) + 1
         thread.importance = max(int(thread.importance or 5), int(candidate.get("importance") or 5))
@@ -444,7 +619,9 @@ async def _refresh_book_analysis_pipeline(db, book: Book) -> None:
     total_chapters = int(
         (
             await db.execute(
-                select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id, Chapter.word_count > 0)
+                select(func.count())
+                .select_from(Chapter)
+                .where(Chapter.book_id == book.id, Chapter.word_count > 0)
             )
         ).scalar_one()
     )
@@ -454,7 +631,11 @@ async def _refresh_book_analysis_pipeline(db, book: Book) -> None:
                 select(func.count(func.distinct(ChapterSummary.chapter_id)))
                 .select_from(ChapterSummary)
                 .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
-                .where(Chapter.book_id == book.id, Chapter.word_count > 0, ChapterSummary.mode == "detailed")
+                .where(
+                    Chapter.book_id == book.id,
+                    Chapter.word_count > 0,
+                    ChapterSummary.mode == "detailed",
+                )
             )
         ).scalar_one()
     )
@@ -468,10 +649,12 @@ async def _refresh_book_analysis_pipeline(db, book: Book) -> None:
     failed_chapters = [
         int(number)
         for number, analysis_state in chapter_rows
-        if isinstance(analysis_state, dict) and str(analysis_state.get("status") or "").strip() == "failed"
+        if isinstance(analysis_state, dict)
+        and str(analysis_state.get("status") or "").strip() == "failed"
     ]
     queued_or_running = any(
-        isinstance(analysis_state, dict) and str(analysis_state.get("status") or "").strip() in {"queued", "running"}
+        isinstance(analysis_state, dict)
+        and str(analysis_state.get("status") or "").strip() in {"queued", "running"}
         for _, analysis_state in chapter_rows
     )
     if total_chapters > 0 and completed >= total_chapters:
@@ -483,7 +666,9 @@ async def _refresh_book_analysis_pipeline(db, book: Book) -> None:
     else:
         analysis_status = "pending"
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
-    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
     processing = merge_processing_pipeline(
         dict(processing),
         analysis={

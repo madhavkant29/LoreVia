@@ -8,7 +8,7 @@ const eslintConfig = [
   ...compat.extends("next/core-web-vitals"),
   ...compat.extends("next/typescript"),
   {
-    ignores: [".next/**", "out/**", "dist/**"],
+    ignores: [".next/**", "out/**", "dist/**", "coverage/**", "playwright-report/**", "test-results/**"],
   },
   {
     rules: {

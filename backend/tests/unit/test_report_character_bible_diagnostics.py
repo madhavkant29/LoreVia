@@ -15,7 +15,9 @@ from scripts.report_character_bible_diagnostics import build_report
 
 @pytest.mark.asyncio
 async def test_build_report_summarizes_character_and_media_diagnostics(db, tmp_path):
-    user = User(email="report-diagnostics@lorevia.app", username="reportdiagnostics", password_hash="hash")
+    user = User(
+        email="report-diagnostics@lorevia.app", username="reportdiagnostics", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
 

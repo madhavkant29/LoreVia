@@ -29,7 +29,12 @@ from app.utils.billing_utils import (
 
 @pytest.mark.asyncio
 async def test_worldbuilding_upload_cost_scales_with_series_book_count(db):
-    user = User(email="billing-series@lorevia.app", username="billingseries", password_hash="hash", tier="author")
+    user = User(
+        email="billing-series@lorevia.app",
+        username="billingseries",
+        password_hash="hash",
+        tier="author",
+    )
     db.add(user)
     await db.flush()
 
@@ -38,9 +43,30 @@ async def test_worldbuilding_upload_cost_scales_with_series_book_count(db):
     await db.flush()
 
     books = [
-        Book(user_id=user.id, title="Book One", format="txt", s3_key="books/one.txt", status="ready", primary_series_id=series.id),
-        Book(user_id=user.id, title="Book Two", format="txt", s3_key="books/two.txt", status="ready", primary_series_id=series.id),
-        Book(user_id=user.id, title="Book Three", format="txt", s3_key="books/three.txt", status="ready", primary_series_id=series.id),
+        Book(
+            user_id=user.id,
+            title="Book One",
+            format="txt",
+            s3_key="books/one.txt",
+            status="ready",
+            primary_series_id=series.id,
+        ),
+        Book(
+            user_id=user.id,
+            title="Book Two",
+            format="txt",
+            s3_key="books/two.txt",
+            status="ready",
+            primary_series_id=series.id,
+        ),
+        Book(
+            user_id=user.id,
+            title="Book Three",
+            format="txt",
+            s3_key="books/three.txt",
+            status="ready",
+            primary_series_id=series.id,
+        ),
     ]
     db.add_all(books)
     await db.flush()
@@ -52,7 +78,12 @@ async def test_worldbuilding_upload_cost_scales_with_series_book_count(db):
 
 @pytest.mark.asyncio
 async def test_calculate_upload_usage_counts_weighted_worldbuilding_documents(db):
-    user = User(email="billing-usage@lorevia.app", username="billingusage", password_hash="hash", tier="author")
+    user = User(
+        email="billing-usage@lorevia.app",
+        username="billingusage",
+        password_hash="hash",
+        tier="author",
+    )
     db.add(user)
     await db.flush()
 
@@ -61,17 +92,40 @@ async def test_calculate_upload_usage_counts_weighted_worldbuilding_documents(db
     await db.flush()
 
     series_books = [
-        Book(user_id=user.id, title="Volume I", format="txt", s3_key="books/i.txt", status="ready", primary_series_id=series.id),
-        Book(user_id=user.id, title="Volume II", format="txt", s3_key="books/ii.txt", status="ready", primary_series_id=series.id),
+        Book(
+            user_id=user.id,
+            title="Volume I",
+            format="txt",
+            s3_key="books/i.txt",
+            status="ready",
+            primary_series_id=series.id,
+        ),
+        Book(
+            user_id=user.id,
+            title="Volume II",
+            format="txt",
+            s3_key="books/ii.txt",
+            status="ready",
+            primary_series_id=series.id,
+        ),
     ]
-    solo_book = Book(user_id=user.id, title="Standalone", format="txt", s3_key="books/solo.txt", status="ready")
+    solo_book = Book(
+        user_id=user.id, title="Standalone", format="txt", s3_key="books/solo.txt", status="ready"
+    )
     db.add_all([*series_books, solo_book])
     await db.flush()
     db.add_all([SeriesBook(series_id=series.id, book_id=book.id) for book in series_books])
     db.add_all(
         [
-            WorldBuildingDocument(book_id=series_books[0].id, title="Series Bible", s3_key="world/series.json", is_active=True),
-            WorldBuildingDocument(book_id=solo_book.id, title="Solo Notes", s3_key="world/solo.json", is_active=True),
+            WorldBuildingDocument(
+                book_id=series_books[0].id,
+                title="Series Bible",
+                s3_key="world/series.json",
+                is_active=True,
+            ),
+            WorldBuildingDocument(
+                book_id=solo_book.id, title="Solo Notes", s3_key="world/solo.json", is_active=True
+            ),
         ]
     )
     await db.commit()
@@ -87,10 +141,21 @@ async def test_calculate_upload_usage_counts_weighted_worldbuilding_documents(db
 
 @pytest.mark.asyncio
 async def test_calculate_upload_usage_includes_manual_reprocess_charges(db):
-    user = User(email="billing-reprocess@lorevia.app", username="billingreprocess", password_hash="hash", tier="author")
+    user = User(
+        email="billing-reprocess@lorevia.app",
+        username="billingreprocess",
+        password_hash="hash",
+        tier="author",
+    )
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Charged Project", format="txt", s3_key="books/charged.txt", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Charged Project",
+        format="txt",
+        s3_key="books/charged.txt",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
     db.add(
@@ -113,10 +178,21 @@ async def test_calculate_upload_usage_includes_manual_reprocess_charges(db):
 
 @pytest.mark.asyncio
 async def test_record_book_upload_charge_is_idempotent_by_source(db):
-    user = User(email="billing-charge-idem@lorevia.app", username="billingchargeidem", password_hash="hash", tier="author")
+    user = User(
+        email="billing-charge-idem@lorevia.app",
+        username="billingchargeidem",
+        password_hash="hash",
+        tier="author",
+    )
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Idempotent Project", format="txt", s3_key="books/idempotent.txt", status="ready")
+    book = Book(
+        user_id=user.id,
+        title="Idempotent Project",
+        format="txt",
+        s3_key="books/idempotent.txt",
+        status="ready",
+    )
     db.add(book)
     await db.flush()
 
@@ -136,7 +212,11 @@ async def test_record_book_upload_charge_is_idempotent_by_source(db):
     )
     await db.commit()
 
-    count = await db.scalar(select(func.count()).select_from(BookUploadCharge).where(BookUploadCharge.user_id == user.id))
+    count = await db.scalar(
+        select(func.count())
+        .select_from(BookUploadCharge)
+        .where(BookUploadCharge.user_id == user.id)
+    )
     assert first.id == second.id
     assert count == 1
 
@@ -185,12 +265,20 @@ async def test_record_book_upload_charge_uses_savepoint_for_idempotency_race():
 
 @pytest.mark.asyncio
 async def test_ensure_upload_capacity_blocks_author_when_series_weight_pushes_past_cap(db):
-    user = User(email="billing-cap@lorevia.app", username="billingcap", password_hash="hash", tier="author")
+    user = User(
+        email="billing-cap@lorevia.app", username="billingcap", password_hash="hash", tier="author"
+    )
     db.add(user)
     await db.flush()
 
     books = [
-        Book(user_id=user.id, title=f"Project {index}", format="txt", s3_key=f"books/{index}.txt", status="ready")
+        Book(
+            user_id=user.id,
+            title=f"Project {index}",
+            format="txt",
+            s3_key=f"books/{index}.txt",
+            status="ready",
+        )
         for index in range(1, 15)
     ]
     db.add_all(books)
@@ -221,7 +309,15 @@ async def test_ensure_upload_capacity_blocks_free_users_from_new_uploads(db):
     db.add(user)
     await db.flush()
 
-    db.add(Book(user_id=user.id, title="Only Project", format="txt", s3_key="books/free.txt", status="ready"))
+    db.add(
+        Book(
+            user_id=user.id,
+            title="Only Project",
+            format="txt",
+            s3_key="books/free.txt",
+            status="ready",
+        )
+    )
     await db.commit()
 
     with pytest.raises(HTTPException) as exc:
@@ -232,7 +328,9 @@ async def test_ensure_upload_capacity_blocks_free_users_from_new_uploads(db):
 
 
 @pytest.mark.asyncio
-async def test_ensure_upload_capacity_treats_legacy_reader_alias_like_non_author_owner_for_uploads(db):
+async def test_ensure_upload_capacity_treats_legacy_reader_alias_like_non_author_owner_for_uploads(
+    db,
+):
     user = User(
         email="billing-reader-cap@lorevia.app",
         username="billingreadercap",
@@ -243,7 +341,15 @@ async def test_ensure_upload_capacity_treats_legacy_reader_alias_like_non_author
     db.add(user)
     await db.flush()
 
-    db.add(Book(user_id=user.id, title="Reader Project", format="txt", s3_key="books/reader.txt", status="ready"))
+    db.add(
+        Book(
+            user_id=user.id,
+            title="Reader Project",
+            format="txt",
+            s3_key="books/reader.txt",
+            status="ready",
+        )
+    )
     await db.commit()
 
     with pytest.raises(HTTPException) as exc:
@@ -273,7 +379,9 @@ def test_paddle_plan_from_event_data_maps_legacy_pro_labels_to_author_plan():
 
 
 def test_recommended_paddle_default_checkout_url_uses_app_url(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.APP_URL", "https://app.getlorevia.com", raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.APP_URL", "https://app.getlorevia.com", raising=False
+    )
 
     assert recommended_paddle_default_checkout_url() == "https://app.getlorevia.com/checkout"
 
@@ -363,7 +471,9 @@ def test_summary_modes_allow_short_for_all_tiers_but_restrict_post_trial_free_us
 
 
 @pytest.mark.asyncio
-async def test_build_subscription_metrics_summary_reports_trial_conversion_and_post_cancel_churn(db):
+async def test_build_subscription_metrics_summary_reports_trial_conversion_and_post_cancel_churn(
+    db,
+):
     now = datetime(2030, 6, 20, 12, 0, tzinfo=UTC)
     cohort_start = datetime(2030, 5, 1, 8, 0, tzinfo=UTC)
 
@@ -439,10 +549,10 @@ async def test_build_subscription_metrics_summary_reports_trial_conversion_and_p
                 source_event_id="evt_unresolved_cancel",
                 plan="author_monthly",
                 status="canceled",
-                    occurred_at=now - timedelta(days=5),
-                ),
-            ]
-        )
+                occurred_at=now - timedelta(days=5),
+            ),
+        ]
+    )
     await db.commit()
 
     summary = await build_subscription_metrics_summary(

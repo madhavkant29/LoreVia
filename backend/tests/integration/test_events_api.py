@@ -10,6 +10,7 @@ from app.models.progress import ReadingProgress
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     from app.core.security import create_access_token
+
     response = await client.post(
         "/api/v1/auth/register",
         json={
@@ -30,8 +31,17 @@ async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]
 
 @pytest.mark.asyncio
 async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
-    headers, user_id = await _register_user(client, f"events-api-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Eventful", format="pdf", s3_key="eventful.pdf", status="ready", total_chapters=4)
+    headers, user_id = await _register_user(
+        client, f"events-api-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    book = Book(
+        user_id=user_id,
+        title="Eventful",
+        format="pdf",
+        s3_key="eventful.pdf",
+        status="ready",
+        total_chapters=4,
+    )
     db.add(book)
     await db.flush()
 
@@ -42,8 +52,19 @@ async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
         name="Mira",
         first_chapter=1,
         growth_events=[
-            {"chapter_number": 1, "event_title": "Takes the oath", "description": "Commits to the cause", "impact_score": 6},
-            {"chapter_number": 3, "event_title": "Breaks the oath", "description": "Turns away", "impact_score": 9, "is_major": True},
+            {
+                "chapter_number": 1,
+                "event_title": "Takes the oath",
+                "description": "Commits to the cause",
+                "impact_score": 6,
+            },
+            {
+                "chapter_number": 3,
+                "event_title": "Breaks the oath",
+                "description": "Turns away",
+                "impact_score": 9,
+                "is_major": True,
+            },
         ],
     )
     db.add_all(
@@ -61,13 +82,27 @@ async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
                 chapter_id=chapter1.id,
                 mode="detailed",
                 content="Chapter one summary",
-                key_events=[{"event_title": "The oath", "description": "Mira swears service", "importance": 6, "involved_characters": [str(hero.id)]}],
+                key_events=[
+                    {
+                        "event_title": "The oath",
+                        "description": "Mira swears service",
+                        "importance": 6,
+                        "involved_characters": [str(hero.id)],
+                    }
+                ],
             ),
             ChapterSummary(
                 chapter_id=chapter3.id,
                 mode="detailed",
                 content="Chapter three summary",
-                key_events=[{"event_title": "The break", "description": "Mira abandons the order", "importance": 9, "involved_characters": [str(hero.id)]}],
+                key_events=[
+                    {
+                        "event_title": "The break",
+                        "description": "Mira abandons the order",
+                        "importance": 9,
+                        "involved_characters": [str(hero.id)],
+                    }
+                ],
             ),
         ]
     )
@@ -81,4 +116,6 @@ async def test_book_and_reader_events_endpoints_filter_by_progress(client, db):
     assert reader_events.status_code == 200
     items = reader_events.json()["items"]
     assert [item["event_title"] for item in items if item.get("type") == "major"] == ["The oath"]
-    assert [item["event_title"] for item in items if item.get("type") == "character"] == ["Takes the oath"]
+    assert [item["event_title"] for item in items if item.get("type") == "character"] == [
+        "Takes the oath"
+    ]

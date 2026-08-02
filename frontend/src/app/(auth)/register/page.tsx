@@ -9,6 +9,7 @@ import { validateRegisterPassword, validateRegisterUsername } from "@/lib/auth/r
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
+import { capture } from "@/lib/analytics/posthog"
 
 function generateStrongPassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+?"
@@ -101,6 +102,7 @@ export default function RegisterPage() {
         setError("Could not create your account. Please try again.")
         return
       }
+      capture("registration_completed", { method: "email" })
       router.push(`/verify-email?email=${encodeURIComponent(result.email)}`)
     } catch (error: unknown) {
       if (typeof error === "object" && error && "response" in error) {

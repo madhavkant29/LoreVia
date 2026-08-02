@@ -12,6 +12,18 @@ from app.models.intelligence import Notification
 from app.models.moderation import ContentReport
 from app.models.user import User
 from app.schemas.public import ContentReportCreateBody, ContentReportOut
+from app.utils.client_identity import trusted_client_ip
+from app.utils.public.moderation import (
+    add_moderation_action,
+    copyright_report_requires_temporary_hold,
+    ensure_public_content_report_not_duplicate,
+    ensure_report_type_supported,
+    invalidate_public_book_caches,
+    validate_public_content_report_target,
+)
+from app.utils.public.requests import (
+    hash_text,
+)
 from app.utils.public_utils import (
     MODERATION_STATUS_HIDDEN,
     MODERATION_STATUS_REPORTED,
@@ -19,13 +31,6 @@ from app.utils.public_utils import (
     REPORT_STATUS_CONTENT_HIDDEN,
     REPORT_STATUS_OPEN,
     REPORT_TYPE_COPYRIGHT,
-    add_moderation_action,
-    copyright_report_requires_temporary_hold,
-    ensure_public_content_report_not_duplicate,
-    ensure_report_type_supported,
-    hash_text,
-    invalidate_public_book_caches,
-    validate_public_content_report_target,
 )
 
 router = APIRouter()
@@ -49,7 +54,7 @@ async def create_content_report(
     reported_content_url = validate_public_content_report_target(book, body.reported_content_url)
     if report_type == REPORT_TYPE_COPYRIGHT and not body.reporter_email:
         raise HTTPException(400, "Copyright reports must include a reporter email.")
-    reporter_ip_hash = hash_text(request.client.host if request.client else None)
+    reporter_ip_hash = hash_text(trusted_client_ip(request))
     await ensure_public_content_report_not_duplicate(
         db,
         book_id=book.id,
@@ -87,7 +92,10 @@ async def create_content_report(
         metadata={"report_type": report_type},
     )
 
-    should_hide = report_type == REPORT_TYPE_COPYRIGHT and await copyright_report_requires_temporary_hold(db, book_id=book.id)
+    should_hide = (
+        report_type == REPORT_TYPE_COPYRIGHT
+        and await copyright_report_requires_temporary_hold(db, book_id=book.id)
+    )
     if should_hide:
         book.moderation_status = MODERATION_STATUS_HIDDEN
         book.public_status = PUBLIC_STATUS_HIDDEN
@@ -108,9 +116,7 @@ async def create_content_report(
     else:
         book.moderation_status = MODERATION_STATUS_REPORTED
 
-    admin_ids = (
-        await db.execute(select(User.id).where(User.tier == "admin"))
-    ).scalars().all()
+    admin_ids = (await db.execute(select(User.id).where(User.tier == "admin"))).scalars().all()
     for admin_id in admin_ids:
         db.add(
             Notification(

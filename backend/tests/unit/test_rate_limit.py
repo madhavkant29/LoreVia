@@ -11,8 +11,10 @@ from app.api.deps.rate_limit import (
     _client_identifier,
     rate_limit_advisor,
     rate_limit_continuity_checker,
+    rate_limit_internal_job,
     rate_limit_manuscript_import,
     rate_limit_recall,
+    rate_limit_summary,
     rate_limit_upload,
     rate_limit_world_building_ai,
     rate_limit_world_building_upload,
@@ -20,7 +22,9 @@ from app.api.deps.rate_limit import (
 
 
 def _request_with_headers(headers: dict[str, str], client_host: str = "127.0.0.1") -> Request:
-    scope_headers = [(key.lower().encode("latin-1"), value.encode("latin-1")) for key, value in headers.items()]
+    scope_headers = [
+        (key.lower().encode("latin-1"), value.encode("latin-1")) for key, value in headers.items()
+    ]
     scope = {
         "type": "http",
         "method": "GET",
@@ -44,9 +48,35 @@ def test_client_identifier_prefers_cloudflare_header() -> None:
 
 
 def test_client_identifier_ignores_forged_cloudflare_header_without_edge_marker() -> None:
-    request = _request_with_headers({"cf-connecting-ip": "203.0.113.11"}, client_host="198.51.100.8")
+    request = _request_with_headers(
+        {"cf-connecting-ip": "203.0.113.11"}, client_host="198.51.100.8"
+    )
 
     assert _client_identifier(request) == "198.51.100.8"
+
+
+def test_client_identifier_requires_edge_marker_for_forwarded_headers_from_proxy() -> None:
+    request = _request_with_headers(
+        {
+            "x-real-ip": "203.0.113.24",
+            "x-forwarded-for": "203.0.113.25",
+        },
+        client_host="127.0.0.1",
+    )
+
+    assert _client_identifier(request) == "127.0.0.1"
+
+
+def test_client_identifier_ignores_malformed_forwarded_header() -> None:
+    request = _request_with_headers(
+        {
+            "x-forwarded-for": "not-an-ip",
+            "x-lorevia-edge-verified": "1",
+        },
+        client_host="127.0.0.1",
+    )
+
+    assert _client_identifier(request) == "127.0.0.1"
 
 
 def test_client_identifier_falls_back_to_socket_client() -> None:
@@ -116,6 +146,58 @@ async def test_weekly_bucket_blocks_after_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_summary_rate_limit_uses_hourly_override(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    async def _fake_limit_for_user(_db, user_id, field, default):
+        assert _db is None
+        assert user_id == "summary-user"
+        assert field == "summary_per_hour"
+        assert default == 3
+        return 1
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
+    monkeypatch.setattr("app.api.deps.rate_limit.settings.FREE_SUMMARY_PER_HOUR", 3)
+    user = SimpleNamespace(id="summary-user")
+
+    await rate_limit_summary(user, db=None)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_summary(user, db=None)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+
+
+@pytest.mark.asyncio
+async def test_internal_job_rate_limit_is_not_keyed_by_invalid_secret(monkeypatch):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    for index in range(10):
+        request = _request_with_headers(
+            {"x-internal-job-secret": f"rotating-{index}"},
+            client_host="198.51.100.8",
+        )
+        await rate_limit_internal_job(request)
+
+    with pytest.raises(Exception) as exc_info:
+        request = _request_with_headers(
+            {"x-internal-job-secret": "rotating-final"},
+            client_host="198.51.100.8",
+        )
+        await rate_limit_internal_job(request)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+
+
+@pytest.mark.asyncio
 async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
     fake_redis = _FakeRedis()
 
@@ -129,7 +211,9 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
     monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
     monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
     monkeypatch.setattr("app.api.deps.rate_limit.free_advisor_limit_per_week", lambda _user: None)
-    monkeypatch.setattr("app.api.deps.rate_limit.protected_authoring_limit_per_day", lambda _user: 2)
+    monkeypatch.setattr(
+        "app.api.deps.rate_limit.protected_authoring_limit_per_day", lambda _user: 2
+    )
     monkeypatch.setattr(
         "app.api.deps.rate_limit._current_utc",
         lambda now=None: datetime(2026, 6, 10, 10, 0, tzinfo=UTC),
@@ -229,12 +313,26 @@ async def test_free_continuity_checker_is_author_only(monkeypatch):
     ("limiter", "field", "expected_message"),
     [
         (rate_limit_upload, "uploads_per_hour", "Upload rate limit exceeded"),
-        (rate_limit_manuscript_import, "manuscript_imports_per_hour", "Manuscript import rate limit exceeded"),
-        (rate_limit_world_building_upload, "world_building_uploads_per_hour", "World-building upload rate limit exceeded"),
-        (rate_limit_world_building_ai, "world_building_ai_per_hour", "World-building analysis rate limit exceeded"),
+        (
+            rate_limit_manuscript_import,
+            "manuscript_imports_per_hour",
+            "Manuscript import rate limit exceeded",
+        ),
+        (
+            rate_limit_world_building_upload,
+            "world_building_uploads_per_hour",
+            "World-building upload rate limit exceeded",
+        ),
+        (
+            rate_limit_world_building_ai,
+            "world_building_ai_per_hour",
+            "World-building analysis rate limit exceeded",
+        ),
     ],
 )
-async def test_window_rate_limits_block_after_threshold(monkeypatch, limiter, field, expected_message):
+async def test_window_rate_limits_block_after_threshold(
+    monkeypatch, limiter, field, expected_message
+):
     class _FakePipeline:
         def __init__(self, redis):
             self.redis = redis
@@ -263,7 +361,9 @@ async def test_window_rate_limits_block_after_threshold(monkeypatch, limiter, fi
                     key, _minimum, maximum = args
                     members = self.redis.zsets.setdefault(key, [])
                     original_size = len(members)
-                    self.redis.zsets[key] = [(member, score) for member, score in members if score > maximum]
+                    self.redis.zsets[key] = [
+                        (member, score) for member, score in members if score > maximum
+                    ]
                     results.append(original_size - len(self.redis.zsets[key]))
                 elif op_name == "zadd":
                     key, mapping = args

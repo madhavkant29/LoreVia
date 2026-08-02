@@ -3,6 +3,7 @@
 Example:
     python scripts/evaluate_retrieval.py --cases scripts/retrieval_eval_cases.sample.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,7 +37,9 @@ class RetrievalCase:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate LoreVia retrieval settings against a labeled case file.")
+    parser = argparse.ArgumentParser(
+        description="Evaluate LoreVia retrieval settings against a labeled case file."
+    )
     parser.add_argument("--cases", required=True, help="Path to retrieval case JSON.")
     return parser.parse_args()
 
@@ -51,7 +54,9 @@ def _load_cases(path: Path) -> list[RetrievalCase]:
                 flow=str(item["flow"]),
                 query=str(item["query"]),
                 max_chapter=int(item.get("max_chapter", 9999)),
-                expected_chapters=tuple(int(chapter) for chapter in item.get("expected_chapters", [])),
+                expected_chapters=tuple(
+                    int(chapter) for chapter in item.get("expected_chapters", [])
+                ),
                 expected_chunk_substring=item.get("expected_chunk_substring"),
                 book_id=uuid.UUID(item["book_id"]) if item.get("book_id") else None,
                 book_title=item.get("book_title"),
@@ -73,7 +78,9 @@ async def _resolve_book_id(case: RetrievalCase) -> uuid.UUID:
     return book_id
 
 
-async def _resolve_prior_book_ids(case: RetrievalCase, current_book_id: uuid.UUID) -> list[uuid.UUID]:
+async def _resolve_prior_book_ids(
+    case: RetrievalCase, current_book_id: uuid.UUID
+) -> list[uuid.UUID]:
     async with AsyncSessionLocal() as db:
         series_id = case.series_id
         if series_id is None and case.series_name:
@@ -81,12 +88,16 @@ async def _resolve_prior_book_ids(case: RetrievalCase, current_book_id: uuid.UUI
         if series_id is None:
             raise SystemExit(f"Series not found for case {case.name}")
         rows = (
-            await db.execute(
-                select(SeriesBook.book_id)
-                .where(SeriesBook.series_id == series_id, SeriesBook.book_id != current_book_id)
-                .order_by(SeriesBook.position)
+            (
+                await db.execute(
+                    select(SeriesBook.book_id)
+                    .where(SeriesBook.series_id == series_id, SeriesBook.book_id != current_book_id)
+                    .order_by(SeriesBook.position)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return list(rows)
 
 
@@ -104,7 +115,9 @@ def _mrr_at(results: list[dict[str, Any]], expected_chapters: tuple[int, ...], k
     return 0.0
 
 
-def _chunk_match_at(results: list[dict[str, Any]], expected_chunk_substring: str | None, k: int) -> float:
+def _chunk_match_at(
+    results: list[dict[str, Any]], expected_chunk_substring: str | None, k: int
+) -> float:
     if not expected_chunk_substring:
         return 0.0
     needle = expected_chunk_substring.casefold()
@@ -114,7 +127,9 @@ def _chunk_match_at(results: list[dict[str, Any]], expected_chunk_substring: str
     return 0.0
 
 
-async def _run_case(case: RetrievalCase, config: dict[str, dict[str, float | int]]) -> list[dict[str, Any]]:
+async def _run_case(
+    case: RetrievalCase, config: dict[str, dict[str, float | int]]
+) -> list[dict[str, Any]]:
     book_id = await _resolve_book_id(case)
     async with AsyncSessionLocal() as db:
         if case.flow == "reader":
@@ -164,7 +179,9 @@ async def _run_case(case: RetrievalCase, config: dict[str, dict[str, float | int
     raise SystemExit(f"Unsupported flow {case.flow}")
 
 
-async def _evaluate_config(name: str, config: dict[str, dict[str, float | int]], cases: list[RetrievalCase]) -> None:
+async def _evaluate_config(
+    name: str, config: dict[str, dict[str, float | int]], cases: list[RetrievalCase]
+) -> None:
     recall3 = recall5 = mrr5 = chunk5 = avg_context = 0.0
     for case in cases:
         results = await _run_case(case, config)

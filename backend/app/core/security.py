@@ -22,7 +22,8 @@ def create_access_token(user_id: str, version: int = 1) -> str:
     expire = datetime.now(UTC) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
     return jwt.encode(
         {"sub": user_id, "exp": expire, "type": "access", "ver": version},
-        settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM,
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
     )
 
 
@@ -36,7 +37,8 @@ def create_refresh_token(user_id: str, version: int = 1, session_id: str | None 
             "ver": version,
             "sid": session_id or str(uuid.uuid4()),
         },
-        settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM,
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
     )
 
 

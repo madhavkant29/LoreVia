@@ -60,12 +60,14 @@ type NavItem = {
   tone: string
   helper: string
   icon: NavIcon
+  advanced?: boolean
 }
 
 type NavSection = {
   title: string
   items: NavItem[]
   authorOnly?: boolean
+  processingDependent?: boolean
 }
 
 const READER_SHELL_ITEM_IDS = new Set(["overview", "read", "chapters", "summaries", "search", "timeline", "beta-feedback"])
@@ -107,64 +109,51 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
 
 const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
   {
-    title: "Library",
+    title: "Write",
     items: [
       { id: "overview", label: "Overview", href: `/${bookId}` as Route, tone: "Home", helper: "See progress, next steps, and the latest signals around this book.", icon: "book" },
       { id: "read", label: "Preview Draft", href: `/${bookId}/chapter/${currentChapter}` as Route, tone: "Continue", helper: "Open the current draft in reading view and pick up where the story last left off.", icon: "read" },
       { id: "chapters", label: "Chapters", href: `/${bookId}/chapters` as Route, tone: "Switch", helper: "Jump across chapters and move through the manuscript without losing your place.", icon: "chapters" },
-    ],
-  },
-  {
-    title: "Manuscript",
-    authorOnly: true,
-    items: [
       { id: "manuscript", label: "Manuscript Editor", href: `/${bookId}/manuscript` as Route, tone: "Drafting", helper: "Write, revise, and shape the working manuscript with your drafting tools close by.", icon: "pen" },
       { id: "scenes", label: "Scene Workspace", href: `/${bookId}/scenes` as Route, tone: "File tree", helper: "Organize scenes, reorder structure, and manage the story at a scene-by-scene level.", icon: "files" },
       { id: "notes", label: "Notes Workspace", href: `/${bookId}/notes` as Route, tone: "Vault", helper: "Keep book-specific notes, reminders, and reference details beside the draft.", icon: "notes" },
-
     ],
   },
   {
     title: "Story Bible",
     authorOnly: true,
+    processingDependent: true,
     items: [
       { id: "characters", label: "Character Bible", href: `/${bookId}/characters` as Route, tone: "Profiles", helper: "Track character profiles, arcs, and duplicate identity issues across the story.", icon: "users" },
       { id: "relationships", label: "Relationships", href: `/${bookId}/graph` as Route, tone: "Network", helper: "Map connections between characters so alliances, conflicts, and ties stay clear.", icon: "links" },
       { id: "timeline", label: "Timeline", href: `/${bookId}/timeline` as Route, tone: "Sequence", helper: "Review character presence, thread duration, and relationship shifts across the manuscript.", icon: "events" },
       { id: "plot-threads", label: "Plot Threads", href: `/${bookId}/plot-threads` as Route, tone: "Arc tracking", helper: "Follow open arcs and see which plot threads are moving, drifting, or unresolved.", icon: "threads" },
-      { id: "foreshadowing", label: "Foreshadowing", href: `/${bookId}/foreshadowing` as Route, tone: "Signals", helper: "Review planted details, early clues, and hints that carry later narrative weight.", icon: "spark" },
-      { id: "world-gap", label: "World Gaps", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", helper: "Spot missing lore, weak canon links, and worldbuilding details that need support.", icon: "gap" },
-      { id: "cross-book-wiki", label: "Series Wiki", href: `/${bookId}/cross-book-wiki` as Route, tone: "Cross-book", helper: "Compare recurring people and lore entries across books in the same series.", icon: "book" },
+      { id: "foreshadowing", label: "Foreshadowing", href: `/${bookId}/foreshadowing` as Route, tone: "Signals", helper: "Review planted details, early clues, and hints that carry later narrative weight.", icon: "spark", advanced: true },
+      { id: "world-gap", label: "World Gaps", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", helper: "Spot missing lore, weak canon links, and worldbuilding details that need support.", icon: "gap", advanced: true },
+      { id: "cross-book-wiki", label: "Series Wiki", href: `/${bookId}/cross-book-wiki` as Route, tone: "Cross-book", helper: "Compare recurring people and lore entries across books in the same series.", icon: "book", advanced: true },
     ],
   },
   {
-    title: "Review Center",
+    title: "Analyze",
+    processingDependent: true,
     items: [
       { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", helper: "Review continuity risks, unresolved threads, and high-priority story pressure points.", icon: "spark" },
       { id: "editorial-review", label: "Editorial Review", href: `/${bookId}/editorial-review` as Route, tone: "Line edit", helper: "Run an editorial pass that calls out clarity, pacing, and prose-level friction.", icon: "quill" },
       { id: "voice", label: "Voice Consistency", href: `/${bookId}/voice` as Route, tone: "Dialogue drift", helper: "Check whether character voice stays consistent across scenes and revisions.", icon: "voice" },
       { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", helper: "Ask direct questions about the manuscript and get answers grounded in the current draft.", icon: "chat" },
       { id: "reports", label: "Chapter Reports", href: `/${bookId}/reports` as Route, tone: "Evidence", helper: "Review chapter-level continuity evidence, new characters, and thread movement.", icon: "analysis" },
-      { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", helper: "Search the manuscript for names, lines, or moments without manually scanning chapters.", icon: "search" },
-      { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", helper: "Read chapter and story recaps when you need context fast before editing.", icon: "summary" },
-      { id: "beta-feedback", label: "Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Review", helper: "Leave chapter comments and open your assignment feedback without leaving the reading flow.", icon: "users" },
-      { id: "quotes", label: "Saved Quotes", href: "/quotes" as Route, tone: "Highlights", helper: "Revisit memorable lines and collected excerpts pulled from this and other projects.", icon: "quote" },
-      { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", helper: "Open deeper analysis views for broader manuscript diagnostics and story signals.", icon: "analysis" },
+      { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", helper: "Search the manuscript for names, lines, or moments without manually scanning chapters.", icon: "search", advanced: true },
+      { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", helper: "Read chapter and story recaps when you need context fast before editing.", icon: "summary", advanced: true },
+      { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", helper: "Open deeper analysis views for broader manuscript diagnostics and story signals.", icon: "analysis", advanced: true },
     ],
   },
   {
-    title: "Collaborate",
-    authorOnly: true,
+    title: "Share & Export",
     items: [
-      { id: "author-loop", label: "Author Lens", href: `/${bookId}/author-loop` as Route, tone: "Launch flow", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark" },
       { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", helper: "Manage who can access the book and what each collaborator is allowed to do.", icon: "users" },
-    ],
-  },
-  {
-    title: "Publish & Export",
-    authorOnly: true,
-    items: [
+      { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Review", helper: "Review chapter comments and assignment feedback.", icon: "users" },
       { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", helper: "Bring files in, send drafts out, and package the manuscript for other workflows.", icon: "files" },
+      { id: "author-loop", label: "Author Lens", href: `/${bookId}/author-loop` as Route, tone: "Advanced", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark", advanced: true },
     ],
   },
 ]
@@ -193,6 +182,8 @@ export function AuthorToolsNav({
   const showAuthorSections = currentShell === "author" && (isOwnerSession || hasOwnAuthorAccess || hasCollaboratorAccess)
   const isLimitedFreeOwner = currentShell === "author" && isOwnerSession && !hasOwnAuthorAccess
   const { prefetchByNavId } = useNavigationPrefetch(bookId)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const processingReady = book?.status === "ready"
 
   const sections = useMemo(
     () =>
@@ -201,8 +192,8 @@ export function AuthorToolsNav({
           if (currentShell === "reader") {
             return !section.authorOnly
           }
-          if (isLimitedFreeOwner) {
-            return section.title === "Library" || section.title === "Review Center" || section.title === "Publish & Export"
+            if (isLimitedFreeOwner) {
+              return section.title === "Write" || section.title === "Analyze" || section.title === "Share & Export"
           }
           if (showAuthorSections || !section.authorOnly) {
             return true
@@ -218,12 +209,13 @@ export function AuthorToolsNav({
             if (isLimitedFreeOwner) {
               return FREE_OWNER_AUTHOR_ITEM_IDS.has(item.id)
             }
+            if (item.advanced && !showAdvanced && item.id !== active) return false
             if (isOwnerSession || hasOwnAuthorAccess || !collaborationRole) return true
             return canSeeCollaboratorItem(item.id, collaborationPermissions)
           }),
         }))
         .filter((section) => section.items.length > 0),
-    [bookId, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasOwnAuthorAccess, isLimitedFreeOwner, isOwnerSession, showAuthorSections]
+    [active, bookId, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasOwnAuthorAccess, isLimitedFreeOwner, isOwnerSession, showAdvanced, showAuthorSections]
   )
   const rail = variant === "rail"
   const [isPinnedOpen, setIsPinnedOpen] = useState(false)
@@ -276,7 +268,7 @@ export function AuthorToolsNav({
               const sectionMarkup = (
               <div>
                 <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-                  {section.title}
+                  {section.title}{section.processingDependent && !processingReady ? " · processing" : ""}
                 </p>
                 <div className="space-y-1">
                   {section.items.map((item) => {
@@ -337,13 +329,18 @@ export function AuthorToolsNav({
               </div>
               )
               return section.authorOnly ? (
-                <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess || (isLimitedFreeOwner && section.title === "Publish & Export")}>
+                <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess || (isLimitedFreeOwner && section.title === "Share & Export")}>
                   {sectionMarkup}
                 </AuthorFeatureComponent>
               ) : (
                 <div key={section.title}>{sectionMarkup}</div>
               )
             })}
+            {currentShell === "author" ? (
+              <button type="button" onClick={() => setShowAdvanced((value) => !value)} className={`w-full rounded-md border px-3 py-2 text-left text-xs font-semibold ${labelVisibility} ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
+                {showAdvanced ? "Hide advanced tools" : "Show advanced tools"}
+              </button>
+            ) : null}
           </div>
         </aside>
       </div>
@@ -363,7 +360,7 @@ export function AuthorToolsNav({
           const sectionMarkup = (
           <div>
             <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-              {section.title}
+              {section.title}{section.processingDependent && !processingReady ? " · processing" : ""}
             </p>
             <div className="space-y-1">
               {section.items.map((item) => {
@@ -424,13 +421,18 @@ export function AuthorToolsNav({
           </div>
           )
           return section.authorOnly ? (
-            <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess || (isLimitedFreeOwner && section.title === "Publish & Export")}>
+            <AuthorFeatureComponent key={section.title} locked={null} allowAccess={hasCollaboratorAccess || (isLimitedFreeOwner && section.title === "Share & Export")}>
               {sectionMarkup}
             </AuthorFeatureComponent>
           ) : (
             <div key={section.title}>{sectionMarkup}</div>
           )
         })}
+        {currentShell === "author" ? (
+          <button type="button" onClick={() => setShowAdvanced((value) => !value)} className={`w-full rounded-md border px-3 py-2 text-left text-xs font-semibold ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
+            {showAdvanced ? "Hide advanced tools" : "Show advanced tools"}
+          </button>
+        ) : null}
       </div>
     </aside>
   )

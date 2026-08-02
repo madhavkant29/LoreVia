@@ -4,10 +4,10 @@ import pytest
 
 from app.services.auth_service import (
     DeviceTrialLimitError,
+    authenticate_user,
     build_device_trial,
     ensure_device_trial_available,
     link_device_to_user_if_allowed,
-    authenticate_user,
     register_user,
 )
 
@@ -127,8 +127,14 @@ async def test_register_user_hashes_password_stores_session_and_returns_tokens(m
     stored = []
     monkeypatch.setattr("app.services.auth_service.hash_password", lambda value: f"hash:{value}")
     monkeypatch.setattr("app.services.auth_service.current_token_version", lambda _user: 7)
-    monkeypatch.setattr("app.services.auth_service.create_access_token", lambda user_id, version: f"access:{user_id}:{version}")
-    monkeypatch.setattr("app.services.auth_service.create_refresh_token", lambda user_id, version, sid: f"refresh:{user_id}:{version}:{sid}")
+    monkeypatch.setattr(
+        "app.services.auth_service.create_access_token",
+        lambda user_id, version: f"access:{user_id}:{version}",
+    )
+    monkeypatch.setattr(
+        "app.services.auth_service.create_refresh_token",
+        lambda user_id, version, sid: f"refresh:{user_id}:{version}:{sid}",
+    )
 
     async def store(user_id, session_id, ttl):
         stored.append((user_id, session_id, ttl))
@@ -146,7 +152,10 @@ async def test_register_user_hashes_password_stores_session_and_returns_tokens(m
 @pytest.mark.asyncio
 async def test_authenticate_user_accepts_valid_password_and_rejects_other_cases(monkeypatch):
     user = type("UserRow", (), {"password_hash": "stored"})()
-    monkeypatch.setattr("app.services.auth_service.verify_password", lambda password, hashed: password == "correct" and hashed == "stored")
+    monkeypatch.setattr(
+        "app.services.auth_service.verify_password",
+        lambda password, hashed: password == "correct" and hashed == "stored",
+    )
     assert await authenticate_user(_FakeSession(user), "writer@example.test", "correct") is user
     assert await authenticate_user(_FakeSession(user), "writer@example.test", "wrong") is None
     assert await authenticate_user(_FakeSession(None), "missing@example.test", "correct") is None

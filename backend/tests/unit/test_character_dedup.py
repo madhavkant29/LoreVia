@@ -1,4 +1,5 @@
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -15,17 +16,22 @@ from app.models.intelligence import (
     WikiEntry,
 )
 from app.models.user import User
-from app.utils.character_utils import (
-    apply_manual_character_description,
-    build_character_dossier_summary,
+from app.utils.characters import partitioning as character_partitioning
+from app.utils.characters.extraction import (
     cluster_character_entities,
-    compose_character_description,
-    description_similarity,
-    filter_character_identity_aliases,
-    merge_characters,
-    name_similarity,
-    partition_character,
     resolve_character_reference_from_roster,
+)
+from app.utils.characters.identity import filter_character_identity_aliases
+from app.utils.characters.manual import apply_manual_character_description
+from app.utils.characters.merging import merge_characters
+from app.utils.characters.partitioning import partition_character
+from app.utils.characters.presentation import (
+    build_character_dossier_summary,
+    compose_character_description,
+)
+from app.utils.characters.similarity import (
+    description_similarity,
+    name_similarity,
 )
 
 
@@ -99,14 +105,82 @@ def test_description_similarity_prefers_related_text():
     assert related > 0.2
 
 
+def test_description_similarity_propagates_unexpected_tokenizer_errors(monkeypatch):
+    from app.utils.characters import similarity
+
+    def fail_tokens(_text: str):
+        raise RuntimeError("tokenizer regression")
+
+    monkeypatch.setattr(similarity, "_similarity_tokens", fail_tokens)
+
+    with pytest.raises(RuntimeError, match="tokenizer regression"):
+        similarity.description_similarity("left text", "right text")
+
+
+@pytest.mark.asyncio
+async def test_partition_payload_enrichment_only_swallows_expected_extractor_failures(monkeypatch):
+    source = SimpleNamespace(
+        first_chapter=1,
+        last_seen_chapter=2,
+        role="supporting",
+    )
+    evidence = {
+        "snippets": ["Gregor crossed the room."],
+        "first_chapter": 1,
+        "last_seen_chapter": 2,
+        "mention_count": 1,
+    }
+
+    async def _expected_extractor_failure(_text: str):
+        raise RuntimeError("llm unavailable")
+
+    monkeypatch.setattr(
+        character_partitioning,
+        "extract_characters_and_relationships",
+        _expected_extractor_failure,
+    )
+
+    payload = await character_partitioning._build_partition_payload(
+        source=source,
+        book_id=uuid.uuid4(),
+        name="Gregor",
+        aliases=[],
+        evidence=evidence,
+    )
+
+    assert payload["name"] == "Gregor"
+    assert payload["personality_tags"] == []
+
+    async def _unexpected_extractor_bug(_text: str):
+        raise AssertionError("extractor invariant")
+
+    monkeypatch.setattr(
+        character_partitioning,
+        "extract_characters_and_relationships",
+        _unexpected_extractor_bug,
+    )
+
+    with pytest.raises(AssertionError, match="extractor invariant"):
+        await character_partitioning._build_partition_payload(
+            source=source,
+            book_id=uuid.uuid4(),
+            name="Gregor",
+            aliases=[],
+            evidence=evidence,
+        )
+
+
 def test_visibility_score_penalizes_phrase_like_noise():
     assert character_visibility_score("On Mother") < VISIBILITY_THRESHOLD
-    assert character_visibility_score(
-        "Meme Oshino",
-        role="mentor",
-        aliases=["Mr. Oshino"],
-        arc_summary="A steady mentor with a clear arc.",
-    ) >= VISIBILITY_THRESHOLD
+    assert (
+        character_visibility_score(
+            "Meme Oshino",
+            role="mentor",
+            aliases=["Mr. Oshino"],
+            arc_summary="A steady mentor with a clear arc.",
+        )
+        >= VISIBILITY_THRESHOLD
+    )
 
 
 def test_compose_character_description_prefers_arc_summary_and_relationships_when_traits_are_sparse():
@@ -445,7 +519,13 @@ async def test_merge_characters_reparents_related_rows(db):
         )
     )
 
-    db.add(CharacterState(character_id=secondary.id, at_chapter=4, trait_snapshot={"hair": {"value": "black", "confidence": 0.9}}))
+    db.add(
+        CharacterState(
+            character_id=secondary.id,
+            at_chapter=4,
+            trait_snapshot={"hair": {"value": "black", "confidence": 0.9}},
+        )
+    )
     db.add(
         CharacterRelationship(
             book_id=book.id,
@@ -484,7 +564,15 @@ async def test_merge_characters_reparents_related_rows(db):
             char_changes=[{"character": secondary.name, "change": "Takes charge"}],
         )
     )
-    db.add(QuoteEntry(user_id=user.id, book_id=book.id, chapter_number=4, character_name=secondary.name, quote_text="Trust me."))
+    db.add(
+        QuoteEntry(
+            user_id=user.id,
+            book_id=book.id,
+            chapter_number=4,
+            character_name=secondary.name,
+            quote_text="Trust me.",
+        )
+    )
     await db.commit()
 
     merged = await merge_characters(db, primary.id, secondary.id, book.id)
@@ -506,19 +594,45 @@ async def test_merge_characters_reparents_related_rows(db):
     assert merged.voice_profile.dominant_markers == {"tone": "calm"}
     assert merged.voice_profile.signature_phrases == ["Let's keep moving."]
 
-    states = (await db.execute(select(CharacterState).where(CharacterState.character_id == merged.id))).scalars().all()
+    states = (
+        (await db.execute(select(CharacterState).where(CharacterState.character_id == merged.id)))
+        .scalars()
+        .all()
+    )
     assert len(states) == 1
-    voice_profiles = (await db.execute(select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id))).scalars().all()
+    voice_profiles = (
+        (
+            await db.execute(
+                select(CharacterVoiceProfile).where(CharacterVoiceProfile.book_id == book.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(voice_profiles) == 1
 
     relationships = (
-        await db.execute(select(CharacterRelationship).where(CharacterRelationship.book_id == book.id))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert relationships == []
-    updated_thread = (await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))).scalar_one()
-    updated_wiki = (await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id))).scalar_one()
-    updated_summary = (await db.execute(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id))).scalar_one()
-    updated_quote = (await db.execute(select(QuoteEntry).where(QuoteEntry.book_id == book.id))).scalar_one()
+    updated_thread = (
+        await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))
+    ).scalar_one()
+    updated_wiki = (
+        await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id))
+    ).scalar_one()
+    updated_summary = (
+        await db.execute(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id))
+    ).scalar_one()
+    updated_quote = (
+        await db.execute(select(QuoteEntry).where(QuoteEntry.book_id == book.id))
+    ).scalar_one()
     assert updated_thread.character_ids == ["Meme Oshino"]
     assert updated_wiki.related_char_ids == [str(merged.id)]
     assert updated_summary.key_events[0]["involved_characters"] == [str(merged.id)]
@@ -550,8 +664,22 @@ async def test_partition_character_splits_record_and_reassigns_references(db, mo
 
     from app.models.intelligence import BookChunk
 
-    db.add(BookChunk(book_id=book.id, chapter_id=chapter_one.id, chunk_index=0, text="Mr. Samsa coughed while Gregor watched."))
-    db.add(BookChunk(book_id=book.id, chapter_id=chapter_two.id, chunk_index=0, text="Mrs. Samsa called softly from the kitchen."))
+    db.add(
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter_one.id,
+            chunk_index=0,
+            text="Mr. Samsa coughed while Gregor watched.",
+        )
+    )
+    db.add(
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter_two.id,
+            chunk_index=0,
+            text="Mrs. Samsa called softly from the kitchen.",
+        )
+    )
 
     source = Character(
         book_id=book.id,
@@ -574,7 +702,13 @@ async def test_partition_character_splits_record_and_reassigns_references(db, mo
     db.add_all([source, counterpart])
     await db.flush()
 
-    db.add(CharacterState(character_id=source.id, at_chapter=1, trait_snapshot={"hair": {"value": "gray", "confidence": 0.9}}))
+    db.add(
+        CharacterState(
+            character_id=source.id,
+            at_chapter=1,
+            trait_snapshot={"hair": {"value": "gray", "confidence": 0.9}},
+        )
+    )
     db.add(
         CharacterRelationship(
             book_id=book.id,
@@ -585,8 +719,23 @@ async def test_partition_character_splits_record_and_reassigns_references(db, mo
             from_chapter=1,
         )
     )
-    db.add(PlotThread(book_id=book.id, title="Samsa household", status="ongoing", introduced_at=1, character_ids=["Samsa"]))
-    db.add(WikiEntry(book_id=book.id, entry_type="concept", name="Household", related_char_ids=[str(source.id)]))
+    db.add(
+        PlotThread(
+            book_id=book.id,
+            title="Samsa household",
+            status="ongoing",
+            introduced_at=1,
+            character_ids=["Samsa"],
+        )
+    )
+    db.add(
+        WikiEntry(
+            book_id=book.id,
+            entry_type="concept",
+            name="Household",
+            related_char_ids=[str(source.id)],
+        )
+    )
     db.add(
         ChapterSummary(
             chapter_id=chapter_one.id,
@@ -596,7 +745,15 @@ async def test_partition_character_splits_record_and_reassigns_references(db, mo
             char_changes=[{"character": "Samsa", "change": "Arrives upset"}],
         )
     )
-    db.add(QuoteEntry(user_id=user.id, book_id=book.id, chapter_number=2, character_name="Samsa", quote_text="Mrs. Samsa whispered a prayer."))
+    db.add(
+        QuoteEntry(
+            user_id=user.id,
+            book_id=book.id,
+            chapter_number=2,
+            character_name="Samsa",
+            quote_text="Mrs. Samsa whispered a prayer.",
+        )
+    )
     await db.commit()
 
     async def _fake_extract(text: str) -> dict:
@@ -630,7 +787,9 @@ async def test_partition_character_splits_record_and_reassigns_references(db, mo
             "relationships": [],
         }
 
-    monkeypatch.setattr("app.utils.character_utils.extract_characters_and_relationships", _fake_extract)
+    monkeypatch.setattr(
+        "app.utils.characters.partitioning.extract_characters_and_relationships", _fake_extract
+    )
 
     created = await partition_character(
         db,
@@ -645,13 +804,21 @@ async def test_partition_character_splits_record_and_reassigns_references(db, mo
     assert {character.name for character in created} == {"Mr. Samsa", "Mrs. Samsa"}
     assert await db.get(Character, source.id) is None
 
-    plot_thread = (await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))).scalar_one()
-    wiki_entry = (await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id))).scalar_one()
-    summary = (await db.execute(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter_one.id))).scalar_one()
+    plot_thread = (
+        await db.execute(select(PlotThread).where(PlotThread.book_id == book.id))
+    ).scalar_one()
+    wiki_entry = (
+        await db.execute(select(WikiEntry).where(WikiEntry.book_id == book.id))
+    ).scalar_one()
+    summary = (
+        await db.execute(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter_one.id))
+    ).scalar_one()
     quote = (await db.execute(select(QuoteEntry).where(QuoteEntry.book_id == book.id))).scalar_one()
 
     assert plot_thread.character_ids == ["Mr. Samsa", "Mrs. Samsa"]
     assert len(wiki_entry.related_char_ids or []) == 2
-    assert summary.key_events[0]["involved_characters"] == [str(next(character.id for character in created if character.name == "Mr. Samsa"))]
+    assert summary.key_events[0]["involved_characters"] == [
+        str(next(character.id for character in created if character.name == "Mr. Samsa"))
+    ]
     assert summary.char_changes[0]["character"] == "Mr. Samsa"
     assert quote.character_name == "Mrs. Samsa"

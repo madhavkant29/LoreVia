@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.utils import book_utils
+from app.utils.books import story_health
 
 
 class FakeResult:
@@ -70,16 +70,47 @@ async def test_build_story_health_payload_scores_all_runtime_dimensions(monkeypa
         SimpleNamespace(status="ongoing", introduced_at=2, last_mentioned_at=3, resolved_at=None),
         SimpleNamespace(status="abandoned", introduced_at=8, last_mentioned_at=8, resolved_at=4),
     ]
-    world_gap = SimpleNamespace(priority_gaps=[{"gap": "law"}], consistency_flags=[{"flag": "color"}, {"flag": "age"}])
+    world_gap = SimpleNamespace(
+        priority_gaps=[{"gap": "law"}], consistency_flags=[{"flag": "color"}, {"flag": "age"}]
+    )
     voice_profiles = [
-        SimpleNamespace(character_id=mara_id, sample_dialogue_count=5, signature_phrases=["Hold the gate"], dominant_markers=[]),
-        SimpleNamespace(character_id=joren_id, sample_dialogue_count=2, signature_phrases=[], dominant_markers=["questions"]),
+        SimpleNamespace(
+            character_id=mara_id,
+            sample_dialogue_count=5,
+            signature_phrases=["Hold the gate"],
+            dominant_markers=[],
+        ),
+        SimpleNamespace(
+            character_id=joren_id,
+            sample_dialogue_count=2,
+            signature_phrases=[],
+            dominant_markers=["questions"],
+        ),
+    ]
+    continuity_scan = SimpleNamespace(
+        id=uuid.uuid4(),
+        coverage={"chapters_analyzed": 12},
+        continuity_status="issues_found",
+    )
+    continuity_findings = [
+        SimpleNamespace(
+            is_stale=False,
+            confidence=0.93,
+            status="open",
+        ),
+        SimpleNamespace(
+            is_stale=False,
+            confidence=0.72,
+            status="review_needed",
+        ),
     ]
     db = FakeDb(
         [
             FakeResult(characters),
             FakeResult(relationships),
             FakeResult([(mara_id, 2), (joren_id, 0)]),
+            FakeResult(scalar=continuity_scan),
+            FakeResult(continuity_findings),
             FakeResult(plot_threads),
             FakeResult(scalar=world_gap),
             FakeResult(voice_profiles),
@@ -96,10 +127,12 @@ async def test_build_story_health_payload_scores_all_runtime_dimensions(monkeypa
             SimpleNamespace(continuity_flags=[]),
         ]
 
-    monkeypatch.setattr("app.utils.character_utils.is_displayable_character", lambda character: True)
-    monkeypatch.setattr(book_utils, "list_chapter_consistency_reports", fake_reports)
+    monkeypatch.setattr(
+        "app.utils.characters.governance.is_displayable_character", lambda character: True
+    )
+    monkeypatch.setattr(story_health, "list_chapter_consistency_reports", fake_reports)
 
-    payload = await book_utils.build_story_health_payload(db, book)
+    payload = await story_health.build_story_health_payload(db, book)
 
     assert 0 <= payload.score <= 94
     assert payload.status in {"Excellent", "Good", "Fair", "Needs Attention"}
@@ -126,6 +159,8 @@ async def test_build_story_health_payload_handles_empty_runtime_data(monkeypatch
             FakeResult([]),
             FakeResult([]),
             FakeResult([]),
+            FakeResult(scalar=None),
+            FakeResult(scalar=None),
             FakeResult([]),
             FakeResult(scalar=None),
             FakeResult([]),
@@ -138,11 +173,20 @@ async def test_build_story_health_payload_handles_empty_runtime_data(monkeypatch
     async def no_reports(*_args, **_kwargs):
         return []
 
-    monkeypatch.setattr("app.utils.character_utils.is_displayable_character", lambda character: True)
-    monkeypatch.setattr(book_utils, "list_chapter_consistency_reports", no_reports)
+    monkeypatch.setattr(
+        "app.utils.characters.governance.is_displayable_character", lambda character: True
+    )
+    monkeypatch.setattr(story_health, "list_chapter_consistency_reports", no_reports)
 
-    payload = await book_utils.build_story_health_payload(db, book)
+    payload = await story_health.build_story_health_payload(db, book)
 
     assert payload.score >= 0
-    assert next(metric for metric in payload.metrics if metric.label == "Pacing").detail.startswith("No persisted")
-    assert "fresh pass" in next(metric for metric in payload.metrics if metric.label == "Worldbuilding consistency").detail
+    assert next(metric for metric in payload.metrics if metric.label == "Pacing").detail.startswith(
+        "No persisted"
+    )
+    assert (
+        "fresh pass"
+        in next(
+            metric for metric in payload.metrics if metric.label == "Worldbuilding consistency"
+        ).detail
+    )

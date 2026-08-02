@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import (
     consume_email_unsubscribe_token,
-    get_redis,
     get_email_preferences_token_payload,
+    get_redis,
     key_ratelimit,
     store_email_preferences_token,
     store_email_unsubscribe_token,
@@ -36,6 +36,7 @@ USAGE_LIMIT_UPGRADE_COOLDOWN_SECONDS = 7 * 24 * 60 * 60
 class EmailPreferenceLinks:
     unsubscribe_url: str
     preferences_url: str
+    browser_unsubscribe_url: str
 
 
 def can_send_email(pref: EmailPreference | None, category: str) -> bool:
@@ -61,7 +62,9 @@ async def get_email_preference_by_user_id(db: AsyncSession, user_id: str) -> Ema
 async def get_email_preference_by_email(db: AsyncSession, email: str) -> EmailPreference | None:
     normalized = normalize_email(email)
     return (
-        await db.execute(select(EmailPreference).where(func.lower(EmailPreference.email) == normalized))
+        await db.execute(
+            select(EmailPreference).where(func.lower(EmailPreference.email) == normalized)
+        )
     ).scalar_one_or_none()
 
 
@@ -156,6 +159,7 @@ async def build_email_preference_links(user: User) -> EmailPreferenceLinks:
     return EmailPreferenceLinks(
         unsubscribe_url=f"{base_api_url}/unsubscribe?token={unsubscribe_token}",
         preferences_url=f"{base_api_url}/preferences?token={preferences_token}",
+        browser_unsubscribe_url=f"{app_url}/unsubscribe?token={unsubscribe_token}",
     )
 
 
@@ -179,7 +183,9 @@ async def track_usage_limit_friction_and_maybe_send(
 
     current = datetime.now(UTC)
     day_bucket = current.strftime("%Y%m%d")
-    midnight_tomorrow = current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
+    midnight_tomorrow = (
+        current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
+    )
     bucket_ttl = max(int(midnight_tomorrow - current.timestamp()), 1)
     hit_key = key_ratelimit(str(user.id), f"upgrade_offer_hits:{action}:{day_bucket}")
     sent_key = key_ratelimit(str(user.id), f"upgrade_offer_sent:{action}")

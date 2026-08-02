@@ -8,7 +8,9 @@ from app.services.summary_service import get_or_generate_summary
 
 
 @pytest.mark.asyncio
-async def test_get_or_generate_summary_returns_pending_without_request_time_generation(db, monkeypatch):
+async def test_get_or_generate_summary_returns_pending_without_request_time_generation(
+    db, monkeypatch
+):
     user = User(
         id=uuid.uuid4(),
         email="summary-test@example.com",

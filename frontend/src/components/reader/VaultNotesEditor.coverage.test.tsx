@@ -14,6 +14,7 @@ const getVaultNoteRelations = vi.fn()
 const getWorkspaceTree = vi.fn()
 const saveScene = vi.fn()
 const confirmDialog = vi.fn()
+const promptDialog = vi.fn()
 
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
@@ -48,6 +49,9 @@ vi.mock("@/components/characters/AddCharacterFromSelection", () => ({
 
 vi.mock("@/components/ui/ConfirmDialog", () => ({
   useConfirmDialog: () => (...args: unknown[]) => confirmDialog(...args),
+}))
+vi.mock("@/components/ui/PromptDialog", () => ({
+  usePromptDialog: () => (...args: unknown[]) => promptDialog(...args),
 }))
 
 vi.mock("@/components/ui/Tooltip", () => ({
@@ -165,7 +169,7 @@ beforeEach(() => {
     cancelIdleCallback: (id: number) => void
   }).requestIdleCallback = (callback) => window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline), 0)
   ;(window as typeof window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback = (id) => window.clearTimeout(id)
-  window.prompt = vi.fn(() => "Custom/Clues")
+  promptDialog.mockResolvedValue("Custom/Clues")
   window.URL.createObjectURL = vi.fn(() => "blob:notes")
   window.URL.revokeObjectURL = vi.fn()
   Object.defineProperty(navigator, "clipboard", {

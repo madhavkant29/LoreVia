@@ -20,6 +20,7 @@ from app.parsers.heading_patterns import (
 
 # ── Data integrity ─────────────────────────────────────────────────────────
 
+
 def test_all_languages_have_required_section_types():
     required = {"chapter", "part", "prologue", "epilogue", "preface", "toc"}
     for lang in ALL_LANGUAGES:
@@ -70,6 +71,7 @@ def test_backward_compat_ordinal_words_exists():
 
 
 # ── build_heading_regex ────────────────────────────────────────────────────
+
 
 def test_regex_builds_with_all_languages():
     r = build_heading_regex()
@@ -202,6 +204,7 @@ def test_regex_empty_languages_returns_no_match():
 
 # ── classify_heading_type ──────────────────────────────────────────────────
 
+
 def test_classify_english_chapter():
     stype, conf = classify_heading_type("Chapter 1", "en")
     assert stype == "chapter"
@@ -299,6 +302,7 @@ def test_classify_french_dedication():
 
 # ── is_toc_indicator ───────────────────────────────────────────────────────
 
+
 def test_toc_indicator_with_dotted_leaders():
     assert is_toc_indicator("Chapitre 1: SCYLLA.................. 1")
     assert is_toc_indicator("Chapter 2.......... 4")
@@ -330,6 +334,7 @@ def test_toc_indicator_empty_is_false():
 
 
 # ── has_toc_signals ────────────────────────────────────────────────────────
+
 
 def test_has_toc_signals_with_dotted_leaders():
     lines = [
@@ -384,6 +389,7 @@ def test_has_toc_signals_low_density_with_one_toc_line():
 
 # ── get_section_type_defaults ──────────────────────────────────────────────
 
+
 def test_chapter_included_by_default():
     defaults = get_section_type_defaults("chapter")
     assert defaults["include_in_analysis"] is True
@@ -437,6 +443,7 @@ def test_display_order_toc_before_chapters():
 
 
 # ── get_number_words / get_ordinal_words ───────────────────────────────────
+
 
 def test_get_number_words_english():
     nw = get_number_words("en")

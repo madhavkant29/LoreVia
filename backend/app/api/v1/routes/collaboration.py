@@ -11,15 +11,17 @@ from app.schemas.books import (
     BookCollaboratorUpdateBody,
     CollaboratorActivityOut,
 )
-from app.utils.beta_read_utils import get_book_collaborator_activity
-from app.utils.book_utils import (
+from app.utils.beta_read_activity_utils import get_book_collaborator_activity
+from app.utils.billing_utils import require_author_access
+from app.utils.books.collaboration_management import (
     create_book_collaborator,
     delete_book_collaborator,
-    get_owned_book,
     list_book_collaborators,
     update_book_collaborator,
 )
-from app.utils.billing_utils import require_author_access
+from app.utils.books.notes import (
+    get_owned_book,
+)
 
 router = APIRouter()
 
@@ -35,7 +37,9 @@ async def list_collaborators(
     return await list_book_collaborators(db, book)
 
 
-@router.get("/{book_id}/collaborators/{collaboration_id}/activity", response_model=CollaboratorActivityOut)
+@router.get(
+    "/{book_id}/collaborators/{collaboration_id}/activity", response_model=CollaboratorActivityOut
+)
 async def get_collaborator_activity(
     book_id: uuid.UUID,
     collaboration_id: uuid.UUID,

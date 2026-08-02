@@ -26,12 +26,13 @@ def parse_epub(raw_bytes: bytes, *, split_large_chapters: bool = True) -> list[d
                 tag.decompose()
             raw_text = soup.get_text(separator="\n")
             cleaned_text = re.sub(r"[\u2726\u2318\u2600-\u26FF\u2700-\u27BF]", " ", raw_text)
-            text = "\n".join(
-                line.strip() for line in cleaned_text.splitlines() if line.strip()
-            )
+            text = "\n".join(line.strip() for line in cleaned_text.splitlines() if line.strip())
             if len(text) < 100:
                 continue
-            title = next((soup.find(tag_name) for tag_name in ["h1", "h2", "h3"] if soup.find(tag_name)), None)
+            title = next(
+                (soup.find(tag_name) for tag_name in ["h1", "h2", "h3"] if soup.find(tag_name)),
+                None,
+            )
             title_text = title.get_text().strip() if title else f"Chapter {n}"
             chapters.append(
                 {
@@ -62,7 +63,9 @@ def _split_large_chapters(chapters: list[dict], *, split_large_chapters: bool) -
                     "number": next_number,
                     "title": title,
                     "text": "\n\n".join(split_part),
-                    "source_number": chapter.get("source_number") if len(split_parts) == 1 else None,
+                    "source_number": chapter.get("source_number")
+                    if len(split_parts) == 1
+                    else None,
                 }
             )
             next_number += 1
@@ -77,7 +80,11 @@ def _split_parts(parts: list[str]) -> list[list[str]]:
     current_words = 0
     for part in parts:
         part_words = len(re.findall(r"\b\w+\b", part))
-        if current and current_words + part_words > PARAGRAPH_SPLIT_TARGET_WORDS and _can_close_section(current):
+        if (
+            current
+            and current_words + part_words > PARAGRAPH_SPLIT_TARGET_WORDS
+            and _can_close_section(current)
+        ):
             sections.append(current)
             current = []
             current_words = 0

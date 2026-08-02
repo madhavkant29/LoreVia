@@ -12,6 +12,7 @@ from app.schemas.section import (
 
 # ── SectionMeta ─────────────────────────────────────────────────────────────
 
+
 def test_section_meta_defaults():
     s = SectionMeta(type="chapter", title="Chapter 1")
     assert s.type == "chapter"
@@ -131,6 +132,7 @@ def test_from_heading_unknown_included():
 
 # ── LanguageDetection ───────────────────────────────────────────────────────
 
+
 def test_language_detection_defaults():
     ld = LanguageDetection()
     assert ld.detected == "en"
@@ -151,6 +153,7 @@ def test_language_detection_explicit():
 
 # ── ImportWarning ───────────────────────────────────────────────────────────
 
+
 def test_import_warning_defaults():
     w = ImportWarning(message="Test warning")
     assert w.message == "Test warning"
@@ -168,6 +171,7 @@ def test_import_warning_invalid_severity():
 
 
 # ── ImportPreview ───────────────────────────────────────────────────────────
+
 
 def test_import_preview_defaults():
     p = ImportPreview()

@@ -142,3 +142,6 @@ frontend/test-results/
 # Generated marketing campaign assets
 /instagram-campaign/
 /social-campaign-50/
+
+# Local-only Codex study/tutorial notes
+/local-tech-tutorials/

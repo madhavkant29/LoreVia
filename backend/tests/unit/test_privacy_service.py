@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException
 
@@ -91,8 +92,8 @@ async def test_download_text_or_error_handles_structured_plain_and_failed_downlo
         if key == "structured":
             return b"structured bytes"
         if key == "plain":
-            return "Plain text".encode()
-        raise RuntimeError("missing object")
+            return b"Plain text"
+        raise OSError("missing object")
 
     def fake_deserialize(raw: bytes):
         if raw == b"structured bytes":
@@ -115,6 +116,18 @@ async def test_download_text_or_error_handles_structured_plain_and_failed_downlo
     failed = await privacy_service._download_text_or_error("missing")
     assert failed["storage_key"] == "missing"
     assert "missing object" in failed["error"]
+
+
+@pytest.mark.asyncio
+async def test_download_text_or_error_propagates_unexpected_download_bug(monkeypatch):
+    monkeypatch.setattr(
+        privacy_service.storage,
+        "download_book",
+        lambda _key: (_ for _ in ()).throw(RuntimeError("storage client regression")),
+    )
+
+    with pytest.raises(RuntimeError, match="storage client regression"):
+        await privacy_service._download_text_or_error("broken")
 
 
 @pytest.mark.asyncio
@@ -160,8 +173,19 @@ async def test_build_user_data_export_includes_account_book_chapter_and_domain_f
         token_count=400,
         s3_key="books/gate/chapter-1.json",
     )
-    preference = SimpleNamespace(marketing_enabled=False, product_enabled=True, beta_reader_enabled=True, updated_at=datetime.now(UTC))
-    domain_row = SimpleNamespace(id=uuid.uuid4(), title="Note", body="Remember the key", created_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+    preference = SimpleNamespace(
+        marketing_enabled=False,
+        product_enabled=True,
+        beta_reader_enabled=True,
+        updated_at=datetime.now(UTC),
+    )
+    domain_row = SimpleNamespace(
+        id=uuid.uuid4(),
+        title="Note",
+        body="Remember the key",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
 
     class SequenceDb:
         def __init__(self):
@@ -172,7 +196,12 @@ async def test_build_user_data_export_includes_account_book_chapter_and_domain_f
 
     async def fake_download(key):
         assert key == chapter.s3_key
-        return {"storage_key": key, "text": "Chapter body", "html": "<p>Chapter body</p>", "metadata": {}}
+        return {
+            "storage_key": key,
+            "text": "Chapter body",
+            "html": "<p>Chapter body</p>",
+            "metadata": {},
+        }
 
     monkeypatch.setattr(privacy_service, "_download_text_or_error", fake_download)
 
@@ -235,7 +264,7 @@ async def test_delete_storage_keys_dedupes_keys_and_reports_errors(monkeypatch):
 
     def fake_delete_object(key: str):
         if key == "bad":
-            raise RuntimeError("storage unavailable")
+            raise OSError("storage unavailable")
         deleted.append(key)
 
     monkeypatch.setattr(privacy_service.storage, "delete_object", fake_delete_object)
@@ -245,6 +274,17 @@ async def test_delete_storage_keys_dedupes_keys_and_reports_errors(monkeypatch):
     assert deleted == ["one", "two"]
     assert result["deleted"] == ["one", "two"]
     assert result["errors"] == {"bad": "storage unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_delete_storage_keys_propagates_unexpected_storage_bug(monkeypatch):
+    def fake_delete_object(_key: str):
+        raise RuntimeError("storage client regression")
+
+    monkeypatch.setattr(privacy_service.storage, "delete_object", fake_delete_object)
+
+    with pytest.raises(RuntimeError, match="storage client regression"):
+        await privacy_service.delete_storage_keys(["one"])
 
 
 @pytest.mark.asyncio
@@ -290,7 +330,9 @@ async def test_queue_book_permanent_deletion_hides_book_and_creates_request(monk
 
 
 @pytest.mark.asyncio
-async def test_request_account_deletion_anonymizes_user_books_and_tracks_provider_followup(monkeypatch):
+async def test_request_account_deletion_anonymizes_user_books_and_tracks_provider_followup(
+    monkeypatch,
+):
     user_id = uuid.uuid4()
     user = SimpleNamespace(
         id=user_id,
@@ -335,7 +377,7 @@ async def test_request_account_deletion_anonymizes_user_books_and_tracks_provide
 
     async def fake_cancel(subscription_id):
         if subscription_id == "sub-fail":
-            raise RuntimeError("provider unavailable")
+            raise httpx.HTTPError("provider unavailable")
         return {"scheduled_change": "cancel"}
 
     async def fake_supabase_delete(auth_id):
@@ -350,7 +392,9 @@ async def test_request_account_deletion_anonymizes_user_books_and_tracks_provide
     monkeypatch.setattr(privacy_service, "delete_supabase_auth_user", fake_supabase_delete)
     monkeypatch.setattr(privacy_service, "collect_book_storage_keys", fake_collect)
     monkeypatch.setattr(privacy_service, "hash_password", lambda value: f"hashed:{len(value)}")
-    monkeypatch.setattr(privacy_service, "next_token_version", lambda value: value.token_version + 1)
+    monkeypatch.setattr(
+        privacy_service, "next_token_version", lambda value: value.token_version + 1
+    )
     db = SequenceDb()
 
     request, followup = await privacy_service.request_account_deletion(
@@ -387,17 +431,23 @@ async def test_request_account_deletion_rejects_invalid_local_credentials(monkey
     )
 
     with pytest.raises(HTTPException) as missing_password:
-        await privacy_service.request_account_deletion(FakeDb(), user, confirmation_text="DELETE MY ACCOUNT", password=None)
+        await privacy_service.request_account_deletion(
+            FakeDb(), user, confirmation_text="DELETE MY ACCOUNT", password=None
+        )
     assert missing_password.value.status_code == 400
 
-    monkeypatch.setattr(privacy_service, "verify_password", lambda password, hashed: False)
+    monkeypatch.setattr(privacy_service, "verify_password_safely", lambda password, hashed: False)
     with pytest.raises(HTTPException) as wrong_password:
-        await privacy_service.request_account_deletion(FakeDb(), user, confirmation_text="DELETE MY ACCOUNT", password="wrong")
+        await privacy_service.request_account_deletion(
+            FakeDb(), user, confirmation_text="DELETE MY ACCOUNT", password="wrong"
+        )
     assert wrong_password.value.status_code == 403
 
     user.deletion_status = "pending_hard_delete"
     with pytest.raises(HTTPException) as duplicate:
-        await privacy_service.request_account_deletion(FakeDb(), user, confirmation_text="DELETE MY ACCOUNT", password="anything")
+        await privacy_service.request_account_deletion(
+            FakeDb(), user, confirmation_text="DELETE MY ACCOUNT", password="anything"
+        )
     assert duplicate.value.status_code == 409
 
 
@@ -513,8 +563,16 @@ async def test_process_data_deletion_request_handles_completed_errors_book_and_u
 async def test_process_due_data_deletion_requests_processes_matching_rows(monkeypatch):
     now = datetime.now(UTC)
     requests = [
-        SimpleNamespace(id=uuid.uuid4(), status=DATA_DELETION_STATUS_PENDING, scheduled_for=now - timedelta(minutes=1)),
-        SimpleNamespace(id=uuid.uuid4(), status=DATA_DELETION_STATUS_FAILED, scheduled_for=now - timedelta(minutes=2)),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            status=DATA_DELETION_STATUS_PENDING,
+            scheduled_for=now - timedelta(minutes=1),
+        ),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            status=DATA_DELETION_STATUS_FAILED,
+            scheduled_for=now - timedelta(minutes=2),
+        ),
     ]
     processed = []
 

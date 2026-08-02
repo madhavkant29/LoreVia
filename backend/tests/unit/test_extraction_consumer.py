@@ -2,11 +2,12 @@ import pytest
 
 from app.core.redis import key_extraction_inflight_book
 from app.utils.ingestion_utils import EXTRACTION_INFLIGHT_TTL_SECONDS
+from app.workers.consumers import extraction_consumer
 from app.workers.consumers.extraction_consumer import process_book
 
 
 def test_inflight_lock_ttl_exceeds_hard_limit():
-    EXTRACTION_HARD_LIMIT = 25 * 60       # celery_app.py task_annotations time_limit
+    EXTRACTION_HARD_LIMIT = 25 * 60  # celery_app.py task_annotations time_limit
     MINIMUM_TTL = EXTRACTION_HARD_LIMIT + 300
     assert EXTRACTION_INFLIGHT_TTL_SECONDS >= MINIMUM_TTL
 
@@ -137,3 +138,44 @@ async def test_process_book_inflight_lock_owner_safety(monkeypatch):
     assert result == {"book_id": book_id, "chapters": 10}
     assert call_count == 1
     assert inflight_key not in inflight_state
+
+
+@pytest.mark.asyncio
+async def test_process_book_impl_rolls_back_open_transaction_before_session_exit(monkeypatch):
+    class FakeDb:
+        def __init__(self):
+            self.rollback_calls = 0
+
+        def in_transaction(self):
+            return True
+
+        async def rollback(self):
+            self.rollback_calls += 1
+
+    class SessionContext:
+        def __init__(self, db):
+            self.db = db
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    db = FakeDb()
+
+    async def fake_process(_db, *, book_id, queue_wait_ms):
+        assert _db is db
+        return {"book_id": book_id}
+
+    monkeypatch.setattr(extraction_consumer, "AsyncSessionLocal", lambda: SessionContext(db))
+    monkeypatch.setattr(
+        extraction_consumer,
+        "process_book_ingestion_and_queue",
+        fake_process,
+    )
+
+    result = await extraction_consumer._process_book_impl("book-1", queue_wait_ms=7)
+
+    assert result == {"book_id": "book-1"}
+    assert db.rollback_calls == 1

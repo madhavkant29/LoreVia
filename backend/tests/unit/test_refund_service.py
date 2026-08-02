@@ -1,7 +1,8 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-import uuid
 
+import httpx
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -262,7 +263,9 @@ async def test_evaluate_refund_eligibility_counts_submitted_refunds_pending_prov
 
 
 @pytest.mark.asyncio
-async def test_create_refund_review_request_is_idempotent_for_duplicate_active_transaction(db, monkeypatch):
+async def test_create_refund_review_request_is_idempotent_for_duplicate_active_transaction(
+    db, monkeypatch
+):
     user = await _create_user(db, email_prefix="refund-duplicate")
     subscription = Subscription(
         user_id=user.id,
@@ -290,9 +293,16 @@ async def test_create_refund_review_request_is_idempotent_for_duplicate_active_t
         assert subscription_id == "sub_123"
         return {"id": "sub_123", "status": "canceled"}
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment)
-    monkeypatch.setattr("app.services.refund_service.cancel_subscription_immediately", fake_cancel_subscription_immediately)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.cancel_subscription_immediately",
+        fake_cancel_subscription_immediately,
+    )
 
     first_review = await create_refund_review_request(
         db,
@@ -316,7 +326,9 @@ async def test_create_refund_review_request_is_idempotent_for_duplicate_active_t
     review_count = int(
         (
             await db.execute(
-                select(func.count(RefundReview.id)).where(RefundReview.paddle_transaction_id == "txn_123")
+                select(func.count(RefundReview.id)).where(
+                    RefundReview.paddle_transaction_id == "txn_123"
+                )
             )
         ).scalar()
         or 0
@@ -327,7 +339,9 @@ async def test_create_refund_review_request_is_idempotent_for_duplicate_active_t
 
 
 @pytest.mark.asyncio
-async def test_create_refund_review_request_recovers_when_duplicate_insert_conflicts_on_flush(db, monkeypatch):
+async def test_create_refund_review_request_recovers_when_duplicate_insert_conflicts_on_flush(
+    db, monkeypatch
+):
     user = await _create_user(db, email_prefix="refund-duplicate-flush")
     existing_review = RefundReview(
         user_id=user.id,
@@ -367,17 +381,25 @@ async def test_create_refund_review_request_recovers_when_duplicate_insert_confl
     original_flush = db.flush
 
     async def fake_flush(*args, **kwargs):
-        raise IntegrityError("duplicate key value violates unique constraint", params=None, orig=None)
+        raise IntegrityError(
+            "duplicate key value violates unique constraint", params=None, orig=None
+        )
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
     monkeypatch.setattr(
         "app.services.refund_service._find_active_review_for_transaction",
         fake_find_active_review_for_transaction,
     )
+
     async def fake_find_latest_review_for_transaction(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr("app.services.refund_service._find_latest_review_for_transaction", fake_find_latest_review_for_transaction)
+    monkeypatch.setattr(
+        "app.services.refund_service._find_latest_review_for_transaction",
+        fake_find_latest_review_for_transaction,
+    )
     monkeypatch.setattr(db, "flush", fake_flush)
 
     result = await create_refund_review_request(
@@ -416,13 +438,17 @@ async def test_create_refund_review_request_sanitizes_provider_exception_details
         return _transaction_summary(user=user, charge_at=now - timedelta(hours=1))
 
     async def fake_create_refund_adjustment(transaction_id: str, reason: str):
-        raise RuntimeError(
+        raise httpx.HTTPError(
             "authorization=Bearer provider-secret-token "
             "database_url=postgresql://refund_user:refund_pass@db.example.com/refunds"
         )
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
 
     review = await create_refund_review_request(
         db,
@@ -435,14 +461,21 @@ async def test_create_refund_review_request_sanitizes_provider_exception_details
     )
 
     assert review.status == REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED
-    assert review.provider_response_json["adjustment_create_error"] == ADJUSTMENT_CREATE_ERROR_MESSAGE
-    assert "provider-secret-token" not in review.provider_response_json["adjustment_create_error_redacted"]
+    assert (
+        review.provider_response_json["adjustment_create_error"] == ADJUSTMENT_CREATE_ERROR_MESSAGE
+    )
+    assert (
+        "provider-secret-token"
+        not in review.provider_response_json["adjustment_create_error_redacted"]
+    )
     assert "refund_pass" not in review.provider_response_json["adjustment_create_error_redacted"]
     assert "[REDACTED]" in review.provider_response_json["adjustment_create_error_redacted"]
 
 
 @pytest.mark.asyncio
-async def test_create_refund_review_request_sanitizes_subscription_cancellation_exception_details(db, monkeypatch):
+async def test_create_refund_review_request_sanitizes_subscription_cancellation_exception_details(
+    db, monkeypatch
+):
     user = await _create_user(db, email_prefix="refund-cancel-error")
     subscription = Subscription(
         user_id=user.id,
@@ -464,14 +497,21 @@ async def test_create_refund_review_request_sanitizes_subscription_cancellation_
         return {"id": "adj_cancel_error_123", "status": "pending_approval"}
 
     async def fake_cancel_subscription_immediately(subscription_id: str):
-        raise RuntimeError(
+        raise httpx.HTTPError(
             "x-api-key=provider-key-123 cookie=session_cookie "
             "database_url=postgresql://cancel_user:cancel_pass@db.example.com/refunds"
         )
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment)
-    monkeypatch.setattr("app.services.refund_service.cancel_subscription_immediately", fake_cancel_subscription_immediately)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.cancel_subscription_immediately",
+        fake_cancel_subscription_immediately,
+    )
 
     review = await create_refund_review_request(
         db,
@@ -484,14 +524,79 @@ async def test_create_refund_review_request_sanitizes_subscription_cancellation_
     )
 
     assert review.status == REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED
-    assert review.provider_response_json["cancel_subscription_error"] == CANCEL_SUBSCRIPTION_ERROR_MESSAGE
-    assert "provider-key-123" not in review.provider_response_json["cancel_subscription_error_redacted"]
+    assert (
+        review.provider_response_json["cancel_subscription_error"]
+        == CANCEL_SUBSCRIPTION_ERROR_MESSAGE
+    )
+    assert (
+        "provider-key-123"
+        not in review.provider_response_json["cancel_subscription_error_redacted"]
+    )
     assert "cancel_pass" not in review.provider_response_json["cancel_subscription_error_redacted"]
     assert "[REDACTED]" in review.provider_response_json["cancel_subscription_error_redacted"]
 
 
 @pytest.mark.asyncio
-async def test_create_refund_review_request_requires_manual_review_when_monthly_subscription_linkage_is_missing(db, monkeypatch):
+async def test_create_refund_review_request_propagates_unexpected_provider_client_bug(
+    db, monkeypatch
+):
+    user = await _create_user(db, email_prefix="refund-provider-bug")
+    subscription = Subscription(
+        user_id=user.id,
+        plan="author_monthly",
+        status="active",
+        paddle_sub_id="sub_provider_bug_123",
+        paddle_transaction_id="txn_provider_bug_123",
+    )
+    db.add(subscription)
+    await db.commit()
+
+    now = datetime.now(UTC)
+
+    async def fake_get_transaction_summary(transaction_id: str):
+        assert transaction_id == "txn_provider_bug_123"
+        return SimpleNamespace(
+            transaction_id="txn_provider_bug_123",
+            status="completed",
+            plan="author_monthly",
+            billing_interval="monthly",
+            display_name="Author",
+            currency_code="USD",
+            total="USD 29.00",
+            invoice_number="INV-123",
+            invoice_pdf_url="https://files.paddle.com/invoice.pdf",
+            subscription_id="sub_provider_bug_123",
+            customer_email=user.email,
+            customer_id="ctm_123",
+            charge_at=now - timedelta(hours=1),
+        )
+
+    async def fake_create_refund_adjustment(transaction_id: str, reason: str):
+        raise RuntimeError("provider client regression")
+
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
+
+    with pytest.raises(RuntimeError, match="provider client regression"):
+        await create_refund_review_request(
+            db,
+            transaction_id="txn_provider_bug_123",
+            request_reason="Need refund",
+            request_source="support",
+            support_reference="CASE-PROVIDER-BUG",
+            requested_by_admin_user_id=user.id,
+            now=now,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_refund_review_request_requires_manual_review_when_monthly_subscription_linkage_is_missing(
+    db, monkeypatch
+):
     user = await _create_user(db, email_prefix="refund-no-sub-link")
     now = datetime.now(UTC)
 
@@ -514,10 +619,16 @@ async def test_create_refund_review_request_requires_manual_review_when_monthly_
         )
 
     async def fail_create_refund_adjustment(transaction_id: str, reason: str):
-        raise AssertionError("Provider refund creation should not run without safe subscription linkage")
+        raise AssertionError(
+            "Provider refund creation should not run without safe subscription linkage"
+        )
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fail_create_refund_adjustment)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fail_create_refund_adjustment
+    )
 
     review = await create_refund_review_request(
         db,

@@ -14,6 +14,10 @@ function isLocalDevBrowser() {
 }
 
 export function resolveApiBase() {
+  if (process.env.NEXT_PUBLIC_E2E_MOCK_API === "1") {
+    return "/api/v1"
+  }
+
   // During local Next dev, auth responses proxied through rewrites can lose
   // the backend's HttpOnly auth cookies. Calling the backend directly avoids
   // that cookie-stripping path while still remaining same-site on localhost.
@@ -36,6 +40,14 @@ export function resolveApiBase() {
 export const API_BASE = resolveApiBase()
 
 export function resolveApiOrigin() {
+  if (
+    process.env.NEXT_PUBLIC_E2E_MOCK_API === "1" &&
+    typeof window !== "undefined" &&
+    window.location?.origin
+  ) {
+    return window.location.origin
+  }
+
   if (isLocalDevBrowser()) {
     return "http://127.0.0.1:8000"
   }
@@ -50,6 +62,19 @@ export function resolveApiOrigin() {
       return new URL(apiUrl).origin
     } catch {
       // Fall through to local defaults.
+    }
+  }
+
+  return "http://127.0.0.1:8000"
+}
+
+export function resolveServerApiOrigin() {
+  const apiUrl = process.env.API_ORIGIN?.trim() || process.env.NEXT_PUBLIC_API_URL?.trim()
+  if (apiUrl) {
+    try {
+      return new URL(apiUrl).origin
+    } catch {
+      // Fall through to the local backend default.
     }
   }
 

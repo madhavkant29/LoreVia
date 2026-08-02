@@ -28,7 +28,13 @@ def test_character_bible_vault_manifest_builds_linked_vault_structure():
         motivations=["protect Blaire"],
         fears=["losing Blaire"],
         arc_summary="Aria learns to trust Blaire.",
-        growth_events=[{"chapter": 1, "event": "Met Blaire", "description": "Aria meets Blaire in the capital."}],
+        growth_events=[
+            {
+                "chapter": 1,
+                "event": "Met Blaire",
+                "description": "Aria meets Blaire in the capital.",
+            }
+        ],
     )
     blaire = Character(
         id=uuid.uuid4(),
@@ -129,7 +135,10 @@ def test_character_bible_vault_manifest_builds_linked_vault_structure():
 
     assert "[[Blaire]]" in paths[f"{root_folder}/Characters/Aria.md"]
     assert "[[Aria]]" in paths[f"{root_folder}/Characters/Blaire.md"]
-    assert "Half-Sister, Half-Brother, Spouse, Forbidden Romance" in paths[f"{root_folder}/Relationships/Relationship Map.md"]
+    assert (
+        "Half-Sister, Half-Brother, Spouse, Forbidden Romance"
+        in paths[f"{root_folder}/Relationships/Relationship Map.md"]
+    )
     assert "Next: [[Blaire joins]]" in paths[f"{root_folder}/Major Events/Aria arrives.md"]
     assert "Previous: [[Aria arrives]]" in paths[f"{root_folder}/Major Events/Blaire joins.md"]
     assert "## Connected Plot Threads" in paths[f"{root_folder}/Major Events/Aria arrives.md"]

@@ -63,9 +63,8 @@ engine = create_async_engine(
 def _set_search_path_on_connect(dbapi_connection, _connection_record) -> None:
     _initialize_postgres_session(dbapi_connection)
 
-AsyncSessionLocal = async_sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False
-)
+
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):

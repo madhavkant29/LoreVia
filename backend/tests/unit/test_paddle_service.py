@@ -12,7 +12,7 @@ def _sign_payload(payload: dict, timestamp: int, secret: str) -> tuple[bytes, st
     raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     digest = hmac.new(
         secret.encode("utf-8"),
-        f"{timestamp}:{raw_body.decode('utf-8')}".encode("utf-8"),
+        f"{timestamp}:{raw_body.decode('utf-8')}".encode(),
         hashlib.sha256,
     ).hexdigest()
     return raw_body, f"ts={timestamp};h1={digest}"
@@ -24,8 +24,12 @@ def test_verify_webhook_signature_accepts_valid_recent_signature(monkeypatch):
     payload = {"event_id": "evt_123", "event_type": "subscription.updated", "data": {}}
     raw_body, signature = _sign_payload(payload, timestamp, secret)
 
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     assert paddle_service.verify_webhook_signature(raw_body, signature) is True
@@ -37,8 +41,12 @@ def test_verify_webhook_signature_rejects_stale_timestamp(monkeypatch):
     payload = {"event_id": "evt_123", "event_type": "subscription.updated", "data": {}}
     raw_body, signature = _sign_payload(payload, timestamp, secret)
 
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 301)
 
     assert paddle_service.verify_webhook_signature(raw_body, signature) is False
@@ -47,8 +55,12 @@ def test_verify_webhook_signature_rejects_stale_timestamp(monkeypatch):
 def test_verify_webhook_signature_rejects_invalid_timestamp(monkeypatch):
     secret = "pdl_secret_test"
 
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
 
     assert paddle_service.verify_webhook_signature(b"{}", "ts=not-a-number;h1=abc123") is False
 
@@ -59,8 +71,12 @@ def test_verify_webhook_signature_rejects_mismatched_signature(monkeypatch):
     payload = {"event_id": "evt_123", "event_type": "subscription.updated", "data": {}}
     raw_body, _signature = _sign_payload(payload, timestamp, secret)
 
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp)
 
     assert paddle_service.verify_webhook_signature(raw_body, "ts=1700000000;h1=deadbeef") is False
@@ -89,8 +105,12 @@ async def test_cancel_subscription_at_period_end_uses_next_billing_period(monkey
             captured["json"] = json
             return FakeResponse()
 
-    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient()
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
 
     result = await paddle_service.cancel_subscription_at_period_end("sub_123")
 
@@ -100,7 +120,9 @@ async def test_cancel_subscription_at_period_end_uses_next_billing_period(monkey
 
 
 @pytest.mark.asyncio
-async def test_create_checkout_url_uses_recommended_checkout_page_when_override_missing(monkeypatch):
+async def test_create_checkout_url_uses_recommended_checkout_page_when_override_missing(
+    monkeypatch,
+):
     captured: dict[str, object] = {}
 
     class FakeResponse:
@@ -108,7 +130,12 @@ async def test_create_checkout_url_uses_recommended_checkout_page_when_override_
             return None
 
         def json(self):
-            return {"data": {"id": "txn_123", "checkout": {"url": "https://getlorevia.com/checkout?_ptxn=txn_123"}}}
+            return {
+                "data": {
+                    "id": "txn_123",
+                    "checkout": {"url": "https://getlorevia.com/checkout?_ptxn=txn_123"},
+                }
+            }
 
     class FakeAsyncClient:
         async def __aenter__(self):
@@ -123,15 +150,30 @@ async def test_create_checkout_url_uses_recommended_checkout_page_when_override_
             captured["json"] = json
             return FakeResponse()
 
-    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID", "pri_author_monthly", raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.APP_URL", "https://getlorevia.com", raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient()
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "pri_author_monthly",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_DEFAULT_CHECKOUT_URL", None, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.APP_URL", "https://getlorevia.com", raising=False
+    )
+
     async def fake_get_or_create_customer(email, existing_customer_id=None):
         return "ctm_123"
 
-    monkeypatch.setattr("app.services.paddle_service.get_or_create_customer", fake_get_or_create_customer)
+    monkeypatch.setattr(
+        "app.services.paddle_service.get_or_create_customer", fake_get_or_create_customer
+    )
 
     checkout_url, customer_id, transaction_id = await paddle_service.create_checkout_url(
         user_id="user_123",
@@ -188,8 +230,12 @@ async def test_get_transaction_summary_returns_invoice_details(monkeypatch):
                 }
             )
 
-    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient()
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
 
     summary = await paddle_service.get_transaction_summary("txn_123")
 
@@ -207,7 +253,9 @@ async def test_get_transaction_summary_returns_invoice_details(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_transaction_summary_derives_annual_interval_from_billing_cycle_when_plan_is_missing(monkeypatch):
+async def test_get_transaction_summary_derives_annual_interval_from_billing_cycle_when_plan_is_missing(
+    monkeypatch,
+):
     class FakeResponse:
         def __init__(self, payload, status_code=200):
             self._payload = payload
@@ -253,8 +301,12 @@ async def test_get_transaction_summary_derives_annual_interval_from_billing_cycl
                 }
             )
 
-    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient()
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
 
     summary = await paddle_service.get_transaction_summary("txn_annual_123")
 
@@ -285,8 +337,12 @@ async def test_create_refund_adjustment_posts_full_refund_request(monkeypatch):
             captured["json"] = json
             return FakeResponse()
 
-    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient()
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
 
     payload = await paddle_service.create_refund_adjustment("txn_123", "Accidental monthly renewal")
 
@@ -324,8 +380,12 @@ async def test_cancel_subscription_immediately_posts_immediate_effective_date(mo
             captured["json"] = json
             return FakeResponse()
 
-    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient()
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
 
     payload = await paddle_service.cancel_subscription_immediately("sub_123")
 
@@ -375,10 +435,16 @@ async def test_get_or_create_customer_reuses_existing_customer_on_duplicate_emai
 
         async def get(self, url, headers=None, params=None):
             requests.append((url, params))
-            raise AssertionError("email lookup should not run when conflict payload already includes the customer id")
+            raise AssertionError(
+                "email lookup should not run when conflict payload already includes the customer id"
+            )
 
-    monkeypatch.setattr("app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient())
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient", lambda timeout=20.0: FakeAsyncClient()
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY", "pdl_test_key", raising=False
+    )
 
     customer_id = await paddle_service.get_or_create_customer("author@getlorevia.com")
 

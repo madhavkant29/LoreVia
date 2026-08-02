@@ -18,7 +18,9 @@ def _trusted_base_url() -> str:
 
 @pytest.mark.asyncio
 async def test_health_response_includes_hardened_security_headers():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
         response = await client.get("/health")
 
     assert response.status_code == 200
@@ -33,7 +35,9 @@ async def test_health_response_includes_hardened_security_headers():
 
 @pytest.mark.asyncio
 async def test_not_found_responses_keep_security_headers():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
         response = await client.get("/api/v1/this-route-does-not-exist")
 
     assert response.status_code == 404
@@ -44,7 +48,9 @@ async def test_not_found_responses_keep_security_headers():
 
 @pytest.mark.asyncio
 async def test_health_allows_localhost_with_port_in_debug_mode():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost:8000") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://localhost:8000"
+    ) as client:
         response = await client.get("/health")
 
     assert response.status_code == 200

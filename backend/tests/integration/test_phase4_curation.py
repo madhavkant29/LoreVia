@@ -26,15 +26,8 @@ async def _register_author(client, email: str, monkeypatch) -> tuple[dict[str, s
         lambda *_args, **_kwargs: None,
     )
 
-    async def _fake_check_upload_limit(*_args, **_kwargs):
-        return None
-
     monkeypatch.setattr(
-        "app.api.v1.routes.books.imports.check_upload_limit",
-        _fake_check_upload_limit,
-    )
-    monkeypatch.setattr(
-        "app.api.v1.routes.books.characters.require_author_access",
+        "app.services.character_relationship_service.require_author_access",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -86,7 +79,7 @@ async def test_relationship_create_sets_edited_by_author(client, db, monkeypatch
     created = await db.execute(
         select(CharacterRelationship).where(
             CharacterRelationship.book_id == book.id,
-            CharacterRelationship.edited_by_author == True,
+            CharacterRelationship.edited_by_author.is_(True),
         )
     )
     rows = created.scalars().all()
@@ -172,8 +165,17 @@ async def test_write_lock_blocks_scene_create_during_rebuild(client, db, monkeyp
         word_count=5,
     )
     db.add(chapter)
-    db.add(NovelScene(book_id=book_id, chapter_id=chapter_id, chapter_number=1,
-                       title="Existing", body="Body", path="/scenes/1", sort_order=1))
+    db.add(
+        NovelScene(
+            book_id=book_id,
+            chapter_id=chapter_id,
+            chapter_number=1,
+            title="Existing",
+            body="Body",
+            path="/scenes/1",
+            sort_order=1,
+        )
+    )
     await db.commit()
 
     response = await client.post(
@@ -220,8 +222,17 @@ async def test_scene_create_allowed_when_not_rebuilding(client, db, monkeypatch)
         word_count=5,
     )
     db.add(chapter)
-    db.add(NovelScene(book_id=book_id, chapter_id=chapter_id, chapter_number=1,
-                       title="Existing", body="Body", path="/scenes/1", sort_order=1))
+    db.add(
+        NovelScene(
+            book_id=book_id,
+            chapter_id=chapter_id,
+            chapter_number=1,
+            title="Existing",
+            body="Body",
+            path="/scenes/1",
+            sort_order=1,
+        )
+    )
     await db.commit()
 
     response = await client.post(

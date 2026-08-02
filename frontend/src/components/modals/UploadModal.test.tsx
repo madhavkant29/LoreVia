@@ -239,6 +239,8 @@ describe("UploadModal", () => {
       expect.objectContaining({ mode: "author" }),
     )
     expect(authState.user.username).toBe("author")
+    expect(captureMock).toHaveBeenCalledWith("upload_started", expect.objectContaining({ mode: "author", kind: "new_upload" }))
+    expect(captureMock).toHaveBeenCalledWith("book_uploaded", expect.not.objectContaining({ manuscript_text: expect.anything() }))
   })
 
   it("removes the private workspace notice and renders author upload options with explicit colors", async () => {

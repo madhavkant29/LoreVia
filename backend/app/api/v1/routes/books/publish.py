@@ -11,10 +11,13 @@ from app.models.book import Book
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
 from app.services.public_publish_service import submit_public_share
 from app.utils.billing_utils import require_author_access
+from app.utils.client_identity import trusted_client_ip
+from app.utils.public.moderation import (
+    add_moderation_action,
+)
 from app.utils.public_utils import (
     PUBLIC_STATUS_HIDDEN,
     USER_PUBLIC_SHARE_SOURCE_KIND,
-    add_moderation_action,
 )
 
 router = APIRouter()
@@ -33,7 +36,12 @@ async def publish_book_publicly(
     current_user=Depends(get_current_user),
 ):
     book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id or book.hidden_at is not None or book.archived_at is not None:
+    if (
+        not book
+        or book.user_id != current_user.id
+        or book.hidden_at is not None
+        or book.archived_at is not None
+    ):
         raise HTTPException(404, "Book not found")
     require_author_access(current_user)
     return await submit_public_share(
@@ -41,7 +49,7 @@ async def publish_book_publicly(
         book=book,
         user=current_user,
         body=body,
-        request_ip=request.client.host if request.client else None,
+        request_ip=trusted_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
 

@@ -124,7 +124,9 @@ class WhatsTheWordRequest(BaseModel):
     def validate_description(cls, value: str) -> str:
         cleaned = " ".join(value.split()).strip()
         if _word_count(cleaned) < MIN_WHATS_THE_WORD_DESCRIPTION_WORDS:
-            raise ValueError(f"Please describe it in at least {MIN_WHATS_THE_WORD_DESCRIPTION_WORDS} words.")
+            raise ValueError(
+                f"Please describe it in at least {MIN_WHATS_THE_WORD_DESCRIPTION_WORDS} words."
+            )
         return cleaned
 
     @field_validator("previous_word")

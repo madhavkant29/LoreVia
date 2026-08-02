@@ -10,7 +10,10 @@ from app.utils.plot_thread_utils import (
 
 
 def test_plot_thread_lookup_key_normalizes_spacing_and_punctuation():
-    assert plot_thread_lookup_key("Joren promised to return the amulet!") == "joren promised to return the amulet"
+    assert (
+        plot_thread_lookup_key("Joren promised to return the amulet!")
+        == "joren promised to return the amulet"
+    )
 
 
 def test_normalize_plot_thread_status_maps_legacy_ongoing_to_developing():
@@ -22,20 +25,26 @@ def test_merge_plot_thread_status_marks_reopened_resolved_thread_as_contradicted
 
 
 def test_derive_plot_thread_status_flags_stale_threads():
-    assert derive_plot_thread_status(
-        "developing",
-        introduced_at=2,
-        last_mentioned_at=3,
-        resolved_at=None,
-        current_chapter=10,
-    ) == "possibly_abandoned"
-    assert derive_plot_thread_status(
-        "developing",
-        introduced_at=2,
-        last_mentioned_at=3,
-        resolved_at=None,
-        current_chapter=16,
-    ) == "forgotten"
+    assert (
+        derive_plot_thread_status(
+            "developing",
+            introduced_at=2,
+            last_mentioned_at=3,
+            resolved_at=None,
+            current_chapter=10,
+        )
+        == "possibly_abandoned"
+    )
+    assert (
+        derive_plot_thread_status(
+            "developing",
+            introduced_at=2,
+            last_mentioned_at=3,
+            resolved_at=None,
+            current_chapter=16,
+        )
+        == "forgotten"
+    )
 
 
 def test_build_plot_thread_payload_exposes_lifecycle_metadata():

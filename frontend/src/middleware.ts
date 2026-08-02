@@ -41,6 +41,7 @@ const PUBLIC_PAGE_ROUTES = new Set([
   "/refund",
   "/status",
   "/terms",
+  "/unsubscribe",
 ])
 
 const PUBLIC_PAGE_PREFIXES = [
@@ -103,6 +104,7 @@ const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
   "stats",
   "status",
   "terms",
+  "unsubscribe",
   "upgrade",
   "verify-email",
 ])

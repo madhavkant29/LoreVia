@@ -1,3 +1,4 @@
+from app.parsers import chunker
 from app.parsers.chunker import chunk_text, count_tokens
 
 
@@ -25,7 +26,9 @@ def test_single_chunk_for_short_text():
 
 
 def test_large_paragraph_respects_abbreviations_when_splitting():
-    text = "Dr. Hargrove stayed silent. Mr. Vale answered slowly. The corridor remained still. " * 40
+    text = (
+        "Dr. Hargrove stayed silent. Mr. Vale answered slowly. The corridor remained still. " * 40
+    )
     chunks = chunk_text(text, max_tokens=120, overlap=20)
     assert all("Dr." in chunk or "Mr." in chunk or "corridor" in chunk for chunk in chunks)
 
@@ -35,3 +38,18 @@ def test_oversized_sentence_prefers_clause_boundaries_before_word_splits():
     chunks = chunk_text(sentence, max_tokens=15, overlap=0)
     assert len(chunks) > 1
     assert any("," in chunk for chunk in chunks[:-1])
+
+
+def test_token_count_has_conservative_offline_fallback(monkeypatch):
+    monkeypatch.setattr(chunker, "_enc", None)
+    monkeypatch.setattr(chunker, "_encoding_load_failed", False)
+
+    def unavailable(_model):
+        raise OSError("network unavailable")
+
+    monkeypatch.setattr(chunker.tiktoken, "encoding_for_model", unavailable)
+
+    assert count_tokens("abcdef") == 2
+    assert count_tokens("") == 0
+    assert count_tokens("[[IMAGE:cover.png]]") > 0
+    assert chunker._encoding_load_failed is True

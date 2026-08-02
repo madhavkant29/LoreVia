@@ -36,4 +36,11 @@ describe("emailApi", () => {
       marketing: true,
     })
   })
+
+  it("submits an email unsubscribe token", async () => {
+    postMock.mockResolvedValue({ data: { unsubscribed_all: true } })
+
+    await expect(emailApi.unsubscribe("token-123")).resolves.toEqual({ unsubscribed_all: true })
+    expect(postMock).toHaveBeenCalledWith("/email/unsubscribe", { token: "token-123" })
+  })
 })

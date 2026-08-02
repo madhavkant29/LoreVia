@@ -4,6 +4,8 @@ import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+const jsonLdDataMock = vi.hoisted(() => new Map<string, unknown>())
+
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
 }))
@@ -17,7 +19,10 @@ vi.mock("@/components/marketing/ThemeToggle", () => ({
 }))
 
 vi.mock("@/components/seo/JsonLdScript", () => ({
-  JsonLdScript: ({ id }: { id: string }) => <script data-testid={id} />,
+  JsonLdScript: ({ id, data }: { id: string; data: unknown }) => {
+    jsonLdDataMock.set(id, data)
+    return <script data-testid={id} />
+  },
 }))
 
 vi.mock("next/navigation", () => ({
@@ -90,6 +95,7 @@ afterEach(() => {
   root = null
   container = null
   document.body.innerHTML = ""
+  jsonLdDataMock.clear()
 })
 
 describe("static public pages", () => {
@@ -112,6 +118,18 @@ describe("static public pages", () => {
     await renderElement(element)
 
     expect(container?.textContent).toContain(expectedText)
+    if (_name === "home") {
+      const homeJsonLd = jsonLdDataMock.get("home-software-jsonld") as {
+        offers: Array<{ name: string; price: string }>
+      }
+      expect(homeJsonLd.offers.map(({ name, price }) => ({ name, price }))).toEqual([
+        { name: "Free", price: "0" },
+        { name: "Author Monthly", price: "19" },
+        { name: "Author Annual", price: "190" },
+        { name: "Architect Monthly", price: "39" },
+        { name: "Architect Annual", price: "390" },
+      ])
+    }
   })
 
   it("renders a competitor comparison slug page and metadata", async () => {

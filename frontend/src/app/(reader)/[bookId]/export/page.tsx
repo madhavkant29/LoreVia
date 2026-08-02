@@ -9,6 +9,7 @@ import { useParams } from "next/navigation"
 import { strToU8, zipSync } from "fflate"
 
 import { booksApi } from "@/lib/api/books"
+import { capture } from "@/lib/analytics/posthog"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -179,6 +180,7 @@ export default function ExportStudioPage() {
  const blob = await booksApi.exportCharacterBible(bookId, bibleFormat, exportFontFamily)
  const extension = bibleFormat === "vault_folder" ? "zip" : bibleFormat
  downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-character-bible.${extension}`)
+ capture("first_export_completed", { book_id: bookId, export_kind: "character_bible", format: extension })
  setStatus(`Downloaded character bible as ${extension.toUpperCase()}.`)
  } catch {
  setStatus("Could not export the character bible.")
@@ -195,6 +197,7 @@ export default function ExportStudioPage() {
  const blob = await booksApi.exportManuscript(bookId, manuscriptFormat, "standard_manuscript", includeSceneMetadata, exportFontFamily, includeTableOfContents)
  const extension = manuscriptFormat === "vault" ? "zip" : manuscriptFormat
  downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-manuscript.${extension}`)
+ capture("first_export_completed", { book_id: bookId, export_kind: "manuscript", format: extension })
  setStatus(`Downloaded manuscript as ${extension.toUpperCase()}.`)
  } catch {
  setStatus("Could not export the manuscript.")
@@ -239,6 +242,7 @@ export default function ExportStudioPage() {
  previewChapters: previewNovelExport ? 2 : null,
  })
  downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-${previewNovelExport ? "novel-preview" : "novel"}.${novelFormat}`)
+ capture("first_export_completed", { book_id: bookId, export_kind: previewNovelExport ? "novel_preview" : "novel", format: novelFormat })
  setStatus(previewNovelExport ? `Downloaded first 2-chapter sample as ${novelFormat.toUpperCase()}.` : `Downloaded novel export as ${novelFormat.toUpperCase()}.`)
  } catch {
  setStatus("Could not export the reader-ready novel.")
@@ -254,6 +258,7 @@ export default function ExportStudioPage() {
  try {
  const blob = await booksApi.exportVaultNotes(bookId)
  downloadBlob(blob, `${safeFileBase(book.title, "lorevia")}-notes.zip`)
+ capture("first_export_completed", { book_id: bookId, export_kind: "notes", format: "zip" })
  setStatus("Downloaded notes workspace ZIP.")
  } catch {
  setStatus("Could not export the notes workspace.")

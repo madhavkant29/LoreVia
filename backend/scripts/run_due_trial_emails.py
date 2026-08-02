@@ -15,7 +15,9 @@ async def _run(limit: int) -> dict[str, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Send due LoreVia trial emails.")
-    parser.add_argument("--limit", type=int, default=100, help="Maximum due trial emails to process in one run.")
+    parser.add_argument(
+        "--limit", type=int, default=100, help="Maximum due trial emails to process in one run."
+    )
     args = parser.parse_args()
 
     result = asyncio.run(_run(max(1, args.limit)))

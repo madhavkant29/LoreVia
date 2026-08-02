@@ -100,6 +100,9 @@ run_alembic() {
   if [[ -n "${ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES:-}" ]]; then
     alembic_env_args+=(-e ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES="${ALEMBIC_ALLOW_DESTRUCTIVE_DOWNGRADES}")
   fi
+  if [[ -n "${ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS:-}" ]]; then
+    alembic_env_args+=(-e ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS="${ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS}")
+  fi
 
   ${COMPOSE} run --rm \
     -e ALEMBIC_DATABASE_URL="${ALEMBIC_DATABASE_URL}" \
@@ -157,15 +160,21 @@ verify_runtime_schema
 
 enable_systemd_unit
 
-${COMPOSE} up -d redis nginx backend worker-extraction worker-analysis worker-intelligence celery-beat
+${COMPOSE} up -d redis nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
 
-for attempt in $(seq 1 20); do
+for retry_index in $(seq 0 6); do
   if ${COMPOSE} exec -T nginx wget -qO- http://127.0.0.1/nginx-health >/dev/null 2>&1 && \
      ${COMPOSE} exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)" >/dev/null 2>&1; then
     echo "Deploy succeeded"
     exit 0
   fi
-  sleep 3
+  if [[ "${retry_index}" -lt 6 ]]; then
+    retry_delay=$((2 ** retry_index))
+    if [[ "${retry_delay}" -gt 16 ]]; then
+      retry_delay=16
+    fi
+    sleep "${retry_delay}"
+  fi
 done
 
 echo "Health checks did not pass after deployment"

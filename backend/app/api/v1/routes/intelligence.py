@@ -1,16 +1,18 @@
 """
 Grounded intelligence routes: contextual Q&A.
 """
-import json
+
 import hashlib
+import json
 import uuid
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
@@ -32,22 +34,29 @@ from app.schemas.intelligence import (
     GroundedCitationOut,
     QARequest,
 )
-from app.utils.billing_utils import require_author_access
-from app.utils.llm_usage_utils import (
-    assert_llm_token_capacity,
-    create_tracked_chat_completion,
-    estimate_chat_completion_tokens,
-    record_llm_usage_counts,
+from app.services.llm_control_service import (
+    fail_llm_reservation,
+    finish_llm_reservation_counts,
+    reserve_llm_call,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.intelligence_utils import (
     build_grounded_qa_context,
     compute_cross_book_snapshot_hash,
     get_cross_book_character_matches,
     get_cross_book_wiki_matches,
 )
+from app.utils.llm_usage_utils import (
+    assert_llm_token_capacity,
+    create_tracked_chat_completion,
+    estimate_chat_completion_tokens,
+    record_llm_usage_counts,
+)
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
+GROUNDED_QA_STREAM_EXCEPTIONS = (OpenAIError, RuntimeError, ValueError, SQLAlchemyError)
 
 
 @router.get("/{book_id}/cross-book-intelligence", response_model=CrossBookIntelligenceOut)
@@ -100,7 +109,7 @@ async def cross_book_intelligence(
 
 
 def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
 
 
 def _intelligence_sse(event: str, data: dict[str, Any]) -> str:
@@ -159,7 +168,7 @@ async def qa_endpoint(
 
     system = (
         f'You answer questions about "{book.title}" using only the provided material.\n'
-        f'The reader has completed up to chapter {body.current_chapter}.\n'
+        f"The reader has completed up to chapter {body.current_chapter}.\n"
         "If earlier books in the same series are provided as prior-volume context, you may use them to answer questions about past lore.\n"
         "Rules:\n"
         "- Answer only from text and summaries provided.\n"
@@ -183,7 +192,11 @@ async def qa_endpoint(
             max_tokens=220,
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": f"Question: {body.question}\n\nContext:\n\n" + "\n\n".join(context_blocks)},
+                {
+                    "role": "user",
+                    "content": f"Question: {body.question}\n\nContext:\n\n"
+                    + "\n\n".join(context_blocks),
+                },
             ],
         )
         answer = (response.choices[0].message.content or "").strip()
@@ -210,7 +223,9 @@ async def qa_stream_endpoint(
     cache_key = key_grounded_answer(str(book_id), body.current_chapter, body.question)
     cached = await cache_get(cache_key)
     if cached:
-        cached_payload = _grounded_answer_out_from_payload(cast(dict[str, Any], cached), cached=True)
+        cached_payload = _grounded_answer_out_from_payload(
+            cast(dict[str, Any], cached), cached=True
+        )
 
         async def cached_stream():
             yield _intelligence_sse("done", cast(dict[str, Any], jsonable_encoder(cached_payload)))
@@ -231,7 +246,7 @@ async def qa_stream_endpoint(
 
     system = (
         f'You answer questions about "{book.title}" using only the provided material.\n'
-        f'The reader has completed up to chapter {body.current_chapter}.\n'
+        f"The reader has completed up to chapter {body.current_chapter}.\n"
         "If earlier books in the same series are provided as prior-volume context, you may use them to answer questions about past lore.\n"
         "Rules:\n"
         "- Answer only from text and summaries provided.\n"
@@ -243,21 +258,28 @@ async def qa_stream_endpoint(
     )
     llm_messages = [
         {"role": "system", "content": system},
-        {"role": "user", "content": f"Question: {body.question}\n\nContext:\n\n" + "\n\n".join(context_blocks)},
+        {
+            "role": "user",
+            "content": f"Question: {body.question}\n\nContext:\n\n" + "\n\n".join(context_blocks),
+        },
     ]
-    await assert_llm_token_capacity(
-        db,
-        user=current_user,
-        estimated_tokens=estimate_chat_completion_tokens(
-            {"messages": llm_messages, "max_tokens": 220}
-        ),
-    )
 
     async def event_stream():
         client = get_client()
         answer_parts: list[str] = []
         usage_counts: tuple[int, int, int] | None = None
+        reservation = None
         try:
+            reservation = await reserve_llm_call(
+                user_id=current_user.id,
+                estimated_tokens=estimate_chat_completion_tokens(
+                    {"messages": llm_messages, "max_tokens": 220}
+                ),
+                feature="grounded_qa",
+                operation="chat",
+                model=settings.OPENAI_INTEL_MODEL,
+                book_id=book.id,
+            )
             yield _intelligence_sse("stage", {"message": "Searching grounded context..."})
             stream = await client.chat.completions.create(
                 model=settings.OPENAI_INTEL_MODEL,
@@ -283,25 +305,33 @@ async def qa_stream_endpoint(
                         yield _intelligence_sse("delta", {"content": content})
 
             if usage_counts is not None:
-                await record_llm_usage_counts(
+                await finish_llm_reservation_counts(
+                    reservation,
                     prompt_tokens=usage_counts[0],
                     completion_tokens=usage_counts[1],
                     total_tokens=usage_counts[2],
-                    feature="grounded_qa",
-                    operation="chat_completion_stream",
-                    model=settings.OPENAI_INTEL_MODEL,
-                    db=db,
-                    user_id=current_user.id,
-                    book_id=book.id,
                 )
+                reservation = None
 
             payload = {"answer": "".join(answer_parts).strip(), "citations": citations}
             await cache_set(cache_key, payload, settings.REDIS_TTL_SUMMARY)
             response_payload = _grounded_answer_out_from_payload(payload)
-            yield _intelligence_sse("done", cast(dict[str, Any], jsonable_encoder(response_payload)))
-        except Exception:
+            yield _intelligence_sse(
+                "done", cast(dict[str, Any], jsonable_encoder(response_payload))
+            )
+        except HTTPException as exc:
+            if reservation is not None:
+                await fail_llm_reservation(reservation)
+                reservation = None
+            yield _intelligence_sse("error", {"error": str(exc.detail)})
+        except GROUNDED_QA_STREAM_EXCEPTIONS:
+            if reservation is not None:
+                await fail_llm_reservation(reservation)
+                reservation = None
             yield _intelligence_sse("error", {"error": public_error_message(500)})
         finally:
+            if reservation is not None:
+                await fail_llm_reservation(reservation)
             await client.close()
 
     return StreamingResponse(
@@ -309,5 +339,3 @@ async def qa_stream_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-

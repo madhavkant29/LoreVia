@@ -26,8 +26,6 @@ RUN if [ "$PREFETCH_MODEL_ASSETS" = "1" ]; then \
     fi
 
 COPY backend/ .
-RUN mkdir -p /frontend/src/lib/billing
-COPY frontend/src/lib/billing/pricing-catalog.json /frontend/src/lib/billing/pricing-catalog.json
 RUN chmod +x start.sh
 
 EXPOSE 8000

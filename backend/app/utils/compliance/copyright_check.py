@@ -14,6 +14,8 @@ COPYRIGHT_RE = re.compile(r"(?:copyright|\u00a9|\(c\)|all rights reserved)", re.
 PUBLIC_DOMAIN_RE = re.compile(r"(?:public domain|project gutenberg)", re.IGNORECASE)
 TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
+REGISTRY_LOOKUP_EXCEPTIONS = (httpx.HTTPError, KeyError, TypeError, ValueError)
+DOCUMENT_PARSE_EXCEPTIONS = (RuntimeError, ValueError, TypeError, zipfile.BadZipFile, OSError)
 
 
 async def check_isbn(isbn: str) -> dict:
@@ -36,7 +38,7 @@ async def check_isbn(isbn: str) -> dict:
                     "authors": [a["name"] for a in entry.get("authors", [])],
                     "requires_disclaimer": True,
                 }
-    except Exception:
+    except REGISTRY_LOOKUP_EXCEPTIONS:
         pass
     return {"found": False}
 
@@ -84,9 +86,7 @@ async def evaluate_document_copyright(
     has_copyright_marker = bool(COPYRIGHT_RE.search(document_text))
     has_isbn_signal = resolved_isbn is not None
     copyright_warning = bool(
-        registry_hit
-        or has_isbn_signal
-        or (has_copyright_marker and not has_public_domain_marker)
+        registry_hit or has_isbn_signal or (has_copyright_marker and not has_public_domain_marker)
     )
 
     return {
@@ -107,9 +107,15 @@ def extract_document_text_for_copyright_checks(format_name: str | None, raw: byt
     if normalized_format in {"txt", "md", "fountain"}:
         return _safe_decode(raw)
     if normalized_format == "docx":
-        return _extract_zip_text(raw, suffixes=(".xml",), preferred_names=("word/document.xml", "docProps/core.xml"))
+        return _extract_zip_text(
+            raw, suffixes=(".xml",), preferred_names=("word/document.xml", "docProps/core.xml")
+        )
     if normalized_format == "epub":
-        return _extract_zip_text(raw, suffixes=(".xhtml", ".html", ".htm", ".xml"), preferred_names=("content.opf", "toc.ncx", "mimetype"))
+        return _extract_zip_text(
+            raw,
+            suffixes=(".xhtml", ".html", ".htm", ".xml"),
+            preferred_names=("content.opf", "toc.ncx", "mimetype"),
+        )
     return ""
 
 
@@ -121,11 +127,13 @@ def _extract_pdf_text(raw: bytes) -> str:
             parts.append(str(cast(Any, doc[index]).get_text() or ""))
         doc.close()
         return _normalize_text("\n".join(parts))
-    except Exception:
+    except DOCUMENT_PARSE_EXCEPTIONS:
         return ""
 
 
-def _extract_zip_text(raw: bytes, *, suffixes: tuple[str, ...], preferred_names: tuple[str, ...]) -> str:
+def _extract_zip_text(
+    raw: bytes, *, suffixes: tuple[str, ...], preferred_names: tuple[str, ...]
+) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             selected_names: list[str] = []
@@ -145,7 +153,7 @@ def _extract_zip_text(raw: bytes, *, suffixes: tuple[str, ...], preferred_names:
             for name in selected_names[:8]:
                 parts.append(_strip_tags(_safe_decode(archive.read(name))))
             return _normalize_text("\n".join(parts))
-    except Exception:
+    except DOCUMENT_PARSE_EXCEPTIONS:
         return ""
 
 

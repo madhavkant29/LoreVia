@@ -3,6 +3,7 @@ Screenplay parser for Fountain-like text and screenplay PDFs converted to text.
 Supports scene headings, action, character cues, parentheticals, dialogue,
 transitions, and shot lines.
 """
+
 from __future__ import annotations
 
 import re
@@ -133,7 +134,7 @@ def _split_scene_remainder(remainder: str) -> tuple[str, str | None, str | None]
     numbered_match = re.search(r"\s+#\s*([^#\s]+)\s*#\s*$", remainder)
     if numbered_match:
         scene_number = numbered_match.group(1).strip()
-        remainder = remainder[:numbered_match.start()].strip()
+        remainder = remainder[: numbered_match.start()].strip()
 
     for separator in (" - ", " – ", " — "):
         if separator in remainder:
@@ -158,7 +159,9 @@ def parse_scene_heading(line: str, line_number: int) -> SceneHeading | None:
     if stripped.startswith(".") and len(stripped) > 1:
         content = stripped[1:].strip()
         location, time_of_day, scene_number = _split_scene_remainder(content)
-        return SceneHeading(stripped, line_number, False, False, location or content, time_of_day, scene_number)
+        return SceneHeading(
+            stripped, line_number, False, False, location or content, time_of_day, scene_number
+        )
 
     match = SCENE_HEADING_REGEX.match(stripped)
     if not match:
@@ -167,8 +170,14 @@ def parse_scene_heading(line: str, line_number: int) -> SceneHeading | None:
     normalized_prefix = prefix.upper().replace(" ", "")
     location, time_of_day, scene_number = _split_scene_remainder(remainder)
     interior = normalized_prefix.startswith("INT") or normalized_prefix == "I/E"
-    exterior = normalized_prefix.startswith("EXT") or normalized_prefix.startswith("EST") or normalized_prefix == "I/E"
-    return SceneHeading(stripped, line_number, interior, exterior, location or "Unknown", time_of_day, scene_number)
+    exterior = (
+        normalized_prefix.startswith("EXT")
+        or normalized_prefix.startswith("EST")
+        or normalized_prefix == "I/E"
+    )
+    return SceneHeading(
+        stripped, line_number, interior, exterior, location or "Unknown", time_of_day, scene_number
+    )
 
 
 def parse_parenthetical(line: str, line_number: int) -> Parenthetical | None:
@@ -267,7 +276,9 @@ def parse_screenplay(text: str) -> list[SceneHeading]:
                 if not dialogue_stripped:
                     i += 1
                     break
-                if parse_scene_heading(dialogue_stripped, dialogue_line_number) or parse_transition(dialogue_stripped, dialogue_line_number):
+                if parse_scene_heading(dialogue_stripped, dialogue_line_number) or parse_transition(
+                    dialogue_stripped, dialogue_line_number
+                ):
                     break
                 next_character = parse_character(dialogue_stripped, dialogue_line_number)
                 if next_character and pending_parenthetical is None:
@@ -287,7 +298,9 @@ def parse_screenplay(text: str) -> list[SceneHeading]:
                     if not next_stripped:
                         i += 1
                         break
-                    if parse_scene_heading(next_stripped, next_line_number) or parse_transition(next_stripped, next_line_number):
+                    if parse_scene_heading(next_stripped, next_line_number) or parse_transition(
+                        next_stripped, next_line_number
+                    ):
                         break
                     next_character = parse_character(next_stripped, next_line_number)
                     if next_character and dialogue_buffer:
@@ -297,7 +310,9 @@ def parse_screenplay(text: str) -> list[SceneHeading]:
                     dialogue_buffer.append(next_stripped)
                     i += 1
                 if dialogue_buffer:
-                    scene_elements.append(DialogueElement("\n".join(dialogue_buffer), dialogue_line_number))
+                    scene_elements.append(
+                        DialogueElement("\n".join(dialogue_buffer), dialogue_line_number)
+                    )
                     pending_parenthetical = None
                     continue
                 break
@@ -351,7 +366,9 @@ def extract_dialogue_from_scene(scene: SceneHeading) -> list[dict[str, Any]]:
                     "character_name": current_character.name,
                     "character_extension": current_character.extension,
                     "dialogue_text": element.text,
-                    "parenthetical": pending_parenthetical.content if pending_parenthetical else None,
+                    "parenthetical": pending_parenthetical.content
+                    if pending_parenthetical
+                    else None,
                     "line_number": line_number,
                 }
             )
@@ -366,10 +383,14 @@ def create_scene_models(scenes: list[SceneHeading], book_id: uuid.UUID) -> list[
 
     for index, scene in enumerate(scenes, start=1):
         action_text = "\n".join(
-            element.text for element in getattr(scene, "elements", []) if isinstance(element, Action) and element.text
+            element.text
+            for element in getattr(scene, "elements", [])
+            if isinstance(element, Action) and element.text
         ).strip()
         dialogue = extract_dialogue_from_scene(scene)
-        dialogue_word_count = sum(len(str(item.get("dialogue_text") or "").split()) for item in dialogue)
+        dialogue_word_count = sum(
+            len(str(item.get("dialogue_text") or "").split()) for item in dialogue
+        )
         scene_model = Scene(
             book_id=book_id,
             number=index,
@@ -431,13 +452,19 @@ def analyze_screenplay_stats(scenes: list[SceneHeading]) -> dict[str, Any]:
         stats["total_dialogue_lines"] += len(dialogue)
         for line in dialogue:
             name = str(line.get("character_name") or "Unknown")
-            stats["character_dialogue_counts"][name] = stats["character_dialogue_counts"].get(name, 0) + 1
+            stats["character_dialogue_counts"][name] = (
+                stats["character_dialogue_counts"].get(name, 0) + 1
+            )
             stats["total_words"] += len(str(line.get("dialogue_text") or "").split())
 
         action_words = sum(
-            len(element.text.split()) for element in getattr(scene, "elements", []) if isinstance(element, Action)
+            len(element.text.split())
+            for element in getattr(scene, "elements", [])
+            if isinstance(element, Action)
         )
         stats["total_words"] += action_words
 
-    stats["estimated_pages"] = max(1, round(stats["total_words"] / 250)) if stats["total_words"] else 1
+    stats["estimated_pages"] = (
+        max(1, round(stats["total_words"] / 250)) if stats["total_words"] else 1
+    )
     return stats

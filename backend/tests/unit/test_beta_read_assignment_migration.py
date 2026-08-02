@@ -27,10 +27,14 @@ class _FakeInspector:
         return list(self._state["tables"])
 
     def get_columns(self, table_name):
-        return [{"name": column_name} for column_name in self._state["columns"].get(table_name, set())]
+        return [
+            {"name": column_name} for column_name in self._state["columns"].get(table_name, set())
+        ]
 
     def get_indexes(self, table_name):
-        return [{"name": index_name} for index_name in self._state["indexes"].get(table_name, set())]
+        return [
+            {"name": index_name} for index_name in self._state["indexes"].get(table_name, set())
+        ]
 
 
 class _FakeOp:

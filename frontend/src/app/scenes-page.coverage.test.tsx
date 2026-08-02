@@ -12,6 +12,7 @@ const booksApiMock = vi.hoisted(() => ({
 }))
 const useBookDetailMock = vi.hoisted(() => vi.fn())
 const paramsMock = vi.hoisted(() => ({ bookId: "book-1" }))
+const promptMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/navigation", () => ({ useParams: () => paramsMock }))
 vi.mock("next/link", () => ({
@@ -53,6 +54,7 @@ vi.mock("@/components/characters/AddCharacterFromSelection", () => ({
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/hooks/useBookDetail", () => ({ useBookDetail: useBookDetailMock }))
 vi.mock("@/lib/stores/preferencesStore", () => ({ usePreferencesStore: () => ({ theme: "dark" }) }))
+vi.mock("@/components/ui/PromptDialog", () => ({ usePromptDialog: () => promptMock }))
 
 import ScenesPage from "@/app/(reader)/[bookId]/scenes/page"
 
@@ -170,13 +172,14 @@ function text() {
   return container?.textContent ?? ""
 }
 
-function clickByText(label: string) {
+async function clickByText(label: string) {
   const match = Array.from(container?.querySelectorAll("button") ?? []).find((button) =>
     button.textContent?.includes(label) || button.getAttribute("aria-label") === label
   )
   if (!match) throw new Error(`Missing button: ${label}`)
-  act(() => {
+  await act(async () => {
     match.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    await Promise.resolve()
   })
 }
 
@@ -195,7 +198,7 @@ function setFieldValue(field: HTMLInputElement | HTMLSelectElement | HTMLTextAre
 beforeEach(() => {
   Object.defineProperty(window, "localStorage", { configurable: true, value: localStorageMock })
   window.localStorage.clear()
-  window.prompt = vi.fn(() => "scenes/chapter-02/new arc")
+  promptMock.mockResolvedValue("scenes/chapter-02/new arc")
   useBookDetailMock.mockReturnValue({
     data: { id: "book-1", title: "The Ember Gate", work_type: "novel" },
   })
@@ -229,10 +232,10 @@ describe("ScenesPage", () => {
     expect(text()).toContain("The first gate scene.")
     expect(text()).toContain("scenes/chapter-01/opening-gate.md")
 
-    clickByText("Open word finder")
+    await clickByText("Open word finder")
     expect(text()).toContain("Word finder ready")
 
-    clickByText("Scenes")
+    await clickByText("Scenes")
     const searchInput = container?.querySelector("aside input") as HTMLInputElement
     act(() => {
       setFieldValue(searchInput, "missing")
@@ -243,21 +246,22 @@ describe("ScenesPage", () => {
     })
     expect(text()).toContain("Opening Gate")
 
-    clickByText("New folder")
-    expect(window.prompt).toHaveBeenCalled()
+    await clickByText("New folder")
+    expect(promptMock).toHaveBeenCalled()
     expect(text()).toContain("Created folder scenes/chapter-02/new arc")
 
-    clickByText("New scene")
+    await clickByText("New scene")
     const fields = Array.from(container?.querySelectorAll("input, textarea, select") ?? []) as Array<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
     const titleInput = fields.find((field) => field instanceof HTMLInputElement && field.value === "") as HTMLInputElement
     const descriptionInput = Array.from(container?.querySelectorAll("textarea") ?? [])[0] as HTMLTextAreaElement
-    act(() => {
+    await act(async () => {
       setFieldValue(titleInput, "Market Ambush")
       setFieldValue(descriptionInput, "Mira is ambushed at the ash market.")
-      clickByText("Write body")
+      await Promise.resolve()
     })
+    await clickByText("Write body")
+    await clickByText("Save scene")
     await act(async () => {
-      clickByText("Save scene")
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -269,7 +273,7 @@ describe("ScenesPage", () => {
       path: expect.stringContaining("market-ambush.md"),
     }))
 
-    clickByText("Delete")
+    await clickByText("Delete")
     expect(booksApiMock.deleteScene).toHaveBeenCalledWith("book-1", "scene-1")
   })
 
@@ -280,10 +284,7 @@ describe("ScenesPage", () => {
     await waitForText("Scene workspace unavailable")
 
     expect(text()).toContain("Try again to refresh the folder tree")
-    await act(async () => {
-      clickByText("Retry")
-      await Promise.resolve()
-    })
+    await clickByText("Retry")
     expect(booksApiMock.getWorkspaceTree).toHaveBeenCalled()
   })
 })

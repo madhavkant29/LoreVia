@@ -6,6 +6,7 @@ Dry-run by default:
 Apply after review:
     python scripts/rebuild_book_chunks.py --book-id <uuid> --apply --confirm-apply REBUILD_BOOK_CHUNKS
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,7 @@ from app.engine.embeddings.embedder import build_chunk_embedding_text, embed_bat
 from app.models.book import Book, Chapter
 from app.models.intelligence import BookChunk
 from app.parsers.chunker import ChunkingConfig, chunk_text
-from app.utils.book_utils import deserialize_manuscript_content
+from app.utils.books.manuscript import deserialize_manuscript_content
 
 CONFIRM_TOKEN = "REBUILD_BOOK_CHUNKS"
 
@@ -38,9 +39,15 @@ class ChapterRebuildPlan:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Rebuild book chunk rows using the current chunking and embedding format.")
+    parser = argparse.ArgumentParser(
+        description="Rebuild book chunk rows using the current chunking and embedding format."
+    )
     parser.add_argument("--book-id", required=True, help="Target book UUID.")
-    parser.add_argument("--apply", action="store_true", help="Persist rebuilt chunks instead of printing a dry-run plan.")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist rebuilt chunks instead of printing a dry-run plan.",
+    )
     parser.add_argument(
         "--confirm-apply",
         default="",
@@ -58,10 +65,14 @@ async def _load_chapter_text(chapter: Chapter) -> str:
 
 async def _build_plan(db: AsyncSession, book: Book) -> list[ChapterRebuildPlan]:
     chapters = (
-        await db.execute(
-            select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number)
+        (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     plans: list[ChapterRebuildPlan] = []
     chunk_cfg = ChunkingConfig(
         target_tokens=settings.CHUNK_TARGET_TOKENS,
@@ -73,7 +84,11 @@ async def _build_plan(db: AsyncSession, book: Book) -> list[ChapterRebuildPlan]:
     for chapter in chapters:
         text = await _load_chapter_text(chapter)
         existing_count = int(
-            await db.scalar(select(func.count()).select_from(BookChunk).where(BookChunk.chapter_id == chapter.id))
+            await db.scalar(
+                select(func.count())
+                .select_from(BookChunk)
+                .where(BookChunk.chapter_id == chapter.id)
+            )
             or 0
         )
         next_chunks = len(chunk_text(text, config=chunk_cfg))
@@ -100,10 +115,14 @@ async def rebuild_book_chunks(*, book_id: uuid.UUID, apply: bool) -> list[Chapte
             return plans
 
         chapters = (
-            await db.execute(
-                select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number)
+            (
+                await db.execute(
+                    select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         chunk_cfg = ChunkingConfig(
             target_tokens=settings.CHUNK_TARGET_TOKENS,
             max_tokens=settings.CHUNK_MAX_TOKENS,

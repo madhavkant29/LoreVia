@@ -4,7 +4,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.character import Character
-from app.utils.character_utils import description_similarity, merge_characters, name_similarity, update_character_classification
+from app.utils.characters.classification import update_character_classification
+from app.utils.characters.merging import merge_characters
+from app.utils.characters.similarity import (
+    description_similarity,
+    name_similarity,
+)
 
 
 async def consolidate_characters(
@@ -12,7 +17,11 @@ async def consolidate_characters(
     book_id: uuid.UUID,
     up_to_chapter: int | None = None,
 ) -> bool:
-    query = select(Character).where(Character.book_id == book_id).order_by(Character.first_chapter, Character.created_at)
+    query = (
+        select(Character)
+        .where(Character.book_id == book_id)
+        .order_by(Character.first_chapter, Character.created_at)
+    )
     if up_to_chapter is not None:
         query = query.where(Character.first_chapter <= up_to_chapter)
 
@@ -39,7 +48,9 @@ async def consolidate_characters(
     return merged_any
 
 
-def _find_primary_character(representatives: list[Character], candidate: Character) -> Character | None:
+def _find_primary_character(
+    representatives: list[Character], candidate: Character
+) -> Character | None:
     candidate_profile = _character_profile_text(candidate)
     best: tuple[float, Character] | None = None
 
@@ -48,7 +59,9 @@ def _find_primary_character(representatives: list[Character], candidate: Charact
         if name_score < 0.70:
             continue
 
-        description_score = description_similarity(candidate_profile, _character_profile_text(existing))
+        description_score = description_similarity(
+            candidate_profile, _character_profile_text(existing)
+        )
         if name_score >= 0.85 or description_score >= 0.75:
             score = (name_score + description_score) / 2
             if best is None or score > best[0]:

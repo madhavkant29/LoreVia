@@ -1,12 +1,13 @@
 import "server-only"
 
-import { headers } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { notFound } from "next/navigation"
 
-import { resolveApiOrigin } from "@/lib/constants"
+import { resolveServerApiOrigin } from "@/lib/constants"
 import type { AdminScope, AdminSession } from "@/types/admin"
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
+const ADMIN_TEST_SESSION_HEADER = "x-lorevia-admin-test-session"
 const ADMIN_SESSION_API_PATH = "/api/v1/admin/session"
 
 function buildDevAdminSession(mode: string | null): AdminSession | null {
@@ -80,7 +81,10 @@ function readCookieValue(cookieHeader: string | null, name: string): string | nu
   return null
 }
 
-function resolveDevAdminSessionOverride(cookieHeader: string | null): { matched: boolean, session: AdminSession | null } {
+function resolveDevAdminSessionOverride(
+  cookieHeader: string | null,
+  adminCookieValue: string | null,
+): { matched: boolean, session: AdminSession | null } {
   if (process.env.NODE_ENV === "production") {
     return { matched: false, session: null }
   }
@@ -89,7 +93,7 @@ function resolveDevAdminSessionOverride(cookieHeader: string | null): { matched:
     return { matched: false, session: null }
   }
 
-  const cookieValue = readCookieValue(cookieHeader, ADMIN_TEST_SESSION_COOKIE)
+  const cookieValue = adminCookieValue || readCookieValue(cookieHeader, ADMIN_TEST_SESSION_COOKIE)
   if (!cookieValue) {
     return { matched: false, session: null }
   }
@@ -110,8 +114,14 @@ function resolveDevAdminSessionOverride(cookieHeader: string | null): { matched:
 
 export async function getAdminSessionServer(): Promise<AdminSession> {
   const headerStore = await headers()
+  const cookieStore = await cookies()
   const cookieHeader = headerStore.get("cookie")
-  const devOverride = resolveDevAdminSessionOverride(cookieHeader)
+  const devOverride = resolveDevAdminSessionOverride(
+    cookieHeader,
+    cookieStore.get(ADMIN_TEST_SESSION_COOKIE)?.value
+      ?? headerStore.get(ADMIN_TEST_SESSION_HEADER)
+      ?? null,
+  )
   if (devOverride.matched) {
     if (devOverride.session) {
       return devOverride.session
@@ -119,7 +129,7 @@ export async function getAdminSessionServer(): Promise<AdminSession> {
     notFound()
   }
 
-  const response = await fetch(`${resolveApiOrigin()}${ADMIN_SESSION_API_PATH}`, {
+  const response = await fetch(`${resolveServerApiOrigin()}${ADMIN_SESSION_API_PATH}`, {
     cache: "no-store",
     headers: cookieHeader ? { cookie: cookieHeader } : undefined,
   })

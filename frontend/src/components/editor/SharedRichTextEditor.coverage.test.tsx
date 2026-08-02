@@ -10,6 +10,7 @@ const editorState = vi.hoisted(() => ({
   text: "Initial",
   setContent: vi.fn(),
 }))
+const promptMock = vi.hoisted(() => vi.fn())
 
 function makeChain() {
   const chain: Record<string, (...args: unknown[]) => typeof chain | boolean> = {}
@@ -92,6 +93,7 @@ vi.mock("@tiptap/extension-task-item", () => ({ default: { configure: vi.fn((opt
 vi.mock("@/components/ui/Tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
+vi.mock("@/components/ui/PromptDialog", () => ({ usePromptDialog: () => promptMock }))
 
 import { EditorToolbar, RichTextEditor } from "@/components/editor/SharedRichTextEditor"
 
@@ -136,7 +138,7 @@ beforeEach(() => {
   editorState.html = "<p>Initial</p>"
   editorState.text = "Initial"
   editorState.setContent.mockClear()
-  window.prompt = vi.fn(() => "https://example.com")
+  promptMock.mockResolvedValue("https://example.com")
 })
 
 afterEach(() => {
@@ -202,14 +204,14 @@ describe("SharedRichTextEditor runtime coverage", () => {
     expect(commandCalls).toContain("comment")
     expect(commandCalls).toContain("notes")
 
-    root?.render(
-      <RichTextEditor
-        html="<p>Updated</p>"
-        onChange={onChange}
-        editorKey="draft"
-      />
-    )
     await act(async () => {
+      root?.render(
+        <RichTextEditor
+          html="<p>Updated</p>"
+          onChange={onChange}
+          editorKey="draft"
+        />
+      )
       await Promise.resolve()
     })
     expect(editorState.setContent).toHaveBeenCalledWith("<p>Updated</p>")

@@ -7,13 +7,13 @@ import pytest
 from sqlalchemy import select
 
 from app.core.security import create_access_token
-from app.utils.auth_csrf import AUTH_CSRF_COOKIE_NAME, AUTH_CSRF_HEADER_NAME, create_auth_csrf_token
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookCollaborator, Chapter
 from app.models.intelligence import Notification
 from app.models.progress import ReadingProgress
 from app.models.user import User
-from app.utils.beta_read_utils import run_beta_read_jobs
+from app.utils.auth_csrf import AUTH_CSRF_COOKIE_NAME, AUTH_CSRF_HEADER_NAME, create_auth_csrf_token
+from app.utils.beta_read_job_utils import run_beta_read_jobs
 
 
 def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:
@@ -183,22 +183,41 @@ async def test_beta_read_flow_requires_review_and_tracks_feedback_completion(cli
 
 
 @pytest.mark.asyncio
-async def test_reader_chapter_payload_surfaces_beta_comments_for_author_and_chapter_collaborators(client, db, monkeypatch):
+async def test_reader_chapter_payload_surfaces_beta_comments_for_author_and_chapter_collaborators(
+    client, db, monkeypatch
+):
     author = await _create_user(db, email="author-chapter-comments@lorevia.test", tier="author")
     first_reader = await _create_user(db, email="reader-one@lorevia.test", tier="reader")
     second_reader = await _create_user(db, email="reader-two@lorevia.test", tier="reader")
     book = await _create_book(db, author_id=author.id)
     await _add_book_chapter(db, book_id=book.id, chapter_number=1)
 
-    db.add_all([
-        ReadingProgress(user_id=first_reader.id, book_id=book.id, current_chapter=1, chapters_read=[1], scroll_pct=1.0),
-        ReadingProgress(user_id=second_reader.id, book_id=book.id, current_chapter=1, chapters_read=[1], scroll_pct=1.0),
-    ])
+    db.add_all(
+        [
+            ReadingProgress(
+                user_id=first_reader.id,
+                book_id=book.id,
+                current_chapter=1,
+                chapters_read=[1],
+                scroll_pct=1.0,
+            ),
+            ReadingProgress(
+                user_id=second_reader.id,
+                book_id=book.id,
+                current_chapter=1,
+                chapters_read=[1],
+                scroll_pct=1.0,
+            ),
+        ]
+    )
     await db.commit()
 
     monkeypatch.setattr(
         "app.services.chapter_recovery_service.deserialize_manuscript_content",
-        lambda _raw: {"text": "Lantern fire cracked across the bridge.", "html": "<p>Lantern fire cracked across the bridge.</p>"},
+        lambda _raw: {
+            "text": "Lantern fire cracked across the bridge.",
+            "html": "<p>Lantern fire cracked across the bridge.</p>",
+        },
     )
     monkeypatch.setattr(
         "app.services.chapter_recovery_service.download_book",
@@ -252,8 +271,12 @@ async def test_reader_chapter_payload_surfaces_beta_comments_for_author_and_chap
     assert first_comment.status_code == 201
     assert second_comment.status_code == 201
 
-    author_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=_auth_headers(author.id))
-    first_reader_chapter = await client.get(f"/api/v1/reader/{book.id}/chapter/1", headers=_auth_headers(first_reader.id))
+    author_chapter = await client.get(
+        f"/api/v1/reader/{book.id}/chapter/1", headers=_auth_headers(author.id)
+    )
+    first_reader_chapter = await client.get(
+        f"/api/v1/reader/{book.id}/chapter/1", headers=_auth_headers(first_reader.id)
+    )
 
     assert author_chapter.status_code == 200
     assert first_reader_chapter.status_code == 200
@@ -340,7 +363,10 @@ async def test_collaborator_activity_endpoint_includes_beta_feedback_timeline(cl
     assert payload["chapter_comment_count"] == 1
     assert payload["assignments"][0]["id"] == assignment_id
     assert {item["kind"] for item in payload["items"]} >= {"chapter_comment", "beta_read_submitted"}
-    assert any(item["body"] == "The midpoint is strong once the argument reaches the lantern room." for item in payload["items"])
+    assert any(
+        item["body"] == "The midpoint is strong once the argument reaches the lantern room."
+        for item in payload["items"]
+    )
 
 
 @pytest.mark.asyncio
@@ -506,7 +532,9 @@ async def test_beta_read_assignment_rejects_windows_outside_three_to_seven_days(
 async def test_unassigned_reader_cannot_access_beta_book(client, db):
     author = await _create_user(db, email="author-access@lorevia.test", tier="author")
     assigned_reader = await _create_user(db, email="assigned-access@lorevia.test", tier="reader")
-    unassigned_reader = await _create_user(db, email="unassigned-access@lorevia.test", tier="reader")
+    unassigned_reader = await _create_user(
+        db, email="unassigned-access@lorevia.test", tier="reader"
+    )
     book = await _create_book(db, author_id=author.id)
 
     create_response = await client.post(
@@ -609,7 +637,9 @@ async def test_expired_assignments_move_to_missed_and_increment_consecutive_coun
     assignment_id = create_response.json()["id"]
 
     assignment = (
-        await db.execute(select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id)))
+        await db.execute(
+            select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id))
+        )
     ).scalar_one()
     assignment.expires_at = assignment.expires_at - timedelta(days=10)
     await db.commit()
@@ -617,7 +647,9 @@ async def test_expired_assignments_move_to_missed_and_increment_consecutive_coun
     await run_beta_read_jobs(db, limit=20)
     await db.commit()
 
-    reader_assignments = await client.get("/api/v1/beta-reads?bucket=missed", headers=_auth_headers(reader.id))
+    reader_assignments = await client.get(
+        "/api/v1/beta-reads?bucket=missed", headers=_auth_headers(reader.id)
+    )
     assert reader_assignments.status_code == 200
     payload = reader_assignments.json()["items"]
     assert payload[0]["state"] == "missed"
@@ -646,7 +678,9 @@ async def test_beta_read_jobs_are_idempotent_for_expirations_and_notifications(c
     assignment_id = create_response.json()["id"]
 
     assignment = (
-        await db.execute(select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id)))
+        await db.execute(
+            select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id))
+        )
     ).scalar_one()
     assignment.expires_at = assignment.expires_at - timedelta(days=10)
     await db.commit()
@@ -659,19 +693,23 @@ async def test_beta_read_jobs_are_idempotent_for_expirations_and_notifications(c
     await db.refresh(assignment)
 
     notifications = (
-        await db.execute(
-            select(Notification).where(
-                Notification.book_id == book.id,
-                Notification.kind.in_(
-                    [
-                        "beta_read_deadline_missed",
-                        "beta_read_missed_author_notice",
-                        "beta_read_penalty_warning",
-                    ]
-                ),
+        (
+            await db.execute(
+                select(Notification).where(
+                    Notification.book_id == book.id,
+                    Notification.kind.in_(
+                        [
+                            "beta_read_deadline_missed",
+                            "beta_read_missed_author_notice",
+                            "beta_read_penalty_warning",
+                        ]
+                    ),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert assignment.state == "missed"
     assert assignment.counted_toward_missed_streak is True
@@ -701,7 +739,9 @@ async def test_beta_read_jobs_do_not_duplicate_deadline_reminders(client, db):
     assignment_id = create_response.json()["id"]
 
     assignment = (
-        await db.execute(select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id)))
+        await db.execute(
+            select(BetaReadAssignment).where(BetaReadAssignment.id == uuid.UUID(assignment_id))
+        )
     ).scalar_one()
     assignment.expires_at = datetime.now(UTC) + timedelta(hours=23, minutes=30)
     await db.commit()
@@ -712,14 +752,18 @@ async def test_beta_read_jobs_do_not_duplicate_deadline_reminders(client, db):
     await db.refresh(assignment)
 
     reminders = (
-        await db.execute(
-            select(Notification).where(
-                Notification.user_id == reader.id,
-                Notification.book_id == book.id,
-                Notification.kind == "beta_read_deadline_reminder",
+        (
+            await db.execute(
+                select(Notification).where(
+                    Notification.user_id == reader.id,
+                    Notification.book_id == book.id,
+                    Notification.kind == "beta_read_deadline_reminder",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert len(reminders) == 1
     assert assignment.reminder_24h_sent_at is not None

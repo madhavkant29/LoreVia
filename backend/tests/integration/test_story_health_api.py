@@ -27,9 +27,30 @@ async def test_story_health_endpoint_returns_dynamic_book_metrics(client, db, au
 
     db.add_all(
         [
-            Chapter(book_id=book.id, number=1, title="Arrival", s3_key="chapters/1.txt", word_count=1800, processed=True),
-            Chapter(book_id=book.id, number=2, title="Crossroads", s3_key="chapters/2.txt", word_count=2100, processed=True),
-            Chapter(book_id=book.id, number=3, title="Ashfall", s3_key="chapters/3.txt", word_count=1700, processed=True),
+            Chapter(
+                book_id=book.id,
+                number=1,
+                title="Arrival",
+                s3_key="chapters/1.txt",
+                word_count=1800,
+                processed=True,
+            ),
+            Chapter(
+                book_id=book.id,
+                number=2,
+                title="Crossroads",
+                s3_key="chapters/2.txt",
+                word_count=2100,
+                processed=True,
+            ),
+            Chapter(
+                book_id=book.id,
+                number=3,
+                title="Ashfall",
+                s3_key="chapters/3.txt",
+                word_count=1700,
+                processed=True,
+            ),
         ]
     )
     protagonist = Character(
@@ -74,8 +95,24 @@ async def test_story_health_endpoint_returns_dynamic_book_metrics(client, db, au
             character_ids=["Mira"],
         )
     )
-    db.add(WikiEntry(book_id=book.id, entry_type="location", name="North Gate", description="The city entrance.", first_mention=1))
-    db.add(WorldBuildingDocument(book_id=book.id, title="City charter", s3_key="world/charter.txt", word_count=900, is_active=True))
+    db.add(
+        WikiEntry(
+            book_id=book.id,
+            entry_type="location",
+            name="North Gate",
+            description="The city entrance.",
+            first_mention=1,
+        )
+    )
+    db.add(
+        WorldBuildingDocument(
+            book_id=book.id,
+            title="City charter",
+            s3_key="world/charter.txt",
+            word_count=900,
+            is_active=True,
+        )
+    )
     db.add(
         WorldGapAnalysis(
             book_id=book.id,
@@ -107,5 +144,7 @@ async def test_story_health_endpoint_returns_dynamic_book_metrics(client, db, au
     assert all(0 <= item["score"] <= 100 for item in payload["metrics"])
     assert payload["score"] < 100
     assert all(item["score"] < 100 for item in payload["metrics"])
-    world_metric = next(item for item in payload["metrics"] if item["label"] == "Worldbuilding consistency")
+    world_metric = next(
+        item for item in payload["metrics"] if item["label"] == "Worldbuilding consistency"
+    )
     assert "0 cached world-analysis issues" not in world_metric["detail"]

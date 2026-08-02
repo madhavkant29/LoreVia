@@ -44,33 +44,39 @@ async def test_book_detail_eager_loading(client, db):
     await db.flush()
 
     for i in range(1, 4):
-        db.add(Character(
-            id=uuid.uuid4(),
-            book_id=book.id,
-            name=f"Character {i}",
-            role="supporting",
-            first_chapter=i,
-            mention_count=10 - i,
-        ))
+        db.add(
+            Character(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                name=f"Character {i}",
+                role="supporting",
+                first_chapter=i,
+                mention_count=10 - i,
+            )
+        )
     for i in range(1, 4):
-        db.add(Chapter(
-            id=uuid.uuid4(),
-            book_id=book.id,
-            number=i,
-            title=f"Chapter {i}",
-            s3_key=f"chapters/{book.id}/{i}.json",
-            processed=True,
-            word_count=1000,
-        ))
+        db.add(
+            Chapter(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                number=i,
+                title=f"Chapter {i}",
+                s3_key=f"chapters/{book.id}/{i}.json",
+                processed=True,
+                word_count=1000,
+            )
+        )
     for i in range(1, 4):
-        db.add(PlotThread(
-            id=uuid.uuid4(),
-            book_id=book.id,
-            title=f"Thread {i}",
-            status="introduced",
-            introduced_at=i,
-            importance=5 + i,
-        ))
+        db.add(
+            PlotThread(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                title=f"Thread {i}",
+                status="introduced",
+                introduced_at=i,
+                importance=5 + i,
+            )
+        )
     await db.commit()
 
     original_execute = db.execute
@@ -136,13 +142,15 @@ async def test_book_characters_eager_loading(client, db):
         mention_count=5,
     )
     db.add(char)
-    db.add(CharacterVoiceProfile(
-        id=uuid.uuid4(),
-        book_id=book.id,
-        character_id=char.id,
-        sample_dialogue_count=10,
-        avg_sentence_length=12,
-    ))
+    db.add(
+        CharacterVoiceProfile(
+            id=uuid.uuid4(),
+            book_id=book.id,
+            character_id=char.id,
+            sample_dialogue_count=10,
+            avg_sentence_length=12,
+        )
+    )
     await db.commit()
 
     original_execute = db.execute
@@ -200,21 +208,25 @@ async def test_advisor_greeting_eager_loading(client, db):
     await db.flush()
 
     for i in range(1, 4):
-        db.add(Character(
-            id=uuid.uuid4(),
-            book_id=book.id,
-            name=f"Adv Char {i}",
-            role="supporting",
-            first_chapter=i,
-        ))
+        db.add(
+            Character(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                name=f"Adv Char {i}",
+                role="supporting",
+                first_chapter=i,
+            )
+        )
     for i in range(1, 3):
-        db.add(PlotThread(
-            id=uuid.uuid4(),
-            book_id=book.id,
-            title=f"Adv Thread {i}",
-            status="introduced",
-            introduced_at=i,
-        ))
+        db.add(
+            PlotThread(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                title=f"Adv Thread {i}",
+                status="introduced",
+                introduced_at=i,
+            )
+        )
     await db.commit()
 
     original_execute = db.execute
@@ -273,15 +285,17 @@ async def test_emotional_arc_eager_loading(client, db):
     await db.flush()
 
     for i in range(1, 4):
-        db.add(Character(
-            id=uuid.uuid4(),
-            book_id=book.id,
-            name=f"Emo Char {i}",
-            role="supporting",
-            first_chapter=i,
-            mention_count=10 - i,
-            growth_events=[{"event_title": f"Growth {i}", "chapter_number": i}],
-        ))
+        db.add(
+            Character(
+                id=uuid.uuid4(),
+                book_id=book.id,
+                name=f"Emo Char {i}",
+                role="supporting",
+                first_chapter=i,
+                mention_count=10 - i,
+                growth_events=[{"event_title": f"Growth {i}", "chapter_number": i}],
+            )
+        )
     await db.commit()
 
     original_execute = db.execute

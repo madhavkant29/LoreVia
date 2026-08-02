@@ -5,9 +5,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.core.security import hash_password
 from app.models.intelligence import AdvisorJob
 from app.models.user import User
-from app.core.security import hash_password
 from app.services import advisor_jobs_service as jobs
 from app.services.advisor_jobs_service import mark_advisor_job_failed, purge_expired_advisor_jobs
 
@@ -116,7 +116,10 @@ async def test_create_get_serialize_and_transition_advisor_job(monkeypatch):
     db.stored = job
     assert await jobs.get_advisor_job(db, job_id=job.id) is job
     assert jobs.serialize_advisor_job(job) == {
-        "task_id": str(job.id), "status": "queued", "result": None, "error": None
+        "task_id": str(job.id),
+        "status": "queued",
+        "result": None,
+        "error": None,
     }
 
     await jobs.mark_advisor_job_running(db, job_id=job.id)

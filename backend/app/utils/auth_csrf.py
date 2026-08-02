@@ -27,7 +27,9 @@ UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 def create_auth_csrf_token() -> str:
     nonce = secrets.token_urlsafe(24)
-    signature = hmac.new(settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256).hexdigest()
+    signature = hmac.new(
+        settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256
+    ).hexdigest()
     return f"{nonce}.{signature}"
 
 
@@ -80,10 +82,7 @@ def _has_valid_bearer_access_token(authorization: str) -> bool:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         return False
-    try:
-        payload = decode_token(token.strip())
-    except Exception:
-        return False
+    payload = decode_token(token.strip())
     return bool(payload and payload.get("type") == "access" and payload.get("sub"))
 
 
@@ -105,7 +104,7 @@ def _validate_same_origin_request(request: Request) -> None:
     try:
         parsed = urlparse(candidate)
         request_origin = f"{parsed.scheme}://{parsed.netloc}"
-    except Exception:
+    except ValueError:
         raise HTTPException(403, "Invalid request origin.")
 
     if request_origin.rstrip("/") not in allowed_origins:
@@ -124,5 +123,7 @@ def _csrf_token_matches(header_token: str, cookie_token: str) -> bool:
         nonce, signature = cookie_token.rsplit(".", 1)
     except ValueError:
         return False
-    expected_signature = hmac.new(settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256).hexdigest()
+    expected_signature = hmac.new(
+        settings.JWT_SECRET.encode("utf-8"), nonce.encode("utf-8"), sha256
+    ).hexdigest()
     return bool(nonce) and hmac.compare_digest(signature, expected_signature)

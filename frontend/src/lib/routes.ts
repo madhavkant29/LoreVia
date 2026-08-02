@@ -16,6 +16,7 @@ const PUBLIC_PAGE_ROUTES = new Set([
   "/refund",
   "/status",
   "/terms",
+  "/unsubscribe",
 ])
 
 const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
@@ -50,6 +51,7 @@ const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
   "stats",
   "status",
   "terms",
+  "unsubscribe",
   "upgrade",
   "verify-email",
 ])
@@ -81,6 +83,7 @@ const AUTH_BOOTSTRAP_EXCLUDED_PREFIXES = [
   "/public",
   "/register",
   "/reset-password",
+  "/unsubscribe",
   "/verify-email",
 ]
 
@@ -96,6 +99,7 @@ const AUTH_NEXT_EXCLUDED_PREFIXES = [
   "/public",
   "/register",
   "/reset-password",
+  "/unsubscribe",
   "/verify-email",
 ]
 

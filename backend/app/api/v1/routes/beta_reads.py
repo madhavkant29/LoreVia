@@ -17,26 +17,34 @@ from app.schemas.beta_reads import (
     BetaReadQuestionOut,
     BetaReadSyncOut,
 )
-from app.utils.beta_read_utils import (
-    add_beta_read_feedback_item,
-    append_beta_read_questions,
-    build_beta_read_assignment_out,
-    build_beta_read_assignment_detail_out,
-    create_beta_read_assignment,
-    delete_beta_read_feedback_item,
-    award_submitted_beta_reads,
+from app.utils.beta_read_access_utils import (
     get_beta_assignment_for_author,
     get_beta_assignment_for_reader,
+)
+from app.utils.beta_read_assignment_query_utils import (
+    build_beta_read_assignment_detail_out,
+    build_beta_read_assignment_out,
     list_book_beta_read_assignments,
     list_reader_beta_read_assignments,
+)
+from app.utils.beta_read_job_utils import award_submitted_beta_reads
+from app.utils.beta_read_lifecycle_utils import (
     revoke_beta_read_assignment,
     start_beta_read,
     submit_beta_read_feedback,
     sync_beta_assignment_progress,
+)
+from app.utils.beta_read_utils import (
+    add_beta_read_feedback_item,
+    append_beta_read_questions,
+    create_beta_read_assignment,
+    delete_beta_read_feedback_item,
     update_beta_read_feedback_item_author_state,
 )
-from app.utils.book_utils import get_owned_book
 from app.utils.billing_utils import require_author_access
+from app.utils.books.notes import (
+    get_owned_book,
+)
 
 router = APIRouter()
 
@@ -50,7 +58,9 @@ async def create_book_beta_read_assignment(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    assignment = await create_beta_read_assignment(db, book=book, current_user=current_user, body=body)
+    assignment = await create_beta_read_assignment(
+        db, book=book, current_user=current_user, body=body
+    )
     return await build_beta_read_assignment_out(db, assignment=assignment)
 
 
@@ -62,10 +72,14 @@ async def list_book_beta_reads(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    return BetaReadAssignmentListOut(items=await list_book_beta_read_assignments(db, book=book, author_user_id=current_user.id))
+    return BetaReadAssignmentListOut(
+        items=await list_book_beta_read_assignments(db, book=book, author_user_id=current_user.id)
+    )
 
 
-@router.get("/books/{book_id}/beta-reads/{assignment_id}", response_model=BetaReadAssignmentDetailOut)
+@router.get(
+    "/books/{book_id}/beta-reads/{assignment_id}", response_model=BetaReadAssignmentDetailOut
+)
 async def get_book_beta_read_detail(
     book_id: uuid.UUID,
     assignment_id: uuid.UUID,
@@ -74,13 +88,18 @@ async def get_book_beta_read_detail(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    assignment = await get_beta_assignment_for_author(db, assignment_id=assignment_id, author_user_id=current_user.id)
+    assignment = await get_beta_assignment_for_author(
+        db, assignment_id=assignment_id, author_user_id=current_user.id
+    )
     if assignment.book_id != book.id:
         raise HTTPException(404, "Beta read assignment not found.")
     return await build_beta_read_assignment_detail_out(db, assignment=assignment)
 
 
-@router.post("/books/{book_id}/beta-reads/{assignment_id}/questions", response_model=list[BetaReadQuestionOut])
+@router.post(
+    "/books/{book_id}/beta-reads/{assignment_id}/questions",
+    response_model=list[BetaReadQuestionOut],
+)
 async def append_book_beta_read_questions(
     book_id: uuid.UUID,
     assignment_id: uuid.UUID,
@@ -90,7 +109,9 @@ async def append_book_beta_read_questions(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    assignment = await get_beta_assignment_for_author(db, assignment_id=assignment_id, author_user_id=current_user.id)
+    assignment = await get_beta_assignment_for_author(
+        db, assignment_id=assignment_id, author_user_id=current_user.id
+    )
     if assignment.book_id != book.id:
         raise HTTPException(404, "Beta read assignment not found.")
     await append_beta_read_questions(db, assignment=assignment, questions=body.questions)
@@ -98,7 +119,9 @@ async def append_book_beta_read_questions(
     return detail.author_questions
 
 
-@router.post("/books/{book_id}/beta-reads/{assignment_id}/revoke", response_model=BetaReadAssignmentOut)
+@router.post(
+    "/books/{book_id}/beta-reads/{assignment_id}/revoke", response_model=BetaReadAssignmentOut
+)
 async def revoke_book_beta_read_assignment(
     book_id: uuid.UUID,
     assignment_id: uuid.UUID,
@@ -107,7 +130,9 @@ async def revoke_book_beta_read_assignment(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    assignment = await get_beta_assignment_for_author(db, assignment_id=assignment_id, author_user_id=current_user.id)
+    assignment = await get_beta_assignment_for_author(
+        db, assignment_id=assignment_id, author_user_id=current_user.id
+    )
     if assignment.book_id != book.id:
         raise HTTPException(404, "Beta read assignment not found.")
     revoked = await revoke_beta_read_assignment(db, assignment=assignment)
@@ -119,7 +144,11 @@ async def list_upcoming_beta_reads(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return BetaReadAssignmentListOut(items=await list_reader_beta_read_assignments(db, current_user=current_user, upcoming_only=True))
+    return BetaReadAssignmentListOut(
+        items=await list_reader_beta_read_assignments(
+            db, current_user=current_user, upcoming_only=True
+        )
+    )
 
 
 @router.get("/beta-reads", response_model=BetaReadAssignmentListOut)
@@ -128,7 +157,9 @@ async def list_reader_beta_reads(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return BetaReadAssignmentListOut(items=await list_reader_beta_read_assignments(db, current_user=current_user, bucket=bucket))
+    return BetaReadAssignmentListOut(
+        items=await list_reader_beta_read_assignments(db, current_user=current_user, bucket=bucket)
+    )
 
 
 @router.get("/beta-reads/{assignment_id}", response_model=BetaReadAssignmentDetailOut)
@@ -137,8 +168,12 @@ async def get_reader_beta_read_detail(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    assignment = await get_beta_assignment_for_reader(db, assignment_id=assignment_id, current_user=current_user)
-    return await build_beta_read_assignment_detail_out(db, assignment=assignment, current_user=current_user)
+    assignment = await get_beta_assignment_for_reader(
+        db, assignment_id=assignment_id, current_user=current_user
+    )
+    return await build_beta_read_assignment_detail_out(
+        db, assignment=assignment, current_user=current_user
+    )
 
 
 @router.post("/beta-reads/{assignment_id}/start", response_model=BetaReadAssignmentOut)
@@ -147,9 +182,13 @@ async def begin_beta_read(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    assignment = await get_beta_assignment_for_reader(db, assignment_id=assignment_id, current_user=current_user)
+    assignment = await get_beta_assignment_for_reader(
+        db, assignment_id=assignment_id, current_user=current_user
+    )
     assignment = await start_beta_read(db, assignment=assignment, current_user=current_user)
-    return await build_beta_read_assignment_out(db, assignment=assignment, current_user=current_user)
+    return await build_beta_read_assignment_out(
+        db, assignment=assignment, current_user=current_user
+    )
 
 
 @router.post("/beta-reads/{assignment_id}/sync", response_model=BetaReadSyncOut)
@@ -158,34 +197,55 @@ async def sync_beta_read_assignment_progress(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    assignment = await get_beta_assignment_for_reader(db, assignment_id=assignment_id, current_user=current_user)
+    assignment = await get_beta_assignment_for_reader(
+        db, assignment_id=assignment_id, current_user=current_user
+    )
     await sync_beta_assignment_progress(db, assignment=assignment)
     await db.commit()
     await db.refresh(assignment)
-    return BetaReadSyncOut(assignment=await build_beta_read_assignment_out(db, assignment=assignment, current_user=current_user))
+    return BetaReadSyncOut(
+        assignment=await build_beta_read_assignment_out(
+            db, assignment=assignment, current_user=current_user
+        )
+    )
 
 
-@router.post("/beta-reads/{assignment_id}/feedback-items", response_model=BetaReadAssignmentDetailOut, status_code=201)
+@router.post(
+    "/beta-reads/{assignment_id}/feedback-items",
+    response_model=BetaReadAssignmentDetailOut,
+    status_code=201,
+)
 async def create_beta_read_feedback_item(
     assignment_id: uuid.UUID,
     body: BetaReadFeedbackItemCreateBody,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    assignment = await get_beta_assignment_for_reader(db, assignment_id=assignment_id, current_user=current_user)
-    await add_beta_read_feedback_item(db, assignment=assignment, current_user=current_user, body=body)
+    assignment = await get_beta_assignment_for_reader(
+        db, assignment_id=assignment_id, current_user=current_user
+    )
+    await add_beta_read_feedback_item(
+        db, assignment=assignment, current_user=current_user, body=body
+    )
     await db.refresh(assignment)
-    return await build_beta_read_assignment_detail_out(db, assignment=assignment, current_user=current_user)
+    return await build_beta_read_assignment_detail_out(
+        db, assignment=assignment, current_user=current_user
+    )
 
 
-@router.delete("/beta-reads/{assignment_id}/feedback-items/{feedback_item_id}", response_model=BetaReadAssignmentDetailOut)
+@router.delete(
+    "/beta-reads/{assignment_id}/feedback-items/{feedback_item_id}",
+    response_model=BetaReadAssignmentDetailOut,
+)
 async def remove_beta_read_feedback_item(
     assignment_id: uuid.UUID,
     feedback_item_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    assignment = await get_beta_assignment_for_reader(db, assignment_id=assignment_id, current_user=current_user)
+    assignment = await get_beta_assignment_for_reader(
+        db, assignment_id=assignment_id, current_user=current_user
+    )
     await delete_beta_read_feedback_item(
         db,
         assignment=assignment,
@@ -193,10 +253,15 @@ async def remove_beta_read_feedback_item(
         current_user=current_user,
     )
     await db.refresh(assignment)
-    return await build_beta_read_assignment_detail_out(db, assignment=assignment, current_user=current_user)
+    return await build_beta_read_assignment_detail_out(
+        db, assignment=assignment, current_user=current_user
+    )
 
 
-@router.put("/books/{book_id}/beta-reads/{assignment_id}/feedback-items/{feedback_item_id}", response_model=BetaReadAssignmentDetailOut)
+@router.put(
+    "/books/{book_id}/beta-reads/{assignment_id}/feedback-items/{feedback_item_id}",
+    response_model=BetaReadAssignmentDetailOut,
+)
 async def update_book_beta_read_feedback_item(
     book_id: uuid.UUID,
     assignment_id: uuid.UUID,
@@ -207,7 +272,9 @@ async def update_book_beta_read_feedback_item(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    assignment = await get_beta_assignment_for_author(db, assignment_id=assignment_id, author_user_id=current_user.id)
+    assignment = await get_beta_assignment_for_author(
+        db, assignment_id=assignment_id, author_user_id=current_user.id
+    )
     if assignment.book_id != book.id:
         raise HTTPException(404, "Beta read assignment not found.")
     await update_beta_read_feedback_item_author_state(
@@ -228,7 +295,9 @@ async def submit_beta_read(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    assignment = await get_beta_assignment_for_reader(db, assignment_id=assignment_id, current_user=current_user)
+    assignment = await get_beta_assignment_for_reader(
+        db, assignment_id=assignment_id, current_user=current_user
+    )
     assignment = await submit_beta_read_feedback(
         db,
         assignment=assignment,
@@ -239,4 +308,6 @@ async def submit_beta_read(
     await award_submitted_beta_reads(db, limit=20)
     await db.commit()
     await db.refresh(assignment)
-    return await build_beta_read_assignment_out(db, assignment=assignment, current_user=current_user)
+    return await build_beta_read_assignment_out(
+        db, assignment=assignment, current_user=current_user
+    )

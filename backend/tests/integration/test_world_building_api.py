@@ -3,11 +3,14 @@ import uuid
 import pytest
 
 from app.models.book import Book, Chapter, Series, SeriesBook
-from app.utils.book_utils import serialize_manuscript_content
+from app.utils.books.manuscript import (
+    serialize_manuscript_content,
+)
 
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     from app.core.security import create_access_token
+
     response = await client.post(
         "/api/v1/auth/register",
         json={
@@ -45,13 +48,28 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     monkeypatch.setattr("app.core.storage.upload_text", fake_upload_text)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
     monkeypatch.setattr("app.services.chapter_recovery_service.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
-    monkeypatch.setattr("app.api.v1.routes.reader.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary",
+        fake_upload_binary,
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
+    monkeypatch.setattr("app.utils.world_building_story_utils.download_book", fake_download_book)
+    monkeypatch.setattr("app.api.v1.routes.reader.core.download_book", fake_download_book)
     monkeypatch.setattr("app.api.v1.routes.world_building.download_book", fake_download_book)
 
     headers, user_id = await _register_user(client, f"world-api-{uuid.uuid4().hex[:8]}@lorevia.app")
-    book = Book(user_id=user_id, title="Worldbook", format="pdf", s3_key="worldbook.pdf", status="ready", total_chapters=1, mode="author")
+    book = Book(
+        user_id=user_id,
+        title="Worldbook",
+        format="pdf",
+        s3_key="worldbook.pdf",
+        status="ready",
+        total_chapters=1,
+        mode="author",
+    )
     db.add(book)
     await db.flush()
 
@@ -92,19 +110,32 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
         f"/api/v1/intelligence/{book.id}/world-building/documents",
         headers=headers,
         data={"title": "Ritual Notes"},
-        files={"files": ("rituals.txt", b"The Ember Rite is the kingdom's winter ritual.", "text/plain")},
+        files={
+            "files": (
+                "rituals.txt",
+                b"The Ember Rite is the kingdom's winter ritual.",
+                "text/plain",
+            )
+        },
     )
     assert second_doc.status_code == 200
 
-    docs_response = await client.get(f"/api/v1/intelligence/{book.id}/world-building/documents", headers=headers)
+    docs_response = await client.get(
+        f"/api/v1/intelligence/{book.id}/world-building/documents", headers=headers
+    )
     assert docs_response.status_code == 200
     documents = docs_response.json()
     assert len(documents) == 2
 
-    elements_response = await client.get(f"/api/v1/intelligence/{book.id}/world-building/elements", headers=headers)
+    elements_response = await client.get(
+        f"/api/v1/intelligence/{book.id}/world-building/elements", headers=headers
+    )
     assert elements_response.status_code == 200
     elements = elements_response.json()
-    assert any(item["name"] == "Northreach" and item["source_scope"] == "worldbuilding" for item in elements)
+    assert any(
+        item["name"] == "Northreach" and item["source_scope"] == "worldbuilding"
+        for item in elements
+    )
 
     detail_response = await client.get(
         f"/api/v1/intelligence/{book.id}/world-building/documents/{first_doc['id']}",
@@ -132,7 +163,9 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     assert gaps.status_code == 200
     payload = gaps.json()
     assert payload["mode"] == "gap_detection"
-    conflict = next((item for item in payload["priority_gaps"] if "Northreach conflicts" in item["title"]), None)
+    conflict = next(
+        (item for item in payload["priority_gaps"] if "Northreach conflicts" in item["title"]), None
+    )
     assert conflict is not None
     assert "choose whether" in conflict["suggested_fix"].lower()
     assert "canonical" in conflict["suggested_fix"].lower()
@@ -157,7 +190,9 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     assert created_note.status_code == 200
     note_id = created_note.json()["id"]
 
-    notes_response = await client.get(f"/api/v1/intelligence/{book.id}/world-building/notes", headers=headers)
+    notes_response = await client.get(
+        f"/api/v1/intelligence/{book.id}/world-building/notes", headers=headers
+    )
     assert notes_response.status_code == 200
     notes = notes_response.json()
     assert any(note["id"] == note_id for note in notes)
@@ -213,16 +248,39 @@ async def test_series_world_building_analysis_checks_across_member_books(client,
     monkeypatch.setattr("app.core.storage.upload_binary", fake_upload_binary)
     monkeypatch.setattr("app.core.storage.download_book", fake_download_book)
     monkeypatch.setattr("app.services.chapter_recovery_service.download_book", fake_download_book)
-    monkeypatch.setattr("app.utils.world_building_utils.upload_binary", fake_upload_binary)
-    monkeypatch.setattr("app.utils.world_building_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_workflow_utils.upload_binary",
+        fake_upload_binary,
+    )
+    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", fake_download_book)
+    monkeypatch.setattr(
+        "app.utils.world_building_candidate_record_utils.download_book", fake_download_book
+    )
+    monkeypatch.setattr("app.utils.world_building_story_utils.download_book", fake_download_book)
     monkeypatch.setattr("app.api.v1.routes.world_building.download_book", fake_download_book)
 
-    headers, user_id = await _register_user(client, f"world-series-api-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"world-series-api-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     series = Series(user_id=user_id, name="The Northreach Cycle")
     db.add(series)
     await db.flush()
-    first_book = Book(user_id=user_id, title="Ice Gates", format="pdf", s3_key="series/ice.pdf", status="ready", primary_series_id=series.id)
-    second_book = Book(user_id=user_id, title="Glass Market", format="pdf", s3_key="series/glass.pdf", status="ready", primary_series_id=series.id)
+    first_book = Book(
+        user_id=user_id,
+        title="Ice Gates",
+        format="pdf",
+        s3_key="series/ice.pdf",
+        status="ready",
+        primary_series_id=series.id,
+    )
+    second_book = Book(
+        user_id=user_id,
+        title="Glass Market",
+        format="pdf",
+        s3_key="series/glass.pdf",
+        status="ready",
+        primary_series_id=series.id,
+    )
     db.add_all([first_book, second_book])
     await db.flush()
     db.add_all(
@@ -268,4 +326,7 @@ async def test_series_world_building_analysis_checks_across_member_books(client,
     assert payload["series_id"] == str(series.id)
     assert payload["book_count"] == 2
     assert payload["gap_analysis"]["mode"] == "series_gap_detection"
-    assert any(item["title"].startswith("Northreach conflicts") for item in payload["gap_analysis"]["priority_gaps"])
+    assert any(
+        item["title"].startswith("Northreach conflicts")
+        for item in payload["gap_analysis"]["priority_gaps"]
+    )

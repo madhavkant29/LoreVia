@@ -5,11 +5,15 @@ import pytest
 from app.models.book import Book, Chapter, NovelScene
 from app.models.character import Character, CharacterVoiceProfile
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
-from app.utils.book_utils import serialize_manuscript_content
+from app.utils.books.manuscript import (
+    serialize_manuscript_content,
+)
 
 
 @pytest.mark.asyncio
-async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_persists_status(client, db, auth_headers, monkeypatch):
+async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_persists_status(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
     user_id = uuid.UUID(me.json()["id"])
@@ -31,7 +35,7 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
                     "chapter_number": 2,
                     "unit_label": "Chapter 2",
                     "before_text": "Nora learns the silver gate needs royal blood.",
-                    "after_text": '\"I can\'t open it,\" Nora said. Kael whispered, \"Then we wait.\"',
+                    "after_text": '"I can\'t open it," Nora said. Kael whispered, "Then we wait."',
                     "updated_at": "2026-05-13T12:00:00Z",
                 }
             ]
@@ -41,13 +45,62 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
     await db.flush()
 
     chapters = [
-        Chapter(book_id=book.id, number=1, title="Ashfall", s3_key="chapters/1.txt", word_count=1700, processed=True),
-        Chapter(book_id=book.id, number=2, title="The Ember Gate", s3_key="chapters/2.txt", word_count=1800, processed=True),
-        Chapter(book_id=book.id, number=3, title="Council of Bells", s3_key="chapters/3.txt", word_count=1650, processed=True),
-        Chapter(book_id=book.id, number=4, title="River Terms", s3_key="chapters/4.txt", word_count=1500, processed=True),
-        Chapter(book_id=book.id, number=5, title="North Watch", s3_key="chapters/5.txt", word_count=1550, processed=True),
-        Chapter(book_id=book.id, number=6, title="Archive Oath", s3_key="chapters/6.txt", word_count=1600, processed=True),
-        Chapter(book_id=book.id, number=7, title="Bell Reckoning", s3_key="chapters/7.txt", word_count=1625, processed=True),
+        Chapter(
+            book_id=book.id,
+            number=1,
+            title="Ashfall",
+            s3_key="chapters/1.txt",
+            word_count=1700,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=2,
+            title="The Ember Gate",
+            s3_key="chapters/2.txt",
+            word_count=1800,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=3,
+            title="Council of Bells",
+            s3_key="chapters/3.txt",
+            word_count=1650,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=4,
+            title="River Terms",
+            s3_key="chapters/4.txt",
+            word_count=1500,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=5,
+            title="North Watch",
+            s3_key="chapters/5.txt",
+            word_count=1550,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=6,
+            title="Archive Oath",
+            s3_key="chapters/6.txt",
+            word_count=1600,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=7,
+            title="Bell Reckoning",
+            s3_key="chapters/7.txt",
+            word_count=1625,
+            processed=True,
+        ),
     ]
     db.add_all(chapters)
     await db.flush()
@@ -157,7 +210,9 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
             chapter_id=chapters[0].id,
             mode="detailed",
             content="Nora enters the city and hears the bells.",
-            key_events=[{"event_title": "Gate entry", "description": "Nora reaches the city gate."}],
+            key_events=[
+                {"event_title": "Gate entry", "description": "Nora reaches the city gate."}
+            ],
             clues=["The silver gate reacts to blood."],
         )
     )
@@ -231,9 +286,13 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
         ),
     }
 
-    monkeypatch.setattr("app.utils.book_utils.download_book", lambda key: chapter_payloads[key])
+    monkeypatch.setattr(
+        "app.utils.books.revision_analysis.download_book", lambda key: chapter_payloads[key]
+    )
 
-    response = await client.get(f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers)
+    response = await client.get(
+        f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -268,14 +327,20 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
     )
     assert workspace_update.status_code == 200
 
-    refreshed = await client.get(f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers)
+    refreshed = await client.get(
+        f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers
+    )
     assert refreshed.status_code == 200
-    updated_item = next(item for item in refreshed.json()["change_impacts"] if item["id"] == first_item_id)
+    updated_item = next(
+        item for item in refreshed.json()["change_impacts"] if item["id"] == first_item_id
+    )
     assert updated_item["status"] == "fixed"
 
 
 @pytest.mark.asyncio
-async def test_notifications_include_revision_digest_for_author_books(client, db, auth_headers, monkeypatch):
+async def test_notifications_include_revision_digest_for_author_books(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
     user_id = uuid.UUID(me.json()["id"])
@@ -307,9 +372,30 @@ async def test_notifications_include_revision_digest_for_author_books(client, db
     await db.flush()
 
     chapters = [
-        Chapter(book_id=book.id, number=1, title="The Vial", s3_key="chapters/ash-ledger-1.txt", word_count=1500, processed=True),
-        Chapter(book_id=book.id, number=2, title="The Hearing", s3_key="chapters/ash-ledger-2.txt", word_count=1400, processed=True),
-        Chapter(book_id=book.id, number=3, title="Night Court", s3_key="chapters/ash-ledger-3.txt", word_count=1450, processed=True),
+        Chapter(
+            book_id=book.id,
+            number=1,
+            title="The Vial",
+            s3_key="chapters/ash-ledger-1.txt",
+            word_count=1500,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=2,
+            title="The Hearing",
+            s3_key="chapters/ash-ledger-2.txt",
+            word_count=1400,
+            processed=True,
+        ),
+        Chapter(
+            book_id=book.id,
+            number=3,
+            title="Night Court",
+            s3_key="chapters/ash-ledger-3.txt",
+            word_count=1450,
+            processed=True,
+        ),
     ]
     db.add_all(chapters)
     db.add(
@@ -350,7 +436,9 @@ async def test_notifications_include_revision_digest_for_author_books(client, db
             None,
         ),
     }
-    monkeypatch.setattr("app.utils.book_utils.download_book", lambda key: chapter_payloads[key])
+    monkeypatch.setattr(
+        "app.utils.books.revision_analysis.download_book", lambda key: chapter_payloads[key]
+    )
 
     response = await client.get("/api/v1/notifications", headers=auth_headers)
 
@@ -361,10 +449,14 @@ async def test_notifications_include_revision_digest_for_author_books(client, db
     assert revision_item["data"]["active_item_count"] >= 1
     assert revision_item["data"]["high_severity_count"] >= 1
 
-    mark_read = await client.put(f"/api/v1/notifications/{revision_item['id']}/read", headers=auth_headers)
+    mark_read = await client.put(
+        f"/api/v1/notifications/{revision_item['id']}/read", headers=auth_headers
+    )
     assert mark_read.status_code == 200
     assert mark_read.json()["read_at"] is not None
-    revision_response = await client.get(f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers)
+    revision_response = await client.get(
+        f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers
+    )
     assert revision_response.status_code == 200
     change_impacts = revision_response.json()["change_impacts"]
     assert change_impacts
@@ -390,7 +482,8 @@ async def test_notifications_include_revision_digest_for_author_books(client, db
     assert refreshed_response.status_code == 200
     refreshed_payload = refreshed_response.json()
     revision_items = [
-        item for item in refreshed_payload["items"]
+        item
+        for item in refreshed_payload["items"]
         if item["kind"] == "revision_digest" and item["book_id"] == str(book.id)
     ]
     assert len(revision_items) == 1

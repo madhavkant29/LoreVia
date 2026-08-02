@@ -85,38 +85,50 @@ def test_derive_friend_state_distinguishes_none_accepted_and_pending_direction()
     other_user_id = uuid.uuid4()
 
     assert derive_friend_state(current_user_id, None) == "none"
-    assert derive_friend_state(
-        current_user_id,
-        SimpleNamespace(
-            status="accepted",
-            requester_user_id=other_user_id,
-            addressee_user_id=current_user_id,
-        ),
-    ) == "accepted"
-    assert derive_friend_state(
-        current_user_id,
-        SimpleNamespace(
-            status="pending",
-            requester_user_id=current_user_id,
-            addressee_user_id=other_user_id,
-        ),
-    ) == "outgoing_pending"
-    assert derive_friend_state(
-        current_user_id,
-        SimpleNamespace(
-            status="pending",
-            requester_user_id=other_user_id,
-            addressee_user_id=current_user_id,
-        ),
-    ) == "incoming_pending"
-    assert derive_friend_state(
-        current_user_id,
-        SimpleNamespace(
-            status="declined",
-            requester_user_id=other_user_id,
-            addressee_user_id=current_user_id,
-        ),
-    ) == "none"
+    assert (
+        derive_friend_state(
+            current_user_id,
+            SimpleNamespace(
+                status="accepted",
+                requester_user_id=other_user_id,
+                addressee_user_id=current_user_id,
+            ),
+        )
+        == "accepted"
+    )
+    assert (
+        derive_friend_state(
+            current_user_id,
+            SimpleNamespace(
+                status="pending",
+                requester_user_id=current_user_id,
+                addressee_user_id=other_user_id,
+            ),
+        )
+        == "outgoing_pending"
+    )
+    assert (
+        derive_friend_state(
+            current_user_id,
+            SimpleNamespace(
+                status="pending",
+                requester_user_id=other_user_id,
+                addressee_user_id=current_user_id,
+            ),
+        )
+        == "incoming_pending"
+    )
+    assert (
+        derive_friend_state(
+            current_user_id,
+            SimpleNamespace(
+                status="declined",
+                requester_user_id=other_user_id,
+                addressee_user_id=current_user_id,
+            ),
+        )
+        == "none"
+    )
 
 
 def test_can_message_target_blocks_self_and_honors_friend_only_setting():
@@ -128,16 +140,22 @@ def test_can_message_target_blocks_self_and_honors_friend_only_setting():
     assert can_message_target(current_user_id, self_target, None) is False
     assert can_message_target(current_user_id, anyone_target, None) is True
     assert can_message_target(current_user_id, friend_only_target, None) is False
-    assert can_message_target(
-        current_user_id,
-        friend_only_target,
-        SimpleNamespace(status="pending"),
-    ) is False
-    assert can_message_target(
-        current_user_id,
-        friend_only_target,
-        SimpleNamespace(status="accepted"),
-    ) is True
+    assert (
+        can_message_target(
+            current_user_id,
+            friend_only_target,
+            SimpleNamespace(status="pending"),
+        )
+        is False
+    )
+    assert (
+        can_message_target(
+            current_user_id,
+            friend_only_target,
+            SimpleNamespace(status="accepted"),
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -170,24 +188,28 @@ async def test_build_social_user_summary_uses_supplied_relationship_without_quer
 
 
 @pytest.mark.asyncio
-async def test_create_friend_request_rejects_invalid_existing_states_and_creates_notification(monkeypatch):
+async def test_create_friend_request_rejects_invalid_existing_states_and_creates_notification(
+    monkeypatch,
+):
     current = SimpleNamespace(id=uuid.uuid4(), username="mira")
     target_id = uuid.uuid4()
     target = SimpleNamespace(id=target_id, username="joren", messaging_permission="anyone")
     notifications = []
 
     async def fake_get_user_or_404(db, user_id):
-      assert user_id == target_id
-      return target
+        assert user_id == target_id
+        return target
 
     async def fake_notify(*args, **kwargs):
-      notifications.append(kwargs)
+        notifications.append(kwargs)
 
     monkeypatch.setattr(social_utils, "get_user_or_404", fake_get_user_or_404)
     monkeypatch.setattr(social_utils, "create_notification_once", fake_notify)
 
     with pytest.raises(Exception) as self_error:
-        await social_utils.create_friend_request(FakeDb(), current_user=current, target_user_id=current.id)
+        await social_utils.create_friend_request(
+            FakeDb(), current_user=current, target_user_id=current.id
+        )
     assert self_error.value.status_code == 400
 
     async def accepted_relationship(db, first_user_id, second_user_id):
@@ -195,7 +217,9 @@ async def test_create_friend_request_rejects_invalid_existing_states_and_creates
 
     monkeypatch.setattr(social_utils, "get_relationship_record", accepted_relationship)
     with pytest.raises(Exception) as accepted_error:
-        await social_utils.create_friend_request(FakeDb(), current_user=current, target_user_id=target_id)
+        await social_utils.create_friend_request(
+            FakeDb(), current_user=current, target_user_id=target_id
+        )
     assert accepted_error.value.status_code == 400
 
     async def incoming_pending(db, first_user_id, second_user_id):
@@ -203,7 +227,9 @@ async def test_create_friend_request_rejects_invalid_existing_states_and_creates
 
     monkeypatch.setattr(social_utils, "get_relationship_record", incoming_pending)
     with pytest.raises(Exception) as incoming_error:
-        await social_utils.create_friend_request(FakeDb(), current_user=current, target_user_id=target_id)
+        await social_utils.create_friend_request(
+            FakeDb(), current_user=current, target_user_id=target_id
+        )
     assert incoming_error.value.status_code == 409
 
     async def no_relationship(db, first_user_id, second_user_id):
@@ -211,7 +237,9 @@ async def test_create_friend_request_rejects_invalid_existing_states_and_creates
 
     monkeypatch.setattr(social_utils, "get_relationship_record", no_relationship)
     db = FakeDb()
-    request = await social_utils.create_friend_request(db, current_user=current, target_user_id=target_id)
+    request = await social_utils.create_friend_request(
+        db, current_user=current, target_user_id=target_id
+    )
 
     assert isinstance(request, FriendRequest)
     assert request.requester_user_id == current.id
@@ -257,7 +285,9 @@ async def test_friend_request_response_and_cancel_paths(monkeypatch):
     assert notifications[0]["kind"] == "friend_request_accepted"
 
     with pytest.raises(Exception) as handled_error:
-        await social_utils.respond_to_friend_request(db, request_id=request_id, current_user=addressee, action="decline")
+        await social_utils.respond_to_friend_request(
+            db, request_id=request_id, current_user=addressee, action="decline"
+        )
     assert handled_error.value.status_code == 400
 
     outgoing = SimpleNamespace(
@@ -268,7 +298,9 @@ async def test_friend_request_response_and_cancel_paths(monkeypatch):
         responded_at=None,
     )
     cancel_db = FakeDb(get_map={(FriendRequest, outgoing.id): outgoing})
-    canceled = await social_utils.cancel_outgoing_friend_request(cancel_db, request_id=outgoing.id, current_user=addressee)
+    canceled = await social_utils.cancel_outgoing_friend_request(
+        cancel_db, request_id=outgoing.id, current_user=addressee
+    )
     assert canceled.status == "canceled"
     assert canceled.responded_at is not None
     assert cancel_db.committed == 1
@@ -277,7 +309,11 @@ async def test_friend_request_response_and_cancel_paths(monkeypatch):
 @pytest.mark.asyncio
 async def test_direct_conversation_creation_access_send_and_read(monkeypatch):
     current = SimpleNamespace(id=uuid.UUID("00000000-0000-0000-0000-000000000001"), username="mira")
-    target = SimpleNamespace(id=uuid.UUID("00000000-0000-0000-0000-000000000002"), username="joren", messaging_permission="friends_only")
+    target = SimpleNamespace(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+        username="joren",
+        messaging_permission="friends_only",
+    )
     relationship = SimpleNamespace(status="accepted")
 
     async def fake_get_user_or_404(db, user_id):
@@ -296,32 +332,50 @@ async def test_direct_conversation_creation_access_send_and_read(monkeypatch):
     )
     existing.id = uuid.uuid4()
     existing_db = FakeDb(execute_results=[FakeScalarResult(scalar=existing)])
-    assert await social_utils.get_or_create_direct_conversation(existing_db, current_user=current, target_user_id=target.id) is existing
+    assert (
+        await social_utils.get_or_create_direct_conversation(
+            existing_db, current_user=current, target_user_id=target.id
+        )
+        is existing
+    )
 
     create_db = FakeDb(execute_results=[FakeScalarResult(scalar=None)])
-    created = await social_utils.get_or_create_direct_conversation(create_db, current_user=current, target_user_id=target.id)
+    created = await social_utils.get_or_create_direct_conversation(
+        create_db, current_user=current, target_user_id=target.id
+    )
     assert isinstance(created, DirectConversation)
     assert create_db.added == [created]
     assert create_db.committed == 1
 
     with pytest.raises(Exception) as self_error:
-        await social_utils.get_or_create_direct_conversation(FakeDb(), current_user=current, target_user_id=current.id)
+        await social_utils.get_or_create_direct_conversation(
+            FakeDb(), current_user=current, target_user_id=current.id
+        )
     assert self_error.value.status_code == 400
 
     missing_db = FakeDb(get_map={(DirectConversation, existing.id): None})
     with pytest.raises(Exception) as missing_error:
-        await social_utils.ensure_conversation_access(missing_db, current_user=current, conversation_id=existing.id)
+        await social_utils.ensure_conversation_access(
+            missing_db, current_user=current, conversation_id=existing.id
+        )
     assert missing_error.value.status_code == 404
 
     access_db = FakeDb(get_map={(DirectConversation, existing.id): existing})
-    assert await social_utils.ensure_conversation_access(access_db, current_user=current, conversation_id=existing.id) is existing
+    assert (
+        await social_utils.ensure_conversation_access(
+            access_db, current_user=current, conversation_id=existing.id
+        )
+        is existing
+    )
 
     async def fake_access(db, *, current_user, conversation_id):
         return existing
 
     monkeypatch.setattr(social_utils, "ensure_conversation_access", fake_access)
     send_db = FakeDb()
-    message = await social_utils.send_direct_message(send_db, current_user=current, conversation_id=existing.id, body="  hello  ")
+    message = await social_utils.send_direct_message(
+        send_db, current_user=current, conversation_id=existing.id, body="  hello  "
+    )
     assert isinstance(message, DirectMessage)
     assert message.body == "hello"
     assert message.recipient_user_id == target.id
@@ -331,6 +385,8 @@ async def test_direct_conversation_creation_access_send_and_read(monkeypatch):
 
     unread = SimpleNamespace(recipient_read_at=None)
     read_db = FakeDb(execute_results=[FakeScalarResult(rows=[unread])])
-    await social_utils.mark_conversation_read(read_db, current_user=current, conversation_id=existing.id)
+    await social_utils.mark_conversation_read(
+        read_db, current_user=current, conversation_id=existing.id
+    )
     assert unread.recipient_read_at is not None
     assert read_db.committed == 1

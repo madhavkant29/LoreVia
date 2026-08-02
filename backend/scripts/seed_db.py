@@ -1,4 +1,5 @@
 """Seed test user. Usage: python scripts/seed_db.py"""
+
 import asyncio
 
 from sqlalchemy import select
@@ -16,10 +17,16 @@ async def seed():
         if (await db.execute(select(User).where(User.email == "test@lorevia.app"))).scalar():
             log.info("seed_user_exists", extra={"email": "test@lorevia.app"})
             return
-        user = User(email="test@lorevia.app", password_hash=hash_password("testpass123"), tier="power")
+        user = User(
+            email="test@lorevia.app", password_hash=hash_password("testpass123"), tier="power"
+        )
         db.add(user)
         await db.commit()
-        log.info("seed_user_created", extra={"email": user.email, "tier": user.tier, "user_id": str(user.id)})
+        log.info(
+            "seed_user_created",
+            extra={"email": user.email, "tier": user.tier, "user_id": str(user.id)},
+        )
+
 
 if __name__ == "__main__":
     asyncio.run(seed())

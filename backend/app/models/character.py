@@ -2,7 +2,19 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
+from sqlalchemy import (
+    ARRAY,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,24 +37,29 @@ class Character(Base):
             ),
         ),
         Index(
-            "ix_characters_embedding_ivfflat",
+            "ix_characters_embedding_hnsw",
             "embedding",
-            postgresql_using="ivfflat",
+            postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
-            postgresql_with={"lists": 100},
+            postgresql_with={"m": 16, "ef_construction": 64},
         ),
+        Index("ix_characters_book_first_name", "book_id", "first_chapter", "name"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     name: Mapped[str] = mapped_column(String, nullable=False)
     normalized_name: Mapped[str | None] = mapped_column(String, index=True)
     aliases: Mapped[list[str] | None] = mapped_column(ARRAY(String))
-    role: Mapped[str | None] = mapped_column(String)       # mc | sc | background
+    role: Mapped[str | None] = mapped_column(String)  # mc | sc | background
     first_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
-    last_seen_chapter: Mapped[int | None] = mapped_column(Integer)      # updated during extraction
-    mention_count: Mapped[int] = mapped_column(Integer, default=0)       # running count across all chunks
+    last_seen_chapter: Mapped[int | None] = mapped_column(Integer)  # updated during extraction
+    mention_count: Mapped[int] = mapped_column(
+        Integer, default=0
+    )  # running count across all chunks
 
     # Confidence-weighted trait model
     # {"hair": {"value":"black","confidence":0.9,"type":"objective"}, ...}
@@ -70,10 +87,16 @@ class Character(Base):
     # Character classification
     character_type: Mapped[str | None] = mapped_column(String)  # complex | normal | gag | meme
     character_type_score: Mapped[int | None] = mapped_column(Integer)  # 0-10 score for main type
-    subtype_scores: Mapped[dict | None] = mapped_column(JSONB, default=dict)  # {"stoic": 7, "broken": 3, ...}
+    subtype_scores: Mapped[dict | None] = mapped_column(
+        JSONB, default=dict
+    )  # {"stoic": 7, "broken": 3, ...}
     analysis_metadata: Mapped[dict | None] = mapped_column(JSONB, default=dict)
-    visibility_state: Mapped[str] = mapped_column(String, nullable=False, default="visible", server_default="visible")
-    approval_state: Mapped[str] = mapped_column(String, nullable=False, default="approved", server_default="approved")
+    visibility_state: Mapped[str] = mapped_column(
+        String, nullable=False, default="visible", server_default="visible"
+    )
+    approval_state: Mapped[str] = mapped_column(
+        String, nullable=False, default="approved", server_default="approved"
+    )
     approval_source: Mapped[str | None] = mapped_column(String)
     approval_reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     approval_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -83,20 +106,41 @@ class Character(Base):
         nullable=True,
         index=True,
     )
-    is_auto_suppressed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_auto_suppressed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     suppression_reason: Mapped[str | None] = mapped_column(String)
 
     # pgvector identity anchor
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_manual: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     book = relationship("Book", back_populates="characters")
-    states = relationship("CharacterState", back_populates="character", cascade="all, delete-orphan")
-    relationships_as_a = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.character_a_id", back_populates="character_a", cascade="all, delete-orphan")
-    relationships_as_b = relationship("CharacterRelationship", foreign_keys="CharacterRelationship.character_b_id", back_populates="character_b", cascade="all, delete-orphan")
-    voice_profile = relationship("CharacterVoiceProfile", back_populates="character", uselist=False, cascade="all, delete-orphan")
+    states = relationship(
+        "CharacterState", back_populates="character", cascade="all, delete-orphan"
+    )
+    relationships_as_a = relationship(
+        "CharacterRelationship",
+        foreign_keys="CharacterRelationship.character_a_id",
+        back_populates="character_a",
+        cascade="all, delete-orphan",
+    )
+    relationships_as_b = relationship(
+        "CharacterRelationship",
+        foreign_keys="CharacterRelationship.character_b_id",
+        back_populates="character_b",
+        cascade="all, delete-orphan",
+    )
+    voice_profile = relationship(
+        "CharacterVoiceProfile",
+        back_populates="character",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     matched_candidates = relationship(
         "CharacterCandidate",
         foreign_keys="CharacterCandidate.matched_character_id",
@@ -145,12 +189,20 @@ class Character(Base):
 
 class CharacterState(Base):
     """Spoiler-free snapshot at a given chapter."""
+
     __tablename__ = "character_states"
+    __table_args__ = (Index("ix_character_states_character_chapter", "character_id", "at_chapter"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     at_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
     trait_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    observed_trait_keys: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     motivations_snapshot: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
     fears_snapshot: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
     prompt_delta: Mapped[str | None] = mapped_column(String)
@@ -168,10 +220,18 @@ class CharacterVoiceProfile(Base):
     __mapper_args__ = {"confirm_deleted_rows": False}
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
-    sample_dialogue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    sample_word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False
+    )
+    sample_dialogue_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    sample_word_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     avg_sentence_length: Mapped[int | None] = mapped_column(Integer)
     avg_word_length_x100: Mapped[int | None] = mapped_column(Integer)
     contraction_rate_x1000: Mapped[int | None] = mapped_column(Integer)
@@ -186,7 +246,9 @@ class CharacterVoiceProfile(Base):
     dominant_markers: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     signature_phrases: Mapped[list[str] | None] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True
+    )
 
     character = relationship("Character", back_populates="voice_profile")
 
@@ -202,9 +264,21 @@ class CharacterCandidate(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    chapter_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True)
-    scene_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("novel_scenes.id", ondelete="SET NULL"), nullable=True, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    chapter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chapters.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("novel_scenes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_name: Mapped[str] = mapped_column(String, nullable=False)
     proposed_name: Mapped[str] = mapped_column(String, nullable=False)
@@ -216,7 +290,9 @@ class CharacterCandidate(Base):
         ForeignKey("characters.id", ondelete="SET NULL"),
         nullable=True,
     )
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending", server_default="pending"
+    )
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
@@ -228,7 +304,9 @@ class CharacterCandidate(Base):
     character_score: Mapped[int | None] = mapped_column(Integer)
     rejection_reason: Mapped[str | None] = mapped_column(String)
     source_batch_key: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -249,7 +327,9 @@ class CharacterMention(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_name: Mapped[str] = mapped_column(String, nullable=False)
     normalized_name: Mapped[str] = mapped_column(String, nullable=False)
@@ -261,10 +341,14 @@ class CharacterMention(Base):
         ForeignKey("characters.id", ondelete="SET NULL"),
         nullable=True,
     )
-    resolver_status: Mapped[str] = mapped_column(String, nullable=False, default="unresolved", server_default="unresolved")
+    resolver_status: Mapped[str] = mapped_column(
+        String, nullable=False, default="unresolved", server_default="unresolved"
+    )
     resolver_reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -288,14 +372,29 @@ class CharacterAlias(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     alias_text: Mapped[str] = mapped_column(String, nullable=False)
     normalized_alias: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    alias_kind: Mapped[str] = mapped_column(String, nullable=False, default="unspecified", server_default="unspecified")
-    source: Mapped[str] = mapped_column(String, nullable=False, default="extraction", server_default="extraction")
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5, server_default="0.5")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    alias_kind: Mapped[str] = mapped_column(
+        String, nullable=False, default="unspecified", server_default="unspecified"
+    )
+    source: Mapped[str] = mapped_column(
+        String, nullable=False, default="extraction", server_default="extraction"
+    )
+    confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.5, server_default="0.5"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     character = relationship("Character", back_populates="alias_records")
 
@@ -307,16 +406,27 @@ class CharacterSuppression(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    character_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    character_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     chapter_number: Mapped[int | None] = mapped_column(Integer)
     surface_text: Mapped[str] = mapped_column(String, nullable=False)
     normalized_text: Mapped[str] = mapped_column(String, nullable=False)
     candidate_kind: Mapped[str | None] = mapped_column(String)
     reason: Mapped[str] = mapped_column(String, nullable=False)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
     evidence_quote: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class CharacterIdentityConstraint(Base):
@@ -333,16 +443,28 @@ class CharacterIdentityConstraint(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    left_character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
-    right_character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    left_character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False
+    )
+    right_character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False
+    )
     left_text: Mapped[str] = mapped_column(String, nullable=False)
     right_text: Mapped[str] = mapped_column(String, nullable=False)
     constraint_type: Mapped[str] = mapped_column(String, nullable=False)
     reason: Mapped[str | None] = mapped_column(String)
-    source: Mapped[str] = mapped_column(String, nullable=False, default="system", server_default="system")
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String, nullable=False, default="system", server_default="system"
+    )
+    confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0, server_default="1"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class CharacterIdentityAction(Base):
@@ -354,17 +476,29 @@ class CharacterIdentityAction(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     action_type: Mapped[str] = mapped_column(String, nullable=False)
-    source_character_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True)
-    target_character_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True)
+    source_character_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True
+    )
+    target_character_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True
+    )
     surface_text: Mapped[str | None] = mapped_column(String)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
     reason: Mapped[str | None] = mapped_column(String)
-    reversible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    reversible: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     reversible_data: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     repair_run_id: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class CharacterDecisionEvent(Base):
@@ -375,8 +509,12 @@ class CharacterDecisionEvent(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False
+    )
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     action: Mapped[str] = mapped_column(String, nullable=False)
     visibility_state: Mapped[str | None] = mapped_column(String)
@@ -384,7 +522,9 @@ class CharacterDecisionEvent(Base):
     approval_source: Mapped[str | None] = mapped_column(String)
     reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     character = relationship("Character", back_populates="decision_events")
 
@@ -402,7 +542,9 @@ class CharacterDuplicateSuggestion(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
     primary_character_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("characters.id", ondelete="CASCADE"),
@@ -416,10 +558,16 @@ class CharacterDuplicateSuggestion(Base):
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     reasons: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     shared_evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending", server_default="pending"
+    )
     dismissal_reason: Mapped[str | None] = mapped_column(String)
-    auto_dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    auto_dismissed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -449,7 +597,9 @@ class CharacterRelationshipCandidate(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    book_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_character_a: Mapped[str] = mapped_column(String, nullable=False)
     raw_character_b: Mapped[str] = mapped_column(String, nullable=False)
@@ -466,11 +616,15 @@ class CharacterRelationshipCandidate(Base):
     rel_type: Mapped[str | None] = mapped_column(String)
     sentiment: Mapped[float | None] = mapped_column(Float)
     description: Mapped[str | None] = mapped_column(String)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending", server_default="pending"
+    )
     reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     evidence: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     source_batch_key: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

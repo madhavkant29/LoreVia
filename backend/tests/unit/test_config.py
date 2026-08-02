@@ -1,4 +1,9 @@
-from app.core.config import LOCALHOST_CORS_ORIGIN_REGEX, cors_middleware_options, cors_origins, settings
+from app.core.config import (
+    LOCALHOST_CORS_ORIGIN_REGEX,
+    cors_middleware_options,
+    cors_origins,
+    settings,
+)
 
 
 def test_cors_origins_include_localhost_and_loopback(monkeypatch):
@@ -16,8 +21,9 @@ def test_cors_origins_include_localhost_and_loopback(monkeypatch):
 
 
 def test_load_env_file_allows_dotenv_local_to_override_repo_defaults(tmp_path, monkeypatch):
-    from app.core.config import _load_env_file
     import os
+
+    from app.core.config import _load_env_file
 
     monkeypatch.delenv("LoreVia_TEST_OVERRIDE", raising=False)
 

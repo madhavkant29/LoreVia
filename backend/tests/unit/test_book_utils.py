@@ -1,6 +1,8 @@
 """Unit tests for book_utils functions."""
+
 import io
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -9,68 +11,106 @@ from fastapi import HTTPException
 from PIL import Image
 
 from app.models.book import Book, Chapter, ChapterMedia, ManuscriptAnnotation, NovelScene
+from app.models.character import Character, CharacterState
+from app.models.intelligence import (
+    ChapterSummary,
+    CharacterRelationship,
+    ContinuityScan,
+    PlotThread,
+    WorldElement,
+)
 from app.models.user import User
-from app.utils.book_utils import (
-    _build_revision_change_summary,
+from app.utils.advisor_scan_utils import build_advisor_suggestions_payload
+from app.utils.books import revision_analysis as revision_analysis_module
+from app.utils.books.chapter_titles import (
+    build_chapter_title_from_summary,
+    chapter_title_is_placeholder,
+    normalize_chapter_title,
+)
+from app.utils.books.character_cards import build_character_card_payload
+from app.utils.books.consistency_reports import list_chapter_consistency_reports
+from app.utils.books.continuity import (
     _detect_continuity_flags_from_rows,
     _latest_state_before_chapter,
     _map_chapter_consistency_state_history,
-    _scene_keyword_set,
-    list_manuscript_annotations,
-    _build_knowledge_timeline,
-    _build_narration_signature,
-    _describe_narration_shift,
-    _genre_match_score,
-    _select_genre_checks,
-    build_chapter_title_from_summary,
-    build_emotional_arc_payload,
-    build_book_processing_payload,
-    build_blank_cover_image,
-    compute_words_read_for_books,
-    build_workspace_chapter_text_from_scenes,
-    chapter_title_is_placeholder,
-    clean_markdown_asterisks_str,
-    clean_manuscript_html,
-    chapter_body_needs_scene_workspace_fallback,
-    deserialize_manuscript_content,
-    ensure_book_cover,
-    estimate_readability,
-    extract_inline_images_from_manuscript_html,
-    extract_novel_scene_candidates,
-    build_scene_chapter_import_text,
-    load_novel_export_chapters,
-    markdown_to_html,
-    manuscript_html_to_text,
-    normalize_chapter_kind,
-    normalize_chapter_title,
+)
+from app.utils.books.imports import (
+    build_import_preview,
     normalize_imported_chapters,
-    normalize_public_processing_stage,
-    normalize_scene_metadata,
-    normalize_scene_reorder_ids,
-    normalize_writer_workspace,
-    parse_screenplay_upload,
     parse_book_upload_for_ingestion,
-    processing_retry_available,
-    resolve_upload_format_and_work_type,
-    search_author_workspace,
-    save_manuscript_annotation,
+    parse_import_upload,
+    parse_screenplay_upload,
+)
+from app.utils.books.manuscript import (
+    clean_manuscript_html,
+    clean_markdown_asterisks_str,
+    deserialize_manuscript_content,
+    extract_inline_images_from_manuscript_html,
+    load_novel_export_chapters,
+    manuscript_html_to_text,
+    markdown_to_html,
     serialize_manuscript_content,
-    strip_scene_metadata_from_manuscript_text,
     sync_chapter_media_from_images,
+)
+from app.utils.books.normalization import (
+    normalize_chapter_kind,
+    resolve_upload_format_and_work_type,
     story_unit_label,
     story_unit_name,
 )
-from app.models.character import Character, CharacterState
-from app.models.intelligence import CharacterRelationship, ChapterSummary, PlotThread, WorldElement
-from app.utils.advisor_utils import build_advisor_suggestions_payload
-from app.utils.book_utils import (
-    build_import_preview,
-    build_character_card_payload,
-    build_manuscript_workspace_tree,
+from app.utils.books.notes import (
+    list_manuscript_annotations,
+    save_manuscript_annotation,
+)
+from app.utils.books.planning import (
+    build_emotional_arc_payload,
     build_prewriting_check,
+)
+from app.utils.books.processing import (
+    normalize_public_processing_stage,
+    processing_retry_available,
+)
+from app.utils.books.revision_analysis import (
+    _build_knowledge_timeline,
+    _build_narration_signature,
+    _build_revision_change_summary,
+    _describe_narration_shift,
+    _genre_match_score,
+    _scene_keyword_set,
+    _select_genre_checks,
+)
+from app.utils.books.revision_decisions import (
+    _finding_excerpt,
+    _priority_revision_findings,
+    apply_revision_finding_decision,
+)
+from app.utils.books.revision_service import (
     build_revision_intelligence_payload,
-    list_chapter_consistency_reports,
-    parse_import_upload,
+)
+from app.utils.books.scene_metadata import (
+    build_scene_chapter_import_text,
+    build_workspace_chapter_text_from_scenes,
+    chapter_body_needs_scene_workspace_fallback,
+    extract_novel_scene_candidates,
+    normalize_scene_metadata,
+    strip_scene_metadata_from_manuscript_text,
+)
+from app.utils.books.scene_ordering import normalize_scene_reorder_ids
+from app.utils.books.scene_sync import sync_chapter_content_from_novel_scenes
+from app.utils.books.serialization import (
+    build_blank_cover_image,
+    chapter_word_count,
+    compute_words_read_for_books,
+    ensure_book_cover,
+)
+from app.utils.books.story_health import estimate_readability
+from app.utils.books.workspace_search import (
+    build_manuscript_workspace_tree,
+    search_author_workspace,
+)
+from app.utils.books.writer_workspace import (
+    build_book_processing_payload,
+    normalize_writer_workspace,
 )
 
 
@@ -102,8 +142,12 @@ def test_normalize_public_processing_stage_maps_internal_values():
 
 def test_processing_retry_available_requires_actionable_state():
     assert processing_retry_available("failed", "failed", [], None) is True
-    assert processing_retry_available("processing", "extracting", ["retry_extraction"], None) is True
-    assert processing_retry_available("processing", "analyzing", ["wait_for_analysis"], None) is False
+    assert (
+        processing_retry_available("processing", "extracting", ["retry_extraction"], None) is True
+    )
+    assert (
+        processing_retry_available("processing", "analyzing", ["wait_for_analysis"], None) is False
+    )
     assert processing_retry_available("ready", "ready", [], None) is False
 
 
@@ -145,8 +189,15 @@ class _FakeExecuteDB:
         self.executed.append(statement)
         return self._execute_values.pop(0) if self._execute_values else _AllResult([])
 
+    @property
+    def no_autoflush(self):
+        return nullcontext()
+
     def add(self, value):
         self.added.append(value)
+
+    async def flush(self):
+        return None
 
 
 class _AllResult:
@@ -187,6 +238,26 @@ def test_scene_keyword_set_filters_common_revision_noise_but_keeps_story_terms()
     assert {"nora", "silver gate", "royal", "blood"}.issubset(keywords)
 
 
+@pytest.mark.asyncio
+async def test_revision_analysis_chapter_text_loading_only_swallows_storage_io(monkeypatch):
+    chapter = SimpleNamespace(number=3, s3_key="chapters/book/3.json")
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr(revision_analysis_module, "download_book", _storage_missing)
+
+    assert await revision_analysis_module._load_chapter_texts([chapter]) == {3: ""}
+
+    def _unexpected_bug(_key: str) -> bytes:
+        raise RuntimeError("download wrapper bug")
+
+    monkeypatch.setattr(revision_analysis_module, "download_book", _unexpected_bug)
+
+    with pytest.raises(RuntimeError, match="download wrapper bug"):
+        await revision_analysis_module._load_chapter_texts([chapter])
+
+
 def test_build_revision_change_summary_falls_back_when_only_noise_terms_changed():
     summary, focus_terms = _build_revision_change_summary(
         before_text="Nora crossed the silver gate.",
@@ -197,7 +268,10 @@ def test_build_revision_change_summary_falls_back_when_only_noise_terms_changed(
         world_terms=set(),
     )
 
-    assert summary == "You changed Chapter 2: the scene logic and wording shifted enough to re-check downstream assumptions."
+    assert (
+        summary
+        == "You changed Chapter 2: the scene logic and wording shifted enough to re-check downstream assumptions."
+    )
     assert focus_terms == []
 
 
@@ -345,7 +419,9 @@ class TestManuscriptHtmlImages:
 
     def test_manuscript_html_to_text_ignores_images_but_keeps_copy(self):
         """Text extraction should ignore images without dropping surrounding prose."""
-        html = '<p>Intro</p><p><img src="data:image/png;base64,AAA" alt="Scene art"></p><p>Outro</p>'
+        html = (
+            '<p>Intro</p><p><img src="data:image/png;base64,AAA" alt="Scene art"></p><p>Outro</p>'
+        )
 
         result = manuscript_html_to_text(html)
 
@@ -365,7 +441,9 @@ class TestManuscriptHtmlImages:
 
     def test_extract_inline_images_replaces_data_uri_with_marker(self):
         """Data URI images should become chapter media payloads and text markers."""
-        html = '<p>Intro</p><p><img src="data:image/png;base64,QUJD" alt="Scene art"></p><p>Outro</p>'
+        html = (
+            '<p>Intro</p><p><img src="data:image/png;base64,QUJD" alt="Scene art"></p><p>Outro</p>'
+        )
 
         cleaned_html, images, retained = extract_inline_images_from_manuscript_html(html)
 
@@ -397,7 +475,7 @@ async def test_sync_chapter_media_from_images_copies_stored_media_references(mon
         uploaded.append((key, raw, content_type))
         return key
 
-    monkeypatch.setattr("app.utils.book_utils.upload_binary", _upload_binary)
+    monkeypatch.setattr("app.utils.books.manuscript.upload_binary", _upload_binary)
     db = _FakeExecuteDB()
     book = SimpleNamespace(id=uuid.uuid4())
     chapter = SimpleNamespace(id=uuid.uuid4(), number=3)
@@ -458,7 +536,7 @@ async def test_load_novel_export_chapters_includes_media_when_requested(monkeypa
             ).encode("utf-8")
         return b"image-bytes"
 
-    monkeypatch.setattr("app.utils.book_utils.download_book", _download_book)
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", _download_book)
 
     chapters = await load_novel_export_chapters(
         db,
@@ -484,6 +562,108 @@ async def test_load_novel_export_chapters_includes_media_when_requested(monkeypa
     ]
 
 
+@pytest.mark.asyncio
+async def test_load_novel_export_chapters_only_swallows_storage_io(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4())
+    chapter_id = uuid.uuid4()
+
+    db = _FakeExecuteDB(
+        execute_values=[
+            _AllResult([(chapter_id, 1, "Opening", "chapters/book/1.json")]),
+        ]
+    )
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", _storage_missing)
+
+    chapters = await load_novel_export_chapters(
+        db,
+        book=book,
+        collaborator=None,
+        include_images=False,
+    )
+
+    assert chapters[0]["text"] == ""
+
+    db = _FakeExecuteDB(
+        execute_values=[
+            _AllResult([(chapter_id, 1, "Opening", "chapters/book/1.json")]),
+        ]
+    )
+    monkeypatch.setattr("app.utils.books.manuscript.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await load_novel_export_chapters(
+            db,
+            book=book,
+            collaborator=None,
+            include_images=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_chapter_content_from_novel_scenes_only_swallows_storage_io(monkeypatch):
+    book = SimpleNamespace(id=uuid.uuid4(), title="Atlas")
+    chapter = SimpleNamespace(
+        id=uuid.uuid4(),
+        s3_key="chapters/book/1.json",
+        word_count=0,
+        content_version=1,
+        title="Opening",
+    )
+
+    def _upload_text(key: str, content: str) -> str:
+        assert key == "chapters/book/1.json"
+        assert isinstance(content, str)
+        return key
+
+    monkeypatch.setattr("app.utils.books.scene_sync.upload_text", _upload_text)
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.scene_sync.download_book", _storage_missing)
+    db = _FakeExecuteDB(execute_values=[_ScalarResult(chapter), _ScalarsResult([])])
+
+    synced = await sync_chapter_content_from_novel_scenes(
+        db,
+        book=book,
+        chapter_number=1,
+    )
+
+    assert synced["chapter"] is chapter
+    assert chapter.s3_key == "chapters/book/1.json"
+    assert db.executed[0]._for_update_arg is not None
+
+    monkeypatch.setattr("app.utils.books.scene_sync.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.scene_sync.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+    db = _FakeExecuteDB(execute_values=[_ScalarResult(chapter), _ScalarsResult([])])
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await sync_chapter_content_from_novel_scenes(
+            db,
+            book=book,
+            chapter_number=1,
+        )
+
+
 def test_build_blank_cover_image_renders_title_and_author_placeholder():
     raw, content_type = build_blank_cover_image("The Silent Archive", "Mira Vale")
 
@@ -497,7 +677,9 @@ def test_build_blank_cover_image_renders_title_and_author_placeholder():
 async def test_compute_words_read_for_books_uses_preloaded_word_counts_without_content_fallback():
     book_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id)
-    progress = SimpleNamespace(book_id=book_id, chapters_read=[1, 2], current_chapter=3, scroll_pct=0.5)
+    progress = SimpleNamespace(
+        book_id=book_id, chapters_read=[1, 2], current_chapter=3, scroll_pct=0.5
+    )
     db = _FakeAnnotationDB(
         execute_values=[
             _RowResult(
@@ -529,7 +711,7 @@ async def test_ensure_book_cover_generates_blank_cover_when_missing(monkeypatch)
         uploaded["content_type"] = content_type
         return key
 
-    monkeypatch.setattr("app.utils.book_utils.upload_binary", _upload_binary)
+    monkeypatch.setattr("app.utils.books.serialization.upload_binary", _upload_binary)
 
     book = Book(
         id=uuid.uuid4(),
@@ -552,15 +734,93 @@ async def test_ensure_book_cover_generates_blank_cover_when_missing(monkeypatch)
     assert image.size == (1200, 1800)
 
 
+@pytest.mark.asyncio
+async def test_ensure_book_cover_only_swallows_expected_storage_failures(monkeypatch):
+    class _FakeDB:
+        async def flush(self):
+            return None
+
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="No Cover Yet",
+        author="A. Writer",
+        format="txt",
+        work_type="novel",
+        s3_key="books/user/story.txt",
+        cover_s3_key=None,
+        status="pending",
+        is_public=False,
+    )
+
+    def _storage_upload_failure(*_args, **_kwargs):
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr("app.utils.books.serialization.upload_binary", _storage_upload_failure)
+
+    await ensure_book_cover(_FakeDB(), book)
+
+    assert book.cover_s3_key is None
+
+    def _unexpected_upload_bug(*_args, **_kwargs):
+        raise RuntimeError("upload wrapper bug")
+
+    monkeypatch.setattr("app.utils.books.serialization.upload_binary", _unexpected_upload_bug)
+
+    with pytest.raises(RuntimeError, match="upload wrapper bug"):
+        await ensure_book_cover(_FakeDB(), book)
+
+
+@pytest.mark.asyncio
+async def test_chapter_word_count_only_swallows_storage_io(monkeypatch):
+    chapter = SimpleNamespace(word_count=None, s3_key="chapters/book/1.json")
+
+    class _ScalarChapter:
+        def scalar(self):
+            return chapter
+
+    class _FakeDB:
+        async def execute(self, *_args, **_kwargs):
+            return _ScalarChapter()
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.serialization.download_book", _storage_missing)
+
+    assert await chapter_word_count(_FakeDB(), uuid.uuid4(), 1) == 0
+
+    monkeypatch.setattr("app.utils.books.serialization.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.serialization.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await chapter_word_count(_FakeDB(), uuid.uuid4(), 1)
+
+
 def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
     workspace = normalize_writer_workspace(
         {
             "word_count_goals": {"chapter_target": 3200, "book_target": -5, "session_target": 900},
             "goal_calendar": [
-                {"title": " Draft chapter 4 ", "due_date": "2026-05-08", "quota_value": 2000, "quota_unit": " words ", "completed": True},
+                {
+                    "title": " Draft chapter 4 ",
+                    "due_date": "2026-05-08",
+                    "quota_value": 2000,
+                    "quota_unit": " words ",
+                    "completed": True,
+                },
                 {"title": " ", "due_date": "not-a-date"},
             ],
-            "corkboard_cards": [{"title": " Opening turn ", "lane": "drafting", "chapter_number": 3}],
+            "corkboard_cards": [
+                {"title": " Opening turn ", "lane": "drafting", "chapter_number": 3}
+            ],
             "publishing": {"active_preset": "kdp_paperback", "trim_size": "6x9"},
             "processing": {
                 "status": " processing ",
@@ -597,7 +857,12 @@ def test_normalize_writer_workspace_preserves_defaults_and_sanitizes_cards():
     assert workspace["revision_board"]["items"] == []
     assert workspace["processing"]["status"] == "processing"
     assert workspace["processing"]["last_chapter_title"] == "Chapter 2"
-    assert build_book_processing_payload(type("DummyBook", (), {"writer_workspace": workspace})())["chapters_total"] == 3
+    assert (
+        build_book_processing_payload(type("DummyBook", (), {"writer_workspace": workspace})())[
+            "chapters_total"
+        ]
+        == 3
+    )
     assert len(workspace["templates"]) >= 3
 
 
@@ -613,8 +878,14 @@ def test_build_book_processing_payload_normalizes_postgres_text_timestamps():
                         "stage": "complete",
                         "updated_at": "2026-06-06 05:11:51.272085+00",
                         "pipeline": {
-                            "extraction": {"status": "succeeded", "updated_at": "2026-06-06 05:11:51.272085+00"},
-                            "analysis": {"status": "succeeded", "updated_at": "2026-06-06 05:11:51.272085+00"},
+                            "extraction": {
+                                "status": "succeeded",
+                                "updated_at": "2026-06-06 05:11:51.272085+00",
+                            },
+                            "analysis": {
+                                "status": "succeeded",
+                                "updated_at": "2026-06-06 05:11:51.272085+00",
+                            },
                         },
                     }
                 }
@@ -639,7 +910,10 @@ def test_build_book_processing_payload_nulls_invalid_timestamps():
                         "stage": "analysis",
                         "updated_at": "not a timestamp",
                         "pipeline": {
-                            "extraction": {"status": "running", "updated_at": "also not a timestamp"},
+                            "extraction": {
+                                "status": "running",
+                                "updated_at": "also not a timestamp",
+                            },
                         },
                     }
                 }
@@ -661,11 +935,32 @@ def test_estimate_readability_returns_basic_metrics():
 
 @pytest.mark.asyncio
 async def test_manuscript_annotations_round_trip_and_hide_private_entries():
-    author = User(id=uuid.uuid4(), email=f"author-{uuid.uuid4().hex[:8]}@example.com", username="author", password_hash="hash")
-    reviewer = User(id=uuid.uuid4(), email=f"reviewer-{uuid.uuid4().hex[:8]}@example.com", username="reviewer", password_hash="hash")
-    book = Book(id=uuid.uuid4(), user_id=author.id, title="Atlas", format="txt", work_type="novel", s3_key="atlas.txt", status="ready", mode="author")
+    author = User(
+        id=uuid.uuid4(),
+        email=f"author-{uuid.uuid4().hex[:8]}@example.com",
+        username="author",
+        password_hash="hash",
+    )
+    reviewer = User(
+        id=uuid.uuid4(),
+        email=f"reviewer-{uuid.uuid4().hex[:8]}@example.com",
+        username="reviewer",
+        password_hash="hash",
+    )
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=author.id,
+        title="Atlas",
+        format="txt",
+        work_type="novel",
+        s3_key="atlas.txt",
+        status="ready",
+        mode="author",
+    )
 
-    db = _FakeAnnotationDB(execute_values=[_ScalarResult("The Ember Gate"), _ScalarResult("The Ember Gate")])
+    db = _FakeAnnotationDB(
+        execute_values=[_ScalarResult("The Ember Gate"), _ScalarResult("The Ember Gate")]
+    )
     shared = await save_manuscript_annotation(
         db,
         book=book,
@@ -732,7 +1027,13 @@ async def test_manuscript_annotations_round_trip_and_hide_private_entries():
         collaborator=SimpleNamespace(
             role="commenter",
             permissions={"can_comment": True},
-            scope={"chapter_start": 1, "chapter_end": 3, "character_bible": False, "continuity_report": False, "reader_confusion_report": False},
+            scope={
+                "chapter_start": 1,
+                "chapter_end": 3,
+                "character_bible": False,
+                "continuity_report": False,
+                "reader_confusion_report": False,
+            },
         ),
     )
 
@@ -742,8 +1043,22 @@ async def test_manuscript_annotations_round_trip_and_hide_private_entries():
 
 @pytest.mark.asyncio
 async def test_save_manuscript_annotation_rejects_reversed_offsets():
-    author = User(id=uuid.uuid4(), email=f"author-{uuid.uuid4().hex[:8]}@example.com", username="author2", password_hash="hash")
-    book = Book(id=uuid.uuid4(), user_id=author.id, title="Atlas", format="txt", work_type="novel", s3_key="atlas.txt", status="ready", mode="author")
+    author = User(
+        id=uuid.uuid4(),
+        email=f"author-{uuid.uuid4().hex[:8]}@example.com",
+        username="author2",
+        password_hash="hash",
+    )
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=author.id,
+        title="Atlas",
+        format="txt",
+        work_type="novel",
+        s3_key="atlas.txt",
+        status="ready",
+        mode="author",
+    )
     db = _FakeAnnotationDB()
 
     with pytest.raises(HTTPException) as exc:
@@ -797,7 +1112,9 @@ def test_scene_import_text_can_include_or_strip_metadata():
     }
 
     with_metadata = build_scene_chapter_import_text(scene, scene_number=1, include_metadata=True)
-    without_metadata = build_scene_chapter_import_text(scene, scene_number=1, include_metadata=False)
+    without_metadata = build_scene_chapter_import_text(
+        scene, scene_number=1, include_metadata=False
+    )
 
     assert with_metadata.startswith("## Scene 1 - Rooftop Encounter")
     assert "POV: Arlen" in with_metadata
@@ -871,10 +1188,26 @@ def test_normalize_scene_reorder_ids_rejects_duplicates_and_bad_values():
 
 
 def test_chapter_body_needs_scene_workspace_fallback_detects_empty_and_placeholder_content():
-    assert chapter_body_needs_scene_workspace_fallback("", chapter_number=2, chapter_title="Chapter 2") is True
-    assert chapter_body_needs_scene_workspace_fallback("2.", chapter_number=2, chapter_title="Chapter 2") is True
-    assert chapter_body_needs_scene_workspace_fallback("II", chapter_number=2, chapter_title="II") is True
-    assert chapter_body_needs_scene_workspace_fallback("A real opening line begins here.", chapter_number=2, chapter_title="Chapter 2") is False
+    assert (
+        chapter_body_needs_scene_workspace_fallback("", chapter_number=2, chapter_title="Chapter 2")
+        is True
+    )
+    assert (
+        chapter_body_needs_scene_workspace_fallback(
+            "2.", chapter_number=2, chapter_title="Chapter 2"
+        )
+        is True
+    )
+    assert (
+        chapter_body_needs_scene_workspace_fallback("II", chapter_number=2, chapter_title="II")
+        is True
+    )
+    assert (
+        chapter_body_needs_scene_workspace_fallback(
+            "A real opening line begins here.", chapter_number=2, chapter_title="Chapter 2"
+        )
+        is False
+    )
 
 
 def test_build_emotional_arc_payload_uses_growth_events():
@@ -885,8 +1218,18 @@ def test_build_emotional_arc_payload_uses_growth_events():
         first_chapter=2,
         arc_summary="Learns to trust her crew.",
         growth_events=[
-            {"chapter_number": 2, "event_title": "Breaks rank", "impact_score": 7, "growth_direction": "negative"},
-            {"chapter_number": 8, "event_title": "Chooses the crew", "impact_score": 9, "growth_direction": "positive"},
+            {
+                "chapter_number": 2,
+                "event_title": "Breaks rank",
+                "impact_score": 7,
+                "growth_direction": "negative",
+            },
+            {
+                "chapter_number": 8,
+                "event_title": "Chooses the crew",
+                "impact_score": 9,
+                "growth_direction": "positive",
+            },
         ],
     )
 
@@ -948,9 +1291,7 @@ def test_detect_continuity_flags_from_rows_uses_prefetched_prior_states():
         },
     )
 
-    assert flags == [
-        "Mira: hair description changed from 'black' to 'silver' since chapter 2."
-    ]
+    assert flags == ["Mira: hair description changed from 'black' to 'silver' since chapter 2."]
 
 
 def test_detect_continuity_flags_from_rows_ignores_characters_without_prior_state():
@@ -1023,7 +1364,15 @@ def test_build_knowledge_timeline_keeps_all_chapters_in_matrix():
     )
 
     assert len(timeline) == 1
-    assert [cell["chapter_number"] for cell in timeline[0]["rows"][0]["cells"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert [cell["chapter_number"] for cell in timeline[0]["rows"][0]["cells"]] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+    ]
     assert timeline[0]["rows"][0]["cells"][1]["state"] == "learned"
     assert timeline[0]["rows"][0]["cells"][-1]["state"] == "known"
     assert all(cell["state"] == "unknown" for cell in timeline[0]["rows"][1]["cells"])
@@ -1083,10 +1432,12 @@ def test_normalize_imported_chapters_preserves_section_type_as_chapter_kind():
 
 
 def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_structure_is_preserved():
-    long_text = "\n\n".join([
-        " ".join(["opening"] * 1800),
-        " ".join(["middle"] * 1800),
-    ])
+    long_text = "\n\n".join(
+        [
+            " ".join(["opening"] * 1800),
+            " ".join(["middle"] * 1800),
+        ]
+    )
 
     normalized = normalize_imported_chapters(
         [{"number": 1, "title": "Chapter I", "text": long_text}],
@@ -1106,10 +1457,12 @@ def test_normalize_imported_chapters_keeps_long_source_chapter_intact_when_struc
 
 
 def test_normalize_imported_chapters_uses_chapter_kind_for_split_parts():
-    long_text = "\n\n".join([
-        " ".join(["front"] * 1800),
-        " ".join(["matter"] * 1800),
-    ])
+    long_text = "\n\n".join(
+        [
+            " ".join(["front"] * 1800),
+            " ".join(["matter"] * 1800),
+        ]
+    )
 
     normalized = normalize_imported_chapters(
         [{"number": 1, "title": "Preface", "text": long_text, "section_type": "preface"}],
@@ -1124,24 +1477,27 @@ def test_normalize_imported_chapters_uses_chapter_kind_for_split_parts():
     assert [chapter["chapter_kind"] for chapter in normalized] == ["chapter", "chapter"]
 
 
-
 def test_normalize_imported_chapters_keeps_images_with_matching_markers_when_split():
-    text = "\n\n".join([
-        "Opening section. [[IMAGE:cover]]",
-        " ".join(["middle"] * 3600),
-        "Closing section. [[IMAGE:map]]",
-    ])
+    text = "\n\n".join(
+        [
+            "Opening section. [[IMAGE:cover]]",
+            " ".join(["middle"] * 3600),
+            "Closing section. [[IMAGE:map]]",
+        ]
+    )
 
     normalized = normalize_imported_chapters(
-        [{
-            "number": 1,
-            "title": "Chapter I",
-            "text": text,
-            "images": [
-                {"marker": "[[IMAGE:cover]]", "bytes": b"cover-bytes"},
-                {"marker": "[[IMAGE:map]]", "bytes": b"map-bytes"},
-            ],
-        }],
+        [
+            {
+                "number": 1,
+                "title": "Chapter I",
+                "text": text,
+                "images": [
+                    {"marker": "[[IMAGE:cover]]", "bytes": b"cover-bytes"},
+                    {"marker": "[[IMAGE:map]]", "bytes": b"map-bytes"},
+                ],
+            }
+        ],
         chapter_number=None,
         start_number=1,
         replace_existing=False,
@@ -1177,13 +1533,16 @@ def test_normalize_writer_workspace_sanitizes_revision_board_items():
         {
             "revision_board": {
                 "items": [
-                    {"item_id": " impact-1 ", "status": "fixed", "assigned_version_id": " version-1 "},
+                    {
+                        "item_id": " impact-1 ",
+                        "status": "fixed",
+                        "assigned_version_id": " version-1 ",
+                    },
                     {"item_id": "impact-1", "status": "ignored"},
                     {"item_id": " ", "status": "pending"},
                 ],
                 "last_generated_at": " 2026-05-11T10:00:00Z ",
-            }
-            ,
+            },
             "revision_recent_edits": [
                 {
                     "id": " edit-1 ",
@@ -1206,10 +1565,100 @@ def test_normalize_writer_workspace_sanitizes_revision_board_items():
             "assigned_version_id": "version-1",
             "task_id": None,
             "updated_at": None,
+            "decision": None,
+            "action": None,
+            "reason": None,
+            "source_content_versions": {},
+            "finding_snapshot": None,
         }
     ]
     assert workspace["revision_recent_edits"][0]["kind"] == "scene"
     assert workspace["revision_recent_edits"][0]["scene_title"] == "Gate Approach"
+
+
+def test_priority_revision_findings_prefers_severity_and_category_diversity():
+    findings = [
+        {
+            "id": "low",
+            "category": "impact",
+            "severity": "low",
+            "chapter_ref": 1,
+            "status": "pending",
+        },
+        {
+            "id": "high-2",
+            "category": "impact",
+            "severity": "high",
+            "chapter_ref": 5,
+            "status": "pending",
+        },
+        {
+            "id": "medium",
+            "category": "voice",
+            "severity": "medium",
+            "chapter_ref": 3,
+            "status": "pending",
+        },
+        {
+            "id": "high-1",
+            "category": "confusion",
+            "severity": "high",
+            "chapter_ref": 2,
+            "status": "pending",
+        },
+    ]
+
+    selected = _priority_revision_findings(findings)
+
+    assert [item["id"] for item in selected] == ["high-1", "high-2", "medium"]
+
+
+def test_finding_excerpt_returns_only_real_source_text_and_match_strength():
+    excerpt, matched = _finding_excerpt(
+        "Mira entered the harbor. The silver key was missing from her coat. She called for Rowan.",
+        {"title": "Missing silver key", "description": "The silver key disappears."},
+    )
+
+    assert "silver key was missing" in excerpt
+    assert matched is True
+    assert _finding_excerpt("", {"title": "Anything"}) == ("", False)
+
+
+def test_apply_revision_finding_decision_persists_snapshot_and_activation():
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="Atlas",
+        format="txt",
+        work_type="novel",
+        s3_key="atlas.txt",
+        status="ready",
+        mode="author",
+        writer_workspace={},
+    )
+    finding = {
+        "id": "rev-1",
+        "title": "Missing key",
+        "evidence": [
+            {"chapter_ref": 2, "source_content_version": 4, "excerpt": "The key was gone."}
+        ],
+    }
+
+    apply_revision_finding_decision(
+        book,
+        finding=finding,
+        decision="accepted",
+        action="added_to_revision_plan",
+        reason=None,
+    )
+
+    workspace = normalize_writer_workspace(book.writer_workspace)
+    state = workspace["revision_board"]["items"][0]
+    assert state["status"] == "task_created"
+    assert state["decision"] == "accepted"
+    assert state["source_content_versions"] == {"2": 4}
+    assert state["finding_snapshot"]["id"] == "rev-1"
+    assert workspace["activation"]["completion_action"] == "added_to_revision_plan"
 
 
 def test_normalize_scene_metadata_preserves_structured_fields_and_cleans_lists():
@@ -1274,24 +1723,39 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
             return _ScalarRows([chapter])
 
     async def _fake_list_novel_scenes(*_args, **_kwargs):
-        return [{
-            "id": "scene-1",
-            "title": "Gate Approach",
-            "description": "Mira heads to the harbor gate.",
-            "body": "Mira reaches the silver gate with the dagger hidden in her sleeve.",
-            "chapter_number": 4,
-            "metadata": {"pov": "Mira", "location": "Harbor", "tags": ["dagger", "reveal"]},
-            "tags": ["dagger", "reveal"],
-        }]
+        return [
+            {
+                "id": "scene-1",
+                "title": "Gate Approach",
+                "description": "Mira heads to the harbor gate.",
+                "body": "Mira reaches the silver gate with the dagger hidden in her sleeve.",
+                "chapter_number": 4,
+                "metadata": {"pov": "Mira", "location": "Harbor", "tags": ["dagger", "reveal"]},
+                "tags": ["dagger", "reveal"],
+            }
+        ]
 
     async def _fake_list_vault_notes(*_args, **_kwargs):
-        return [{"path": "Plot Threads/Silver Gate.md", "content": "# Silver Gate\n\nMira hides the dagger near the gate."}]
+        return [
+            {
+                "path": "Plot Threads/Silver Gate.md",
+                "content": "# Silver Gate\n\nMira hides the dagger near the gate.",
+            }
+        ]
 
-    monkeypatch.setattr("app.utils.book_utils.list_novel_scenes", _fake_list_novel_scenes)
-    monkeypatch.setattr("app.utils.book_utils.list_vault_notes", _fake_list_vault_notes)
     monkeypatch.setattr(
-        "app.utils.book_utils.download_book",
-        lambda _key: serialize_manuscript_content("The silver gate loomed over the harbor.", "<p>The silver gate loomed over the harbor.</p>").encode("utf-8"),
+        "app.utils.books.workspace_search.list_novel_scenes", _fake_list_novel_scenes
+    )
+    monkeypatch.setattr(
+        "app.utils.books.workspace_search.vault_storage.list_vault_notes",
+        _fake_list_vault_notes,
+    )
+    monkeypatch.setattr(
+        "app.utils.books.workspace_search.download_book",
+        lambda _key: serialize_manuscript_content(
+            "The silver gate loomed over the harbor.",
+            "<p>The silver gate loomed over the harbor.</p>",
+        ).encode("utf-8"),
     )
 
     results = await search_author_workspace(
@@ -1310,6 +1774,83 @@ async def test_search_author_workspace_returns_scoped_results(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_author_workspace_only_swallows_manuscript_storage_io(monkeypatch):
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        title="Atlas",
+        format="txt",
+        work_type="novel",
+        s3_key="atlas.txt",
+        status="ready",
+        mode="author",
+    )
+    chapter = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=4,
+        title="The Gate",
+        s3_key="chapter-4.txt",
+        content_version=1,
+    )
+
+    class _ScalarRows:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [chapter]
+
+    class _FakeSearchDB:
+        async def execute(self, *_args, **_kwargs):
+            return _ScalarRows()
+
+    async def _no_scenes(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("app.utils.books.workspace_search.list_novel_scenes", _no_scenes)
+    monkeypatch.setattr(
+        "app.utils.books.workspace_search.vault_storage.list_vault_notes",
+        _no_scenes,
+    )
+
+    def _storage_missing(_key: str) -> bytes:
+        raise OSError("object unavailable")
+
+    monkeypatch.setattr("app.utils.books.workspace_search.download_book", _storage_missing)
+
+    assert (
+        await search_author_workspace(
+            _FakeSearchDB(),
+            book=book,
+            user_id=book.user_id,
+            query="silver gate",
+            scopes=["manuscript"],
+        )
+        == []
+    )
+
+    monkeypatch.setattr("app.utils.books.workspace_search.download_book", lambda _key: b"{}")
+
+    def _deserialize_bug(_raw: bytes) -> dict:
+        raise RuntimeError("deserializer bug")
+
+    monkeypatch.setattr(
+        "app.utils.books.workspace_search.manuscript.deserialize_manuscript_content",
+        _deserialize_bug,
+    )
+
+    with pytest.raises(RuntimeError, match="deserializer bug"):
+        await search_author_workspace(
+            _FakeSearchDB(),
+            book=book,
+            user_id=book.user_id,
+            query="silver gate",
+            scopes=["manuscript"],
+        )
+
+
+@pytest.mark.asyncio
 async def test_search_author_workspace_rejects_nested_regex_repetition():
     with pytest.raises(HTTPException) as exc_info:
         await search_author_workspace(
@@ -1325,17 +1866,26 @@ async def test_search_author_workspace_rejects_nested_regex_repetition():
 
 
 def test_build_narration_signature_detects_first_person_anchor():
-    signature = _build_narration_signature("I ran through the gate. My hands shook. I tasted blood on my lip.")
+    signature = _build_narration_signature(
+        "I ran through the gate. My hands shook. I tasted blood on my lip."
+    )
 
     assert signature["pov_mode"] == "first-person"
     assert signature["first_person_hits"] >= 3
 
 
 def test_describe_narration_shift_flags_mode_change():
-    previous = _build_narration_signature("She crossed the gate and kept her head down. Her breath stayed measured.")
-    current = _build_narration_signature("I crossed the gate and kept my head down. My breath stayed measured.")
+    previous = _build_narration_signature(
+        "She crossed the gate and kept her head down. Her breath stayed measured."
+    )
+    current = _build_narration_signature(
+        "I crossed the gate and kept my head down. My breath stayed measured."
+    )
 
-    assert _describe_narration_shift(previous, current) == "Narration shifts from third-person anchoring into first-person anchoring."
+    assert (
+        _describe_narration_shift(previous, current)
+        == "Narration shifts from third-person anchoring into first-person anchoring."
+    )
 
 
 @pytest.mark.asyncio
@@ -1388,12 +1938,17 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
 
 
 @pytest.mark.asyncio
-async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_source_preservation(monkeypatch):
+async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_source_preservation(
+    monkeypatch,
+):
     parse_calls: list[bool] = []
 
     def _fake_parse_pdf(raw, *, split_large_chapters=True, language=None):
         parse_calls.append(split_large_chapters)
-        return ([{"number": 1, "title": "Chapter 7", "text": "Original full chapter"}], {"source": "pdf"})
+        return (
+            [{"number": 1, "title": "Chapter 7", "text": "Original full chapter"}],
+            {"source": "pdf"},
+        )
 
     monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
 
@@ -1458,7 +2013,9 @@ async def test_chapter_consistency_reports_load_full_context(db):
     await db.flush()
     db.add_all(
         [
-            ChapterSummary(chapter_id=chapters[1].id, mode="short", content="Mara confronts Jon at the gate."),
+            ChapterSummary(
+                chapter_id=chapters[1].id, mode="short", content="Mara confronts Jon at the gate."
+            ),
             CharacterRelationship(
                 book_id=book.id,
                 character_a_id=mara.id,
@@ -1476,8 +2033,16 @@ async def test_chapter_consistency_reports_load_full_context(db):
                 importance=8,
                 character_ids=[str(mara.id)],
             ),
-            CharacterState(character_id=mara.id, at_chapter=1, trait_snapshot={"location": "harbor", "eyes": "blue"}),
-            CharacterState(character_id=mara.id, at_chapter=2, trait_snapshot={"location": "citadel", "eyes": "green"}),
+            CharacterState(
+                character_id=mara.id,
+                at_chapter=1,
+                trait_snapshot={"location": "harbor", "eyes": "blue"},
+            ),
+            CharacterState(
+                character_id=mara.id,
+                at_chapter=2,
+                trait_snapshot={"location": "citadel", "eyes": "green"},
+            ),
             WorldElement(
                 book_id=book.id,
                 source_scope="story",
@@ -1504,6 +2069,18 @@ async def test_chapter_consistency_reports_load_full_context(db):
                 path="scenes/unassigned/unused-fragment.md",
                 status="unassigned",
                 sort_order=1,
+            ),
+            ContinuityScan(
+                book_id=book.id,
+                user_id=user.id,
+                scope="full_book",
+                status="ready",
+                continuity_status="clean",
+                detector_version="continuity-rules-v2",
+                chapter_versions={"1": 1, "2": 1},
+                coverage={"chapters_analyzed": 2},
+                duration_ms=420,
+                completed_at=datetime(2026, 7, 24, 9, 0, tzinfo=UTC),
             ),
         ]
     )
@@ -1537,6 +2114,10 @@ async def test_chapter_consistency_reports_load_full_context(db):
     assert revision["summary"]["active_item_count"] >= 0
     assert revision["revision_plan"]
     assert isinstance(revision["knowledge_timeline"], list)
+    assert revision["continuity_status"] == "clean"
+    assert revision["continuity_scan_id"] is not None
+    assert revision["continuity_completed_at"] == datetime(2026, 7, 24, 9, 0, tzinfo=UTC)
+    assert revision["continuity_duration_ms"] == 420
 
     advisor_scan = await build_advisor_suggestions_payload(
         db=db,
@@ -1661,6 +2242,27 @@ async def test_parse_import_upload_covers_text_markdown_pdf_epub_and_unsupported
 
     with pytest.raises(HTTPException, match="Unsupported manuscript import"):
         await parse_import_upload("book.xyz", b"unknown", False)
+
+
+@pytest.mark.asyncio
+async def test_parse_import_upload_legacy_doc_only_maps_expected_parse_failures(monkeypatch):
+    from docx.opc.exceptions import PackageNotFoundError
+
+    def _expected_doc_parse_failure(*_args, **_kwargs):
+        raise PackageNotFoundError("legacy doc")
+
+    monkeypatch.setattr("docx.Document", _expected_doc_parse_failure)
+
+    with pytest.raises(HTTPException, match="Legacy \\.doc files"):
+        await parse_import_upload("legacy.doc", b"not-a-docx", False)
+
+    def _unexpected_doc_bug(*_args, **_kwargs):
+        raise RuntimeError("doc parser bug")
+
+    monkeypatch.setattr("docx.Document", _unexpected_doc_bug)
+
+    with pytest.raises(RuntimeError, match="doc parser bug"):
+        await parse_import_upload("legacy.doc", b"not-a-docx", False)
 
 
 def test_build_import_preview_covers_text_screenplay_and_invalid_format(monkeypatch):

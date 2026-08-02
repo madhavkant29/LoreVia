@@ -1,0 +1,423 @@
+{
+  "version": "1.0.0",
+  "license": "Original synthetic evaluation text created for LoreVia.",
+  "cases": [
+    {
+      "id": "fantasy_shared_first_name",
+      "genre": "fantasy",
+      "text": "John Carter raised the moon-key. Across the hall, John Reed warned Mira not to touch it. Later, John hid the key.",
+      "labels": {
+        "characters": [
+          {"canonical_name": "John Carter", "mentions": ["John Carter"]},
+          {"canonical_name": "John Reed", "mentions": ["John Reed"]},
+          {"canonical_name": "Mira", "mentions": ["Mira"]}
+        ],
+        "identity_links": {"John Carter": "John Carter", "John Reed": "John Reed", "Mira": "Mira"},
+        "ambiguous_mentions": ["John"],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "moon-key raised"}],
+        "knowledge_events": [{"character": "John Reed", "fact": "moon-key is dangerous", "chapter": 1}],
+        "plot_threads": [{"title": "The moon-key", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": []
+      }
+    },
+    {
+      "id": "fantasy_title_surname",
+      "genre": "fantasy",
+      "text": "Captain Vale entered first. Elara Vale followed her brother. The captain ordered Elara to seal the western gate.",
+      "labels": {
+        "characters": [
+          {"canonical_name": "Tomas Vale", "mentions": ["Captain Vale", "the captain"]},
+          {"canonical_name": "Elara Vale", "mentions": ["Elara Vale", "Elara"]}
+        ],
+        "identity_links": {"Captain Vale": "Tomas Vale", "the captain": "Tomas Vale", "Elara": "Elara Vale"},
+        "ambiguous_mentions": [],
+        "relationships": [{"a": "Tomas Vale", "b": "Elara Vale", "type": "siblings"}],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "western gate sealed"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "The western gate", "promise_chapter": 1, "payoff_chapter": 1}],
+        "findings": []
+      }
+    },
+    {
+      "id": "fantasy_intentional_transformation",
+      "genre": "fantasy",
+      "text": "In Chapter 1, Nyra's eyes were brown. In Chapter 4, the phoenix rite turned Nyra's eyes gold. In Chapter 5, Nyra saw gold light in the mirror.",
+      "labels": {
+        "characters": [{"canonical_name": "Nyra", "mentions": ["Nyra"]}],
+        "identity_links": {"Nyra": "Nyra"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Nyra", "predicate": "eyes", "from": "brown", "to": "gold", "chapter": 4, "intentional": true}],
+        "timeline_events": [{"chapter": 4, "event": "phoenix rite"}],
+        "knowledge_events": [{"character": "Nyra", "fact": "eyes are gold", "chapter": 5}],
+        "plot_threads": [{"title": "Phoenix rite", "promise_chapter": 1, "payoff_chapter": 4}],
+        "findings": []
+      }
+    },
+    {
+      "id": "fantasy_disguise",
+      "genre": "fantasy",
+      "text": "The masked pilgrim called herself Sable. When the veil burned away, Prince Oren recognized the pilgrim as Queen Maelis.",
+      "labels": {
+        "characters": [
+          {"canonical_name": "Queen Maelis", "mentions": ["masked pilgrim", "Sable", "the pilgrim", "Queen Maelis"]},
+          {"canonical_name": "Prince Oren", "mentions": ["Prince Oren"]}
+        ],
+        "identity_links": {"Sable": "Queen Maelis", "the pilgrim": "Queen Maelis", "Queen Maelis": "Queen Maelis"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Queen Maelis", "predicate": "disguise", "from": "Sable", "to": "revealed", "chapter": 2, "intentional": true}],
+        "timeline_events": [{"chapter": 2, "event": "Maelis revealed"}],
+        "knowledge_events": [{"character": "Prince Oren", "fact": "Sable is Queen Maelis", "chapter": 2}],
+        "plot_threads": [{"title": "Sable's identity", "promise_chapter": 1, "payoff_chapter": 2}],
+        "findings": []
+      }
+    },
+    {
+      "id": "fantasy_eye_contradiction",
+      "genre": "fantasy",
+      "text": "In Chapter 1, Ilya's left eye was blue and her right eye was gray. Chapter 3 calls both of Ilya's eyes green, with no spell or injury between.",
+      "labels": {
+        "characters": [{"canonical_name": "Ilya", "mentions": ["Ilya"]}],
+        "identity_links": {"Ilya": "Ilya"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Ilya", "predicate": "eyes", "from": "blue and gray", "to": "green", "chapter": 3, "intentional": false}],
+        "timeline_events": [],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": [{"key": "character_state|ilya|eyes|1,3", "category": "character_state", "subject": "Ilya", "chapters": [1, 3]}]
+      }
+    },
+    {
+      "id": "romance_nickname",
+      "genre": "romance",
+      "text": "Alexandra Moreno signed the lease. Her old friend Dev called her Lex, the name only he used.",
+      "labels": {
+        "characters": [
+          {"canonical_name": "Alexandra Moreno", "mentions": ["Alexandra Moreno", "Lex"]},
+          {"canonical_name": "Dev", "mentions": ["Dev"]}
+        ],
+        "identity_links": {"Alexandra Moreno": "Alexandra Moreno", "Lex": "Alexandra Moreno", "Dev": "Dev"},
+        "ambiguous_mentions": [],
+        "relationships": [{"a": "Alexandra Moreno", "b": "Dev", "type": "old friends"}],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "lease signed"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Shared lease", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": []
+      }
+    },
+    {
+      "id": "romance_same_surname",
+      "genre": "romance",
+      "text": "Dr. Shah greeted Priya Shah and her cousin Rohan Shah. Later, Shah left a note on Priya's desk.",
+      "labels": {
+        "characters": [
+          {"canonical_name": "Dr. Meera Shah", "mentions": ["Dr. Shah"]},
+          {"canonical_name": "Priya Shah", "mentions": ["Priya Shah", "Priya"]},
+          {"canonical_name": "Rohan Shah", "mentions": ["Rohan Shah"]}
+        ],
+        "identity_links": {"Dr. Shah": "Dr. Meera Shah", "Priya": "Priya Shah", "Rohan Shah": "Rohan Shah"},
+        "ambiguous_mentions": ["Shah"],
+        "relationships": [{"a": "Priya Shah", "b": "Rohan Shah", "type": "cousins"}],
+        "state_transitions": [],
+        "timeline_events": [],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Anonymous note", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": []
+      }
+    },
+    {
+      "id": "romance_relationship_transition",
+      "genre": "romance",
+      "text": "In Chapter 2, June and Mateo agreed they were only colleagues. In Chapter 5, after Mateo confessed on the bridge, they began dating.",
+      "labels": {
+        "characters": [{"canonical_name": "June", "mentions": ["June"]}, {"canonical_name": "Mateo", "mentions": ["Mateo"]}],
+        "identity_links": {"June": "June", "Mateo": "Mateo"},
+        "ambiguous_mentions": [],
+        "relationships": [{"a": "June", "b": "Mateo", "type": "colleagues", "from": 2, "to": 4}, {"a": "June", "b": "Mateo", "type": "romantic", "from": 5}],
+        "state_transitions": [{"subject": "June/Mateo", "predicate": "relationship", "from": "colleagues", "to": "romantic", "chapter": 5, "intentional": true}],
+        "timeline_events": [{"chapter": 5, "event": "bridge confession"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "June and Mateo", "promise_chapter": 2, "payoff_chapter": 5}],
+        "findings": []
+      }
+    },
+    {
+      "id": "romance_impossible_trip",
+      "genre": "romance",
+      "text": "At 8:55 p.m., Lina was onstage in Mumbai. At 9:00 p.m., the same scene places Lina at a café in Paris, with no teleportation or time jump.",
+      "labels": {
+        "characters": [{"canonical_name": "Lina", "mentions": ["Lina"]}],
+        "identity_links": {"Lina": "Lina"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Lina", "predicate": "location", "from": "Mumbai", "to": "Paris", "chapter": 3, "intentional": false}],
+        "timeline_events": [{"chapter": 3, "time": "20:55", "event": "Lina in Mumbai"}, {"chapter": 3, "time": "21:00", "event": "Lina in Paris"}],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": [{"key": "timeline|lina|location|3", "category": "timeline", "subject": "Lina", "chapters": [3]}]
+      }
+    },
+    {
+      "id": "romance_family_role",
+      "genre": "romance",
+      "text": "Mina waved to Aunt Celeste. Celeste Park was Mina's mother's younger sister, and her aunt had raised Mina for six years.",
+      "labels": {
+        "characters": [{"canonical_name": "Mina", "mentions": ["Mina"]}, {"canonical_name": "Celeste Park", "mentions": ["Aunt Celeste", "Celeste Park", "her aunt"]}],
+        "identity_links": {"Aunt Celeste": "Celeste Park", "Celeste Park": "Celeste Park", "her aunt": "Celeste Park"},
+        "ambiguous_mentions": [],
+        "relationships": [{"a": "Mina", "b": "Celeste Park", "type": "aunt and niece"}],
+        "state_transitions": [],
+        "timeline_events": [],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": []
+      }
+    },
+    {
+      "id": "mystery_unreliable_narrator",
+      "genre": "mystery",
+      "text": "I swear Elias never entered the study, Mara wrote. The security log later showed Elias entering at 10:12, and the narrator admitted Mara had forged her diary.",
+      "labels": {
+        "characters": [{"canonical_name": "Elias", "mentions": ["Elias"]}, {"canonical_name": "Mara", "mentions": ["Mara"]}],
+        "identity_links": {"Elias": "Elias", "Mara": "Mara"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 2, "time": "10:12", "event": "Elias entered study"}],
+        "knowledge_events": [{"character": "Mara", "fact": "Elias entered the study", "chapter": 1}],
+        "plot_threads": [{"title": "Forged diary", "promise_chapter": 1, "payoff_chapter": 4}],
+        "findings": []
+      }
+    },
+    {
+      "id": "mystery_knowledge_before_acquisition",
+      "genre": "mystery",
+      "text": "In Chapter 2, Omar names the poison as aconite. The lab does not identify aconite until Chapter 4, and nobody tells Omar before then.",
+      "labels": {
+        "characters": [{"canonical_name": "Omar", "mentions": ["Omar"]}],
+        "identity_links": {"Omar": "Omar"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 4, "event": "lab identifies aconite"}],
+        "knowledge_events": [{"character": "Omar", "fact": "poison is aconite", "chapter": 4}],
+        "plot_threads": [{"title": "Poison identity", "promise_chapter": 2, "payoff_chapter": 4}],
+        "findings": [{"key": "knowledge|omar|aconite|2,4", "category": "knowledge", "subject": "Omar", "chapters": [2, 4]}]
+      }
+    },
+    {
+      "id": "mystery_object_destroyed",
+      "genre": "mystery",
+      "text": "Chapter 3 shows Detective Bell burning the only blackmail letter to ash. In Chapter 6, Bell hands the intact original letter to the judge.",
+      "labels": {
+        "characters": [{"canonical_name": "Detective Bell", "mentions": ["Detective Bell", "Bell"]}],
+        "identity_links": {"Detective Bell": "Detective Bell", "Bell": "Detective Bell"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "blackmail letter", "predicate": "condition", "from": "intact", "to": "destroyed", "chapter": 3, "intentional": false}],
+        "timeline_events": [{"chapter": 3, "event": "letter destroyed"}, {"chapter": 6, "event": "letter presented"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Blackmail letter", "promise_chapter": 1, "payoff_chapter": 6}],
+        "findings": [{"key": "object|blackmail letter|destroyed|3,6", "category": "object", "subject": "blackmail letter", "chapters": [3, 6]}]
+      }
+    },
+    {
+      "id": "mystery_alias_reveal",
+      "genre": "mystery",
+      "text": "The caller used the name Nightjar. Fingerprints on the telephone proved Nightjar was Inspector Sen.",
+      "labels": {
+        "characters": [{"canonical_name": "Inspector Sen", "mentions": ["Nightjar", "Inspector Sen"]}],
+        "identity_links": {"Nightjar": "Inspector Sen", "Inspector Sen": "Inspector Sen"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Inspector Sen", "predicate": "alias", "from": "Nightjar", "to": "revealed", "chapter": 5, "intentional": true}],
+        "timeline_events": [],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Nightjar's identity", "promise_chapter": 1, "payoff_chapter": 5}],
+        "findings": []
+      }
+    },
+    {
+      "id": "mystery_clue_without_payoff",
+      "genre": "mystery",
+      "text": "A blue thread was caught in the window latch in Chapter 1. The manuscript ends in Chapter 12 without mentioning the thread again.",
+      "labels": {
+        "characters": [],
+        "identity_links": {},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "blue thread found"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Blue thread clue", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": [{"key": "plot_payoff|blue thread clue|1,12", "category": "plot_payoff", "subject": "Blue thread clue", "chapters": [1, 12]}]
+      }
+    },
+    {
+      "id": "science_fiction_clone_names",
+      "genre": "science_fiction",
+      "text": "Dr. Ren Ko woke the clone called Ren-2. Ren Ko stayed in orbit while Ren-2 descended to the colony.",
+      "labels": {
+        "characters": [{"canonical_name": "Ren Ko", "mentions": ["Dr. Ren Ko", "Ren Ko"]}, {"canonical_name": "Ren-2", "mentions": ["Ren-2"]}],
+        "identity_links": {"Dr. Ren Ko": "Ren Ko", "Ren Ko": "Ren Ko", "Ren-2": "Ren-2"},
+        "ambiguous_mentions": ["Ren"],
+        "relationships": [{"a": "Ren Ko", "b": "Ren-2", "type": "original and clone"}],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 1, "event": "Ren-2 descends"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Clone mission", "promise_chapter": 1, "payoff_chapter": null}],
+        "findings": []
+      }
+    },
+    {
+      "id": "science_fiction_world_rule",
+      "genre": "science_fiction",
+      "text": "Chapter 1 states that jump gates cannot transmit living tissue. In Chapter 7, an unmodified human steps through a gate alive, with no exception explained.",
+      "labels": {
+        "characters": [],
+        "identity_links": {},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "jump gates", "predicate": "living_tissue", "from": "cannot transmit", "to": "transmits", "chapter": 7, "intentional": false}],
+        "timeline_events": [],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": [{"key": "world_rule|jump gates|1,7", "category": "world_rule", "subject": "jump gates", "chapters": [1, 7]}]
+      }
+    },
+    {
+      "id": "science_fiction_memory_transfer",
+      "genre": "science_fiction",
+      "text": "Before the sync, Aya did not know the station code. The memory transfer completed, and afterward Aya entered the code correctly.",
+      "labels": {
+        "characters": [{"canonical_name": "Aya", "mentions": ["Aya"]}],
+        "identity_links": {"Aya": "Aya"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [{"chapter": 2, "event": "memory transfer completed"}],
+        "knowledge_events": [{"character": "Aya", "fact": "station code", "chapter": 2}],
+        "plot_threads": [{"title": "Memory transfer", "promise_chapter": 1, "payoff_chapter": 2}],
+        "findings": []
+      }
+    },
+    {
+      "id": "science_fiction_timeline_loop",
+      "genre": "science_fiction",
+      "text": "Kai receives the cracked watch from his older self in 2210. In 2214, Kai cracks the same watch before traveling back to 2210.",
+      "labels": {
+        "characters": [{"canonical_name": "Kai", "mentions": ["Kai", "his older self"]}],
+        "identity_links": {"Kai": "Kai", "his older self": "Kai"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "watch", "predicate": "condition", "from": "intact", "to": "cracked", "chapter": 4, "intentional": true}],
+        "timeline_events": [{"chapter": 1, "time": "2210", "event": "watch received"}, {"chapter": 4, "time": "2214", "event": "watch cracked"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Watch loop", "promise_chapter": 1, "payoff_chapter": 4}],
+        "findings": []
+      }
+    },
+    {
+      "id": "science_fiction_android_pronouns",
+      "genre": "science_fiction",
+      "text": "Unit Seven introduced itself as Sev and used they pronouns. The engineer later called Sev 'it,' and Sev corrected him.",
+      "labels": {
+        "characters": [{"canonical_name": "Unit Seven", "mentions": ["Unit Seven", "Sev"]}],
+        "identity_links": {"Unit Seven": "Unit Seven", "Sev": "Unit Seven"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [],
+        "timeline_events": [],
+        "knowledge_events": [{"character": "engineer", "fact": "Sev uses they pronouns", "chapter": 1}],
+        "plot_threads": [],
+        "findings": []
+      }
+    },
+    {
+      "id": "contemporary_family_reference",
+      "genre": "contemporary",
+      "text": "Nadia texted Dad that she was late. Her father, Imran Qureshi, replied that dinner could wait.",
+      "labels": {
+        "characters": [{"canonical_name": "Nadia", "mentions": ["Nadia"]}, {"canonical_name": "Imran Qureshi", "mentions": ["Dad", "Her father", "Imran Qureshi"]}],
+        "identity_links": {"Dad": "Imran Qureshi", "Her father": "Imran Qureshi", "Imran Qureshi": "Imran Qureshi"},
+        "ambiguous_mentions": [],
+        "relationships": [{"a": "Nadia", "b": "Imran Qureshi", "type": "daughter and father"}],
+        "state_transitions": [],
+        "timeline_events": [],
+        "knowledge_events": [{"character": "Imran Qureshi", "fact": "Nadia is late", "chapter": 1}],
+        "plot_threads": [],
+        "findings": []
+      }
+    },
+    {
+      "id": "contemporary_injury_transition",
+      "genre": "contemporary",
+      "text": "Sam broke his right wrist in Chapter 2 and wore a cast. By Chapter 8, a doctor removed the cast after the wrist healed.",
+      "labels": {
+        "characters": [{"canonical_name": "Sam", "mentions": ["Sam"]}],
+        "identity_links": {"Sam": "Sam"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Sam", "predicate": "right_wrist", "from": "broken", "to": "healed", "chapter": 8, "intentional": true}],
+        "timeline_events": [{"chapter": 2, "event": "wrist broken"}, {"chapter": 8, "event": "cast removed"}],
+        "knowledge_events": [],
+        "plot_threads": [{"title": "Sam's recovery", "promise_chapter": 2, "payoff_chapter": 8}],
+        "findings": []
+      }
+    },
+    {
+      "id": "contemporary_age_contradiction",
+      "genre": "contemporary",
+      "text": "Chapter 1 says Mei is thirty-two. Two weeks later in Chapter 4, Mei tells the same narrator she is twenty-seven, with no deception indicated.",
+      "labels": {
+        "characters": [{"canonical_name": "Mei", "mentions": ["Mei"]}],
+        "identity_links": {"Mei": "Mei"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Mei", "predicate": "age", "from": "32", "to": "27", "chapter": 4, "intentional": false}],
+        "timeline_events": [{"chapter": 4, "event": "two weeks elapsed"}],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": [{"key": "character_state|mei|age|1,4", "category": "character_state", "subject": "Mei", "chapters": [1, 4]}]
+      }
+    },
+    {
+      "id": "contemporary_name_change",
+      "genre": "contemporary",
+      "text": "Before filing the paperwork, Daniel Cho used Daniel. After his court hearing, he asked everyone to call him Dana Cho.",
+      "labels": {
+        "characters": [{"canonical_name": "Dana Cho", "mentions": ["Daniel Cho", "Daniel", "Dana Cho"]}],
+        "identity_links": {"Daniel Cho": "Dana Cho", "Daniel": "Dana Cho", "Dana Cho": "Dana Cho"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Dana Cho", "predicate": "name", "from": "Daniel Cho", "to": "Dana Cho", "chapter": 4, "intentional": true}],
+        "timeline_events": [{"chapter": 4, "event": "legal name changed"}],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": []
+      }
+    },
+    {
+      "id": "contemporary_lost_phone",
+      "genre": "contemporary",
+      "text": "Leah dropped her phone into the river in Chapter 3 and watched it sink. In Chapter 4, Leah reads a new message on that same phone without recovering or replacing it.",
+      "labels": {
+        "characters": [{"canonical_name": "Leah", "mentions": ["Leah"]}],
+        "identity_links": {"Leah": "Leah"},
+        "ambiguous_mentions": [],
+        "relationships": [],
+        "state_transitions": [{"subject": "Leah's phone", "predicate": "possession", "from": "lost", "to": "possessed", "chapter": 4, "intentional": false}],
+        "timeline_events": [{"chapter": 3, "event": "phone lost"}, {"chapter": 4, "event": "phone used"}],
+        "knowledge_events": [],
+        "plot_threads": [],
+        "findings": [{"key": "object|leah phone|3,4", "category": "object", "subject": "Leah's phone", "chapters": [3, 4]}]
+      }
+    }
+  ]
+}

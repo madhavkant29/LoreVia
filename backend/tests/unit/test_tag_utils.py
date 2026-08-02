@@ -15,7 +15,9 @@ from app.utils.tag_utils import (
 
 
 def test_normalize_custom_tags_dedupes_and_cleans():
-    tags = normalize_custom_tags([" Needs Rewrite ", "foreshadowing", "needs rewrite", "beta_feedback"])
+    tags = normalize_custom_tags(
+        [" Needs Rewrite ", "foreshadowing", "needs rewrite", "beta_feedback"]
+    )
 
     assert tags == ["needs rewrite", "foreshadowing", "beta feedback"]
 

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.utils.book_utils import build_series_bible_payload
+from app.utils.books.series_bible import build_series_bible_payload
 
 
 class FakeResult:
@@ -69,38 +69,99 @@ async def test_build_series_bible_aggregates_recurring_canon_threads_and_continu
     mara_second_id = uuid.uuid4()
     joren_second_id = uuid.uuid4()
     characters = [
-        SimpleNamespace(id=mara_first_id, book_id=first_id, name="Mara", mention_count=18, role="mc", first_chapter=1),
-        SimpleNamespace(id=joren_first_id, book_id=first_id, name="Joren", mention_count=9, role="sc", first_chapter=2),
-        SimpleNamespace(id=mara_second_id, book_id=second_id, name="Mara", mention_count=22, role="sc", first_chapter=1),
-        SimpleNamespace(id=joren_second_id, book_id=second_id, name="Joren", mention_count=13, role="sc", first_chapter=1),
-        SimpleNamespace(id=uuid.uuid4(), book_id=second_id, name="   ", mention_count=1, role=None, first_chapter=4),
+        SimpleNamespace(
+            id=mara_first_id,
+            book_id=first_id,
+            name="Mara",
+            mention_count=18,
+            role="mc",
+            first_chapter=1,
+        ),
+        SimpleNamespace(
+            id=joren_first_id,
+            book_id=first_id,
+            name="Joren",
+            mention_count=9,
+            role="sc",
+            first_chapter=2,
+        ),
+        SimpleNamespace(
+            id=mara_second_id,
+            book_id=second_id,
+            name="Mara",
+            mention_count=22,
+            role="sc",
+            first_chapter=1,
+        ),
+        SimpleNamespace(
+            id=joren_second_id,
+            book_id=second_id,
+            name="Joren",
+            mention_count=13,
+            role="sc",
+            first_chapter=1,
+        ),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            book_id=second_id,
+            name="   ",
+            mention_count=1,
+            role=None,
+            first_chapter=4,
+        ),
     ]
     relationships = [
-        SimpleNamespace(book_id=first_id, character_a_id=mara_first_id, character_b_id=joren_first_id, rel_type="ally", description="They guard the gate."),
-        SimpleNamespace(book_id=second_id, character_a_id=mara_second_id, character_b_id=joren_second_id, rel_type="ally", description=None),
-        SimpleNamespace(book_id=second_id, character_a_id=mara_second_id, character_b_id=joren_second_id, rel_type="rival", description="A label shift."),
+        SimpleNamespace(
+            book_id=first_id,
+            character_a_id=mara_first_id,
+            character_b_id=joren_first_id,
+            rel_type="ally",
+            description="They guard the gate.",
+        ),
+        SimpleNamespace(
+            book_id=second_id,
+            character_a_id=mara_second_id,
+            character_b_id=joren_second_id,
+            rel_type="ally",
+            description=None,
+        ),
+        SimpleNamespace(
+            book_id=second_id,
+            character_a_id=mara_second_id,
+            character_b_id=joren_second_id,
+            rel_type="rival",
+            description="A label shift.",
+        ),
     ]
     plot_threads = [
-        SimpleNamespace(book_id=first_id, title="The Brass Key", status="developing", note="Who forged it?"),
+        SimpleNamespace(
+            book_id=first_id, title="The Brass Key", status="developing", note="Who forged it?"
+        ),
         SimpleNamespace(book_id=second_id, title=" the brass key ", status="ongoing", note=None),
         SimpleNamespace(book_id=second_id, title="Closed Door", status="resolved", note=None),
         SimpleNamespace(book_id=second_id, title=" ", status="developing", note=None),
     ]
     wiki_entries = [
-        SimpleNamespace(book_id=first_id, entry_type="place", name="Ash Gate", description="A silver arch."),
-        SimpleNamespace(book_id=second_id, entry_type="place", name=" ash gate ", description="A black arch."),
+        SimpleNamespace(
+            book_id=first_id, entry_type="place", name="Ash Gate", description="A silver arch."
+        ),
+        SimpleNamespace(
+            book_id=second_id, entry_type="place", name=" ash gate ", description="A black arch."
+        ),
         SimpleNamespace(book_id=second_id, entry_type="object", name="Brass Key", description=None),
         SimpleNamespace(book_id=second_id, entry_type="place", name=" ", description="ignored"),
     ]
-    db = FakeDb([
-        memberships,
-        [(first_id, 12, 8400), (second_id, 14, 9200)],
-        [(first_id, 44), (second_id, 51)],
-        characters,
-        relationships,
-        plot_threads,
-        wiki_entries,
-    ])
+    db = FakeDb(
+        [
+            memberships,
+            [(first_id, 12, 8400), (second_id, 14, 9200)],
+            [(first_id, 44), (second_id, 51)],
+            characters,
+            relationships,
+            plot_threads,
+            wiki_entries,
+        ]
+    )
 
     payload = await build_series_bible_payload(db, series=series)
 

@@ -13,6 +13,11 @@ from app.models.book import Book, BookCollaborator, BookNote, Chapter, NovelScen
 from app.models.character import Character
 from app.models.intelligence import PlotThread, WorldNote
 from app.models.tag import CustomTag
+from app.utils.books.collaboration_access import (
+    collaboration_allows_chapter,
+    collaboration_can_comment,
+    collaboration_can_edit,
+)
 
 BLEACH_EMPTY_TAGS: Any = frozenset()
 MAX_TAGS_PER_ENTITY = 25
@@ -92,10 +97,10 @@ async def list_custom_tags_for_entity_ids(
     if book_id is not None:
         stmt = stmt.where(CustomTag.book_id == book_id)
     rows = (
-        await db.execute(
-            stmt.order_by(CustomTag.tag_name.asc(), CustomTag.created_at.asc())
-        )
-    ).scalars().all()
+        (await db.execute(stmt.order_by(CustomTag.tag_name.asc(), CustomTag.created_at.asc())))
+        .scalars()
+        .all()
+    )
     mapping: dict[uuid.UUID, list[str]] = {entity_id: [] for entity_id in ids}
     for row in rows:
         mapping.setdefault(row.entity_id, []).append(row.tag_name)
@@ -171,7 +176,9 @@ async def resolve_tag_target(
         elif chapter_number is not None:
             chapter = (
                 await db.execute(
-                    select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
+                    select(Chapter).where(
+                        Chapter.book_id == book.id, Chapter.number == chapter_number
+                    )
                 )
             ).scalar_one_or_none()
         if chapter is None:
@@ -204,27 +211,31 @@ def can_manage_tag_target(
     target_owner_user_id: uuid.UUID | None,
     current_user_id: uuid.UUID,
 ) -> bool:
-    from app.utils.book_utils import (
-        collaboration_allows_chapter,
-        collaboration_can_comment,
-        collaboration_can_edit,
-    )
-
     if collaborator is None:
         return True
 
     normalized_public_type = normalize_public_entity_type(public_entity_type)
-    if normalized_public_type in {ENTITY_TYPE_CHAPTER, ENTITY_TYPE_SCENE, ENTITY_TYPE_CHARACTER, ENTITY_TYPE_PLOT_THREAD, ENTITY_TYPE_WORLD_NOTE}:
+    if normalized_public_type in {
+        ENTITY_TYPE_CHAPTER,
+        ENTITY_TYPE_SCENE,
+        ENTITY_TYPE_CHARACTER,
+        ENTITY_TYPE_PLOT_THREAD,
+        ENTITY_TYPE_WORLD_NOTE,
+    }:
         if not collaboration_can_edit(collaborator):
             return False
-        if target_chapter_number is not None and not collaboration_allows_chapter(collaborator, target_chapter_number):
+        if target_chapter_number is not None and not collaboration_allows_chapter(
+            collaborator, target_chapter_number
+        ):
             return False
         return True
 
     if normalized_public_type in {ENTITY_TYPE_NOTE, "comment"}:
         if not collaboration_can_comment(collaborator):
             return False
-        if target_chapter_number is not None and not collaboration_allows_chapter(collaborator, target_chapter_number):
+        if target_chapter_number is not None and not collaboration_allows_chapter(
+            collaborator, target_chapter_number
+        ):
             return False
         return target_owner_user_id is None or target_owner_user_id == current_user_id
 

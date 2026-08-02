@@ -28,7 +28,9 @@ SENSITIVE_KEY_PARTS = (
 )
 SENSITIVE_TEXT_PATTERNS = (
     re.compile(r"(?i)\b(bearer)(\s+)([A-Za-z0-9._~+/=-]+)"),
-    re.compile(r"(?i)\b(authorization|cookie|x-api-key|session_id|database_url|supabase_service_role_key|openai_api_key|paddle_api_key|resend_api_key)\b([^\S\r\n]*[:=][^\S\r\n]*)([^\s,;]+)"),
+    re.compile(
+        r"(?i)\b(authorization|cookie|x-api-key|session_id|database_url|supabase_service_role_key|openai_api_key|paddle_api_key|resend_api_key)\b([^\S\r\n]*[:=][^\S\r\n]*)([^\s,;]+)"
+    ),
     re.compile(r"(?i)\b(postgresql(?:\+psycopg)?://)([^:\s/@]+):([^@\s]+)@"),
     re.compile(r"(?i)\b(rediss?://)([^:\s/@]+):([^@\s]+)@"),
 )

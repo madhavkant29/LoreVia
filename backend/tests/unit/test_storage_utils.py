@@ -9,7 +9,10 @@ async def test_delete_storage_key_best_effort_deletes_key(monkeypatch):
 
     monkeypatch.setattr(storage_utils, "delete_object", lambda key: deleted.append(key))
 
-    assert await storage_utils.delete_storage_key_best_effort("covers/old.png", context="cover") is True
+    assert (
+        await storage_utils.delete_storage_key_best_effort("covers/old.png", context="cover")
+        is True
+    )
     assert deleted == ["covers/old.png"]
 
 
@@ -31,8 +34,22 @@ async def test_delete_storage_keys_best_effort_dedupes_and_skips_empty(monkeypat
 @pytest.mark.asyncio
 async def test_delete_storage_key_best_effort_swallows_storage_errors(monkeypatch):
     def _raise(_key):
-        raise RuntimeError("storage unavailable")
+        raise OSError("storage unavailable")
 
     monkeypatch.setattr(storage_utils, "delete_object", _raise)
 
-    assert await storage_utils.delete_storage_key_best_effort("forum/old.png", context="forum") is False
+    assert (
+        await storage_utils.delete_storage_key_best_effort("forum/old.png", context="forum")
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_storage_key_best_effort_propagates_unexpected_errors(monkeypatch):
+    def _raise(_key):
+        raise RuntimeError("programming error")
+
+    monkeypatch.setattr(storage_utils, "delete_object", _raise)
+
+    with pytest.raises(RuntimeError, match="programming error"):
+        await storage_utils.delete_storage_key_best_effort("forum/old.png", context="forum")

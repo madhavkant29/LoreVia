@@ -7,13 +7,26 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.redis import cache_set_if_absent, mark_book_cache_dirty, mark_user_dashboard_cache_dirty
+from app.core.redis import (
+    cache_set_if_absent,
+    mark_book_cache_dirty,
+    mark_user_dashboard_cache_dirty,
+)
 from app.models.book import Book, Chapter
 from app.models.intelligence import BookChunk, ChapterSummary
+from app.models.operations import BookProcessingRun, TaskExecution
+from app.models.user import User
 from app.schemas.books import WriterWorkspaceOut
-from app.utils.book_utils import build_book_processing_payload, build_writer_workspace_payload, normalize_writer_workspace
-from app.utils.ingestion_utils import get_processing_started_at, merge_processing_pipeline, update_book_processing_state
-from app.workers.tasks.extraction_tasks import process_book_task
+from app.utils.books.writer_workspace import (
+    build_book_processing_payload,
+    build_writer_workspace_payload,
+    normalize_writer_workspace,
+)
+from app.utils.ingestion_utils import (
+    get_processing_started_at,
+    merge_processing_pipeline,
+    update_book_processing_state,
+)
 
 log = logging.getLogger("lorevia.pipeline_state")
 
@@ -47,8 +60,12 @@ async def enqueue_processing_state_repair_if_needed(book: Book) -> bool:
 
 
 def _book_processing_retry_actions(book: Book) -> list[str]:
-    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
-    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
     actions = processing.get("retry_actions") if isinstance(processing, dict) else []
     return [
         " ".join(str(action).split()).strip()
@@ -58,8 +75,12 @@ def _book_processing_retry_actions(book: Book) -> list[str]:
 
 
 def _book_processing_last_error(book: Book) -> str | None:
-    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
-    processing = workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
     last_error = " ".join(str((processing or {}).get("last_error") or "").split()).strip()
     return last_error or None
 
@@ -67,8 +88,53 @@ def _book_processing_last_error(book: Book) -> str | None:
 def _book_has_retryable_processing_state(book: Book) -> bool:
     if book.status == "failed":
         return True
-    actions = [action for action in _book_processing_retry_actions(book) if action != "wait_for_analysis"]
+    actions = [
+        action for action in _book_processing_retry_actions(book) if action != "wait_for_analysis"
+    ]
     return bool(actions or _book_processing_last_error(book))
+
+
+async def _dispatch_durable_book_processing(
+    db: AsyncSession,
+    book: Book,
+    *,
+    run_kind: str,
+    identity_suffix: str | None = None,
+) -> TaskExecution:
+    from app.services.task_execution_service import (
+        dispatch_pending_extraction_tasks,
+        ensure_task_execution,
+        get_or_create_processing_run,
+    )
+
+    run = await get_or_create_processing_run(
+        db,
+        user_id=book.user_id,
+        book_id=book.id,
+        run_kind=run_kind,
+        rebuild_run_id=identity_suffix,
+        chapters_total=int(book.total_chapters or 0),
+    )
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_book",
+        processing_run=run,
+        rebuild_run_id=identity_suffix,
+        arguments={
+            "book_id": str(book.id),
+            "processing_run_id": str(run.id),
+            "rebuild_run_id": identity_suffix,
+        },
+    )
+    if execution.status in {"succeeded", "dismissed", "queued", "running"}:
+        return execution
+    execution.status = "pending_dispatch"
+    execution.error_category = None
+    execution.error_detail = None
+    run.status = "queued"
+    await db.commit()
+    await dispatch_pending_extraction_tasks(db)
+    return execution
 
 
 async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] | None:
@@ -76,21 +142,39 @@ async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] 
         return None
 
     actions = set(_book_processing_retry_actions(book))
-    should_restart_extraction = book.status == "failed" or "retry_extraction" in actions or "retry_analysis" in actions
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
+    processing_status = str((processing or {}).get("status") or "").strip().lower()
+    should_restart_extraction = (
+        book.status == "failed"
+        or processing_status in {"failed", "cancelled", "canceled"}
+        or "retry_extraction" in actions
+        or "retry_analysis" in actions
+    )
 
     if should_restart_extraction:
-        book.status = "processing"
-        book.writer_workspace = update_book_processing_state(
-            book,
-            status="processing",
-            stage="queued",
-            total_chapters=book.total_chapters,
-            completed_chapters=0,
-            started_at=datetime.now(UTC),
-            last_error=None,
-            progress_pct=0,
-        )
-        process_book_task.apply_async(args=[str(book.id)], queue="extraction")
+        if getattr(book, "is_editor_project", False):
+            from app.services.editor_project_service import dispatch_rebuild, prepare_rebuild
+
+            await prepare_rebuild(db, book, reason="manual_reprocess")
+            await dispatch_rebuild(db, book)
+        else:
+            book.status = "processing"
+            book.writer_workspace = update_book_processing_state(
+                book,
+                status="processing",
+                stage="queued",
+                total_chapters=book.total_chapters,
+                completed_chapters=0,
+                started_at=datetime.now(UTC),
+                last_error=None,
+                progress_pct=0,
+            )
+            await _dispatch_durable_book_processing(db, book, run_kind="manual_retry")
     else:
         book.status = "processing"
         await enqueue_processing_state_repair_if_needed(book)
@@ -101,6 +185,152 @@ async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] 
     await mark_user_dashboard_cache_dirty(str(book.user_id))
     processing = build_book_processing_payload(book)
     return processing if processing is not None else {}
+
+
+async def continue_book_processing(db: AsyncSession, book: Book) -> dict[str, Any]:
+    from fastapi import HTTPException
+
+    from app.services.processing_allowance_service import reserve_processing_words
+    from app.services.task_execution_service import (
+        dispatch_pending_analysis_tasks,
+        dispatch_pending_extraction_tasks,
+        ensure_task_execution,
+    )
+
+    run = (
+        (
+            await db.execute(
+                select(BookProcessingRun)
+                .where(BookProcessingRun.book_id == book.id, BookProcessingRun.status == "paused")
+                .order_by(BookProcessingRun.created_at.desc())
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if run is None:
+        raise HTTPException(409, "Processing is not paused for this book.")
+    user = await db.get(User, book.user_id)
+    if user is None:
+        raise HTTPException(404, "Book owner not found.")
+    chapters = (
+        (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    queued_extraction = 0
+    blocker: dict[str, Any] | None = None
+    for chapter in chapters:
+        if chapter.processed:
+            continue
+        existing = (
+            await db.execute(
+                select(TaskExecution).where(
+                    TaskExecution.processing_run_id == run.id,
+                    TaskExecution.task_name == "extraction_tasks.process_chapter",
+                    TaskExecution.chapter_id == chapter.id,
+                )
+            )
+        ).scalar_one_or_none()
+        try:
+            await reserve_processing_words(
+                db,
+                user,
+                book_id=book.id,
+                usage_kind="initial_ingestion_chapter",
+                source_id=f"{run.id}:{chapter.number}",
+                word_count=int(chapter.word_count or 0),
+            )
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+            blocker = {"kind": "monthly_processed_words", "detail": str(exc.detail)}
+            run.next_chapter_number = chapter.number
+            break
+        if existing is None:
+            existing = await ensure_task_execution(
+                db,
+                task_name="extraction_tasks.process_chapter",
+                processing_run=run,
+                chapter_id=chapter.id,
+                chapter_number=chapter.number,
+                arguments={
+                    "book_id": str(book.id),
+                    "chapter_number": chapter.number,
+                    "processing_run_id": str(run.id),
+                },
+            )
+        elif existing.status == "paused":
+            existing.status = "pending_dispatch"
+            existing.error_category = None
+            existing.error_detail = None
+        if existing.status == "pending_dispatch":
+            queued_extraction += 1
+    paused_analysis = (
+        (
+            await db.execute(
+                select(TaskExecution).where(
+                    TaskExecution.processing_run_id == run.id,
+                    TaskExecution.task_name == "analysis_tasks.analyse_chapter",
+                    TaskExecution.status == "paused",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for execution in paused_analysis:
+        execution.status = "pending_dispatch"
+        execution.error_category = None
+        execution.error_detail = None
+        execution.completed_at = None
+    queued_analysis = len(paused_analysis)
+    if queued_extraction + queued_analysis == 0:
+        run.resume_blockers = [blocker] if blocker else run.resume_blockers
+        await db.commit()
+        raise HTTPException(
+            409,
+            {
+                "message": "Processing cannot continue until allowance is available.",
+                "resume_blockers": run.resume_blockers,
+            },
+        )
+    remains_paused = blocker is not None
+    run.status = "paused" if remains_paused else "running"
+    run.pause_reason = "monthly_processed_words" if remains_paused else None
+    run.resume_blockers = [blocker] if blocker else []
+    run.paused_at = datetime.now(UTC) if remains_paused else None
+    if not remains_paused:
+        run.next_chapter_number = None
+    book.status = "processing"
+    workspace = dict(book.writer_workspace or {})
+    processing = dict(workspace.get("processing") or {})
+    processing.update(
+        {
+            "status": "paused" if remains_paused else "processing",
+            "stage": "usage_limited" if remains_paused else "queued",
+            "processing_run_id": str(run.id),
+            "pause_reason": run.pause_reason,
+            "resume_available": remains_paused,
+            "resume_blockers": run.resume_blockers,
+            "next_chapter_number": run.next_chapter_number,
+            "retry_actions": ["continue_processing"] if remains_paused else [],
+            "last_error": None,
+        }
+    )
+    workspace["processing"] = processing
+    book.writer_workspace = workspace
+    await db.commit()
+    await dispatch_pending_extraction_tasks(db)
+    await dispatch_pending_analysis_tasks(db)
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(str(book.user_id))
+    return build_book_processing_payload(book) or {}
 
 
 def _parse_chapter_status_updated_at(chapter: Chapter) -> datetime | None:
@@ -133,8 +363,14 @@ async def requeue_stalled_book_processing_if_needed(
         return False
 
     chapters = (
-        await db.execute(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc()))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     if not chapters or any(chapter.processed for chapter in chapters):
         return False
 
@@ -146,17 +382,31 @@ async def requeue_stalled_book_processing_if_needed(
         return False
 
     latest_update_at = max(
-        (timestamp for chapter in chapters if (timestamp := _parse_chapter_status_updated_at(chapter)) is not None),
+        (
+            timestamp
+            for chapter in chapters
+            if (timestamp := _parse_chapter_status_updated_at(chapter)) is not None
+        ),
         default=processing_started_at,
     )
     if current_time - latest_update_at < STALE_PROCESSING_REQUEUE_AFTER:
         return False
 
-    chunk_count = await db.scalar(select(func.count()).select_from(BookChunk).where(BookChunk.book_id == book.id)) or 0
+    chunk_count = (
+        await db.scalar(
+            select(func.count()).select_from(BookChunk).where(BookChunk.book_id == book.id)
+        )
+        or 0
+    )
     if chunk_count:
         return False
 
-    process_book_task.apply_async(args=[str(book.id)], queue="extraction")
+    await _dispatch_durable_book_processing(
+        db,
+        book,
+        run_kind="stalled_recovery",
+        identity_suffix=f"stalled-{int(current_time.timestamp())}",
+    )
     log.warning("requeued_stalled_book_processing book_id=%s", book.id)
     return True
 
@@ -179,15 +429,21 @@ async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) 
     if getattr(book, "is_editor_project", False) or book.status != "processing":
         return False
 
-    workspace = normalize_writer_workspace(book.writer_workspace if isinstance(book.writer_workspace, dict) else None)
-    processing = dict(workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {})
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
+    processing = dict(
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
     if processing.get("rebuild_run_id") or _processing_pipeline_has_blocking_failure(processing):
         return False
 
     chapter_count = int(
         (
             await db.execute(
-                select(func.count(func.distinct(Chapter.number))).select_from(Chapter).where(
+                select(func.count(func.distinct(Chapter.number)))
+                .select_from(Chapter)
+                .where(
                     Chapter.book_id == book.id,
                     Chapter.word_count > 0,
                 )
@@ -200,7 +456,9 @@ async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) 
     processed_count = int(
         (
             await db.execute(
-                select(func.count(func.distinct(Chapter.number))).select_from(Chapter).where(
+                select(func.count(func.distinct(Chapter.number)))
+                .select_from(Chapter)
+                .where(
                     Chapter.book_id == book.id,
                     Chapter.word_count > 0,
                     Chapter.processed.is_(True),
@@ -266,5 +524,7 @@ async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) 
     await db.refresh(book)
     await mark_book_cache_dirty(str(book.id))
     await mark_user_dashboard_cache_dirty(str(book.user_id))
-    log.warning("repaired_stale_completed_processing_state book_id=%s chapters=%s", book.id, chapter_count)
+    log.warning(
+        "repaired_stale_completed_processing_state book_id=%s chapters=%s", book.id, chapter_count
+    )
     return True

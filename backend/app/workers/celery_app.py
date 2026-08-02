@@ -11,8 +11,10 @@ from sentry_sdk.integrations.celery import CeleryIntegration
 from app.core.config import settings
 from app.core.database import engine
 from app.core.redis import close_all_redis_clients
+from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 from app.utils.logging.errors import scrub_sentry_event
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
+from app.utils.retry_utils import NON_LLM_MAX_RETRIES
 from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
 from app.workers.queues.queues import TASK_QUEUES
 
@@ -59,7 +61,9 @@ def _resolve_celery_redis_settings() -> tuple[str, dict, str | None, dict]:
     return broker_url, broker_ssl_options, backend_url, backend_ssl_options
 
 
-redis_url, redis_ssl_options, result_backend_url, result_backend_ssl_options = _resolve_celery_redis_settings()
+redis_url, redis_ssl_options, result_backend_url, result_backend_ssl_options = (
+    _resolve_celery_redis_settings()
+)
 
 
 if settings.SENTRY_DSN and not settings.DEBUG:
@@ -73,7 +77,16 @@ if settings.SENTRY_DSN and not settings.DEBUG:
 
 
 class RequestContextTask(Task):
-    def apply_async(self, args=None, kwargs=None, task_id=None, producer=None, link=None, link_error=None, **options):
+    def apply_async(
+        self,
+        args=None,
+        kwargs=None,
+        task_id=None,
+        producer=None,
+        link=None,
+        link_error=None,
+        **options,
+    ):
         headers = dict(options.get("headers") or {})
         if "request_id" not in headers:
             request_id = get_request_id()
@@ -119,13 +132,14 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=200,
     broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=NON_LLM_MAX_RETRIES,
     broker_transport_options={
         "visibility_timeout": settings.CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS,
     },
     task_routes={
         "extraction_tasks.*": {"queue": "extraction"},
-        "analysis_tasks.*":   {"queue": "analysis"},
-        "embedding_tasks.*":  {"queue": "embedding"},
+        "analysis_tasks.*": {"queue": "analysis"},
+        "embedding_tasks.*": {"queue": "embedding"},
         "intelligence_tasks.*": {"queue": "intelligence"},
         "maintenance_tasks.*": {"queue": "intelligence"},
     },
@@ -162,6 +176,16 @@ celery_app.conf.update(
     },
     result_expires=settings.CELERY_RESULT_EXPIRES_SECONDS if result_backend_url else None,
     beat_schedule={
+        "maintenance-release-stale-processing-reservations-every-15-minutes": {
+            "task": "maintenance_tasks.release_stale_processing_reservations",
+            "schedule": crontab(minute="*/15"),
+            "kwargs": {"limit": 500},
+        },
+        "maintenance-durable-task-dispatch-every-minute": {
+            "task": "maintenance_tasks.maintain_task_executions",
+            "schedule": crontab(),
+            "kwargs": {"limit": 500},
+        },
         "maintenance-send-due-trial-emails-hourly": {
             "task": "maintenance_tasks.send_due_trial_emails",
             "schedule": crontab(minute=0),
@@ -201,7 +225,7 @@ celery_app.conf.update(
         },
     },
     task_default_retry_delay=30,
-    task_max_retries=3,
+    task_max_retries=NON_LLM_MAX_RETRIES,
 )
 
 if redis_ssl_options:
@@ -217,7 +241,7 @@ def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
         set_request_id(request_id)
         if request_id and settings.SENTRY_DSN:
             sentry_sdk.set_tag("request_id", request_id)
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         # never block task execution on observability
         return
 
@@ -227,15 +251,19 @@ def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwarg
     try:
         set_request_id(None)
         set_request_user_id(None)
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
 
 @signals.worker_process_init.connect
 def _worker_process_init(**kwargs):
     try:
-        get_worker_loop()
-    except Exception:
+        loop = get_worker_loop()
+        # Celery forks worker children after importing this module. Detach any
+        # pool inherited from the parent so a child never reuses or garbage
+        # collects a parent-owned async PostgreSQL connection.
+        loop.run_until_complete(engine.dispose(close=False))
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
 
@@ -246,7 +274,7 @@ def _worker_process_shutdown(**kwargs):
     try:
         loop = get_worker_loop()
         loop.run_until_complete(_shutdown_worker_async_resources())
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
     finally:
         close_worker_loop()
@@ -274,10 +302,12 @@ def _worker_ready_health_log(sender=None, **kwargs):
                 len(priority_queues),
                 ",".join(q.name for q in priority_queues),
             )
-    except Exception:
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 
 
 async def _shutdown_worker_async_resources() -> None:
-    await close_all_redis_clients()
-    await engine.dispose()
+    try:
+        await close_all_redis_clients()
+    finally:
+        await engine.dispose()

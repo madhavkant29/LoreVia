@@ -178,7 +178,9 @@ async def test_password_reset_and_email_verification_consumption_is_single_use(m
     fake_redis = _FakeRedisClient()
     reset_token = "reset-token"
     verification_token = "verify-token"
-    fake_redis.store[redis_module.key_password_reset(redis_module._hash_ephemeral_token(reset_token))] = "user-1"
+    fake_redis.store[
+        redis_module.key_password_reset(redis_module._hash_ephemeral_token(reset_token))
+    ] = "user-1"
     fake_redis.store[redis_module.key_password_reset_user("user-1")] = reset_token
     fake_redis.store[redis_module.key_email_verification(verification_token)] = "user-1"
     fake_redis.store[redis_module.key_email_verification_user("user-1")] = verification_token
@@ -199,7 +201,9 @@ async def test_consuming_old_token_preserves_newer_user_pointer(monkeypatch):
     fake_redis = _FakeRedisClient()
     reset_token = "old-reset-token"
     verification_token = "old-verify-token"
-    fake_redis.store[redis_module.key_password_reset(redis_module._hash_ephemeral_token(reset_token))] = "user-1"
+    fake_redis.store[
+        redis_module.key_password_reset(redis_module._hash_ephemeral_token(reset_token))
+    ] = "user-1"
     fake_redis.store[redis_module.key_password_reset_user("user-1")] = "new-reset-token"
     fake_redis.store[redis_module.key_email_verification(verification_token)] = "user-1"
     fake_redis.store[redis_module.key_email_verification_user("user-1")] = "new-verify-token"
@@ -212,4 +216,6 @@ async def test_consuming_old_token_preserves_newer_user_pointer(monkeypatch):
     assert await redis_module.consume_password_reset_token(reset_token) == "user-1"
     assert fake_redis.store[redis_module.key_password_reset_user("user-1")] == "new-reset-token"
     assert await redis_module.consume_email_verification_token(verification_token) == "user-1"
-    assert fake_redis.store[redis_module.key_email_verification_user("user-1")] == "new-verify-token"
+    assert (
+        fake_redis.store[redis_module.key_email_verification_user("user-1")] == "new-verify-token"
+    )

@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass, field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.character import Character, CharacterDuplicateSuggestion, CharacterMention
 from app.engine.character.adjudicator import (
     ADJUDICATION_OBJECT,
     ADJUDICATION_ORGANIZATION,
@@ -18,8 +17,12 @@ from app.engine.character.adjudicator import (
     ENTITY_PERSON,
     adjudicate_character_candidate,
 )
+from app.models.character import Character, CharacterDuplicateSuggestion, CharacterMention
 from app.services.character_identity.classification import CandidateKind, classify_candidate_kind
-from app.services.character_identity.constraints import add_identity_constraint, has_blocking_identity_constraint
+from app.services.character_identity.constraints import (
+    add_identity_constraint,
+    has_blocking_identity_constraint,
+)
 from app.services.character_identity.merge import add_character_alias, record_identity_action
 from app.services.character_identity.normalization import (
     assign_unique_active_normalized_names,
@@ -27,21 +30,20 @@ from app.services.character_identity.normalization import (
     normalize_name,
 )
 from app.services.character_identity.suppression import suppress_candidate
-from app.utils.character_utils import (
+from app.utils.characters.constants import (
     CHARACTER_APPROVAL_PENDING_REVIEW,
     CHARACTER_APPROVAL_REJECTED,
     CHARACTER_APPROVAL_SOURCE_DETERMINISTIC_AUTO,
-    CHARACTER_VISIBILITY_QUARANTINED,
     CHARACTER_DUPLICATE_DISMISSED,
     CHARACTER_DUPLICATE_PENDING,
     CHARACTER_VISIBILITY_NOISE,
-    family_role_reference,
-    has_conflicting_title_identity,
-    is_protected_character,
-    merge_characters,
-    refresh_character_duplicate_suggestions,
-    set_character_review_state,
+    CHARACTER_VISIBILITY_QUARANTINED,
 )
+from app.utils.characters.duplicates import refresh_character_duplicate_suggestions
+from app.utils.characters.identity import family_role_reference, has_conflicting_title_identity
+from app.utils.characters.merging import merge_characters
+from app.utils.characters.review import set_character_review_state
+from app.utils.characters.serialization import is_protected_character
 
 
 @dataclass
@@ -85,7 +87,9 @@ class CharacterIdentityRepairResult:
 
 
 class CharacterIdentityRepairJob:
-    def __init__(self, db: AsyncSession, *, book_id: uuid.UUID, repair_run_id: str | None = None) -> None:
+    def __init__(
+        self, db: AsyncSession, *, book_id: uuid.UUID, repair_run_id: str | None = None
+    ) -> None:
         self.db = db
         self.book_id = book_id
         self.repair_run_id = repair_run_id or f"character-identity-repair:{book_id}"
@@ -104,7 +108,9 @@ class CharacterIdentityRepairJob:
                     .where(Character.book_id == self.book_id)
                     .order_by(Character.first_chapter, Character.name)
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     async def _run(self, *, dry_run: bool) -> CharacterIdentityRepairResult:
@@ -135,22 +141,31 @@ class CharacterIdentityRepairJob:
         await self._handle_duplicate_suggestions(result, dry_run=dry_run)
 
         if not dry_run:
-            suggestions = await refresh_character_duplicate_suggestions(self.db, book_id=self.book_id)
+            suggestions = await refresh_character_duplicate_suggestions(
+                self.db, book_id=self.book_id
+            )
             result.pending_duplicate_suggestions = sum(
                 1
                 for suggestion in suggestions
-                if suggestion.status == CHARACTER_DUPLICATE_PENDING and int(suggestion.confidence or 0) >= 75
+                if suggestion.status == CHARACTER_DUPLICATE_PENDING
+                and int(suggestion.confidence or 0) >= 75
             )
         else:
             suggestions = (
-                await self.db.execute(
-                    select(CharacterDuplicateSuggestion).where(
-                        CharacterDuplicateSuggestion.book_id == self.book_id,
-                        CharacterDuplicateSuggestion.status == CHARACTER_DUPLICATE_PENDING,
+                (
+                    await self.db.execute(
+                        select(CharacterDuplicateSuggestion).where(
+                            CharacterDuplicateSuggestion.book_id == self.book_id,
+                            CharacterDuplicateSuggestion.status == CHARACTER_DUPLICATE_PENDING,
+                        )
                     )
                 )
-            ).scalars().all()
-            result.pending_duplicate_suggestions = sum(1 for suggestion in suggestions if int(suggestion.confidence or 0) >= 75)
+                .scalars()
+                .all()
+            )
+            result.pending_duplicate_suggestions = sum(
+                1 for suggestion in suggestions if int(suggestion.confidence or 0) >= 75
+            )
         result.remaining_review_items = result.pending_duplicate_suggestions
         return result
 
@@ -249,13 +264,17 @@ class CharacterIdentityRepairJob:
                 details={"target_character_id": str(target.id)},
             )
             mention_rows = (
-                await self.db.execute(
-                    select(CharacterMention).where(
-                        CharacterMention.book_id == self.book_id,
-                        CharacterMention.matched_character_id == alias_character.id,
+                (
+                    await self.db.execute(
+                        select(CharacterMention).where(
+                            CharacterMention.book_id == self.book_id,
+                            CharacterMention.matched_character_id == alias_character.id,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for mention in mention_rows:
                 mention.matched_character_id = target.id
             await record_identity_action(
@@ -298,18 +317,28 @@ class CharacterIdentityRepairJob:
             )
             kind = classify_candidate_kind(character.name)
             reason = ""
-            if adjudication.adjudication_status in {
-                ADJUDICATION_PLACE,
-                ADJUDICATION_ORGANIZATION,
-                ADJUDICATION_OBJECT,
-                ADJUDICATION_TITLE_OR_ROLE,
-            } or adjudication.entity_type == ENTITY_JUNK:
+            if (
+                adjudication.adjudication_status
+                in {
+                    ADJUDICATION_PLACE,
+                    ADJUDICATION_ORGANIZATION,
+                    ADJUDICATION_OBJECT,
+                    ADJUDICATION_TITLE_OR_ROLE,
+                }
+                or adjudication.entity_type == ENTITY_JUNK
+            ):
                 reason = f"{adjudication.adjudication_status}_adjudicated"
-            elif adjudication.adjudication_status == ADJUDICATION_QUARANTINED and adjudication.entity_type != ENTITY_PERSON:
+            elif (
+                adjudication.adjudication_status == ADJUDICATION_QUARANTINED
+                and adjudication.entity_type != ENTITY_PERSON
+            ):
                 reason = "adjudication_quarantined_for_review"
             elif kind == CandidateKind.FRAGMENT:
                 reason = "title_only_fragment_suppressed"
-            elif kind == CandidateKind.KINSHIP_DESCRIPTOR and family_role_reference(character.name)[1]:
+            elif (
+                kind == CandidateKind.KINSHIP_DESCRIPTOR
+                and family_role_reference(character.name)[1]
+            ):
                 reason = "kinship_descriptor_unresolved_suppressed"
             elif kind in {CandidateKind.GROUP_DESCRIPTOR, CandidateKind.OBJECT_OR_PLACE}:
                 reason = f"{kind.value}_suppressed"
@@ -370,17 +399,18 @@ class CharacterIdentityRepairJob:
         dry_run: bool,
     ) -> None:
         suggestions = (
-            await self.db.execute(
-                select(CharacterDuplicateSuggestion).where(
-                    CharacterDuplicateSuggestion.book_id == self.book_id,
-                    CharacterDuplicateSuggestion.status == CHARACTER_DUPLICATE_PENDING,
+            (
+                await self.db.execute(
+                    select(CharacterDuplicateSuggestion).where(
+                        CharacterDuplicateSuggestion.book_id == self.book_id,
+                        CharacterDuplicateSuggestion.status == CHARACTER_DUPLICATE_PENDING,
+                    )
                 )
             )
-        ).scalars().all()
-        character_map = {
-            character.id: character
-            for character in await self._load_characters()
-        }
+            .scalars()
+            .all()
+        )
+        character_map = {character.id: character for character in await self._load_characters()}
         for suggestion in suggestions:
             primary = character_map.get(suggestion.primary_character_id)
             secondary = character_map.get(suggestion.secondary_character_id)
@@ -388,7 +418,11 @@ class CharacterIdentityRepairJob:
             reason = ""
             if confidence < 75:
                 reason = "low_confidence_duplicate_suggestion"
-            elif primary and secondary and has_conflicting_title_identity(primary.name, secondary.name):
+            elif (
+                primary
+                and secondary
+                and has_conflicting_title_identity(primary.name, secondary.name)
+            ):
                 reason = "conflicting_title_identity"
             if not reason:
                 continue
@@ -407,7 +441,9 @@ class CharacterIdentityRepairJob:
                     right_character_id=secondary.id,
                     left_text=primary.name,
                     right_text=secondary.name,
-                    constraint_type="not_same_character" if reason == "conflicting_title_identity" else "blocked_merge",
+                    constraint_type="not_same_character"
+                    if reason == "conflicting_title_identity"
+                    else "blocked_merge",
                     reason=reason,
                     source="repair",
                     confidence=1.0 if reason == "conflicting_title_identity" else 0.75,

@@ -2,28 +2,28 @@ from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaR
 from app.models.book import (
     Book,
     BookCollaborator,
-    BookUploadCharge,
-    PublicBookAnalyticsEvent,
-    PublicBookRanking,
     BookForumComment,
     BookForumCommentReaction,
     BookForumInterest,
     BookForumPost,
     BookNote,
+    BookUploadCharge,
     Chapter,
     ChapterMedia,
     ChapterVersion,
     ManuscriptAnnotation,
-    VaultNote,
-    VaultNoteSource,
     NoteBacklink,
     NoteLink,
     NoteSeriesLink,
     NoteTag,
     NovelScene,
+    PublicBookAnalyticsEvent,
+    PublicBookRanking,
     SceneVersion,
     Series,
     SeriesBook,
+    VaultNote,
+    VaultNoteSource,
 )
 from app.models.character import (
     Character,
@@ -34,14 +34,18 @@ from app.models.character import (
     CharacterIdentityConstraint,
     CharacterMention,
     CharacterRelationshipCandidate,
-    CharacterSuppression,
     CharacterState,
+    CharacterSuppression,
 )
 from app.models.intelligence import (
     AdvisorJob,
     BookChunk,
     ChapterSummary,
     CharacterRelationship,
+    ContinuityFinding,
+    ContinuityFindingEvidence,
+    ContinuityObservation,
+    ContinuityScan,
     Notification,
     PlotThread,
     QuoteEntry,
@@ -52,6 +56,14 @@ from app.models.intelligence import (
     WorldNote,
 )
 from app.models.moderation import ContentReport, CreatorStrike, ModerationAction
+from app.models.operations import (
+    AiQualityEvent,
+    BookProcessingRun,
+    RevenueLedgerEvent,
+    SupportIncident,
+    TaskDispatchOutbox,
+    TaskExecution,
+)
 from app.models.progress import ReadingProgress, ReadingSession
 from app.models.social import DirectConversation, DirectMessage, FriendRequest
 from app.models.tag import CustomTag
@@ -62,11 +74,12 @@ from app.models.user import (
     DeviceTrial,
     EmailPreference,
     LlmUsageEvent,
+    ProcessingUsageEvent,
     RefundReview,
     Subscription,
     SubscriptionEvent,
     TrialEmailEvent,
     User,
-    UserWritingActivity,
     UserRateLimitOverride,
+    UserWritingActivity,
 )

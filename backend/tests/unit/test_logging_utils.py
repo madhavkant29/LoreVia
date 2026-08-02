@@ -9,9 +9,9 @@ from app.utils.logging import (
     public_error_message,
     redact_sensitive_text,
     request_log_context,
+    sanitize_validation_errors,
     scrub_sensitive_data,
     scrub_sentry_event,
-    sanitize_validation_errors,
 )
 from app.utils.request_context import set_request_id
 
@@ -39,7 +39,12 @@ def test_request_log_context_includes_request_metadata() -> None:
 
 def test_sanitize_validation_errors_removes_raw_input() -> None:
     errors = [
-        {"loc": ("body", "password"), "msg": "Field required", "type": "missing", "input": "secret"},
+        {
+            "loc": ("body", "password"),
+            "msg": "Field required",
+            "type": "missing",
+            "input": "secret",
+        },
         {"loc": ("body", "email"), "msg": "Invalid email", "type": "value_error"},
     ]
 

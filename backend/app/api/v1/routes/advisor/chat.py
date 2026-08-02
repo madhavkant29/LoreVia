@@ -22,25 +22,28 @@ from app.core.redis import get_advisor_response_cache
 from app.models.book import Book
 from app.models.character import Character
 from app.models.intelligence import AdvisorJob, PlotThread
-from app.services.advisor_jobs_service import (
-    ADVISOR_SCOPE_BOOK,
-    create_advisor_job,
-    mark_advisor_job_failed,
-    serialize_advisor_job,
-)
 from app.schemas.advisor import (
     AdvisorRequest,
     AdvisorTaskStatusResponse,
     WhatsTheWordRequest,
     WhatsTheWordResponse,
 )
-from app.utils.billing_utils import require_author_access
+from app.services.advisor_jobs_service import (
+    ADVISOR_SCOPE_BOOK,
+    create_advisor_job,
+    mark_advisor_job_failed,
+    serialize_advisor_job,
+)
+from app.utils.advisor_chat_utils import stream_advisor_reply_payload
+from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.advisor_utils import (
     generate_whats_the_word_result,
     make_advisor_cache_key,
-    stream_advisor_reply_payload,
 )
+from app.utils.billing_utils import require_author_access
 from app.utils.logging.errors import public_error_message
+from app.utils.retry_utils import LLM_MAX_RETRIES
+from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
 
 router = APIRouter()
@@ -62,7 +65,9 @@ def _best_issue_snippet(text: str, description: str) -> str:
     sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", text or "") if item.strip()]
     if not sentences:
         return " ".join((text or "").split())[:220]
-    description_tokens = {token for token in re.findall(r"[a-z0-9']+", (description or "").lower()) if len(token) > 3}
+    description_tokens = {
+        token for token in re.findall(r"[a-z0-9']+", (description or "").lower()) if len(token) > 3
+    }
     ranked = sorted(
         sentences,
         key=lambda sentence: sum(1 for token in description_tokens if token in sentence.lower()),
@@ -126,7 +131,7 @@ async def _enqueue_book_advisor_task(
                 "total_chapters": body.total_chapters,
             },
         )
-    except Exception as exc:
+    except TASK_ENQUEUE_ERRORS:
         await mark_advisor_job_failed(
             db,
             job_id=job.id,
@@ -139,6 +144,7 @@ async def _enqueue_book_advisor_task(
 
 
 # ─── Main advisor conversation endpoint ──────────────────────────────────────
+
 
 @router.post("/{book_id}/advisor/message")
 async def advisor_message(
@@ -190,7 +196,7 @@ async def advisor_message_stream(
                 total_chapters=body.total_chapters,
             ):
                 yield _advisor_sse(item["event"], item["data"])
-        except Exception as exc:
+        except ADVISOR_STREAM_ERRORS as exc:
             logging.getLogger(__name__).error(
                 "advisor_message_stream failed book_id=%s user_id=%s: %s\n%s",
                 book_id,
@@ -217,10 +223,14 @@ async def advisor_greeting(
     if not book or book.user_id != current_user.id:
         raise HTTPException(404)
     plot_thread_count = (
-        await db.execute(select(func.count()).select_from(PlotThread).where(PlotThread.book_id == book.id))
+        await db.execute(
+            select(func.count()).select_from(PlotThread).where(PlotThread.book_id == book.id)
+        )
     ).scalar_one()
     character_count = (
-        await db.execute(select(func.count()).select_from(Character).where(Character.book_id == book.id))
+        await db.execute(
+            select(func.count()).select_from(Character).where(Character.book_id == book.id)
+        )
     ).scalar_one()
 
     return {
@@ -247,7 +257,7 @@ async def whats_the_word(
         raise HTTPException(404)
     require_author_access(current_user)
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
     try:
         payload = await generate_whats_the_word_result(
             client=client,
@@ -275,7 +285,7 @@ async def whats_the_word_stream(
     require_author_access(current_user)
 
     async def event_stream():
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
         try:
             yield _advisor_sse("stage", {"message": "Finding the closest fit..."})
             payload = await generate_whats_the_word_result(
@@ -285,8 +295,10 @@ async def whats_the_word_stream(
                 description=body.description,
                 previous_word=body.previous_word,
             )
-            yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload))))
-        except Exception as exc:
+            yield _advisor_sse(
+                "done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload)))
+            )
+        except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
         finally:
             await client.close()

@@ -166,22 +166,26 @@ describe("AuthorToolsNav", () => {
     ).toBe(true)
   })
 
-  it("renders the author lens entry in the shared author rail", () => {
+  it("reveals the advanced author lens entry on request", () => {
     mockBaseState()
 
     const view = renderAuthorToolsNav()
+    expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')).toBeNull()
+    const toggle = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes("Show advanced tools"))
+    act(() => toggle?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
 
     expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')?.textContent).toContain("Author Lens")
   })
 
-  it("groups story bible and review center tools in the shared author rail", () => {
+  it("groups story bible and analyze tools and hides advanced entries by default", () => {
     mockBaseState()
 
     const view = renderAuthorToolsNav()
 
     expect(view.querySelector('[data-testid="author-nav-item-timeline"]')?.textContent).toContain("Timeline")
-    expect(view.querySelector('[data-testid="author-nav-item-cross-book-wiki"]')?.textContent).toContain("Series Wiki")
+    expect(view.querySelector('[data-testid="author-nav-item-cross-book-wiki"]')).toBeNull()
     expect(view.querySelector('[data-testid="author-nav-item-reports"]')?.textContent).toContain("Chapter Reports")
+    expect(view.textContent).toContain("Analyze")
   })
 
   it("keeps reader-shell collaborators on reader navigation only", () => {

@@ -12,7 +12,23 @@ async def test_books_stats_returns_writing_dashboard_data(client, db, auth_heade
     async def _fake_embed_batch(texts: list[str], **_kwargs) -> list[list[float]]:
         return [[0.0] * 1536 for _ in texts]
 
-    monkeypatch.setattr("app.workers.consumers.extraction_consumer.embed_batch", _fake_embed_batch)
+    async def _fake_character_extraction(_text: str, **_kwargs) -> dict:
+        return {"characters": [], "relationships": [], "rejected_characters": []}
+
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_embedding_service.embed_batch", _fake_embed_batch
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_character_reporting_service.embed_batch", _fake_embed_batch
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_character_reporting_service.embed_batch",
+        _fake_embed_batch,
+    )
+    monkeypatch.setattr(
+        "app.services.extraction_chapter_llm_service.extract_characters_and_relationships",
+        _fake_character_extraction,
+    )
 
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
@@ -41,7 +57,7 @@ async def test_books_stats_returns_writing_dashboard_data(client, db, auth_heade
             "replace_existing": "true",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
 
     current = datetime.now(UTC)
     db.add(

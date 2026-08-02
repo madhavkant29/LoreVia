@@ -30,18 +30,24 @@ async def get_character_cached(db: AsyncSession, character_id: uuid.UUID) -> dic
         "archetype": char.archetype,
         "arc_summary": char.arc_summary,
     }
-    await cache_set(key_character_profile(str(character_id)), data, settings.REDIS_TTL_CHARACTER_PROFILE)
+    await cache_set(
+        key_character_profile(str(character_id)), data, settings.REDIS_TTL_CHARACTER_PROFILE
+    )
     return data
 
 
 async def get_spoiler_free_state(db: AsyncSession, character_id: uuid.UUID, chapter: int) -> dict:
     """Return character state at or before the given chapter — never ahead."""
-    state = (await db.execute(
-        select(CharacterState)
-        .where(CharacterState.character_id == character_id, CharacterState.at_chapter <= chapter)
-        .order_by(CharacterState.at_chapter.desc())
-        .limit(1)
-    )).scalar()
+    state = (
+        await db.execute(
+            select(CharacterState)
+            .where(
+                CharacterState.character_id == character_id, CharacterState.at_chapter <= chapter
+            )
+            .order_by(CharacterState.at_chapter.desc())
+            .limit(1)
+        )
+    ).scalar()
 
     if state:
         return {

@@ -25,13 +25,13 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/public/uploads", label: "Public Uploads", icon: UploadIcon },
   { href: "/library", label: "Library", icon: LibraryIcon },
   { href: "/notes", label: "Notes", icon: NotesIcon },
   { href: "/quotes", label: "Quotes", icon: QuotesIcon },
-  { href: "/stats", label: "Stats", icon: StatsIcon },
   { href: "/series", label: "Series", icon: SeriesIcon },
   { href: "/beta-reads", label: "Beta Reads", icon: BetaReadsIcon },
+  { href: "/public/uploads", label: "Public Uploads", icon: UploadIcon, group: "secondary" },
+  { href: "/stats", label: "Stats", icon: StatsIcon, group: "secondary" },
   { href: "/upgrade", label: "Pricing", icon: PricingIcon, group: "secondary" },
   { href: "/settings", label: "Settings", icon: SettingsIcon, group: "secondary" },
 ]

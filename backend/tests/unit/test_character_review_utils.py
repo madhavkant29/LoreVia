@@ -1,26 +1,38 @@
 import uuid
+
 import numpy as np
 import pytest
 from sqlalchemy import select
 
 from app.models.book import Book
-from app.models.character import Character, CharacterCandidate, CharacterDecisionEvent, CharacterDuplicateSuggestion, CharacterMention, CharacterRelationshipCandidate
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterDecisionEvent,
+    CharacterDuplicateSuggestion,
+    CharacterMention,
+    CharacterRelationshipCandidate,
+)
 from app.models.user import User
-from app.utils.character_utils import (
+from app.utils.characters.candidates import (
+    can_auto_persist_character_candidate,
+    decide_character_candidate_disposition,
+    decide_relationship_candidate_disposition,
+)
+from app.utils.characters.constants import (
     CHARACTER_CANDIDATE_PENDING,
     CHARACTER_CANDIDATE_SUPPRESSED,
     CHARACTER_RELATIONSHIP_CANDIDATE_PENDING,
     CHARACTER_RELATIONSHIP_CANDIDATE_SUPPRESSED,
-    build_character_roster_snapshot,
-    build_character_review_payload,
-    can_auto_persist_character_candidate,
-    decide_character_candidate_disposition,
-    decide_relationship_candidate_disposition,
-    record_character_candidate,
-    record_character_mention,
-    record_relationship_candidate,
-    score_duplicate_characters,
 )
+from app.utils.characters.duplicates import score_duplicate_characters
+from app.utils.characters.extraction import record_character_mention
+from app.utils.characters.review import (
+    record_character_candidate,
+    record_relationship_candidate,
+)
+from app.utils.characters.review_serialization import build_character_review_payload
+from app.utils.characters.serialization import build_character_roster_snapshot
 
 
 def test_disposition_gate_suppresses_weak_verifier_review_candidate():
@@ -69,79 +81,88 @@ def test_disposition_gate_allows_llm_confirmed_person_into_review():
 
 
 def test_auto_persist_gate_allows_grounded_first_pass_full_name():
-    assert can_auto_persist_character_candidate(
-        name="Anna Sergeyevna",
-        aliases=[],
-        evidence={
-            "mention_count": 3,
-            "strong_mention_count": 2,
-            "has_dialogue_or_action": True,
-            "has_physical_description": True,
-            "verifier": {
-                "local": {
-                    "person_ner_mentions": 1,
-                    "mid_sentence_mentions": 1,
+    assert (
+        can_auto_persist_character_candidate(
+            name="Anna Sergeyevna",
+            aliases=[],
+            evidence={
+                "mention_count": 3,
+                "strong_mention_count": 2,
+                "has_dialogue_or_action": True,
+                "has_physical_description": True,
+                "verifier": {
+                    "local": {
+                        "person_ner_mentions": 1,
+                        "mid_sentence_mentions": 1,
+                    },
+                    "final": {
+                        "confidence_band": "accept",
+                        "is_person_like": True,
+                        "reasons": [],
+                    },
                 },
-                "final": {
-                    "confidence_band": "accept",
-                    "is_person_like": True,
-                    "reasons": [],
-                }
             },
-        },
-    ) is True
+        )
+        is True
+    )
 
 
 def test_auto_persist_gate_allows_grounded_full_name_with_soft_multi_token_ambiguity():
-    assert can_auto_persist_character_candidate(
-        name="Gregor Samsa",
-        aliases=[],
-        evidence={
-            "mention_count": 77,
-            "strong_mention_count": 38,
-            "has_dialogue_or_action": True,
-            "has_physical_description": True,
-            "verifier": {
-                "local": {
-                    "person_ner_mentions": 1,
-                    "non_person_ner_mentions": 0,
-                    "mid_sentence_mentions": 48,
-                },
-                "final": {
-                    "confidence_band": "accept",
-                    "is_person_like": True,
-                    "reasons": ["llm_confirmed_person", "ambiguous_multi_token_mention"],
+    assert (
+        can_auto_persist_character_candidate(
+            name="Gregor Samsa",
+            aliases=[],
+            evidence={
+                "mention_count": 77,
+                "strong_mention_count": 38,
+                "has_dialogue_or_action": True,
+                "has_physical_description": True,
+                "verifier": {
+                    "local": {
+                        "person_ner_mentions": 1,
+                        "non_person_ner_mentions": 0,
+                        "mid_sentence_mentions": 48,
+                    },
+                    "final": {
+                        "confidence_band": "accept",
+                        "is_person_like": True,
+                        "reasons": ["llm_confirmed_person", "ambiguous_multi_token_mention"],
+                    },
                 },
             },
-        },
-    ) is True
+        )
+        is True
+    )
 
 
 def test_auto_persist_gate_allows_obvious_fallback_name_with_shared_identity_support():
-    assert can_auto_persist_character_candidate(
-        name="Gregor Samsa",
-        aliases=["Gregor"],
-        evidence={
-            "mention_count": 3,
-            "strong_mention_count": 2,
-            "has_dialogue_or_action": True,
-            "has_physical_description": True,
-            "deterministic_fallback": True,
-            "cluster_names": ["Gregor Samsa", "Gregor"],
-            "entity": {"canonical_name": "Gregor"},
-            "verifier": {
-                "local": {
-                    "person_ner_mentions": 1,
-                    "mid_sentence_mentions": 1,
+    assert (
+        can_auto_persist_character_candidate(
+            name="Gregor Samsa",
+            aliases=["Gregor"],
+            evidence={
+                "mention_count": 3,
+                "strong_mention_count": 2,
+                "has_dialogue_or_action": True,
+                "has_physical_description": True,
+                "deterministic_fallback": True,
+                "cluster_names": ["Gregor Samsa", "Gregor"],
+                "entity": {"canonical_name": "Gregor"},
+                "verifier": {
+                    "local": {
+                        "person_ner_mentions": 1,
+                        "mid_sentence_mentions": 1,
+                    },
+                    "final": {
+                        "confidence_band": "accept",
+                        "is_person_like": True,
+                        "reasons": [],
+                    },
                 },
-                "final": {
-                    "confidence_band": "accept",
-                    "is_person_like": True,
-                    "reasons": [],
-                }
             },
-        },
-    ) is True
+        )
+        is True
+    )
 
 
 def test_disposition_gate_suppresses_rejected_verifier_candidate():
@@ -284,7 +305,10 @@ def test_score_duplicate_characters_uses_embedding_similarity_signal():
     suggestion = score_duplicate_characters(primary, secondary)
 
     assert suggestion is not None
-    assert any(reason in suggestion["reasons"] for reason in ["High embedding similarity", "Related embedding similarity"])
+    assert any(
+        reason in suggestion["reasons"]
+        for reason in ["High embedding similarity", "Related embedding similarity"]
+    )
     assert suggestion["shared_evidence"]["embedding_similarity"] is not None
 
 
@@ -318,7 +342,9 @@ def test_score_duplicate_characters_accepts_numpy_embeddings():
 
 @pytest.mark.asyncio
 async def test_record_character_candidate_upserts_by_source_key(db):
-    user = User(email="candidate-review@lorevia.app", username="candidate-review", password_hash="hash")
+    user = User(
+        email="candidate-review@lorevia.app", username="candidate-review", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
 
@@ -361,8 +387,10 @@ async def test_record_character_candidate_upserts_by_source_key(db):
     await db.commit()
 
     rows = (
-        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id))
-    ).scalars().all()
+        (await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)))
+        .scalars()
+        .all()
+    )
 
     assert len(rows) == 1
     assert rows[0].confidence == 68
@@ -416,8 +444,10 @@ async def test_record_character_mention_keeps_distinct_passages_in_same_cluster(
     await db.commit()
 
     rows = (
-        await db.execute(select(CharacterMention).where(CharacterMention.book_id == book.id))
-    ).scalars().all()
+        (await db.execute(select(CharacterMention).where(CharacterMention.book_id == book.id)))
+        .scalars()
+        .all()
+    )
 
     assert len(rows) == 2
     assert {row.mention_text for row in rows} == {
@@ -428,7 +458,11 @@ async def test_record_character_mention_keeps_distinct_passages_in_same_cluster(
 
 @pytest.mark.asyncio
 async def test_record_relationship_candidate_upserts_by_source_key(db):
-    user = User(email="relationship-review@lorevia.app", username="relationship-review", password_hash="hash")
+    user = User(
+        email="relationship-review@lorevia.app",
+        username="relationship-review",
+        password_hash="hash",
+    )
     db.add(user)
     await db.flush()
 
@@ -469,10 +503,16 @@ async def test_record_relationship_candidate_upserts_by_source_key(db):
     await db.commit()
 
     rows = (
-        await db.execute(
-            select(CharacterRelationshipCandidate).where(CharacterRelationshipCandidate.book_id == book.id)
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book.id
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert len(rows) == 1
     assert rows[0].reason_codes == ["relationship_unresolved", "character_b_missing"]

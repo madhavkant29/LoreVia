@@ -1,38 +1,38 @@
 """Unit tests for character bible export formatting."""
 
-from io import BytesIO
 import uuid
+from io import BytesIO
 from zipfile import ZipFile
 
-from docx import Document
-import reportlab.platypus
 import pytest
+import reportlab.platypus
+from docx import Document
 
 from app.models.book import Book, Chapter
 from app.models.character import Character
-from app.models.intelligence import CharacterRelationship, ChapterSummary, PlotThread, WikiEntry
+from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WikiEntry
 from app.models.user import User
 from app.utils.export_utils import (
     EXPORT_ATTRIBUTION,
-    character_card_docx,
-    character_card_markdown,
-    character_card_pdf,
+    _chapter_body_blocks,
+    build_character_bible_vault_context,
     character_bible_docx,
     character_bible_markdown,
     character_bible_pdf,
+    character_card_docx,
+    character_card_markdown,
+    character_card_pdf,
     export_filename_base,
     export_font_notice,
-    manuscript_epub_compiled,
-    manuscript_epub,
     manuscript_docx,
+    manuscript_epub,
+    manuscript_epub_compiled,
     manuscript_pdf,
     manuscript_pdf_compiled,
     manuscript_vault_zip,
     novel_docx,
     novel_epub_compiled,
     novel_pdf_compiled,
-    _chapter_body_blocks,
-    build_character_bible_vault_context,
 )
 
 
@@ -110,7 +110,11 @@ def test_character_bible_docx_writes_attribution_to_document_footer():
 
 
 def test_character_bible_docx_applies_selected_safe_font():
-    raw = character_bible_docx(markdown=b"# Atlas\n\n### Iris\n\n- Lead", title="Atlas - Character Bible", font_family="eb-garamond")
+    raw = character_bible_docx(
+        markdown=b"# Atlas\n\n### Iris\n\n- Lead",
+        title="Atlas - Character Bible",
+        font_family="eb-garamond",
+    )
     doc = Document(BytesIO(raw))
 
     assert doc.styles["Normal"].font.name == "EB Garamond"
@@ -214,10 +218,22 @@ def test_character_card_exports_use_scene_language_for_screenplays():
         "arc_summary": None,
         "growth_events": [{"chapter_number": 3, "event_title": "Refuses the order"}],
         "relationships": [
-            {"name": "Eli", "type": "ally", "description": "Trusted partner", "from_chapter": 2, "to_chapter": 8}
+            {
+                "name": "Eli",
+                "type": "ally",
+                "description": "Trusted partner",
+                "from_chapter": 2,
+                "to_chapter": 8,
+            }
         ],
         "plot_threads": [
-            {"title": "Missing witness", "status": "open", "introduced_at": 1, "resolved_at": 6, "note": None}
+            {
+                "title": "Missing witness",
+                "status": "open",
+                "introduced_at": 1,
+                "resolved_at": 6,
+                "note": None,
+            }
         ],
         "continuity_watch": [],
         "filename_base": "maya",
@@ -238,7 +254,9 @@ def test_character_card_exports_use_scene_language_for_screenplays():
 
     doc = Document(BytesIO(character_card_docx(payload)))
     doc_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
-    table_text = "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+    table_text = "\n".join(
+        cell.text for table in doc.tables for row in table.rows for cell in row.cells
+    )
 
     assert doc.core_properties.title == "Pilot - Maya Character Card"
     assert doc.core_properties.author == "LoreVia"
@@ -253,7 +271,9 @@ def test_character_card_exports_use_scene_language_for_screenplays():
 def test_manuscript_docx_uses_front_matter_for_title_page():
     raw = manuscript_docx(
         title="Atlas",
-        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\n\n#\n\nSecond paragraph."}],
+        chapters=[
+            {"number": 1, "title": "Opening", "text": "First paragraph.\n\n#\n\nSecond paragraph."}
+        ],
         scenes=[],
         front_matter={
             "author_name": "A. Writer",
@@ -377,12 +397,17 @@ def test_manuscript_docx_resets_indentation_after_scene_break_and_preserves_line
     )
 
     doc = Document(BytesIO(raw))
-    prose_paragraphs = [paragraph for paragraph in doc.paragraphs if paragraph.text in {
-        "First paragraph.\nWrapped line.",
-        "***",
-        "Second paragraph after break.\nStill same paragraph.",
-        "Third paragraph.",
-    }]
+    prose_paragraphs = [
+        paragraph
+        for paragraph in doc.paragraphs
+        if paragraph.text
+        in {
+            "First paragraph.\nWrapped line.",
+            "***",
+            "Second paragraph after break.\nStill same paragraph.",
+            "Third paragraph.",
+        }
+    ]
 
     assert [paragraph.text for paragraph in prose_paragraphs] == [
         "First paragraph.\nWrapped line.",
@@ -444,7 +469,13 @@ def test_manuscript_pdf_compiled_preserves_scene_break_order(monkeypatch):
     try:
         manuscript_pdf_compiled(
             title="Atlas",
-            chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\nLine two.\n\n~~~\n\nSecond paragraph.\n\nThird paragraph."}],
+            chapters=[
+                {
+                    "number": 1,
+                    "title": "Opening",
+                    "text": "First paragraph.\nLine two.\n\n~~~\n\nSecond paragraph.\n\nThird paragraph.",
+                }
+            ],
             scenes=[],
             front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
         )
@@ -538,7 +569,13 @@ def test_manuscript_pdf_compiled_adds_toc_entries_when_requested(monkeypatch):
 def test_manuscript_epub_compiled_preserves_scene_breaks_and_line_breaks():
     raw = manuscript_epub_compiled(
         title="Atlas",
-        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\nLine two.\n\n#\n\nSecond paragraph.\n\nThird paragraph."}],
+        chapters=[
+            {
+                "number": 1,
+                "title": "Opening",
+                "text": "First paragraph.\nLine two.\n\n#\n\nSecond paragraph.\n\nThird paragraph.",
+            }
+        ],
         scenes=[],
         front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
     )
@@ -581,7 +618,12 @@ def test_manuscript_pdf_renders_html_and_fallback_chapters_with_metadata():
                 ),
                 "text": "ignored",
             },
-            {"number": 2, "title": "Chapter 2", "html": None, "text": "Fallback line.\n\nLast line."},
+            {
+                "number": 2,
+                "title": "Chapter 2",
+                "html": None,
+                "text": "Fallback line.\n\nLast line.",
+            },
         ],
         preset="trade_paperback",
         font_family="eb-garamond",
@@ -626,7 +668,9 @@ def test_manuscript_epub_builds_navigation_styles_and_sanitized_chapters():
 def test_novel_docx_includes_cover_toc_preface_chapters_and_end_marker():
     raw = novel_docx(
         title="Atlas",
-        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\n\n#\n\nSecond paragraph."}],
+        chapters=[
+            {"number": 1, "title": "Opening", "text": "First paragraph.\n\n#\n\nSecond paragraph."}
+        ],
         front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
         preface="Before the voyage.\n\nA note to readers.",
         novel_front_matter={
@@ -701,7 +745,9 @@ def test_novel_pdf_compiled_adds_preface_and_chapter_toc_entries(monkeypatch):
         def bookmarkPage(self, key: str) -> None:
             self.bookmarks.append(key)
 
-        def addOutlineEntry(self, title: str, key: str, level: int = 0, closed: bool = False) -> None:
+        def addOutlineEntry(
+            self, title: str, key: str, level: int = 0, closed: bool = False
+        ) -> None:
             self.outlines.append((title, key, level, closed))
 
     class FakeDoc:
@@ -736,7 +782,9 @@ def test_novel_pdf_compiled_adds_preface_and_chapter_toc_entries(monkeypatch):
     finally:
         monkeypatch.setattr(reportlab.platypus, "SimpleDocTemplate", original_template)
 
-    paragraph_text = [item.getPlainText() for item in captured["story"] if hasattr(item, "getPlainText")]
+    paragraph_text = [
+        item.getPlainText() for item in captured["story"] if hasattr(item, "getPlainText")
+    ]
 
     assert "Table of Contents" in paragraph_text
     assert "Dedication" in paragraph_text
@@ -817,7 +865,13 @@ def test_novel_pdf_compiled_draws_cover_as_full_page(monkeypatch):
 def test_novel_epub_compiled_writes_preface_chapters_and_cover():
     raw = novel_epub_compiled(
         title="Atlas",
-        chapters=[{"number": 1, "title": "Opening", "text": "First paragraph.\n\n---\n\nSecond paragraph."}],
+        chapters=[
+            {
+                "number": 1,
+                "title": "Opening",
+                "text": "First paragraph.\n\n---\n\nSecond paragraph.",
+            }
+        ],
         front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
         preface="Before the voyage.",
         novel_front_matter={
@@ -861,7 +915,15 @@ def test_manuscript_vault_zip_creates_expected_folders():
     raw = manuscript_vault_zip(
         title="Atlas",
         chapters=[{"number": 1, "title": "Opening", "text": "Chapter text"}],
-        scenes=[{"title": "Forest Ambush", "description": "Setup", "chapter_number": 1, "status": "assigned", "body": "Scene body"}],
+        scenes=[
+            {
+                "title": "Forest Ambush",
+                "description": "Setup",
+                "chapter_number": 1,
+                "status": "assigned",
+                "body": "Scene body",
+            }
+        ],
         notes=[{"path": "story/idea.md", "content": "Remember this"}],
         front_matter={"title": "Atlas Rising", "author_name": "A. Writer"},
     )

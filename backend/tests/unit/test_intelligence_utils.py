@@ -1,7 +1,7 @@
 """Unit tests for grounded intelligence and voice fingerprint helpers."""
 
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,17 +45,24 @@ def test_grounded_citation_normalizes_excerpt_and_relevance():
 
 @pytest.mark.asyncio
 async def test_build_grounded_context_combines_series_summaries_and_ranked_passages(monkeypatch):
-    db = _FakeDB([
-        (3, "Third", "A repeated summary."),
-        (2, None, "  The key changes hands.  "),
-        (1, "First", ""),
-    ])
+    db = _FakeDB(
+        [
+            (3, "Third", "A repeated summary."),
+            (2, None, "  The key changes hands.  "),
+            (1, "First", ""),
+        ]
+    )
     book = SimpleNamespace(id=uuid.uuid4())
     user_id = uuid.uuid4()
 
     async def search(*_args, **_kwargs):
         return [
-            {"chapter_num": 2, "chapter_title": "Key", "text": "The brass key glows.", "relevance": 0.92},
+            {
+                "chapter_num": 2,
+                "chapter_title": "Key",
+                "text": "The brass key glows.",
+                "relevance": 0.92,
+            },
             {"chapter_num": 3, "chapter_title": None, "text": "A weaker clue.", "relevance": 0.4},
             {"chapter_num": 4, "chapter_title": "Empty", "text": "   ", "relevance": 1.0},
         ]
@@ -88,10 +95,19 @@ async def test_prior_series_context_uses_only_three_preceding_volumes(monkeypatc
 
     monkeypatch.setattr(intelligence_utils, "book_series_snapshot", snapshot)
     result = await build_prior_series_context(db, current, uuid.uuid4())
-    assert calls == [(prior[2].id, "Volume 2"), (prior[3].id, "Volume 3"), (prior[4].id, "Volume 4")]
+    assert calls == [
+        (prior[2].id, "Volume 2"),
+        (prior[3].id, "Volume 3"),
+        (prior[4].id, "Volume 4"),
+    ]
     assert result == ["Context: Volume 2", "Context: Volume 4"]
 
-    assert await build_prior_series_context(_FakeDB(), SimpleNamespace(primary_series_id=None), uuid.uuid4()) == []
+    assert (
+        await build_prior_series_context(
+            _FakeDB(), SimpleNamespace(primary_series_id=None), uuid.uuid4()
+        )
+        == []
+    )
     missing = SimpleNamespace(id=uuid.uuid4(), primary_series_id=uuid.uuid4())
     assert await build_prior_series_context(_FakeDB([]), missing, uuid.uuid4()) == []
 
@@ -99,7 +115,10 @@ async def test_prior_series_context_uses_only_three_preceding_volumes(monkeypatc
 @pytest.mark.asyncio
 async def test_book_series_snapshot_formats_all_context_sections_and_empty_state():
     db = _FakeDB(
-        [(2, None, "Second summary", {"turns": ["Gate opens", "Key breaks"]}), (1, "Opening", "First summary", ["Arrival"])],
+        [
+            (2, None, "Second summary", {"turns": ["Gate opens", "Key breaks"]}),
+            (1, "Opening", "First summary", ["Arrival"]),
+        ],
         [("Mara", "lead", "Learns trust"), ("Theo", None, None), (None, "extra", "ignored")],
         [("ally", "Mara protects Theo"), ("enemy", None)],
         [("Gate law", "Who controls it?", "open"), ("Lost key", None, None)],

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { billingApi } from "@/lib/api/billing"
+import { capture } from "@/lib/analytics/posthog"
 import {
   getBillingConfirmationTokenFromCheckoutUrl,
   buildPaddleCheckoutSettings,
@@ -43,6 +44,13 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
   const [message, setMessage] = useState<string | null>(null)
   const [paddleReady, setPaddleReady] = useState(false)
   const pendingConfirmationTokenRef = useRef<string | null>(null)
+  const promptViewedRef = useRef(false)
+
+  useEffect(() => {
+    if (promptViewedRef.current) return
+    promptViewedRef.current = true
+    capture("upgrade_prompt_viewed", { surface })
+  }, [surface])
 
   function redirectToSuccess(transactionId: string, confirmationToken: string | null) {
     const params = new URLSearchParams({ txn: transactionId })
@@ -73,15 +81,23 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
         settings: buildPaddleCheckoutSettings(),
       },
       eventCallback: (event) => {
+        if (event.name === "checkout.closed") {
+          capture("checkout_closed", { surface, billing_cycle: billingCycle })
+        }
         if (event.name === "checkout.completed") {
           const transactionId = typeof event.data?.transaction_id === "string" ? event.data.transaction_id : null
+          capture("checkout_completed", {
+            surface,
+            billing_cycle: billingCycle,
+            transaction_id: transactionId,
+          })
           if (transactionId) {
             redirectToSuccess(transactionId, pendingConfirmationTokenRef.current)
           }
         }
       },
     })
-  }, [paddleEnvironment, paddleReady, paddleToken])
+  }, [billingCycle, paddleEnvironment, paddleReady, paddleToken, surface])
 
   async function handlePlanClick(tier: PricingTier) {
     if (tier.access === "free") {
@@ -95,11 +111,29 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
     }
 
     if (!user) {
+      capture("upgrade_prompt_clicked", {
+        surface,
+        plan: tier.key,
+        billing_cycle: billingCycle,
+        destination: "register",
+      })
       router.push("/register")
       return
     }
 
+    capture("upgrade_prompt_clicked", {
+      surface,
+      plan: tier.key,
+      billing_cycle: billingCycle,
+      destination: "checkout",
+    })
     const selectedPlanCode = billingCycle === "annual" ? tier.annualCode : tier.monthlyCode
+    capture("pricing_plan_selected", {
+      surface,
+      plan: tier.key,
+      billing_cycle: billingCycle,
+      plan_code: selectedPlanCode,
+    })
     if (!selectedPlanCode) {
       setMessage(tier.message ?? `${tier.name} cannot be started from this page yet.`)
       return
@@ -107,9 +141,21 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
 
     setBusyPlan(selectedPlanCode)
     setMessage(null)
+    capture("checkout_started", {
+      surface,
+      plan: tier.key,
+      billing_cycle: billingCycle,
+      plan_code: selectedPlanCode,
+    })
     try {
       const result = await billingApi.checkout(selectedPlanCode)
       if (!result.billing_enabled || !result.checkout_url) {
+        capture("checkout_failed", {
+          surface,
+          plan: tier.key,
+          billing_cycle: billingCycle,
+          reason: "billing_unavailable",
+        })
         setMessage(result.message ?? "Billing is not configured in this environment yet.")
         return
       }
@@ -125,6 +171,12 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
       }
       window.location.href = result.checkout_url
     } catch {
+      capture("checkout_failed", {
+        surface,
+        plan: tier.key,
+        billing_cycle: billingCycle,
+        reason: "checkout_request_failed",
+      })
       setMessage("We could not start checkout right now. Please try again in a moment.")
     } finally {
       setBusyPlan(null)
@@ -173,7 +225,10 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                   key={cycle}
                   type="button"
                   aria-pressed={billingCycle === cycle}
-                  onClick={() => setBillingCycle(cycle)}
+                  onClick={() => {
+                    setBillingCycle(cycle)
+                    capture("billing_cadence_selected", { surface, billing_cycle: cycle })
+                  }}
                   className={`rounded-sm px-6 py-2.5 text-sm font-semibold transition ${
                     billingCycle === cycle
                       ? isDark
@@ -189,7 +244,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
               ))}
             </div>
             {billingCycle === "annual" ? (
-              <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Save more with yearly billing.</p>
+              <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Get two months free with yearly billing.</p>
             ) : (
               <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Cancel anytime.</p>
             )}

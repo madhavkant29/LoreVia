@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .core import _clean_text, _read_upload_bounded
 from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_manuscript_import
 from app.core.config import settings
@@ -16,34 +15,45 @@ from app.schemas.books import (
     EntityTagSetOut,
     EntityTagUpdateBody,
     VaultGraphOut,
-    VaultNoteLinkListOut,
     VaultNoteBody,
+    VaultNoteLinkListOut,
     VaultNoteOut,
     VaultNoteSaveOut,
 )
-from app.utils.book_utils import (
-    build_vault_graph,
+from app.utils.billing_utils import require_author_access
+from app.utils.books.collaboration_access import (
     collaboration_allows_chapter,
     collaboration_can_comment,
+    get_book_with_collaboration_access,
+)
+from app.utils.books.notes import (
     delete_book_note,
+    get_owned_book,
+    list_book_notes,
+    save_book_note,
+)
+from app.utils.books.vault import (
+    build_vault_graph,
+)
+from app.utils.books.vault_relations import (
+    list_vault_note_relations,
+)
+from app.utils.books.vault_storage import (
     delete_vault_note,
     export_vault_notes_zip,
-    get_book_with_collaboration_access,
-    get_owned_book,
     import_vault_notes_zip,
-    list_book_notes,
-    list_vault_note_relations,
     list_vault_notes,
-    save_book_note,
     save_vault_note,
 )
-from app.utils.billing_utils import require_author_access
 from app.utils.tag_utils import (
     ENTITY_TYPE_NOTE,
     can_manage_tag_target,
     replace_custom_tags_for_entity,
     resolve_tag_target,
 )
+
+from .core import _clean_text
+from .lifecycle import _read_upload_bounded
 
 router = APIRouter()
 
@@ -121,7 +131,11 @@ async def upsert_book_note(
         require_author_access(current_user)
     if collaborator and not collaboration_can_comment(collaborator):
         raise HTTPException(403, "This share cannot leave comments.")
-    if collaborator and body.chapter_number is not None and not collaboration_allows_chapter(collaborator, body.chapter_number):
+    if (
+        collaborator
+        and body.chapter_number is not None
+        and not collaboration_allows_chapter(collaborator, body.chapter_number)
+    ):
         raise HTTPException(403, "This share cannot comment on that chapter.")
     return await save_book_note(
         db,
@@ -244,7 +258,7 @@ async def export_book_vault_notes(
     return Response(
         content=zip_data,
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

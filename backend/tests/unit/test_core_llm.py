@@ -54,7 +54,9 @@ async def test_complete_with_fallback_forwards_usage_db(monkeypatch):
     async def _fake_create_tracked_chat_completion(**kwargs):
         captured.update(kwargs)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="Tracked with current session."))]
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content="Tracked with current session."))
+            ]
         )
 
     usage_db = object()
@@ -161,6 +163,29 @@ async def test_complete_with_fallback_retries_503_then_falls_back_to_gemini(monk
     assert call_count[0] == 3
 
 
+@pytest.mark.asyncio
+async def test_complete_with_fallback_propagates_unexpected_openai_client_bugs(monkeypatch):
+    async def _buggy_openai_completion(**kwargs):
+        raise AssertionError("client invariant")
+
+    async def _mock_gemini(**kwargs):
+        return "should not be used"
+
+    monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm.settings, "GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setattr(llm, "create_tracked_chat_completion", _buggy_openai_completion)
+    monkeypatch.setattr(llm, "_complete_with_gemini", _mock_gemini)
+
+    with pytest.raises(AssertionError, match="client invariant"):
+        await llm.complete_with_fallback(
+            system="System prompt",
+            user="User prompt",
+            openai_model="gpt-test",
+            gemini_model="gemini-test",
+            usage_feature="reader_recall",
+        )
+
+
 def test_is_transient_openai_error_httpx():
     import httpx
 
@@ -181,6 +206,22 @@ def test_get_openai_client_reuses_instance(monkeypatch):
     client2 = llm._get_openai_client()
 
     assert client1 is client2
+
+
+def test_get_openai_client_disables_hidden_sdk_retries(monkeypatch):
+    captured: dict[str, object] = {}
+    client = object()
+
+    def fake_openai(**kwargs):
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr(llm, "_openai_client", None)
+    monkeypatch.setattr(llm, "AsyncOpenAI", fake_openai)
+    monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
+
+    assert llm._get_openai_client() is client
+    assert captured == {"api_key": "test-key", "max_retries": 0}
 
 
 def test_get_openai_client_returns_external_when_provided(monkeypatch):

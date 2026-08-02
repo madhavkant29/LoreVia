@@ -90,11 +90,18 @@ def test_character_persistence_gate_ignores_placeholder_summaries_for_noise_name
     )
 
     assert decision.allowed is False
-    assert "generic_profile_summary" in decision.reasons or "visibility_score_below_threshold" in decision.reasons
+    assert (
+        "generic_profile_summary" in decision.reasons
+        or "visibility_score_below_threshold" in decision.reasons
+    )
 
 
-@pytest.mark.parametrize("name", ["Actually", "Maybe", "Sure", "Wait", "Okay", "However", "Though", "Please", "Thanks"])
-def test_character_persistence_gate_rejects_common_discourse_words_even_with_single_strong_action(name: str):
+@pytest.mark.parametrize(
+    "name", ["Actually", "Maybe", "Sure", "Wait", "Okay", "However", "Though", "Please", "Thanks"]
+)
+def test_character_persistence_gate_rejects_common_discourse_words_even_with_single_strong_action(
+    name: str,
+):
     decision = character_persistence_decision(
         name,
         entity_type="person",
@@ -109,4 +116,7 @@ def test_character_persistence_gate_rejects_common_discourse_words_even_with_sin
     )
 
     assert decision.allowed is False
-    assert "single_token_needs_stronger_support" in decision.reasons or "single_token_requires_more_evidence" in decision.reasons
+    assert (
+        "single_token_needs_stronger_support" in decision.reasons
+        or "single_token_requires_more_evidence" in decision.reasons
+    )

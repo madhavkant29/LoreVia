@@ -5,7 +5,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any, cast
 
-from openai import AsyncOpenAI
+import httpx
+from openai import AsyncOpenAI, OpenAIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import (
     retry,
@@ -15,10 +16,15 @@ from tenacity import (
 )
 
 from app.core.config import settings
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.llm_usage_utils import (
+    create_tracked_chat_completion,
+    is_retryable_llm_call_error,
+)
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 _openai_client: AsyncOpenAI | None = None
 _gemini_client: object | None = None
+LLM_PROVIDER_EXCEPTIONS = (OpenAIError, httpx.HTTPError, TimeoutError, RuntimeError, ValueError)
 
 
 def _get_openai_client(external: AsyncOpenAI | None = None) -> AsyncOpenAI:
@@ -26,7 +32,9 @@ def _get_openai_client(external: AsyncOpenAI | None = None) -> AsyncOpenAI:
     if external is not None:
         return external
     if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        # Tenacity below is the single retry owner. Leaving the SDK's default
+        # retries enabled would multiply every configured attempt.
+        _openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
     return _openai_client
 
 
@@ -41,22 +49,11 @@ def _get_gemini_client() -> object:
 
 
 def _is_transient_openai_error(exc: BaseException) -> bool:
-    import httpx
-
-    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError)):
-        return True
-    try:
-        from openai import APIStatusError
-
-        if isinstance(exc, APIStatusError):
-            return exc.status_code >= 500 or exc.status_code == 429
-    except ImportError:
-        pass
-    return False
+    return is_retryable_llm_call_error(exc)
 
 
 @retry(
-    stop=stop_after_attempt(3),
+    stop=stop_after_attempt(LLM_MAX_RETRIES + 1),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception(_is_transient_openai_error),
     reraise=True,
@@ -136,7 +133,7 @@ async def complete_with_fallback(
             content = response.choices[0].message.content or ""
             if content.strip():
                 return content.strip()
-        except Exception as exc:  # pragma: no cover - network/provider path
+        except LLM_PROVIDER_EXCEPTIONS as exc:  # pragma: no cover - network/provider path
             openai_error = exc
 
     if settings.GEMINI_API_KEY and gemini_model:
@@ -149,7 +146,7 @@ async def complete_with_fallback(
                 max_tokens=max_tokens,
                 want_json=response_format == {"type": "json_object"},
             )
-        except Exception:  # pragma: no cover - network/provider path
+        except LLM_PROVIDER_EXCEPTIONS:  # pragma: no cover - network/provider path
             if openai_error:
                 raise openai_error
             raise
@@ -171,7 +168,7 @@ async def _complete_with_gemini(
 ) -> str:
     try:
         from google.generativeai import types
-    except Exception as exc:  # pragma: no cover - optional dependency
+    except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("Gemini fallback requested but google-genai is not installed") from exc
 
     client = cast(Any, _get_gemini_client())

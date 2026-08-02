@@ -1,15 +1,19 @@
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.book import Book
-from app.models.character import Character, CharacterCandidate, CharacterMention, CharacterRelationshipCandidate
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterMention,
+    CharacterRelationshipCandidate,
+)
 from app.models.user import User
-from scripts import backfill_character_bible_noise
-from scripts import repair_character_bible_book
+from scripts import backfill_character_bible_noise, repair_character_bible_book
 
 
 def _character(**overrides):
@@ -69,7 +73,12 @@ def test_auto_mergeable_skips_pairs_that_touch_protected_characters():
     primary = _character(is_manual=True)
     secondary = _character()
 
-    assert repair_character_bible_book._auto_mergeable(suggestion, primary=primary, secondary=secondary) is False
+    assert (
+        repair_character_bible_book._auto_mergeable(
+            suggestion, primary=primary, secondary=secondary
+        )
+        is False
+    )
 
 
 def test_auto_mergeable_keeps_unprotected_high_confidence_duplicates():
@@ -81,7 +90,12 @@ def test_auto_mergeable_keeps_unprotected_high_confidence_duplicates():
     primary = _character(name="Aikawa", mention_count=1)
     secondary = _character(name="Aikawa", mention_count=1)
 
-    assert repair_character_bible_book._auto_mergeable(suggestion, primary=primary, secondary=secondary) is True
+    assert (
+        repair_character_bible_book._auto_mergeable(
+            suggestion, primary=primary, secondary=secondary
+        )
+        is True
+    )
 
 
 def test_is_protected_character_respects_curated_metadata_flags():
@@ -113,7 +127,9 @@ async def test_repair_session_reuses_injected_db():
 
 @pytest.mark.asyncio
 async def test_apply_repair_plan_demotes_characters_rejected_by_repair_verifier(db, monkeypatch):
-    user = User(email="repair-verifier@lorevia.app", username="repair-verifier", password_hash="hash")
+    user = User(
+        email="repair-verifier@lorevia.app", username="repair-verifier", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
 
@@ -154,12 +170,28 @@ async def test_apply_repair_plan_demotes_characters_rejected_by_repair_verifier(
     async def _fake_verify(*_args, **_kwargs):
         return {
             "local": {"confidence_band": "reject", "reasons": ["interjection_like_usage"]},
-            "llm": {"used": False, "is_person_like": None, "confidence": None, "canonical_name": None, "reason": None},
-            "final": {"confidence_band": "reject", "is_person_like": False, "reasons": ["interjection_like_usage"]},
+            "llm": {
+                "used": False,
+                "is_person_like": None,
+                "confidence": None,
+                "canonical_name": None,
+                "reason": None,
+            },
+            "final": {
+                "confidence_band": "reject",
+                "is_person_like": False,
+                "reasons": ["interjection_like_usage"],
+            },
         }
 
-    monkeypatch.setattr(repair_character_bible_book, "verify_character_candidate_personhood", _fake_verify)
-    monkeypatch.setattr(repair_character_bible_book, "_is_obvious_noise_character", lambda *_args, **_kwargs: (False, []))
+    monkeypatch.setattr(
+        repair_character_bible_book, "verify_character_candidate_personhood", _fake_verify
+    )
+    monkeypatch.setattr(
+        repair_character_bible_book,
+        "_is_obvious_noise_character",
+        lambda *_args, **_kwargs: (False, []),
+    )
 
     result = await repair_character_bible_book.apply_repair_plan(
         book.id,
@@ -170,8 +202,10 @@ async def test_apply_repair_plan_demotes_characters_rejected_by_repair_verifier(
 
     persisted_character = await db.get(Character, character.id)
     candidate_rows = (
-        await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id))
-    ).scalars().all()
+        (await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)))
+        .scalars()
+        .all()
+    )
 
     assert persisted_character is not None
     assert persisted_character.visibility_state == "noise"
@@ -187,7 +221,9 @@ async def test_apply_repair_plan_demotes_characters_rejected_by_repair_verifier(
 
 @pytest.mark.asyncio
 async def test_apply_repair_plan_suppresses_pending_candidate_noise(db, monkeypatch):
-    user = User(email="repair-candidates@lorevia.app", username="repair-candidates", password_hash="hash")
+    user = User(
+        email="repair-candidates@lorevia.app", username="repair-candidates", password_hash="hash"
+    )
     db.add(user)
     await db.flush()
 
@@ -211,7 +247,14 @@ async def test_apply_repair_plan_suppresses_pending_candidate_noise(db, monkeypa
         status="pending",
         confidence=0,
         reason_codes=["mention_verifier_review"],
-        evidence={"verifier": {"final": {"confidence_band": "review", "reasons": ["sentence_start_capitalization_only"]}}},
+        evidence={
+            "verifier": {
+                "final": {
+                    "confidence_band": "review",
+                    "reasons": ["sentence_start_capitalization_only"],
+                }
+            }
+        },
     )
     relationship_candidate = CharacterRelationshipCandidate(
         book_id=book.id,
@@ -263,7 +306,11 @@ def test_backfill_marks_book_state_with_version_and_summary():
 
 @pytest.mark.asyncio
 async def test_backfill_targets_books_with_only_pending_candidate_noise(db, monkeypatch):
-    user = User(email="candidate-only-backfill@lorevia.app", username="candidate-only-backfill", password_hash="hash")
+    user = User(
+        email="candidate-only-backfill@lorevia.app",
+        username="candidate-only-backfill",
+        password_hash="hash",
+    )
     db.add(user)
     await db.flush()
 
@@ -292,6 +339,8 @@ async def test_backfill_targets_books_with_only_pending_candidate_noise(db, monk
     session_factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(backfill_character_bible_noise, "AsyncSessionLocal", session_factory)
 
-    targets = await backfill_character_bible_noise._iter_target_books(book_id=book.id, limit=0, force=True)
+    targets = await backfill_character_bible_noise._iter_target_books(
+        book_id=book.id, limit=0, force=True
+    )
 
     assert [item.id for item in targets] == [book.id]

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const headersMock = vi.hoisted(() => vi.fn())
+const cookiesMock = vi.hoisted(() => vi.fn())
 const notFoundMock = vi.hoisted(() => vi.fn(() => {
   throw new Error("NEXT_NOT_FOUND")
 }))
 
 vi.mock("next/headers", () => ({
+  cookies: cookiesMock,
   headers: headersMock,
 }))
 
@@ -17,9 +19,12 @@ describe("admin server api", () => {
   beforeEach(() => {
     vi.resetModules()
     headersMock.mockReset()
+    cookiesMock.mockReset()
+    cookiesMock.mockResolvedValue({ get: () => undefined })
     notFoundMock.mockClear()
     vi.unstubAllGlobals()
     delete process.env.ADMIN_E2E_TEST_SECRET
+    delete process.env.API_ORIGIN
     delete process.env.NEXT_PUBLIC_API_URL
   })
 
@@ -28,6 +33,24 @@ describe("admin server api", () => {
     headersMock.mockResolvedValue(
       new Headers({
         cookie: "lorevia_admin_test_session=owner%3Atest-admin-secret",
+      })
+    )
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { getAdminSessionServer } = await import("./admin.server")
+    const session = await getAdminSessionServer()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(session.is_owner).toBe(true)
+    expect(session.scopes).toEqual(["moderation_admin", "billing_admin", "super_admin"])
+  })
+
+  it("uses the dev-only owner header override without calling fetch", async () => {
+    process.env.ADMIN_E2E_TEST_SECRET = "test-admin-secret"
+    headersMock.mockResolvedValue(
+      new Headers({
+        "x-lorevia-admin-test-session": "owner:test-admin-secret",
       })
     )
     const fetchMock = vi.fn()
@@ -106,12 +129,43 @@ describe("admin server api", () => {
     const { getAdminSessionServer } = await import("./admin.server")
     const session = await getAdminSessionServer()
 
-    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3000/api/v1/admin/session", {
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/api/v1/admin/session", {
       cache: "no-store",
       headers: { cookie: "lorevia_access_token=token" },
     })
     expect(session.scopes).toEqual(["billing_admin"])
     expect(session.requires_step_up).toBe(false)
+  })
+
+  it("prefers the deployment server api origin for admin session checks", async () => {
+    process.env.API_ORIGIN = "http://api:8000"
+    process.env.NEXT_PUBLIC_API_URL = "https://public.example.com/api/v1"
+    headersMock.mockResolvedValue(
+      new Headers({
+        cookie: "lorevia_access_token=token",
+      })
+    )
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        is_admin: true,
+        scopes: ["super_admin"],
+        is_owner: false,
+        requires_step_up: true,
+        session_expires_at: null,
+      }),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { getAdminSessionServer } = await import("./admin.server")
+    const session = await getAdminSessionServer()
+
+    expect(fetchMock).toHaveBeenCalledWith("http://api:8000/api/v1/admin/session", {
+      cache: "no-store",
+      headers: { cookie: "lorevia_access_token=token" },
+    })
+    expect(session.scopes).toEqual(["super_admin"])
   })
 
   it("404s when the backend rejects admin session access", async () => {

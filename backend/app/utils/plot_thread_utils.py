@@ -114,6 +114,86 @@ def normalize_related_characters(values: object | None) -> list[str]:
     return normalized
 
 
+def resolve_plot_thread_identity(
+    existing_threads: list[Any],
+    *,
+    title: str,
+    description: str | None,
+    thread_type: str | None,
+    character_names: list[str],
+    chapter_number: int,
+    minimum_score: float = 0.58,
+) -> Any | None:
+    """Resolve a renamed or paraphrased thread using multiple story signals."""
+    candidate_title_terms = _thread_terms(title)
+    candidate_description_terms = _thread_terms(description)
+    candidate_characters = {name.casefold() for name in character_names}
+    best_match = None
+    best_score = minimum_score
+    for existing in existing_threads:
+        title_score = _jaccard(candidate_title_terms, _thread_terms(existing.title))
+        description_score = _jaccard(
+            candidate_description_terms,
+            _thread_terms(getattr(existing, "description", None)),
+        )
+        existing_characters = {
+            str(name).strip().casefold()
+            for name in (getattr(existing, "character_ids", None) or [])
+            if str(name).strip()
+        }
+        character_score = _jaccard(candidate_characters, existing_characters)
+        type_score = (
+            1.0
+            if thread_type
+            and normalize_plot_thread_type(getattr(existing, "thread_type", None))
+            == normalize_plot_thread_type(thread_type)
+            else 0.0
+        )
+        last_chapter = (
+            getattr(existing, "last_mentioned_at", None)
+            or getattr(existing, "introduced_at", None)
+            or chapter_number
+        )
+        chronology_score = 1.0 if 0 <= chapter_number - int(last_chapter) <= 12 else 0.0
+        score = (
+            (title_score * 0.4)
+            + (description_score * 0.2)
+            + (character_score * 0.2)
+            + (type_score * 0.1)
+            + (chronology_score * 0.1)
+        )
+        if score > best_score:
+            best_match = existing
+            best_score = score
+    return best_match
+
+
+def _thread_terms(value: object | None) -> set[str]:
+    return {
+        term
+        for term in plot_thread_lookup_key(value).split()
+        if len(term) > 2
+        and term
+        not in {
+            "the",
+            "and",
+            "but",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "into",
+        }
+    }
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
 def is_plot_thread_closed(status: str) -> bool:
     return normalize_plot_thread_status(status) in {"resolved", "abandoned"}
 
@@ -176,8 +256,15 @@ def derive_plot_thread_risk(
     if resolved_status == "possibly_abandoned":
         return "Reader expectation may still be active because this thread has been quiet for several chapters."
     if resolved_status == "paused":
-        return "The thread is resting off-page; readers may need a reminder before it matters again."
-    if introduced_at is not None and current_chapter is not None and current_chapter - introduced_at >= 4 and weight >= 7:
+        return (
+            "The thread is resting off-page; readers may need a reminder before it matters again."
+        )
+    if (
+        introduced_at is not None
+        and current_chapter is not None
+        and current_chapter - introduced_at >= 4
+        and weight >= 7
+    ):
         return "Reader may strongly expect closure because this thread has stayed active for a long stretch."
     if resolved_status in {"introduced", "developing", "unknown"}:
         return f"'{title}' is still open, so readers may expect resolution or reinforcement."

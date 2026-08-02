@@ -1,7 +1,7 @@
 import type { Page, Route } from "@playwright/test"
 import type { Character } from "@/types/character"
 import type { EmailPreferences } from "@/types/email"
-import type { PublicBook } from "@/types/book"
+import type { ContinuityFinding, PublicBook, RevisionIntelligence } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
 
 type SessionMode = "authenticated" | "guest"
@@ -9,7 +9,7 @@ type LoginMode = "success" | "unauthorized"
 type AdminMode = "none" | "moderation" | "billing" | "super" | "owner"
 type VoiceConsistencyMode = "success" | "backend-error" | "weak-attribution" | "selected-character"
 type CharacterBibleMode = "default" | "review-only"
-type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads"
+type ManuscriptProcessingMode = "default" | "refresh-after-two-book-reads" | "allowance-paused"
 type UserTierMode = "author" | "free"
 
 type MockOptions = {
@@ -20,13 +20,14 @@ type MockOptions = {
   characterBible?: CharacterBibleMode
   manuscriptProcessing?: ManuscriptProcessingMode
   userTier?: UserTierMode
+  activationPending?: boolean
 }
 
 const ADMIN_TEST_SESSION_COOKIE = "lorevia_admin_test_session"
 const ADMIN_TEST_SESSION_SECRET = process.env.ADMIN_E2E_TEST_SECRET ?? "codex-e2e-admin-secret"
 const ACCESS_TOKEN_COOKIE = "lorevia_access_token"
 const REFRESH_TOKEN_COOKIE = "lorevia_refresh_token"
-const E2E_APP_ORIGIN = "http://localhost:3001"
+const E2E_APP_ORIGIN = process.env.E2E_APP_ORIGIN ?? `http://localhost:${process.env.E2E_PORT ?? "3001"}`
 
 function normalizeMockApiPath(pathname: string) {
   return pathname
@@ -2217,6 +2218,107 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
   const voiceConsistencyMode = options.voiceConsistency ?? "success"
   const characterBibleMode = options.characterBible ?? "default"
   const manuscriptProcessingMode = options.manuscriptProcessing ?? "default"
+  let activationRevision = (options.activationPending
+    ? {
+        ...revisionIntelligence,
+        priority_findings: [
+          {
+            ...revisionIntelligence.change_impacts[0],
+            why_flagged: revisionIntelligence.change_impacts[0].description,
+            evidence_strength: "strong",
+            evidence: [{ chapter_ref: 2, source_label: "The Ember Gate", excerpt: "Nora crossed the silver gate without the blood oath Kael expected.", source_content_version: 2 }],
+            is_stale: false,
+          },
+          {
+            ...revisionIntelligence.scene_advice[0],
+            why_flagged: revisionIntelligence.scene_advice[0].description,
+            evidence_strength: "moderate",
+            evidence: [{ chapter_ref: 3, source_label: "River of Glass", excerpt: "The gate warning returned before the reveal moved forward.", source_content_version: 1 }],
+            is_stale: false,
+          },
+          {
+            ...revisionIntelligence.confusion_map[0],
+            why_flagged: revisionIntelligence.confusion_map[0].description,
+            evidence_strength: "moderate",
+            evidence: [{ chapter_ref: 1, source_label: "Ashfall", excerpt: "Four names arrived with the first ashfall bulletin.", source_content_version: 1 }],
+            is_stale: false,
+          },
+        ],
+        activation: { eligible: true, completed: false, completed_at: null, completion_action: null, completed_finding_id: null },
+        analysis_complete: true,
+        continuity_status: "issues_found",
+        coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
+        stale_finding_count: 0,
+        analysis_limitations: [],
+      }
+    : {
+        ...revisionIntelligence,
+        priority_findings: [],
+        activation: { eligible: false, completed: true, completed_at: "2026-05-01T00:00:00Z", completion_action: "added_to_revision_plan", completed_finding_id: "rev-impact-1" },
+        analysis_complete: true,
+        continuity_status: "clean",
+        coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
+        stale_finding_count: 0,
+        analysis_limitations: [],
+      }) as unknown as RevisionIntelligence
+  let continuityFindings: ContinuityFinding[] = options.activationPending
+    ? [
+        {
+          id: "continuity-finding-1",
+          scan_id: "continuity-scan-1",
+          book_id: "book-1",
+          category: "knowledge",
+          severity: "high",
+          confidence: 0.94,
+          status: "pending",
+          title: "Nora may use gate knowledge before learning it",
+          explanation: "Chapter 1 shows Nora using the blood-oath rule before Chapter 2 establishes how she learned it.",
+          recommendation: "Add an earlier acquisition beat or revise the Chapter 1 action.",
+          subject_type: "character",
+          subject_id: "char-1",
+          subject_label: "Nora Vale",
+          detector_version: "continuity-rules-v1",
+          content_versions: { "1": 1, "2": 2 },
+          coverage: { chapters_analyzed: 3, citation_coverage: 1 },
+          is_stale: false,
+          decision: null,
+          action: null,
+          reason: null,
+          evidence: [
+            {
+              observation_id: "continuity-observation-1",
+              role: "premature_use",
+              evidence_order: 1,
+              subject_type: "character",
+              subject_id: "char-1",
+              subject_label: "Nora Vale",
+              predicate: "knowledge.used",
+              display_value: "the gate needs royal blood",
+              chapter_number: 1,
+              content_version: 1,
+              excerpt: "Nora pressed her cut palm to the gate before anyone explained the blood oath.",
+              confidence: 0.95,
+            },
+            {
+              observation_id: "continuity-observation-2",
+              role: "later_acquisition",
+              evidence_order: 2,
+              subject_type: "character",
+              subject_id: "char-1",
+              subject_label: "Nora Vale",
+              predicate: "knowledge.acquired",
+              display_value: "Kael explains the blood oath",
+              chapter_number: 2,
+              content_version: 2,
+              excerpt: "Kael finally told Nora that royal blood was the only key.",
+              confidence: 0.96,
+            },
+          ],
+          created_at: "2026-06-19T09:00:00Z",
+          updated_at: "2026-06-19T09:00:00Z",
+        },
+      ]
+    : []
   book.hidden_at = null
   book.is_public = false
   const mockUser = {
@@ -2310,6 +2412,7 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     unsubscribed_at: null,
   }
   let bookDetailReadCount = 0
+  let allowanceProcessingContinued = false
 
   const buildBookOverview = () => ({
     book: mockBook,
@@ -2362,11 +2465,31 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     prewriting_check: preWritingCheck,
     story_health: storyHealth,
     writer_workspace: mockWriterWorkspace,
-    revision_intelligence: revisionIntelligence,
+    revision_intelligence: activationRevision,
   })
 
   const buildBookDetailResponse = () => {
     bookDetailReadCount += 1
+    if (manuscriptProcessingMode === "allowance-paused" && !allowanceProcessingContinued) {
+      return {
+        ...mockBook,
+        status: "processing",
+        processing: {
+          ...(mockBook.processing ?? {}),
+          status: "paused",
+          stage: "paused",
+          progress_pct: 50,
+          chapters_completed: 1,
+          chapters_total: 3,
+          processing_run_id: "processing-run-1",
+          pause_reason: "monthly_processed_words",
+          resume_available: true,
+          resume_blockers: [{ kind: "monthly_processed_words", detail: "Monthly processing allowance reached." }],
+          next_chapter_number: 2,
+          retry_available: true,
+        },
+      }
+    }
     if (manuscriptProcessingMode === "refresh-after-two-book-reads") {
       // The manuscript route performs multiple detail reads while the page is
       // still settling; keep one poll cycle visible before switching to ready.
@@ -2478,6 +2601,15 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       return json(route, { ok: true })
     }
 
+    if (path === "/api/v1/billing/checkout" && method === "POST") {
+      const payload = route.request().postDataJSON() as { plan?: string }
+      return json(route, {
+        billing_enabled: false,
+        checkout_url: null,
+        message: `Mock checkout requested for ${payload.plan ?? "unknown"}.`,
+      })
+    }
+
     if (path === "/api/v1/admin/session" && method === "GET") {
       const adminSession = buildAdminSession(admin)
       return adminSession ? json(route, adminSession) : json(route, { detail: "Admin only" }, 403)
@@ -2496,10 +2628,10 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
         fully_configured_plan_count: 4,
         missing_configuration: [],
         plans: [
-          { code: "author_monthly", display_name: "Author", billing_interval: "monthly", price_usd: 29, configured: true, price_id_present: true },
-          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 249, configured: true, price_id_present: true },
-          { code: "architect_monthly", display_name: "Architect", billing_interval: "monthly", price_usd: 49, configured: true, price_id_present: true },
-          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 449, configured: true, price_id_present: true },
+          { code: "author_monthly", display_name: "Author", billing_interval: "monthly", price_usd: 19, configured: true, price_id_present: true },
+          { code: "author_annual", display_name: "Author", billing_interval: "annual", price_usd: 190, configured: true, price_id_present: true },
+          { code: "architect_monthly", display_name: "Architect", billing_interval: "monthly", price_usd: 39, configured: true, price_id_present: true },
+          { code: "architect_annual", display_name: "Architect", billing_interval: "annual", price_usd: 390, configured: true, price_id_present: true },
         ],
         webhook_endpoint_path: "/api/v1/webhooks/paddle",
         supported_webhook_events: ["transaction.completed", "subscription.updated"],
@@ -2617,6 +2749,94 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       ])
     }
 
+    if (path === "/api/v1/admin/metrics" && method === "GET") {
+      return json(route, {
+        users: 42,
+        books: 84,
+        characters: 320,
+        chunks_indexed: 1200,
+        summaries_cached: 96,
+        redis_memory_mb: 18,
+        redis_key_count: 240,
+        redis_connected_clients: 3,
+        redis_key_prefix_counts: {
+          "advisor:book": 12,
+          "reader:summary": 34,
+        },
+        redis_key_scan_truncated: false,
+      })
+    }
+
+    if (path === "/api/v1/admin/queue-depth" && method === "GET") {
+      return json(route, {
+        extraction: 2,
+        analysis: 1,
+        embedding: 0,
+        intelligence: 3,
+      })
+    }
+
+    if (path === "/api/v1/admin/task-executions" && method === "GET") {
+      return json(route, [])
+    }
+
+    if (path === "/api/v1/admin/operations-metrics" && method === "GET") {
+      return json(route, {
+        total_executions: 128,
+        terminal_failures: 0,
+        failure_rate: 0,
+        oldest_job_age_seconds: 9,
+        average_task_duration_seconds: 12,
+        paused_runs: 1,
+        queue_depth: 6,
+        retry_count: 4,
+      })
+    }
+
+    if (path === "/api/v1/admin/ai-quality" && method === "GET") {
+      return json(route, {
+        label: "Review-confirmed precision proxy",
+        reviewed: 12,
+        accepted: 10,
+        acceptance_rate: 0.83,
+        character_corrections_after_promotion: 1,
+        relationship_corrections: 2,
+        breakdown: [],
+      })
+    }
+
+    if (path === "/api/v1/admin/contribution-margin" && method === "GET") {
+      return json(route, {
+        currency: "USD",
+        recognized_net_revenue: 420,
+        llm_cost: 38,
+        worker_cost: 24,
+        storage_cost: 3,
+        contribution_margin: 355,
+        allocation_basis: "E2E mock",
+      })
+    }
+
+    if (path === "/api/v1/admin/support-incidents" && method === "GET") {
+      return json(route, [])
+    }
+
+    if (path === "/api/v1/admin/subscription-metrics" && method === "GET") {
+      return json(route, {
+        cohort_start: "2026-06-01",
+        cohort_end: "2026-06-29",
+        trial_starts: 20,
+        trial_to_paid_conversions: 8,
+        trial_to_paid_rate: 0.4,
+        cancellation_events: 3,
+        resolved_cancellation_events: 2,
+        unresolved_cancellation_events: 1,
+        reactivated_after_cancellation: 1,
+        churned_after_cancellation: 2,
+        post_cancel_churn_rate: 0.67,
+      })
+    }
+
     if (path === "/api/v1/auth/me/username" && method === "PATCH") {
       const nextUsername = url.searchParams.get("username")?.trim()
       if (!nextUsername || nextUsername.length < 3) {
@@ -2640,6 +2860,26 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
       mockEmailPreferences.unsubscribed_all = !mockEmailPreferences.product_updates && !mockEmailPreferences.marketing
       mockEmailPreferences.unsubscribed_at = mockEmailPreferences.unsubscribed_all ? "2026-05-23T12:00:00Z" : null
       return json(route, mockEmailPreferences)
+    }
+
+    if (path === "/api/v1/email/unsubscribe" && method === "POST") {
+      const payload = route.request().postDataJSON() as { token?: string } | null
+      if (!payload?.token) {
+        return json(route, { detail: "Unsubscribe token is required" }, 400)
+      }
+      mockEmailPreferences = {
+        ...mockEmailPreferences,
+        product_updates: false,
+        marketing: false,
+        unsubscribed_all: true,
+        unsubscribed_at: "2026-06-29T07:00:00Z",
+      }
+      return json(route, {
+        email: mockEmailPreferences.email,
+        product_updates: mockEmailPreferences.product_updates,
+        marketing: mockEmailPreferences.marketing,
+        unsubscribed_all: mockEmailPreferences.unsubscribed_all,
+      })
     }
 
     if (path === "/api/v1/notifications" && method === "GET") {
@@ -2682,6 +2922,29 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
 
     if (path === "/api/v1/books/book-1" && method === "GET") {
       return json(route, buildBookDetailResponse())
+    }
+
+    if (path === "/api/v1/books/book-1/processing/continue" && method === "POST") {
+      allowanceProcessingContinued = true
+      mockBook = {
+        ...mockBook,
+        status: "processing",
+        processing: {
+          ...(mockBook.processing ?? {}),
+          status: "processing",
+          stage: "queued",
+          progress_pct: 50,
+          chapters_completed: 1,
+          chapters_total: 3,
+          processing_run_id: "processing-run-1",
+          pause_reason: null,
+          resume_available: false,
+          resume_blockers: [],
+          next_chapter_number: 2,
+          retry_available: false,
+        },
+      }
+      return json(route, mockBook.processing)
     }
 
     if (path === "/api/v1/books/book-1/permanent" && method === "DELETE") {
@@ -3112,7 +3375,67 @@ export async function installMockApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/api/v1/books/book-1/revision-intelligence" && method === "GET") {
-      return json(route, revisionIntelligence)
+      return json(route, activationRevision)
+    }
+
+    if (path === "/api/v1/books/book-1/continuity-findings" && method === "GET") {
+      return json(route, continuityFindings)
+    }
+
+    if (path === "/api/v1/books/book-1/continuity-scans" && method === "POST") {
+      return json(route, {
+        id: "continuity-scan-1",
+        book_id: "book-1",
+        scope: "full_book",
+        status: "ready",
+        continuity_status: continuityFindings.length ? "issues_found" : "clean",
+        detector_version: "continuity-rules-v1",
+        chapter_versions: { "1": 1, "2": 2, "3": 1 },
+        coverage: { chapters_analyzed: 3, observation_count: 18, citation_coverage: 1 },
+        metrics: { cost_usd_per_100k_words: 0, latency_ms_per_100k_words: 2400 },
+        word_count: 2400,
+        duration_ms: 58,
+        cost_usd: 0,
+        error_detail: null,
+        finding_count: continuityFindings.length,
+        stale_finding_count: 0,
+        findings: continuityFindings,
+        started_at: "2026-06-19T09:00:00Z",
+        completed_at: "2026-06-19T09:00:00Z",
+        created_at: "2026-06-19T09:00:00Z",
+      })
+    }
+
+    const continuityDecisionMatch = path.match(/^\/api\/v1\/books\/book-1\/continuity-findings\/([^/]+)$/)
+    if (continuityDecisionMatch && method === "PATCH") {
+      const body = route.request().postDataJSON() as {
+        decision?: ContinuityFinding["decision"]
+        action?: string | null
+        reason?: string | null
+      } | null
+      continuityFindings = continuityFindings.map((finding) =>
+        finding.id === continuityDecisionMatch[1]
+          ? {
+              ...finding,
+              status: body?.decision ?? finding.status,
+              decision: body?.decision ?? finding.decision,
+              action: body?.action ?? finding.action,
+              reason: body?.reason ?? finding.reason,
+            }
+          : finding,
+      )
+      return json(route, continuityFindings.find((finding) => finding.id === continuityDecisionMatch[1]))
+    }
+
+    if (path.match(/^\/api\/v1\/books\/book-1\/revision-findings\/[^/]+\/decision$/) && method === "POST") {
+      const body = route.request().postDataJSON() as { decision?: string; action?: string } | null
+      activationRevision = {
+        ...activationRevision,
+        activation: body?.decision === "accepted"
+          ? { eligible: false, completed: true, completed_at: "2026-06-19T10:00:00Z", completion_action: body.action ?? "added_to_revision_plan", completed_finding_id: "rev-impact-1" }
+          : activationRevision.activation,
+      }
+      return json(route, activationRevision)
     }
 
     if (path === "/api/v1/books/book-1/workspace/tree" && method === "GET") {

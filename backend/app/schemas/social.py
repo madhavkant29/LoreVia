@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 MessagingPermission = Literal["anyone", "friends_only"]
 FriendState = Literal["none", "outgoing_pending", "incoming_pending", "accepted"]
 

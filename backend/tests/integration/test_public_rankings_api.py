@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -102,31 +102,35 @@ async def test_ranked_public_uploads_endpoint_returns_ranked_visible_books(clien
         public_share_status="approved",
     )
     snapshot_date = datetime.now(UTC).date()
-    db.add_all([
-        PublicBookRanking(
-            book_id=visible_book.id,
-            surface="creator_uploads",
-            ranking_key="most_popular",
-            time_window="monthly",
-            snapshot_date=snapshot_date,
-            rank_position=1,
-            score=412.5,
-            primary_timestamp=visible_book.public_updated_at,
-        ),
-        PublicBookRanking(
-            book_id=hidden_book.id,
-            surface="creator_uploads",
-            ranking_key="most_popular",
-            time_window="monthly",
-            snapshot_date=snapshot_date,
-            rank_position=2,
-            score=380.0,
-            primary_timestamp=hidden_book.public_updated_at,
-        ),
-    ])
+    db.add_all(
+        [
+            PublicBookRanking(
+                book_id=visible_book.id,
+                surface="creator_uploads",
+                ranking_key="most_popular",
+                time_window="monthly",
+                snapshot_date=snapshot_date,
+                rank_position=1,
+                score=412.5,
+                primary_timestamp=visible_book.public_updated_at,
+            ),
+            PublicBookRanking(
+                book_id=hidden_book.id,
+                surface="creator_uploads",
+                ranking_key="most_popular",
+                time_window="monthly",
+                snapshot_date=snapshot_date,
+                rank_position=2,
+                score=380.0,
+                primary_timestamp=hidden_book.public_updated_at,
+            ),
+        ]
+    )
     await db.commit()
 
-    response = await client.get("/api/v1/public/rankings/uploads?ranking=most_popular&time_window=monthly")
+    response = await client.get(
+        "/api/v1/public/rankings/uploads?ranking=most_popular&time_window=monthly"
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -140,8 +144,12 @@ async def test_ranked_public_uploads_endpoint_returns_ranked_visible_books(clien
 @pytest.mark.asyncio
 async def test_ranked_beta_novels_endpoint_returns_open_ranked_threads_only(client, db):
     author = await _create_user(db, email="beta-rankings@lorevia.test", tier="author")
-    ranked_book = await _create_book(db, author_id=author.id, title="Sky Citadel", is_public=False, public_status="draft")
-    closed_book = await _create_book(db, author_id=author.id, title="Glass Current", is_public=False, public_status="draft")
+    ranked_book = await _create_book(
+        db, author_id=author.id, title="Sky Citadel", is_public=False, public_status="draft"
+    )
+    closed_book = await _create_book(
+        db, author_id=author.id, title="Glass Current", is_public=False, public_status="draft"
+    )
     snapshot_date = datetime.now(UTC).date()
 
     open_post = BookForumPost(
@@ -168,31 +176,35 @@ async def test_ranked_beta_novels_endpoint_returns_open_ranked_threads_only(clie
     await db.commit()
     await db.refresh(open_post)
 
-    db.add_all([
-        PublicBookRanking(
-            book_id=ranked_book.id,
-            surface="beta_novels",
-            ranking_key="top_rated",
-            time_window="monthly",
-            snapshot_date=snapshot_date,
-            rank_position=1,
-            score=501.0,
-            primary_timestamp=ranked_book.public_updated_at,
-        ),
-        PublicBookRanking(
-            book_id=closed_book.id,
-            surface="beta_novels",
-            ranking_key="top_rated",
-            time_window="monthly",
-            snapshot_date=snapshot_date,
-            rank_position=2,
-            score=480.0,
-            primary_timestamp=closed_book.public_updated_at,
-        ),
-    ])
+    db.add_all(
+        [
+            PublicBookRanking(
+                book_id=ranked_book.id,
+                surface="beta_novels",
+                ranking_key="top_rated",
+                time_window="monthly",
+                snapshot_date=snapshot_date,
+                rank_position=1,
+                score=501.0,
+                primary_timestamp=ranked_book.public_updated_at,
+            ),
+            PublicBookRanking(
+                book_id=closed_book.id,
+                surface="beta_novels",
+                ranking_key="top_rated",
+                time_window="monthly",
+                snapshot_date=snapshot_date,
+                rank_position=2,
+                score=480.0,
+                primary_timestamp=closed_book.public_updated_at,
+            ),
+        ]
+    )
     await db.commit()
 
-    response = await client.get("/api/v1/public/rankings/beta-novels?ranking=top_rated&time_window=monthly")
+    response = await client.get(
+        "/api/v1/public/rankings/beta-novels?ranking=top_rated&time_window=monthly"
+    )
 
     assert response.status_code == 200
     payload = response.json()

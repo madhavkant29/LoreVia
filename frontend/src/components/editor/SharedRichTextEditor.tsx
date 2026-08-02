@@ -14,6 +14,7 @@ import Color from "@tiptap/extension-color"
 import TaskList from "@tiptap/extension-task-list"
 import TaskItem from "@tiptap/extension-task-item"
 
+import { usePromptDialog } from "@/components/ui/PromptDialog"
 import { Tooltip } from "@/components/ui/Tooltip"
 import type { Character } from "@/types/character"
 
@@ -208,6 +209,18 @@ function colorValue(value: string) {
   return value.trim() || "#0f172a"
 }
 
+function validateLinkHref(value: string) {
+  const href = value.trim()
+  if (!href) return "Enter a URL."
+  if (href.startsWith("#") || href.startsWith("/")) return null
+  try {
+    const url = new URL(href)
+    return ["http:", "https:", "mailto:"].includes(url.protocol) ? null : "Use http, https, mailto, anchor, or relative links."
+  } catch {
+    return "Enter a valid URL."
+  }
+}
+
 function ToolbarButton({
   title,
   className,
@@ -265,6 +278,7 @@ export function EditorToolbar({
 }) {
   const [showMentionPicker, setShowMentionPicker] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const prompt = usePromptDialog()
   const editor = currentEditor(editorKey)
 
   const shellClass = compact
@@ -279,6 +293,20 @@ export function EditorToolbar({
   const run = (fn: (instance: NonNullable<typeof editor>) => void) => {
     if (!editor) return
     fn(editor)
+  }
+
+  const insertLink = async () => {
+    const href = await prompt({
+      title: "Insert link",
+      body: "Add a safe URL, anchor, or relative link.",
+      label: "URL",
+      placeholder: "https://example.com",
+      confirmLabel: "Insert link",
+      validate: validateLinkHref,
+    })
+    const cleanHref = href?.trim()
+    if (!cleanHref) return
+    run((instance) => instance.chain().focus().extendMarkRange("link").setLink({ href: cleanHref }).run())
   }
 
   return (
@@ -321,11 +349,7 @@ export function EditorToolbar({
         <ToolbarButton title="Align center" onClick={() => run((instance) => instance.chain().focus().setTextAlign("center").run())} className={buttonClass}>≣</ToolbarButton>
         <ToolbarButton title="Align right" onClick={() => run((instance) => instance.chain().focus().setTextAlign("right").run())} className={buttonClass}>≡</ToolbarButton>
         <span className={dividerClass} />
-        <ToolbarButton title="Insert link" onClick={() => {
-          const href = window.prompt("Enter a URL")
-          if (!href) return
-          run((instance) => instance.chain().focus().extendMarkRange("link").setLink({ href }).run())
-        }} className={buttonClass}>↗</ToolbarButton>
+        <ToolbarButton title="Insert link" onClick={() => void insertLink()} className={buttonClass}>↗</ToolbarButton>
         <ToolbarButton title="Insert image" onClick={() => fileInputRef.current?.click()} className={buttonClass}>▧</ToolbarButton>
         <div className="relative">
           <ToolbarButton title="Mention character" onClick={() => setShowMentionPicker((current) => !current)} className={buttonClass}>@</ToolbarButton>

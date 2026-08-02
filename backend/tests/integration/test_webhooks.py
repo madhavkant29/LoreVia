@@ -1,9 +1,9 @@
 import hashlib
 import hmac
 import json
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -18,7 +18,7 @@ def _sign_payload(payload: dict, timestamp: int, secret: str) -> tuple[bytes, st
     raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     digest = hmac.new(
         secret.encode("utf-8"),
-        f"{timestamp}:{raw_body.decode('utf-8')}".encode("utf-8"),
+        f"{timestamp}:{raw_body.decode('utf-8')}".encode(),
         hashlib.sha256,
     ).hexdigest()
     return raw_body, f"ts={timestamp};h1={digest}"
@@ -39,7 +39,9 @@ def _patch_service_session(monkeypatch, db) -> None:
     async def _db_session_factory():
         yield db
 
-    monkeypatch.setattr("app.services.paddle_webhook_service.AsyncSessionLocal", _db_session_factory)
+    monkeypatch.setattr(
+        "app.services.paddle_webhook_service.AsyncSessionLocal", _db_session_factory
+    )
 
 
 async def _create_user(db) -> User:
@@ -127,15 +129,24 @@ async def test_paddle_webhook_rejects_invalid_signature(monkeypatch):
     secret = "pdl_secret_test"
     payload = {"event_id": "evt_123", "event_type": "subscription.updated", "data": {}}
 
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: 1_700_000_060)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
         response = await client.post(
             "/api/v1/webhooks/paddle",
             content=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-            headers={"Paddle-Signature": "ts=1700000000;h1=deadbeef", "Content-Type": "application/json"},
+            headers={
+                "Paddle-Signature": "ts=1700000000;h1=deadbeef",
+                "Content-Type": "application/json",
+            },
         )
 
     assert response.status_code == 400
@@ -149,11 +160,17 @@ async def test_paddle_webhook_rejects_stale_signature(monkeypatch):
     payload = {"event_id": "evt_123", "event_type": "subscription.updated", "data": {}}
     raw_body, signature = _sign_payload(payload, timestamp, secret)
 
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 301)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
         response = await client.post(
             "/api/v1/webhooks/paddle",
             content=raw_body,
@@ -175,12 +192,20 @@ async def test_paddle_webhook_accepts_valid_recent_signature(monkeypatch):
         assert event["event_id"] == "evt_123"
         return {"received": True}
 
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
-    monkeypatch.setattr("app.api.v1.routes.webhooks.process_paddle_webhook", _fake_process_paddle_webhook)
+    monkeypatch.setattr(
+        "app.api.v1.routes.webhooks.process_paddle_webhook", _fake_process_paddle_webhook
+    )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url=_trusted_base_url()) as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
         response = await client.post(
             "/api/v1/webhooks/paddle",
             content=raw_body,
@@ -192,7 +217,9 @@ async def test_paddle_webhook_accepts_valid_recent_signature(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_paddle_webhook_deduplicates_processed_events_and_sends_confirmation_once(client, db, monkeypatch):
+async def test_paddle_webhook_deduplicates_processed_events_and_sends_confirmation_once(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -202,8 +229,12 @@ async def test_paddle_webhook_deduplicates_processed_events_and_sends_confirmati
         sent_emails.append((email, plan))
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
     monkeypatch.setattr(
         "app.services.paddle_webhook_service.send_subscription_confirmation",
@@ -238,33 +269,39 @@ async def test_paddle_webhook_deduplicates_processed_events_and_sends_confirmati
     assert user.tier == "author"
 
     subscription = (
-        await db.execute(
-            select(Subscription).where(Subscription.user_id == user.id)
-        )
-    ).scalars().one()
+        (await db.execute(select(Subscription).where(Subscription.user_id == user.id)))
+        .scalars()
+        .one()
+    )
     assert subscription.plan == "author_annual"
     assert subscription.status == "active"
     assert subscription.paddle_transaction_id == "txn_123"
 
     subscription_events = (
-        await db.execute(
-            select(SubscriptionEvent).where(SubscriptionEvent.user_id == user.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(SubscriptionEvent).where(SubscriptionEvent.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert [event.event_type for event in subscription_events] == ["subscription_activated"]
 
     webhook_event = (
-        await db.execute(
-            select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == "evt_txn_complete")
+        (
+            await db.execute(
+                select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == "evt_txn_complete")
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
     assert webhook_event.processing_status == "processed"
     assert webhook_event.duplicate_count == 1
     assert sent_emails == [(user.email, "author")]
 
 
 @pytest.mark.asyncio
-async def test_paddle_webhook_sends_cancellation_email_only_for_final_cancellation(client, db, monkeypatch):
+async def test_paddle_webhook_sends_cancellation_email_only_for_final_cancellation(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -274,8 +311,12 @@ async def test_paddle_webhook_sends_cancellation_email_only_for_final_cancellati
         sent_emails.append((email, plan))
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr(
         "app.services.paddle_webhook_service.send_subscription_cancellation",
         _fake_send_subscription_cancellation,
@@ -347,8 +388,12 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, mo
         return await original_record_subscription_event(*args, **kwargs)
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
     monkeypatch.setattr(
         "app.services.paddle_webhook_service.record_subscription_event",
@@ -371,10 +416,16 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, mo
         )
 
     webhook_event = (
-        await db.execute(
-            select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == "evt_retry_activate")
+        (
+            await db.execute(
+                select(PaddleWebhookEvent).where(
+                    PaddleWebhookEvent.event_id == "evt_retry_activate"
+                )
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
     assert webhook_event.processing_status == "failed"
     assert webhook_event.last_error in {
         "transient billing write failure",
@@ -394,18 +445,24 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, mo
     assert user.tier == "author"
 
     webhook_event = (
-        await db.execute(
-            select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == "evt_retry_activate")
+        (
+            await db.execute(
+                select(PaddleWebhookEvent).where(
+                    PaddleWebhookEvent.event_id == "evt_retry_activate"
+                )
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
     assert webhook_event.processing_status == "processed"
     assert webhook_event.duplicate_count == 1
 
     subscription_events = (
-        await db.execute(
-            select(SubscriptionEvent).where(SubscriptionEvent.user_id == user.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(SubscriptionEvent).where(SubscriptionEvent.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert [event.event_type for event in subscription_events] == ["subscription_activated"]
 
 
@@ -416,8 +473,12 @@ async def test_paddle_webhook_subscription_lifecycle_and_transaction_sync(client
     user = await _create_user(db)
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     cases = [
@@ -442,7 +503,9 @@ async def test_paddle_webhook_subscription_lifecycle_and_transaction_sync(client
             status=status,
         )
         raw_body, signature = _sign_payload(payload, timestamp + index, secret)
-        monkeypatch.setattr("app.services.paddle_service.time.time", lambda value=timestamp + index + 60: value)
+        monkeypatch.setattr(
+            "app.services.paddle_service.time.time", lambda value=timestamp + index + 60: value
+        )
         response = await client.post(
             "/api/v1/webhooks/paddle",
             content=raw_body,
@@ -454,22 +517,26 @@ async def test_paddle_webhook_subscription_lifecycle_and_transaction_sync(client
         assert user.tier == expected_tier
 
     subscription = (
-        await db.execute(
-            select(Subscription).where(Subscription.user_id == user.id)
-        )
-    ).scalars().one()
+        (await db.execute(select(Subscription).where(Subscription.user_id == user.id)))
+        .scalars()
+        .one()
+    )
     assert subscription.paddle_customer_id == "ctm_123"
     assert subscription.paddle_sub_id == "sub_123"
     assert subscription.paddle_transaction_id == "txn_123"
     assert subscription.status == "canceled"
 
     subscription_events = (
-        await db.execute(
-            select(SubscriptionEvent)
-            .where(SubscriptionEvent.user_id == user.id)
-            .order_by(SubscriptionEvent.occurred_at.asc())
+        (
+            await db.execute(
+                select(SubscriptionEvent)
+                .where(SubscriptionEvent.user_id == user.id)
+                .order_by(SubscriptionEvent.occurred_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [event.event_type for event in subscription_events] == [
         "subscription_activated",
         "subscription_past_due",
@@ -485,11 +552,19 @@ async def test_paddle_webhook_ignores_unknown_events_but_records_them(client, db
     timestamp = 1_700_000_000
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
-    payload = {"event_id": "evt_unknown", "event_type": "subscription.foo", "data": {"id": "sub_123"}}
+    payload = {
+        "event_id": "evt_unknown",
+        "event_type": "subscription.foo",
+        "data": {"id": "sub_123"},
+    }
     raw_body, signature = _sign_payload(payload, timestamp, secret)
 
     response = await client.post(
@@ -502,21 +577,31 @@ async def test_paddle_webhook_ignores_unknown_events_but_records_them(client, db
     assert response.json() == {"received": True, "ignored": True}
 
     webhook_event = (
-        await db.execute(
-            select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == "evt_unknown")
+        (
+            await db.execute(
+                select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == "evt_unknown")
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
     assert webhook_event.processing_status == "ignored"
 
 
 @pytest.mark.asyncio
-async def test_paddle_webhook_fails_when_supported_event_cannot_be_linked_to_local_user(client, db, monkeypatch):
+async def test_paddle_webhook_fails_when_supported_event_cannot_be_linked_to_local_user(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     payload = _event_payload(
@@ -536,15 +621,23 @@ async def test_paddle_webhook_fails_when_supported_event_cannot_be_linked_to_loc
         )
 
     webhook_event = (
-        await db.execute(
-            select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == "evt_unlinked_paid_event")
+        (
+            await db.execute(
+                select(PaddleWebhookEvent).where(
+                    PaddleWebhookEvent.event_id == "evt_unlinked_paid_event"
+                )
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
     assert webhook_event.processing_status == "failed"
 
 
 @pytest.mark.asyncio
-async def test_transaction_completed_does_not_overwrite_existing_paused_status(client, db, monkeypatch):
+async def test_transaction_completed_does_not_overwrite_existing_paused_status(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -559,8 +652,12 @@ async def test_transaction_completed_does_not_overwrite_existing_paused_status(c
     await db.commit()
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     payload = _event_payload(
@@ -582,15 +679,17 @@ async def test_transaction_completed_does_not_overwrite_existing_paused_status(c
     assert user.tier == "free"
 
     refreshed_subscription = (
-        await db.execute(
-            select(Subscription).where(Subscription.user_id == user.id)
-        )
-    ).scalars().one()
+        (await db.execute(select(Subscription).where(Subscription.user_id == user.id)))
+        .scalars()
+        .one()
+    )
     assert refreshed_subscription.status == "paused"
 
 
 @pytest.mark.asyncio
-async def test_paddle_webhook_adjustment_approval_updates_refund_review_status(client, db, monkeypatch):
+async def test_paddle_webhook_adjustment_approval_updates_refund_review_status(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -613,8 +712,12 @@ async def test_paddle_webhook_adjustment_approval_updates_refund_review_status(c
     await db.commit()
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     payload = _adjustment_payload(
@@ -639,7 +742,9 @@ async def test_paddle_webhook_adjustment_approval_updates_refund_review_status(c
 
 
 @pytest.mark.asyncio
-async def test_paddle_webhook_adjustment_rejection_leaves_entitlements_unchanged(client, db, monkeypatch):
+async def test_paddle_webhook_adjustment_rejection_leaves_entitlements_unchanged(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -673,8 +778,12 @@ async def test_paddle_webhook_adjustment_rejection_leaves_entitlements_unchanged
     await db.commit()
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     payload = _adjustment_payload(
@@ -699,7 +808,9 @@ async def test_paddle_webhook_adjustment_rejection_leaves_entitlements_unchanged
 
 
 @pytest.mark.asyncio
-async def test_refund_adjustment_does_not_downgrade_until_subscription_canceled_webhook(client, db, monkeypatch):
+async def test_refund_adjustment_does_not_downgrade_until_subscription_canceled_webhook(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -734,8 +845,12 @@ async def test_refund_adjustment_does_not_downgrade_until_subscription_canceled_
     await db.commit()
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     adjustment_payload = _adjustment_payload(
@@ -782,7 +897,9 @@ async def test_refund_adjustment_does_not_downgrade_until_subscription_canceled_
 
 
 @pytest.mark.asyncio
-async def test_subscription_canceled_webhook_closes_refund_follow_up_after_adjustment_approval(client, db, monkeypatch):
+async def test_subscription_canceled_webhook_closes_refund_follow_up_after_adjustment_approval(
+    client, db, monkeypatch
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -824,8 +941,12 @@ async def test_subscription_canceled_webhook_closes_refund_follow_up_after_adjus
     await db.commit()
 
     _patch_service_session(monkeypatch, db)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False)
-    monkeypatch.setattr("app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
     monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
 
     cancel_payload = _event_payload(

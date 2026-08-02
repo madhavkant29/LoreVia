@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.utils import notification_utils
 from app.utils.notification_utils import (
     BookReadyStats,
     _book_ready_diagnostic_totals,
@@ -12,7 +13,6 @@ from app.utils.notification_utils import (
     collect_book_ready_stats,
     sync_revision_digest_notifications,
 )
-from app.utils import notification_utils
 
 
 def test_build_revision_digest_notification_includes_revision_summary():
@@ -41,11 +41,16 @@ def test_build_revision_digest_notification_includes_revision_summary():
     assert notification is not None
     assert notification.kind == "revision_digest"
     assert notification.title == "2 revision risks surfaced in Sky of Ash"
-    assert notification.body == "LoreVia found 5 active revision items, including 2 high-severity risks."
+    assert (
+        notification.body
+        == "LoreVia found 5 active revision items, including 2 high-severity risks."
+    )
     assert notification.data["active_item_count"] == 5
     assert notification.data["high_severity_count"] == 2
     assert notification.data["top_item_title"] == "Chapter 2 assumption may break later payoff"
-    assert notification.data["signature"] == "5:2:You changed Chapter 2: removed silver gate.:impact-1"
+    assert (
+        notification.data["signature"] == "5:2:You changed Chapter 2: removed silver gate.:impact-1"
+    )
 
 
 @pytest.mark.asyncio
@@ -152,13 +157,18 @@ def test_build_revision_digest_notification_prefers_active_high_severity_top_iss
     notification = build_revision_digest_notification(book, payload)
 
     assert notification is not None
-    assert notification.body == "LoreVia found 3 active revision items, including 1 high-severity risk."
+    assert (
+        notification.body
+        == "LoreVia found 3 active revision items, including 1 high-severity risk."
+    )
     assert notification.data["recent_edit_label"] == "You changed Chapter 2."
     assert notification.data["top_item_title"] == "Gate rule contradiction"
 
 
 def test_build_revision_digest_notification_returns_none_when_no_active_items():
-    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Sky of Ash", created_at=datetime.now(UTC))
+    book = SimpleNamespace(
+        id=uuid.uuid4(), user_id=uuid.uuid4(), title="Sky of Ash", created_at=datetime.now(UTC)
+    )
     payload = {
         "summary": {
             "hero_message": "Clear",
@@ -173,7 +183,9 @@ def test_build_revision_digest_notification_returns_none_when_no_active_items():
 
 
 def test_build_book_ready_notification_stays_honest_while_analysis_is_pending():
-    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Metamorphosis", writer_workspace={})
+    book = SimpleNamespace(
+        id=uuid.uuid4(), user_id=uuid.uuid4(), title="Metamorphosis", writer_workspace={}
+    )
     stats = BookReadyStats(
         character_count=3,
         relationship_count=1,
@@ -196,7 +208,9 @@ def test_build_book_ready_notification_stays_honest_while_analysis_is_pending():
 
 
 def test_build_book_ready_notification_reports_final_stats_once_analysis_finishes():
-    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Metamorphosis", writer_workspace={})
+    book = SimpleNamespace(
+        id=uuid.uuid4(), user_id=uuid.uuid4(), title="Metamorphosis", writer_workspace={}
+    )
     stats = BookReadyStats(
         character_count=7,
         relationship_count=4,
@@ -311,7 +325,9 @@ async def test_collect_book_ready_stats_ignores_empty_chapters(db):
     user = User(email="ready-empty@lorevia.app", username="readyempty", password_hash="hash")
     db.add(user)
     await db.flush()
-    book = Book(user_id=user.id, title="Ready Draft", format="txt", s3_key="ready.txt", status="processing")
+    book = Book(
+        user_id=user.id, title="Ready Draft", format="txt", s3_key="ready.txt", status="processing"
+    )
     db.add(book)
     await db.flush()
     populated = Chapter(book_id=book.id, number=1, s3_key="chapter-1.txt", word_count=10)

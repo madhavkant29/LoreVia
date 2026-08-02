@@ -6,6 +6,7 @@ for all existing characters in the database using the new scoring system.
 
 Run with: python scripts/backfill_character_classification.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,7 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.models.character import Character
-from app.utils.character_utils import update_character_classification
+from app.utils.characters.classification import update_character_classification
 from app.utils.logging import get_logger
 
 log = get_logger("lorevia.backfill.character_classification")

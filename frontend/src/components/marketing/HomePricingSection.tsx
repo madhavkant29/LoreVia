@@ -38,24 +38,21 @@ const marketingPricingContent = pricingTiers.map((tier) => ({
       : tier.name === "Author"
         ? [
             "Everything in Free",
-            "15 uploads",
+            "2M active words and 1M processed words monthly",
+            "5 GB source storage",
             "30 Story Advisor turns per day",
             "30 continuity and editorial scans per day",
             "Manuscript editor, notes, summaries, and search",
           ]
         : [
             "Everything in Author",
-            "Unlimited uploads",
+            "8M active words and 4M processed words monthly",
+            "25 GB source storage",
             "60 Story Advisor turns per day",
             "60 continuity and editorial scans per day",
             "Multi-book continuity",
           ],
-  cta:
-    tier.name === "Free"
-      ? "Get started free"
-      : tier.name === "Author"
-        ? "Start free trial"
-        : "Start architect trial",
+  cta: "Analyze my manuscript",
 }))
 
 export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
@@ -93,7 +90,9 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
       </div>
 
       <p className="mt-5 text-center text-sm text-[#8fa19a]">
-        Free stays available. Paid plans include a 10-day trial. Cancel anytime.
+        {billingCycle === "annual"
+          ? "Get two months free with yearly billing."
+          : "Includes a 10-day Author trial. No payment required."}
       </p>
 
       <div className="mt-10 grid gap-5 xl:grid-cols-3">
@@ -125,7 +124,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
                   <p className="mt-4 text-sm leading-7 text-[#aeb9b3]">{tier.subtitle}</p>
                 </div>
 
-                <div className="mt-8 min-h-[5rem]">
+                <div className="mt-8 min-h-[8rem]">
                   <div className="flex items-end gap-2">
                     <span className="text-5xl font-semibold tracking-tight text-white">${price}</span>
                     {suffix ? <span className="pb-1 text-sm text-[#8fa19a]">{suffix}</span> : null}
@@ -134,6 +133,15 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
                     <p className="mt-3 text-sm font-medium text-[#86decd]">Save ${savings} with yearly billing</p>
                   ) : (
                     <div className="mt-3 h-[1.5rem]" aria-hidden="true" />
+                  )}
+                  {tier.access === "paid" ? (
+                    <p className="mt-2 text-sm text-[#8fa19a]">
+                      {billingCycle === "annual"
+                        ? `Billed yearly at $${price}/year`
+                        : `10 days free, then $${price}/mo`}
+                    </p>
+                  ) : (
+                    <div className="mt-2 h-5" aria-hidden="true" />
                   )}
                 </div>
 

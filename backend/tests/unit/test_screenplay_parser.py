@@ -1,8 +1,8 @@
 """Unit tests for screenplay parsing primitives."""
 
 from app.parsers.screenplay_parser import (
-    DialogueElement,
     Character,
+    DialogueElement,
     extract_dialogue_from_scene,
     parse_screenplay,
 )
@@ -25,8 +25,14 @@ I'm trying.
     assert len(scenes) == 1
     scene = scenes[0]
     assert scene.text == "INT. HALLWAY - NIGHT"
-    assert any(isinstance(element, Character) and element.name == "MAYA" and element.extension == "O.S." for element in scene.elements)
-    assert any(isinstance(element, DialogueElement) and "Open the door." in element.text for element in scene.elements)
+    assert any(
+        isinstance(element, Character) and element.name == "MAYA" and element.extension == "O.S."
+        for element in scene.elements
+    )
+    assert any(
+        isinstance(element, DialogueElement) and "Open the door." in element.text
+        for element in scene.elements
+    )
 
     dialogue = extract_dialogue_from_scene(scene)
 

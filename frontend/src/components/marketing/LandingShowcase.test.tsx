@@ -8,8 +8,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { LANDING_SHOWCASE_VISUALS, LandingShowcase } from "./LandingShowcase"
 
 vi.mock("next/image", () => ({
-  default: ({ alt, src, className }: { alt: string; src: string; className?: string }) => (
-    <img alt={alt} className={className} src={src} />
+  default: ({ alt, src, className, loading }: { alt: string; src: string; className?: string; loading?: "eager" | "lazy" }) => (
+    <img alt={alt} className={className} src={src} loading={loading} />
   ),
 }))
 
@@ -167,6 +167,14 @@ describe("LandingShowcase", () => {
 
     expect(view.querySelector("img.object-cover")).toBeNull()
     expect(view.querySelector("img.object-contain")).not.toBeNull()
+  })
+
+  it("lazy loads every below-fold showcase screenshot", () => {
+    const view = renderComponent(<LandingShowcase />)
+    const images = Array.from(view.querySelectorAll("img"))
+
+    expect(images.length).toBeGreaterThan(0)
+    expect(images.every((image) => image.getAttribute("loading") === "lazy")).toBe(true)
   })
 })
 

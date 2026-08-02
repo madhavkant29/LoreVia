@@ -38,6 +38,18 @@ export type ConfirmDialogConfig = {
   tone?: "default" | "danger"
 }
 
+export type PromptDialogConfig = {
+  title: string
+  body?: ReactNode
+  label: string
+  initialValue?: string
+  placeholder?: string
+  confirmLabel?: string
+  cancelLabel?: string
+  multiline?: boolean
+  validate?: (value: string) => string | null
+}
+
 export type ToastMessage = {
   id: string
   title?: string

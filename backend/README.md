@@ -42,6 +42,22 @@ Preferred local test commands for this repo:
 docker compose -f docker-compose-local.yml exec -T api pytest tests -v
 ```
 
+Read-only local preflight before backend verification:
+
+```powershell
+docker compose -f docker-compose-local.yml exec -T api python scripts/preflight_local.py
+```
+
+Disposable local migration gate:
+
+```powershell
+docker compose -f docker-compose-local.yml exec -T api python scripts/verify_migrations_temp_db.py
+```
+
+By default this verifies the current head can upgrade, downgrade to its immediate
+parent, and upgrade again. Use `--downgrade-target base` only when intentionally
+checking the full historical downgrade path.
+
 Notes:
 
 - Prefer Docker Compose Local so tests run against the repo's pinned app image, Postgres, Redis, and extensions.

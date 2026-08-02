@@ -7,14 +7,25 @@ import pytest
 from sqlalchemy import select
 
 from app.api.v1.routes import manuscript
-from app.models.book import Book, BookNote, Chapter, ChapterMedia, ChapterVersion, ManuscriptAnnotation, NovelScene, SceneVersion
+from app.models.book import (
+    Book,
+    BookNote,
+    Chapter,
+    ChapterMedia,
+    ChapterVersion,
+    ManuscriptAnnotation,
+    NovelScene,
+    SceneVersion,
+)
 from app.models.character import Character, CharacterMention, CharacterState
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.progress import ReadingProgress
-from app.services.editor_project_service import complete_rebuild_if_ready
 from app.models.tag import CustomTag
 from app.models.user import User
-from app.utils.book_utils import serialize_manuscript_content
+from app.services.editor_project_service import complete_rebuild_if_ready
+from app.utils.books.manuscript import (
+    serialize_manuscript_content,
+)
 
 
 @pytest.mark.asyncio
@@ -69,15 +80,14 @@ async def test_restore_version_dispatches_async(client, db, auth_headers, monkey
 
     dispatched: dict[str, object] = {}
 
-    class _Task:
-        @staticmethod
-        def apply_async(*args, **kwargs):
-            dispatched["args"] = args
-            dispatched["kwargs"] = kwargs
-            return SimpleNamespace(id="restore-task-123")
+    async def _enqueue(_db, **kwargs):
+        dispatched.update(kwargs)
+        return SimpleNamespace(id="restore-task-123")
 
     monkeypatch.setattr(manuscript, "restore_chapter_version", _fake_restore)
-    monkeypatch.setattr(manuscript, "process_chapter_task", _Task())
+    monkeypatch.setattr(
+        "app.services.task_execution_service.enqueue_extraction_execution", _enqueue
+    )
 
     response = await client.post(
         f"/api/v1/books/{book.id}/chapter-versions/{version.id}/restore",
@@ -88,16 +98,15 @@ async def test_restore_version_dispatches_async(client, db, auth_headers, monkey
     payload = response.json()
     assert payload["status"] == "restore_queued"
     assert payload["task_id"] == "restore-task-123"
-    assert dispatched["kwargs"] == {
-        "args": [str(book.id), 1, str(version.id)],
-        "queue": "extraction",
-    }
+    assert dispatched["book_id"] == book.id
+    assert dispatched["chapter_number"] == 1
+    assert dispatched["chapter_version_id"] == version.id
 
     await db.refresh(version)
-    assert version.restore_status == "processing"
+    assert version.restore_status == "queued"
     assert version.restore_task_id == "restore-task-123"
     assert version.restore_error is None
-    assert version.restore_started_at is not None
+    assert version.restore_started_at is None
     assert version.restore_completed_at is None
 
     status_response = await client.get(
@@ -107,12 +116,14 @@ async def test_restore_version_dispatches_async(client, db, auth_headers, monkey
 
     assert status_response.status_code == 200
     status_payload = status_response.json()
-    assert status_payload["restore_status"] == "processing"
+    assert status_payload["restore_status"] == "queued"
     assert status_payload["restore_task_id"] == "restore-task-123"
 
 
 @pytest.mark.asyncio
-async def test_manuscript_workspace_scene_annotation_and_version_workflow(client, db, auth_headers, monkeypatch):
+async def test_manuscript_workspace_scene_annotation_and_version_workflow(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     user_id = uuid.UUID(me.json()["id"])
     user = await db.get(User, user_id)
@@ -127,8 +138,13 @@ async def test_manuscript_workspace_scene_annotation_and_version_workflow(client
         storage[key] = raw
         return key
 
-    monkeypatch.setattr("app.utils.book_utils.download_book", download)
-    monkeypatch.setattr("app.utils.book_utils.upload_binary", upload)
+    for target in (
+        "app.utils.books.chapter_versions",
+        "app.utils.books.scene_records",
+        "app.utils.books.scene_sync",
+    ):
+        monkeypatch.setattr(f"{target}.download_book", download, raising=False)
+        monkeypatch.setattr(f"{target}.upload_binary", upload, raising=False)
 
     book = Book(
         user_id=user_id,
@@ -144,7 +160,9 @@ async def test_manuscript_workspace_scene_annotation_and_version_workflow(client
     db.add(book)
     await db.flush()
     chapter_key = f"chapters/{book.id}/1.txt"
-    storage[chapter_key] = serialize_manuscript_content("Opening paragraph.", "<p>Opening paragraph.</p>").encode()
+    storage[chapter_key] = serialize_manuscript_content(
+        "Opening paragraph.", "<p>Opening paragraph.</p>"
+    ).encode()
     chapter = Chapter(
         book_id=book.id,
         number=1,
@@ -205,15 +223,41 @@ async def test_manuscript_workspace_scene_annotation_and_version_workflow(client
         headers=auth_headers,
     )
     assert reader_bootstrap.status_code == 200, reader_bootstrap.text
+    assert reader_bootstrap.json()["profile"] == "full"
     assert reader_bootstrap.json()["overview"]["book"]["id"] == str(book.id)
     assert reader_bootstrap.json()["writer_workspace"] is not None
+
+    reader_critical_bootstrap = await client.get(
+        f"/api/v1/books/{book.id}/reader-bootstrap?profile=critical",
+        headers=auth_headers,
+    )
+    assert reader_critical_bootstrap.status_code == 200, reader_critical_bootstrap.text
+    assert reader_critical_bootstrap.json()["profile"] == "critical"
+    assert reader_critical_bootstrap.json()["overview"]["book"]["id"] == str(book.id)
+    assert reader_critical_bootstrap.json()["writer_workspace"] is None
+    assert reader_critical_bootstrap.json()["chapter_reports"] == []
 
     manuscript_bootstrap = await client.get(
         f"/api/v1/books/{book.id}/manuscript-bootstrap?active_chapter_number=1",
         headers=auth_headers,
     )
     assert manuscript_bootstrap.status_code == 200, manuscript_bootstrap.text
+    assert manuscript_bootstrap.json()["profile"] == "full"
     assert manuscript_bootstrap.json()["book"]["id"] == str(book.id)
+    assert manuscript_bootstrap.json()["prewriting_check"] is not None
+
+    manuscript_critical_bootstrap = await client.get(
+        f"/api/v1/books/{book.id}/manuscript-bootstrap?active_chapter_number=1&profile=critical",
+        headers=auth_headers,
+    )
+    assert manuscript_critical_bootstrap.status_code == 200, manuscript_critical_bootstrap.text
+    assert manuscript_critical_bootstrap.json()["profile"] == "critical"
+    assert manuscript_critical_bootstrap.json()["book"]["id"] == str(book.id)
+    assert manuscript_critical_bootstrap.json()["writer_workspace"] is not None
+    assert manuscript_critical_bootstrap.json()["workspace_tree"] is not None
+    assert manuscript_critical_bootstrap.json()["prewriting_check"] is None
+    assert manuscript_critical_bootstrap.json()["notes"] == []
+    assert manuscript_critical_bootstrap.json()["chapter_versions"] == []
 
     search = await client.post(
         f"/api/v1/books/{book.id}/workspace/search",
@@ -283,7 +327,9 @@ async def test_manuscript_workspace_scene_annotation_and_version_workflow(client
 
 
 @pytest.mark.asyncio
-async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_history(client, db, auth_headers, monkeypatch):
+async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_history(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
     user_id = uuid.UUID(me.json()["id"])
@@ -292,10 +338,13 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
     user.tier = "author"
 
     monkeypatch.setattr(
-        "app.utils.book_utils.download_book",
+        "app.utils.books.chapter_versions.download_book",
         lambda _key: serialize_manuscript_content("Deleted chapter text.").encode("utf-8"),
     )
-    monkeypatch.setattr("app.utils.book_utils.upload_binary", lambda key, _raw, _content_type=None: key)
+    monkeypatch.setattr(
+        "app.utils.books.chapter_versions.upload_binary",
+        lambda key, _raw, _content_type=None: key,
+    )
 
     book = Book(
         user_id=user_id,
@@ -328,6 +377,7 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
         number=1,
         title="Arrival",
         s3_key="chapters/delete-chapter/1.txt",
+        word_count=120,
         processed=True,
     )
     chapter_two = Chapter(
@@ -335,6 +385,7 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
         number=2,
         title="Departure",
         s3_key="chapters/delete-chapter/2.txt",
+        word_count=140,
         processed=True,
     )
     character = Character(
@@ -351,7 +402,9 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
 
     db.add_all(
         [
-            BookChunk(book_id=book.id, chapter_id=chapter_two.id, chunk_index=0, text="Departure chunk."),
+            BookChunk(
+                book_id=book.id, chapter_id=chapter_two.id, chunk_index=0, text="Departure chunk."
+            ),
             ChapterSummary(chapter_id=chapter_two.id, mode="short", content="Departure summary."),
             ChapterVersion(
                 book_id=book.id,
@@ -416,7 +469,9 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
                 normalized_name="nora",
                 matched_character_id=character.id,
             ),
-            CharacterState(character_id=character.id, at_chapter=2, trait_snapshot={"mood": "resolved"}),
+            CharacterState(
+                character_id=character.id, at_chapter=2, trait_snapshot={"mood": "resolved"}
+            ),
             CustomTag(
                 book_id=book.id,
                 created_by_user_id=user_id,
@@ -438,37 +493,107 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
     response = await client.delete(f"/api/v1/books/{book.id}/chapters/2", headers=auth_headers)
 
     assert response.status_code == 204
-    assert await db.scalar(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 2)) is None
+    assert (
+        await db.scalar(select(Chapter).where(Chapter.book_id == book.id, Chapter.number == 2))
+        is None
+    )
     assert await db.scalar(select(BookChunk).where(BookChunk.chapter_id == chapter_two.id)) is None
-    assert await db.scalar(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter_two.id)) is None
-    assert await db.scalar(select(NovelScene).where(NovelScene.book_id == book.id, NovelScene.chapter_number == 2)) is None
-    assert await db.scalar(select(ChapterMedia).where(ChapterMedia.chapter_id == chapter_two.id)) is None
-    assert await db.scalar(select(BookNote).where(BookNote.book_id == book.id, BookNote.chapter_number == 2)) is None
-    assert await db.scalar(select(ManuscriptAnnotation).where(ManuscriptAnnotation.book_id == book.id, ManuscriptAnnotation.chapter_number == 2)) is None
-    assert await db.scalar(select(CharacterMention).where(CharacterMention.book_id == book.id, CharacterMention.chapter_number == 2)) is None
-    assert await db.scalar(select(CharacterState).where(CharacterState.character_id == character.id, CharacterState.at_chapter == 2)) is None
-    assert await db.scalar(select(CustomTag).where(CustomTag.book_id == book.id, CustomTag.entity_id == chapter_two.id)) is None
+    assert (
+        await db.scalar(select(ChapterSummary).where(ChapterSummary.chapter_id == chapter_two.id))
+        is None
+    )
+    assert (
+        await db.scalar(
+            select(NovelScene).where(NovelScene.book_id == book.id, NovelScene.chapter_number == 2)
+        )
+        is None
+    )
+    assert (
+        await db.scalar(select(ChapterMedia).where(ChapterMedia.chapter_id == chapter_two.id))
+        is None
+    )
+    assert (
+        await db.scalar(
+            select(BookNote).where(BookNote.book_id == book.id, BookNote.chapter_number == 2)
+        )
+        is None
+    )
+    assert (
+        await db.scalar(
+            select(ManuscriptAnnotation).where(
+                ManuscriptAnnotation.book_id == book.id, ManuscriptAnnotation.chapter_number == 2
+            )
+        )
+        is None
+    )
+    assert (
+        await db.scalar(
+            select(CharacterMention).where(
+                CharacterMention.book_id == book.id, CharacterMention.chapter_number == 2
+            )
+        )
+        is None
+    )
+    assert (
+        await db.scalar(
+            select(CharacterState).where(
+                CharacterState.character_id == character.id, CharacterState.at_chapter == 2
+            )
+        )
+        is None
+    )
+    assert (
+        await db.scalar(
+            select(CustomTag).where(
+                CustomTag.book_id == book.id, CustomTag.entity_id == chapter_two.id
+            )
+        )
+        is None
+    )
 
     preserved_versions = (
-        await db.execute(select(ChapterVersion).where(ChapterVersion.book_id == book.id, ChapterVersion.chapter_number == 2))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(ChapterVersion).where(
+                    ChapterVersion.book_id == book.id, ChapterVersion.chapter_number == 2
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(preserved_versions) == 2
     assert any(version.snapshot_kind == "pre_delete" for version in preserved_versions)
     assert all(version.chapter_id is None for version in preserved_versions)
 
-    preserved_scene_version = await db.scalar(select(SceneVersion).where(SceneVersion.book_id == book.id, SceneVersion.chapter_number == 2))
+    preserved_scene_version = await db.scalar(
+        select(SceneVersion).where(
+            SceneVersion.book_id == book.id, SceneVersion.chapter_number == 2
+        )
+    )
     assert preserved_scene_version is not None
     assert preserved_scene_version.scene_id is None
     assert preserved_scene_version.chapter_id is None
 
     await db.refresh(book)
     await db.refresh(character)
-    progress = await db.scalar(select(ReadingProgress).where(ReadingProgress.book_id == book.id, ReadingProgress.user_id == user_id))
+    progress = await db.scalar(
+        select(ReadingProgress).where(
+            ReadingProgress.book_id == book.id, ReadingProgress.user_id == user_id
+        )
+    )
     assert book.total_chapters == 1
-    assert book.status == "ready"
-    assert book.writer_workspace["processing"]["status"] == "cancelled"
+    assert book.status == "failed"
+    assert book.writer_workspace["processing"]["status"] == "failed"
+    assert book.writer_workspace["processing"]["stage"] == "failed"
+    assert book.writer_workspace["processing"]["chapters_completed"] == 1
+    assert book.writer_workspace["processing"]["chapters_total"] == 1
+    assert book.writer_workspace["processing"]["progress_pct"] == 100.0
+    assert book.writer_workspace["processing"]["retry_actions"] == ["retry_extraction"]
     assert "rebuild_run_id" not in book.writer_workspace["processing"]
-    assert book.writer_workspace["reprocess"]["last_cancelled_rebuild_run_id"] == "active-delete-test"
+    assert (
+        book.writer_workspace["reprocess"]["last_cancelled_rebuild_run_id"] == "active-delete-test"
+    )
     assert character.first_chapter == 1
     assert character.last_seen_chapter == 1
     assert character.mention_count == 1
@@ -479,7 +604,9 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
 
 @pytest.mark.asyncio
 async def test_complete_rebuild_recovers_stale_extraction_progress(db):
-    user = User(email="stale-rebuild@example.com", username="stale-rebuild", password_hash="test-hash")
+    user = User(
+        email="stale-rebuild@example.com", username="stale-rebuild", password_hash="test-hash"
+    )
     db.add(user)
     await db.flush()
 
@@ -530,7 +657,9 @@ async def test_complete_rebuild_recovers_stale_extraction_progress(db):
     await db.flush()
     db.add_all(
         [
-            ChapterSummary(chapter_id=chapter.id, mode="detailed", content=f"Summary {chapter.number}")
+            ChapterSummary(
+                chapter_id=chapter.id, mode="detailed", content=f"Summary {chapter.number}"
+            )
             for chapter in chapters
         ]
     )

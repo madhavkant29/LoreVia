@@ -1,15 +1,16 @@
-from types import SimpleNamespace
 import sys
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
 from app.core import llm
-from app.engine.character import entity_filters, extractor as character_extractor
+from app.engine.character import entity_filters
+from app.engine.character import extractor as character_extractor
 from app.engine.embeddings import embedder
 from app.engine.world import extractor as world_extractor
-from app.services.character_identity.repair import CharacterIdentityRepairResult
 from app.services import email_service
+from app.services.character_identity.repair import CharacterIdentityRepairResult
 from app.utils import reader_utils, social_utils
 
 
@@ -54,47 +55,60 @@ async def test_gemini_completion_handles_text_candidates_and_json_fallback(monke
 
     fake_types = SimpleNamespace(GenerateContentConfig=Config)
     monkeypatch.setitem(sys.modules, "google.generativeai", SimpleNamespace(types=fake_types))
-    monkeypatch.setattr(llm, "_get_gemini_client", lambda: SimpleNamespace(models=SimpleNamespace()))
+    monkeypatch.setattr(
+        llm, "_get_gemini_client", lambda: SimpleNamespace(models=SimpleNamespace())
+    )
 
     async def direct_text(fn):
         return SimpleNamespace(text="  direct answer  ", candidates=[])
 
     monkeypatch.setattr(llm, "_run_blocking", direct_text)
-    assert await llm._complete_with_gemini(
-        system="system",
-        user="user",
-        model="gemini",
-        temperature=0.2,
-        max_tokens=40,
-        want_json=False,
-    ) == "direct answer"
+    assert (
+        await llm._complete_with_gemini(
+            system="system",
+            user="user",
+            model="gemini",
+            temperature=0.2,
+            max_tokens=40,
+            want_json=False,
+        )
+        == "direct answer"
+    )
 
     async def candidate_text(fn):
         part = SimpleNamespace(text="candidate answer")
-        return SimpleNamespace(text="", candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))])
+        return SimpleNamespace(
+            text="", candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))]
+        )
 
     monkeypatch.setattr(llm, "_run_blocking", candidate_text)
-    assert await llm._complete_with_gemini(
-        system="system",
-        user="user",
-        model="gemini",
-        temperature=0.2,
-        max_tokens=40,
-        want_json=False,
-    ) == "candidate answer"
+    assert (
+        await llm._complete_with_gemini(
+            system="system",
+            user="user",
+            model="gemini",
+            temperature=0.2,
+            max_tokens=40,
+            want_json=False,
+        )
+        == "candidate answer"
+    )
 
     async def empty(fn):
         return SimpleNamespace(text="", candidates=[])
 
     monkeypatch.setattr(llm, "_run_blocking", empty)
-    assert await llm._complete_with_gemini(
-        system="system",
-        user="user",
-        model="gemini",
-        temperature=0.2,
-        max_tokens=40,
-        want_json=True,
-    ) == "{}"
+    assert (
+        await llm._complete_with_gemini(
+            system="system",
+            user="user",
+            model="gemini",
+            temperature=0.2,
+            max_tokens=40,
+            want_json=True,
+        )
+        == "{}"
+    )
 
 
 def test_character_identity_repair_payload_populates_compatibility_fields():
@@ -137,7 +151,9 @@ def test_contextual_entity_label_scores_exact_prefix_and_overlap(monkeypatch):
         SimpleNamespace(text="Mara Vale", label_="ORG"),
         SimpleNamespace(text="Vale Guard", label_="GROUP"),
     ]
-    monkeypatch.setattr(entity_filters, "_get_nlp", lambda: lambda _text: SimpleNamespace(ents=entities))
+    monkeypatch.setattr(
+        entity_filters, "_get_nlp", lambda: lambda _text: SimpleNamespace(ents=entities)
+    )
     assert entity_filters.contextual_ner_entity_label("Mara Vale arrived", "Mara Vale") == "ORG"
     assert entity_filters.contextual_ner_entity_label("Mara arrived", "Mara V") == "PERSON"
     assert entity_filters.contextual_ner_entity_label("", "Mara") is None
@@ -155,28 +171,36 @@ def test_world_context_pos_label_uses_offsets_span_and_text_fallback(monkeypatch
         ]
     )
     monkeypatch.setattr(world_extractor, "_get_pos_nlp", lambda: lambda _text: tokens)
-    assert world_extractor._context_pos_label(
-        "Northreach",
-        "Northreach stands",
-        provenance={"sentence_start": 10, "match_start": 10, "match_end": 20},
-    ) == "PROPN"
+    assert (
+        world_extractor._context_pos_label(
+            "Northreach",
+            "Northreach stands",
+            provenance={"sentence_start": 10, "match_start": 10, "match_end": 20},
+        )
+        == "PROPN"
+    )
     assert world_extractor._context_pos_label("stands", "Northreach stands") == "VERB"
     monkeypatch.setattr(world_extractor, "_get_pos_nlp", lambda: None)
     assert world_extractor._context_pos_label("Northreach", "Northreach stands") is None
 
 
 @pytest.mark.asyncio
-async def test_promotional_context_covers_transactional_missing_address_user_and_allowed(monkeypatch):
+async def test_promotional_context_covers_transactional_missing_address_user_and_allowed(
+    monkeypatch,
+):
     assert await email_service._resolve_promotional_context(
         email="reader@example.com",
         category=email_service.EMAIL_CATEGORY_TRANSACTIONAL,
     ) == {"allowed": True}
 
     monkeypatch.setattr(email_service.settings, "BUSINESS_MAILING_ADDRESS", "", raising=False)
-    assert await email_service._resolve_promotional_context(
-        email="reader@example.com",
-        category="product_updates",
-    ) is None
+    assert (
+        await email_service._resolve_promotional_context(
+            email="reader@example.com",
+            category="product_updates",
+        )
+        is None
+    )
 
     class Result:
         def __init__(self, value):
@@ -216,7 +240,9 @@ async def test_promotional_context_covers_transactional_missing_address_user_and
             preferences_url="https://example.com/preferences",
         )
 
-    monkeypatch.setattr(email_service.settings, "BUSINESS_MAILING_ADDRESS", "123 Main Street", raising=False)
+    monkeypatch.setattr(
+        email_service.settings, "BUSINESS_MAILING_ADDRESS", "123 Main Street", raising=False
+    )
     monkeypatch.setattr(email_service, "AsyncSessionLocal", lambda: Session(user))
     monkeypatch.setattr(email_service, "get_or_create_email_preference", preference_for)
     monkeypatch.setattr(email_service, "can_send_email", lambda *_args: True)
@@ -228,10 +254,13 @@ async def test_promotional_context_covers_transactional_missing_address_user_and
     assert context["unsubscribe_url"].endswith("/unsubscribe")
 
     monkeypatch.setattr(email_service, "AsyncSessionLocal", lambda: Session(None))
-    assert await email_service._resolve_promotional_context(
-        email="missing@example.com",
-        category="product_updates",
-    ) is None
+    assert (
+        await email_service._resolve_promotional_context(
+            email="missing@example.com",
+            category="product_updates",
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -294,16 +323,31 @@ async def test_list_relationships_groups_friends_and_pending_requests():
     incoming_user = SimpleNamespace(id=uuid.uuid4(), username="incoming")
     now = __import__("datetime").datetime.now(__import__("datetime").UTC)
     accepted = SimpleNamespace(
-        id=uuid.uuid4(), requester_user_id=current.id, addressee_user_id=friend.id,
-        status="accepted", created_at=now, updated_at=now, responded_at=now,
+        id=uuid.uuid4(),
+        requester_user_id=current.id,
+        addressee_user_id=friend.id,
+        status="accepted",
+        created_at=now,
+        updated_at=now,
+        responded_at=now,
     )
     incoming = SimpleNamespace(
-        id=uuid.uuid4(), requester_user_id=incoming_user.id, addressee_user_id=current.id,
-        status="pending", created_at=now, updated_at=now, responded_at=None,
+        id=uuid.uuid4(),
+        requester_user_id=incoming_user.id,
+        addressee_user_id=current.id,
+        status="pending",
+        created_at=now,
+        updated_at=now,
+        responded_at=None,
     )
     outgoing = SimpleNamespace(
-        id=uuid.uuid4(), requester_user_id=current.id, addressee_user_id=incoming_user.id,
-        status="pending", created_at=now, updated_at=now, responded_at=None,
+        id=uuid.uuid4(),
+        requester_user_id=current.id,
+        addressee_user_id=incoming_user.id,
+        status="pending",
+        created_at=now,
+        updated_at=now,
+        responded_at=None,
     )
 
     class Result:

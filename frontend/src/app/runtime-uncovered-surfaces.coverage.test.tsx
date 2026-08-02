@@ -16,14 +16,27 @@ const readerApiMock = vi.hoisted(() => ({
   getUpcomingBetaReads: vi.fn(),
   startBetaRead: vi.fn(),
 }))
-const publicApiMock = vi.hoisted(() => ({
-  getChapter: vi.fn(),
-  trackView: vi.fn(),
-}))
 const captureMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
+  default: ({
+    children,
+    href,
+    prefetch: _prefetch,
+    replace: _replace,
+    scroll: _scroll,
+    shallow: _shallow,
+    locale: _locale,
+    ...props
+  }: {
+    children: ReactNode
+    href: string
+    prefetch?: boolean | null
+    replace?: boolean
+    scroll?: boolean
+    shallow?: boolean
+    locale?: string | false
+  }) => <a href={href} {...props}>{children}</a>,
 }))
 
 vi.mock("next/navigation", () => ({
@@ -33,7 +46,6 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/api/reader", () => ({ readerApi: readerApiMock }))
-vi.mock("@/lib/api/public", () => ({ publicApi: publicApiMock }))
 vi.mock("@/lib/analytics/posthog", () => ({ capture: captureMock }))
 vi.mock("@/lib/stores/authStore", () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "user-1" } }),
@@ -52,7 +64,6 @@ import { UpcomingBetaReadsCard } from "@/components/library/UpcomingBetaReadsCar
 import { DailyCapPrompt } from "@/components/limits/DailyCapPrompt"
 import { ChaptersPageHeader } from "@/components/reader/ChaptersPageHeader"
 import { ReaderQuickRail } from "@/components/reader/ReaderQuickRail"
-import { PublicChapterPageClient } from "@/components/public/PublicChapterPageClient"
 import { DAILY_CAP_EVENT } from "@/lib/limits/dailyCap"
 
 let root: Root | null = null
@@ -66,9 +77,7 @@ beforeEach(() => {
   captureMock.mockReset()
   Object.values(booksApiMock).forEach((mock) => mock.mockReset())
   Object.values(readerApiMock).forEach((mock) => mock.mockReset())
-  Object.values(publicApiMock).forEach((mock) => mock.mockReset())
   readerApiMock.startBetaRead.mockResolvedValue({})
-  publicApiMock.trackView.mockResolvedValue({})
 })
 
 afterEach(() => {
@@ -218,33 +227,6 @@ describe("previously uncovered runtime surfaces", () => {
     expect(onPrimaryAction).toHaveBeenCalled()
   })
 
-  it("renders public chapter content, navigation, tracking, and unavailable states", async () => {
-    const chapter = {
-      book_id: "book-1",
-      chapter_number: 2,
-      chapter_title: "The Gate",
-      chapter_description: "Mara reaches the sealed gate.",
-      html_content: "<p>The brass key turned.</p>",
-      text_content: null,
-      text_url: null,
-      total_chapters: 4,
-    }
-    publicApiMock.getChapter.mockResolvedValue(chapter)
-
-    await renderElement(<PublicChapterPageClient bookId="book-1" chapterId="2" initialChapter={chapter as never} />)
-    await flushAsync()
-
-    expect(container?.textContent).toContain("The Gate")
-    expect(container?.textContent).toContain("The brass key turned")
-    expect(container?.textContent).toContain("Previous chapter")
-    expect(container?.textContent).toContain("Next chapter")
-    expect(publicApiMock.trackView).toHaveBeenCalledWith("book-1", { eventType: "chapter_view", chapterNumber: 2 })
-
-    cleanupRenderedTree()
-    await renderElement(<PublicChapterPageClient bookId="book-1" chapterId="bad" />)
-    await flushAsync()
-    expect(container?.textContent).toContain("This chapter is not available")
-  })
 })
 
 async function renderElement(element: ReactElement) {

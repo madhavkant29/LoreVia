@@ -53,4 +53,23 @@ describe("admin api", () => {
       provider_followup_only: true,
     })
   })
+
+  it("uses protected operations routes for durable task actions", async () => {
+    await adminApi.taskExecutions()
+    await adminApi.retryTaskExecution("task-1", "Reviewed")
+    await adminApi.dismissTaskExecution("task-2", "Not actionable")
+    await adminApi.operationsMetrics()
+    await adminApi.aiQuality()
+    await adminApi.contributionMargin()
+
+    expect(getMock).toHaveBeenCalledWith(
+      "/admin/task-executions?status=failed_terminal&limit=50"
+    )
+    expect(postMock).toHaveBeenCalledWith("/admin/task-executions/task-1/retry", {
+      reason: "Reviewed",
+    })
+    expect(postMock).toHaveBeenCalledWith("/admin/task-executions/task-2/dismiss", {
+      reason: "Not actionable",
+    })
+  })
 })

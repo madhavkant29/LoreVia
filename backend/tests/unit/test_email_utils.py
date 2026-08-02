@@ -3,8 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.models.user import EmailPreference
-from app.models.user import User
+from app.models.user import EmailPreference, User
 from app.utils.email_utils import (
     EMAIL_CATEGORY_MARKETING,
     EMAIL_CATEGORY_PRODUCT_UPDATES,

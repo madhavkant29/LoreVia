@@ -4,18 +4,16 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import ProgrammingError
+
 from app.models.book import Book, Series, SeriesBook
 from app.models.character import Character
 from app.models.intelligence import PlotThread
 from app.models.user import User
-from app.utils import advisor_utils
-
+from app.utils import advisor_chat_utils, advisor_utils
+from app.utils.advisor_story_context_utils import build_series_story_context, build_story_context
 from app.utils.advisor_utils import (
     advisor_retrieval_settings,
-    build_story_context,
     build_advisor_world_context,
-    build_series_story_context,
-    language_context_hint,
     build_fallback_advisor_suggestions,
     classify_intent_fast,
     classify_response_type,
@@ -23,6 +21,7 @@ from app.utils.advisor_utils import (
     identify_character_mentions,
     invalidate_advisor_caches,
     invalidate_advisor_caches_for_book,
+    language_context_hint,
     normalize_proactive_scan_result,
     retrieve_series_continuity_passages,
 )
@@ -70,7 +69,9 @@ def test_detect_advisor_world_mode_routes_gap_questions_to_gap_detection():
 
 
 def test_detect_advisor_world_mode_ignores_non_lore_questions():
-    assert detect_advisor_world_mode("Should my protagonist forgive her brother?", "direction") is None
+    assert (
+        detect_advisor_world_mode("Should my protagonist forgive her brother?", "direction") is None
+    )
 
 
 def test_detect_advisor_world_mode_routes_reaction_questions_to_story_integration():
@@ -116,7 +117,9 @@ def test_build_advisor_world_context_compacts_alerts_suggestions_and_citations()
                     "source_scope": "worldbuilding",
                 }
             ],
-            "simulation_steps": ["Canon focus: Moon Gate behaves as a place with worldbuilding support."],
+            "simulation_steps": [
+                "Canon focus: Moon Gate behaves as a place with worldbuilding support."
+            ],
         }
     )
 
@@ -127,7 +130,7 @@ def test_build_advisor_world_context_compacts_alerts_suggestions_and_citations()
 
 def test_identify_character_mentions_matches_punctuation_and_possessives():
     matches = identify_character_mentions(
-        "Gregor's breathing caught. Later, Grete whispered, \"Not now.\"",
+        'Gregor\'s breathing caught. Later, Grete whispered, "Not now."',
         [
             {"name": "Gregor", "aliases": [], "first_chapter": 1},
             {"name": "Grete", "aliases": [], "first_chapter": 1},
@@ -166,7 +169,10 @@ async def test_invalidate_advisor_caches_for_book_expands_series_scope(monkeypat
 
     class _FakeResult:
         def all(self):
-            return [type("Row", (), {"series_id": "series-a"})(), type("Row", (), {"series_id": "series-b"})()]
+            return [
+                type("Row", (), {"series_id": "series-a"})(),
+                type("Row", (), {"series_id": "series-b"})(),
+            ]
 
     class _FakeDB:
         async def execute(self, *_args, **_kwargs):
@@ -177,7 +183,9 @@ async def test_invalidate_advisor_caches_for_book_expands_series_scope(monkeypat
         _fake_invalidate,
     )
 
-    await invalidate_advisor_caches_for_book(_FakeDB(), book_id="12345678-1234-5678-1234-567812345678")
+    await invalidate_advisor_caches_for_book(
+        _FakeDB(), book_id="12345678-1234-5678-1234-567812345678"
+    )
 
     assert captured == {
         "book_id": "12345678-1234-5678-1234-567812345678",
@@ -215,9 +223,15 @@ async def test_build_story_context_returns_cached_payload(monkeypatch):
     async def _fake_set_cache(*_args, **_kwargs):
         raise AssertionError("cache set should not run on cache hit")
 
-    monkeypatch.setattr("app.utils.advisor_utils.get_book_cache_version", _fake_get_version)
-    monkeypatch.setattr("app.utils.advisor_utils.get_story_context_cache", _fake_get_cache)
-    monkeypatch.setattr("app.utils.advisor_utils.set_story_context_cache", _fake_set_cache)
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_book_cache_version", _fake_get_version
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_story_context_cache", _fake_get_cache
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.set_story_context_cache", _fake_set_cache
+    )
 
     class _FailingDB:
         async def execute(self, *_args, **_kwargs):
@@ -242,9 +256,15 @@ async def test_build_story_context_builds_and_caches_complete_runtime_context(mo
     async def _fake_set_cache(*args):
         cached_payloads.append(args)
 
-    monkeypatch.setattr("app.utils.advisor_utils.get_book_cache_version", _fake_get_version)
-    monkeypatch.setattr("app.utils.advisor_utils.get_story_context_cache", _fake_get_cache)
-    monkeypatch.setattr("app.utils.advisor_utils.set_story_context_cache", _fake_set_cache)
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_book_cache_version", _fake_get_version
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_story_context_cache", _fake_get_cache
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.set_story_context_cache", _fake_set_cache
+    )
 
     character = SimpleNamespace(
         name="Mara",
@@ -263,19 +283,23 @@ async def test_build_story_context_builds_and_caches_complete_runtime_context(mo
     )
     book = SimpleNamespace(
         characters=[character],
-        plot_threads=[SimpleNamespace(
-            title="The Brass Key",
-            importance=9,
-            introduced_at=2,
-            status=None,
-            description="The key predates the city and may open the ash gate. " * 4,
-        )],
-        world_elements=[SimpleNamespace(
-            name="Ash Gate",
-            element_type="place",
-            usage_count=12,
-            description="An ancient silver arch " * 8,
-        )],
+        plot_threads=[
+            SimpleNamespace(
+                title="The Brass Key",
+                importance=9,
+                introduced_at=2,
+                status=None,
+                description="The key predates the city and may open the ash gate. " * 4,
+            )
+        ],
+        world_elements=[
+            SimpleNamespace(
+                name="Ash Gate",
+                element_type="place",
+                usage_count=12,
+                description="An ancient silver arch " * 8,
+            )
+        ],
     )
 
     class _Result:
@@ -297,14 +321,33 @@ async def test_build_story_context_builds_and_caches_complete_runtime_context(mo
             self.results = [
                 _Result(scalar=book),
                 _Result(rows=[("Gate Codex", "document", "Author supplied canon " * 12, 8)]),
-                _Result(rows=[
-                    (7, "The Choice", [{"event_title": "Mara opens the gate"}, {"event": " \'  "}, "invalid"]),
-                    (6, None, "invalid"),
-                ]),
-                _Result(rows=[
-                    (7, [{"theme": "Trust", "signal": "rising", "depth": "deep", "evidence": "Mara shares the key."}, {"theme": ""}]),
-                    (6, [{"theme": "trust", "evidence": "duplicate"}, "invalid"]),
-                ]),
+                _Result(
+                    rows=[
+                        (
+                            7,
+                            "The Choice",
+                            [{"event_title": "Mara opens the gate"}, {"event": " '  "}, "invalid"],
+                        ),
+                        (6, None, "invalid"),
+                    ]
+                ),
+                _Result(
+                    rows=[
+                        (
+                            7,
+                            [
+                                {
+                                    "theme": "Trust",
+                                    "signal": "rising",
+                                    "depth": "deep",
+                                    "evidence": "Mara shares the key.",
+                                },
+                                {"theme": ""},
+                            ],
+                        ),
+                        (6, [{"theme": "trust", "evidence": "duplicate"}, "invalid"]),
+                    ]
+                ),
             ]
 
         async def execute(self, _statement):
@@ -330,7 +373,9 @@ async def test_classify_response_type_no_llm_warning_marker():
 
 @pytest.mark.asyncio
 async def test_classify_response_type_no_llm_contradiction_inline():
-    result = await classify_response_type(None, "Here is an analysis. ⚠️ Contradiction in the timeline")
+    result = await classify_response_type(
+        None, "Here is an analysis. ⚠️ Contradiction in the timeline"
+    )
     assert result == "warning"
 
 
@@ -342,7 +387,9 @@ async def test_classify_response_type_no_llm_opportunity_marker():
 
 @pytest.mark.asyncio
 async def test_classify_response_type_no_llm_opportunity_inline():
-    result = await classify_response_type(None, "Take a look. ✨ Opportunity: unused side character")
+    result = await classify_response_type(
+        None, "Take a look. ✨ Opportunity: unused side character"
+    )
     assert result == "opportunity"
 
 
@@ -354,7 +401,9 @@ async def test_classify_response_type_no_llm_tradeoff_marker():
 
 @pytest.mark.asyncio
 async def test_classify_response_type_no_llm_fallback_to_standard():
-    result = await classify_response_type(None, "Here is some general advice about your story pacing.")
+    result = await classify_response_type(
+        None, "Here is some general advice about your story pacing."
+    )
     assert result == "standard"
 
 
@@ -382,7 +431,9 @@ def test_classify_intent_fast_direction_what_should():
 
 
 def test_classify_intent_fast_direction_stuck():
-    assert classify_intent_fast("I am stuck on this chapter, where do I go from here?") == "direction"
+    assert (
+        classify_intent_fast("I am stuck on this chapter, where do I go from here?") == "direction"
+    )
 
 
 def test_classify_intent_fast_direction_next_step():
@@ -390,7 +441,9 @@ def test_classify_intent_fast_direction_next_step():
 
 
 def test_classify_intent_fast_opportunity_potential():
-    assert classify_intent_fast("Is there untapped potential in this side character?") == "opportunity"
+    assert (
+        classify_intent_fast("Is there untapped potential in this side character?") == "opportunity"
+    )
 
 
 def test_classify_intent_fast_opportunity_expand():
@@ -398,7 +451,10 @@ def test_classify_intent_fast_opportunity_expand():
 
 
 def test_classify_intent_fast_consistency_canon():
-    assert classify_intent_fast("Does this new chapter stay consistent with the canon?") == "consistency"
+    assert (
+        classify_intent_fast("Does this new chapter stay consistent with the canon?")
+        == "consistency"
+    )
 
 
 def test_classify_intent_fast_consistency_rules():
@@ -443,7 +499,9 @@ async def test_retrieve_series_continuity_passages_returns_empty_when_pgvector_e
                 Exception('type "vector" does not exist'),
             )
 
-    with patch("app.utils.advisor_utils.embed_text", AsyncMock(return_value=[0.1] * 1536)):
+    with patch(
+        "app.utils.advisor_retrieval_utils.embed_text", AsyncMock(return_value=[0.1] * 1536)
+    ):
         payload = await retrieve_series_continuity_passages(
             db=_FakeDB(),
             prior_book_ids=[uuid.uuid4()],
@@ -454,6 +512,7 @@ async def test_retrieve_series_continuity_passages_returns_empty_when_pgvector_e
 
 
 # ── language_context_hint ─────────────────────────────────────────────────
+
 
 def test_language_hint_french():
     hint = language_context_hint("fr")
@@ -519,14 +578,14 @@ async def test_prepare_advisor_reply_context_builds_grounded_messages(monkeypatc
             }
         ]
 
-    monkeypatch.setattr(advisor_utils, "AsyncOpenAI", lambda **_kwargs: FakeClient())
-    monkeypatch.setattr(advisor_utils, "get_advisor_response_cache", no_cache)
-    monkeypatch.setattr(advisor_utils, "build_story_context", story_context)
-    monkeypatch.setattr(advisor_utils, "semantic_search", search)
-    monkeypatch.setattr(advisor_utils, "classify_intent_fast", lambda _text: "consistency")
+    monkeypatch.setattr(advisor_chat_utils, "AsyncOpenAI", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr(advisor_chat_utils, "get_advisor_response_cache", no_cache)
+    monkeypatch.setattr(advisor_chat_utils, "build_story_context", story_context)
+    monkeypatch.setattr(advisor_chat_utils, "semantic_search", search)
+    monkeypatch.setattr(advisor_chat_utils, "classify_intent_fast", lambda _text: "consistency")
 
     book = SimpleNamespace(id=uuid.uuid4(), title="Gate Book", total_chapters=6)
-    prepared = await advisor_utils._prepare_advisor_reply_context(
+    prepared = await advisor_chat_utils.prepare_advisor_reply_context(
         db=SimpleNamespace(),
         book=book,
         user_id=uuid.uuid4(),
@@ -547,8 +606,8 @@ async def test_prepare_advisor_reply_context_builds_grounded_messages(monkeypatc
     async def cached(*_args, **_kwargs):
         return {"reply": "Cached answer"}
 
-    monkeypatch.setattr(advisor_utils, "get_advisor_response_cache", cached)
-    cached_payload = await advisor_utils._prepare_advisor_reply_context(
+    monkeypatch.setattr(advisor_chat_utils, "get_advisor_response_cache", cached)
+    cached_payload = await advisor_chat_utils.prepare_advisor_reply_context(
         db=SimpleNamespace(),
         book=book,
         user_id=uuid.uuid4(),
@@ -571,8 +630,16 @@ async def test_build_series_story_context_labels_books_characters_and_threads(db
     db.add(series)
     await db.flush()
     books = [
-        Book(user_id=user.id, title="Ice Gate", format="txt", s3_key="series/ice.txt", status="ready"),
-        Book(user_id=user.id, title="Ash Crown", format="txt", s3_key="series/ash.txt", status="ready"),
+        Book(
+            user_id=user.id, title="Ice Gate", format="txt", s3_key="series/ice.txt", status="ready"
+        ),
+        Book(
+            user_id=user.id,
+            title="Ash Crown",
+            format="txt",
+            s3_key="series/ash.txt",
+            status="ready",
+        ),
     ]
     db.add_all(books)
     await db.flush()
@@ -613,10 +680,14 @@ async def test_build_series_story_context_labels_books_characters_and_threads(db
     async def set_cache(key, version_value, payload):
         stored.update(key=key, version=version_value, payload=payload)
 
-    monkeypatch.setattr(advisor_utils, "get_book_cache_version", version)
-    monkeypatch.setattr(advisor_utils, "get_series_cache_version", version)
-    monkeypatch.setattr(advisor_utils, "get_series_story_context_cache", no_cache)
-    monkeypatch.setattr(advisor_utils, "set_series_story_context_cache", set_cache)
+    monkeypatch.setattr("app.utils.advisor_story_context_utils.get_book_cache_version", version)
+    monkeypatch.setattr("app.utils.advisor_story_context_utils.get_series_cache_version", version)
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.get_series_story_context_cache", no_cache
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_story_context_utils.set_series_story_context_cache", set_cache
+    )
 
     payload = await build_series_story_context(
         db,
@@ -640,7 +711,9 @@ async def test_stream_advisor_payload_records_usage_and_finalizes(monkeypatch):
             usage=SimpleNamespace(prompt_tokens=10, completion_tokens=4, total_tokens=14),
             choices=[SimpleNamespace(delta=SimpleNamespace(content="First "))],
         )
-        yield SimpleNamespace(usage=None, choices=[SimpleNamespace(delta=SimpleNamespace(content="answer"))])
+        yield SimpleNamespace(
+            usage=None, choices=[SimpleNamespace(delta=SimpleNamespace(content="answer"))]
+        )
 
     class Completions:
         async def create(self, **_kwargs):
@@ -668,20 +741,25 @@ async def test_stream_advisor_payload_records_usage_and_finalizes(monkeypatch):
     async def capacity(*_args, **_kwargs):
         return None
 
-    async def record(**kwargs):
+    async def reserve(**kwargs):
+        return SimpleNamespace(
+            id="advisor-reservation", operation="chat", user_id=kwargs["user_id"]
+        )
+
+    async def finish(_reservation, **kwargs):
         usage.append(kwargs)
 
     async def finalize(**kwargs):
         return {"reply": kwargs["reply"], "cached": False}
 
-    monkeypatch.setattr(advisor_utils, "_prepare_advisor_reply_context", prepare)
-    monkeypatch.setattr(advisor_utils, "assert_llm_token_capacity", capacity)
-    monkeypatch.setattr(advisor_utils, "record_llm_usage_counts", record)
-    monkeypatch.setattr(advisor_utils, "_finalize_advisor_reply_payload", finalize)
+    monkeypatch.setattr(advisor_chat_utils, "prepare_advisor_reply_context", prepare)
+    monkeypatch.setattr(advisor_chat_utils, "reserve_llm_call", reserve)
+    monkeypatch.setattr(advisor_chat_utils, "finish_llm_reservation_counts", finish)
+    monkeypatch.setattr(advisor_chat_utils, "finalize_advisor_reply_payload", finalize)
 
     events = [
         event
-        async for event in advisor_utils.stream_advisor_reply_payload(
+        async for event in advisor_chat_utils.stream_advisor_reply_payload(
             db=SimpleNamespace(),
             book=SimpleNamespace(id=uuid.uuid4()),
             user_id=uuid.uuid4(),
@@ -730,21 +808,24 @@ async def test_stream_series_advisor_payload_records_usage_and_finalizes(monkeyp
     async def capacity(*_args, **_kwargs):
         return None
 
-    async def record(**kwargs):
+    async def reserve(**kwargs):
+        return SimpleNamespace(id="series-reservation", operation="chat", user_id=kwargs["user_id"])
+
+    async def finish(_reservation, **kwargs):
         usage.append(kwargs)
 
     async def finalize(**kwargs):
         return {"reply": kwargs["reply"], "book_count": kwargs["book_count"]}
 
-    monkeypatch.setattr(advisor_utils, "_prepare_series_advisor_reply_context", prepare)
-    monkeypatch.setattr(advisor_utils, "assert_llm_token_capacity", capacity)
-    monkeypatch.setattr(advisor_utils, "record_llm_usage_counts", record)
-    monkeypatch.setattr(advisor_utils, "_finalize_series_advisor_reply_payload", finalize)
+    monkeypatch.setattr(advisor_chat_utils, "prepare_series_advisor_reply_context", prepare)
+    monkeypatch.setattr(advisor_chat_utils, "reserve_llm_call", reserve)
+    monkeypatch.setattr(advisor_chat_utils, "finish_llm_reservation_counts", finish)
+    monkeypatch.setattr(advisor_chat_utils, "finalize_series_advisor_reply_payload", finalize)
 
     series = SimpleNamespace(id=uuid.uuid4())
     events = [
         event
-        async for event in advisor_utils.stream_series_advisor_reply_payload(
+        async for event in advisor_chat_utils.stream_series_advisor_reply_payload(
             db=SimpleNamespace(),
             series=series,
             user_id=uuid.uuid4(),
@@ -786,12 +867,12 @@ async def test_prepare_series_advisor_context_builds_history_and_handles_empty_s
         async def close(self):
             return None
 
-    monkeypatch.setattr(advisor_utils, "get_series_advisor_response_cache", no_cache)
-    monkeypatch.setattr(advisor_utils, "build_series_story_context", context)
-    monkeypatch.setattr(advisor_utils, "AsyncOpenAI", lambda **_kwargs: Client())
-    monkeypatch.setattr(advisor_utils, "classify_intent_fast", lambda _text: "opportunity")
+    monkeypatch.setattr(advisor_chat_utils, "get_series_advisor_response_cache", no_cache)
+    monkeypatch.setattr(advisor_chat_utils, "build_series_story_context", context)
+    monkeypatch.setattr(advisor_chat_utils, "AsyncOpenAI", lambda **_kwargs: Client())
+    monkeypatch.setattr(advisor_chat_utils, "classify_intent_fast", lambda _text: "opportunity")
 
-    prepared = await advisor_utils._prepare_series_advisor_reply_context(
+    prepared = await advisor_chat_utils.prepare_series_advisor_reply_context(
         db=Db(
             [
                 [SimpleNamespace(book_id=book_id, position=1)],
@@ -811,7 +892,7 @@ async def test_prepare_series_advisor_context_builds_history_and_handles_empty_s
     assert prepared["llm_messages"][-1]["content"].startswith("Where can")
 
     with pytest.raises(ValueError, match="no_books_found_in_series"):
-        await advisor_utils._prepare_series_advisor_reply_context(
+        await advisor_chat_utils.prepare_series_advisor_reply_context(
             db=Db([[]]),
             series=SimpleNamespace(id=series_id, name="Empty Cycle"),
             user_id=uuid.uuid4(),

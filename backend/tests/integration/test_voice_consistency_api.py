@@ -14,7 +14,9 @@ class _FakeOpenAIClient:
 
 
 @pytest.mark.asyncio
-async def test_voice_consistency_endpoint_limits_review_to_selected_character(client, db, auth_headers, monkeypatch):
+async def test_voice_consistency_endpoint_limits_review_to_selected_character(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
     user_id = uuid.UUID(me.json()["id"])
@@ -93,30 +95,36 @@ async def test_voice_consistency_endpoint_limits_review_to_selected_character(cl
             ]
         )
 
-    monkeypatch.setattr("app.api.v1.routes.advisor.AsyncOpenAI", lambda api_key: _FakeOpenAIClient())
-    monkeypatch.setattr("app.api.v1.routes.advisor.semantic_search", _fake_semantic_search)
-    monkeypatch.setattr("app.api.v1.routes.advisor.build_story_context", _fake_story_context)
-    monkeypatch.setattr("app.api.v1.routes.advisor.create_tracked_chat_completion", _fake_chat_completion)
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.extract_dialogue_samples_by_character",
+        "app.api.v1.routes.advisor.voice.AsyncOpenAI", lambda **_kwargs: _FakeOpenAIClient()
+    )
+    monkeypatch.setattr("app.api.v1.routes.advisor.voice.semantic_search", _fake_semantic_search)
+    monkeypatch.setattr("app.api.v1.routes.advisor.voice.build_story_context", _fake_story_context)
+    monkeypatch.setattr(
+        "app.api.v1.routes.advisor.voice.create_tracked_chat_completion", _fake_chat_completion
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.advisor.voice.extract_dialogue_samples_by_character",
         lambda *_args: {"Iris": ["I can handle this."]},
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.compute_voice_metrics",
+        "app.api.v1.routes.advisor.voice.compute_voice_metrics",
         lambda samples: {"sample_dialogue_count": len(samples)},
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.score_voice_match",
+        "app.api.v1.routes.advisor.voice.score_voice_match",
         lambda _profile, metrics: (83 if metrics["sample_dialogue_count"] else 0, ["cadence"]),
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.synopsis.get_voice_consistency_cache",
+        "app.api.v1.routes.advisor.voice.get_voice_consistency_cache",
         lambda *_args, **_kwargs: None,
     )
+
     async def _fake_get_voice_consistency_cache(*_args, **_kwargs):
         pass
+
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.synopsis.get_voice_consistency_cache",
+        "app.api.v1.routes.advisor.voice.get_voice_consistency_cache",
         _fake_get_voice_consistency_cache,
     )
 
@@ -137,7 +145,9 @@ async def test_voice_consistency_endpoint_limits_review_to_selected_character(cl
 
 
 @pytest.mark.asyncio
-async def test_voice_consistency_endpoint_warns_on_selected_character_fallback(client, db, auth_headers, monkeypatch):
+async def test_voice_consistency_endpoint_warns_on_selected_character_fallback(
+    client, db, auth_headers, monkeypatch
+):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
     assert me.status_code == 200
     user_id = uuid.UUID(me.json()["id"])
@@ -216,20 +226,24 @@ async def test_voice_consistency_endpoint_warns_on_selected_character_fallback(c
             ]
         )
 
-    monkeypatch.setattr("app.api.v1.routes.advisor.AsyncOpenAI", lambda api_key: _FakeOpenAIClient())
-    monkeypatch.setattr("app.api.v1.routes.advisor.semantic_search", _fake_semantic_search)
-    monkeypatch.setattr("app.api.v1.routes.advisor.build_story_context", _fake_story_context)
-    monkeypatch.setattr("app.api.v1.routes.advisor.create_tracked_chat_completion", _fake_chat_completion)
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.extract_dialogue_samples_by_character",
+        "app.api.v1.routes.advisor.voice.AsyncOpenAI", lambda **_kwargs: _FakeOpenAIClient()
+    )
+    monkeypatch.setattr("app.api.v1.routes.advisor.voice.semantic_search", _fake_semantic_search)
+    monkeypatch.setattr("app.api.v1.routes.advisor.voice.build_story_context", _fake_story_context)
+    monkeypatch.setattr(
+        "app.api.v1.routes.advisor.voice.create_tracked_chat_completion", _fake_chat_completion
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.advisor.voice.extract_dialogue_samples_by_character",
         lambda *_args: {},
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.compute_voice_metrics",
+        "app.api.v1.routes.advisor.voice.compute_voice_metrics",
         lambda samples: {"sample_dialogue_count": len(samples)},
     )
     monkeypatch.setattr(
-        "app.api.v1.routes.advisor.score_voice_match",
+        "app.api.v1.routes.advisor.voice.score_voice_match",
         lambda _profile, metrics: (76 if metrics["sample_dialogue_count"] else 0, ["cadence"]),
     )
 

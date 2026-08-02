@@ -8,13 +8,14 @@ from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
 from app.core.config import settings
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_password
 from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaReadQuestion
 from app.models.book import (
     Book,
@@ -55,8 +56,10 @@ from app.models.user import (
 )
 from app.services.paddle_service import cancel_subscription_at_period_end
 from app.services.supabase_auth_service import delete_supabase_auth_user
-from app.utils.auth_utils import next_token_version
-from app.utils.book_utils import deserialize_manuscript_content
+from app.utils.auth_utils import next_token_version, verify_password_safely
+from app.utils.books.manuscript import (
+    deserialize_manuscript_content,
+)
 from app.utils.privacy_utils import (
     DATA_DELETION_STATUS_COMPLETED,
     DATA_DELETION_STATUS_FAILED,
@@ -73,6 +76,9 @@ from app.utils.privacy_utils import (
     validate_account_deletion_confirmation,
     validate_book_deletion_confirmation,
 )
+from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
+
+PADDLE_PROVIDER_EXCEPTIONS = (httpx.HTTPError, KeyError, TypeError, ValueError)
 
 
 def _json_default(value: Any) -> str:
@@ -100,14 +106,22 @@ async def _download_text_or_error(key: str) -> dict[str, Any]:
                 "html": content.html,
                 "metadata": content.metadata,
             }
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return {"storage_key": key, "text": raw.decode("utf-8", errors="replace")}
-    except Exception as exc:
+    except STORAGE_IO_EXCEPTIONS as exc:
         return {"storage_key": key, "error": str(exc)}
 
 
 async def build_user_data_export(db: AsyncSession, user: User) -> bytes:
-    books = (await db.execute(select(Book).where(Book.user_id == user.id).order_by(Book.created_at.asc()))).scalars().all()
+    books = (
+        (
+            await db.execute(
+                select(Book).where(Book.user_id == user.id).order_by(Book.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     email_preferences = (
         await db.execute(select(EmailPreference).where(EmailPreference.user_id == user.id))
     ).scalar_one_or_none()
@@ -132,7 +146,10 @@ async def build_user_data_export(db: AsyncSession, user: User) -> bytes:
         _write_json(
             zip_file,
             "email_preferences.json",
-            _model_payload(email_preferences, ["marketing_enabled", "product_enabled", "beta_reader_enabled", "updated_at"])
+            _model_payload(
+                email_preferences,
+                ["marketing_enabled", "product_enabled", "beta_reader_enabled", "updated_at"],
+            )
             if email_preferences
             else {},
         )
@@ -164,49 +181,176 @@ async def build_user_data_export(db: AsyncSession, user: User) -> bytes:
 
         for book in books:
             prefix = f"books/{book.id}"
-            _write_json(zip_file, f"{prefix}/book.json", _model_payload(book, [
-                "id",
-                "title",
-                "author",
-                "genre",
-                "format",
-                "work_type",
-                "status",
-                "source_kind",
-                "total_chapters",
-                "total_tokens",
-                "total_words",
-                "is_public",
-                "public_description",
-                "public_status",
-                "created_at",
-            ]))
-            chapters = (await db.execute(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc()))).scalars().all()
+            _write_json(
+                zip_file,
+                f"{prefix}/book.json",
+                _model_payload(
+                    book,
+                    [
+                        "id",
+                        "title",
+                        "author",
+                        "genre",
+                        "format",
+                        "work_type",
+                        "status",
+                        "source_kind",
+                        "total_chapters",
+                        "total_tokens",
+                        "total_words",
+                        "is_public",
+                        "public_description",
+                        "public_status",
+                        "created_at",
+                    ],
+                ),
+            )
+            chapters = (
+                (
+                    await db.execute(
+                        select(Chapter)
+                        .where(Chapter.book_id == book.id)
+                        .order_by(Chapter.number.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
             _write_json(
                 zip_file,
                 f"{prefix}/chapters.json",
                 [
                     {
-                        **_model_payload(chapter, ["id", "number", "title", "description", "chapter_kind", "word_count", "token_count"]),
+                        **_model_payload(
+                            chapter,
+                            [
+                                "id",
+                                "number",
+                                "title",
+                                "description",
+                                "chapter_kind",
+                                "word_count",
+                                "token_count",
+                            ],
+                        ),
                         "manuscript": await _download_text_or_error(chapter.s3_key),
                     }
                     for chapter in chapters
                 ],
             )
             for filename, model, fields in (
-                ("notes.json", BookNote, ["id", "chapter_number", "title", "body", "created_at", "updated_at"]),
-                ("annotations.json", ManuscriptAnnotation, ["id", "chapter_number", "category", "status", "visibility", "quote", "comment", "created_at"]),
-                ("characters.json", Character, ["id", "name", "display_name", "status", "description", "mention_count", "created_at"]),
-                ("relationships.json", CharacterRelationship, ["id", "character_a_id", "character_b_id", "relationship_type", "description", "confidence"]),
-                ("plot_threads.json", PlotThread, ["id", "title", "status", "description", "created_at", "updated_at"]),
-                ("wiki_entries.json", WikiEntry, ["id", "title", "entry_type", "body", "created_at", "updated_at"]),
-                ("world_elements.json", WorldElement, ["id", "element_type", "name", "description", "usage_count", "created_at", "updated_at"]),
-                ("world_notes.json", WorldNote, ["id", "title", "body", "created_at", "updated_at"]),
-                ("beta_read_assignments.json", BetaReadAssignment, ["id", "author_user_id", "reader_user_id", "reader_email", "state", "scope_kind", "task_label", "created_at", "updated_at"]),
-                ("collaborators.json", BookCollaborator, ["id", "invited_user_id", "email", "display_name", "role", "scope", "permissions", "invite_status", "invited_at", "updated_at"]),
+                (
+                    "notes.json",
+                    BookNote,
+                    ["id", "chapter_number", "title", "body", "created_at", "updated_at"],
+                ),
+                (
+                    "annotations.json",
+                    ManuscriptAnnotation,
+                    [
+                        "id",
+                        "chapter_number",
+                        "category",
+                        "status",
+                        "visibility",
+                        "quote",
+                        "comment",
+                        "created_at",
+                    ],
+                ),
+                (
+                    "characters.json",
+                    Character,
+                    [
+                        "id",
+                        "name",
+                        "display_name",
+                        "status",
+                        "description",
+                        "mention_count",
+                        "created_at",
+                    ],
+                ),
+                (
+                    "relationships.json",
+                    CharacterRelationship,
+                    [
+                        "id",
+                        "character_a_id",
+                        "character_b_id",
+                        "relationship_type",
+                        "description",
+                        "confidence",
+                    ],
+                ),
+                (
+                    "plot_threads.json",
+                    PlotThread,
+                    ["id", "title", "status", "description", "created_at", "updated_at"],
+                ),
+                (
+                    "wiki_entries.json",
+                    WikiEntry,
+                    ["id", "title", "entry_type", "body", "created_at", "updated_at"],
+                ),
+                (
+                    "world_elements.json",
+                    WorldElement,
+                    [
+                        "id",
+                        "element_type",
+                        "name",
+                        "description",
+                        "usage_count",
+                        "created_at",
+                        "updated_at",
+                    ],
+                ),
+                (
+                    "world_notes.json",
+                    WorldNote,
+                    ["id", "title", "body", "created_at", "updated_at"],
+                ),
+                (
+                    "beta_read_assignments.json",
+                    BetaReadAssignment,
+                    [
+                        "id",
+                        "author_user_id",
+                        "reader_user_id",
+                        "reader_email",
+                        "state",
+                        "scope_kind",
+                        "task_label",
+                        "created_at",
+                        "updated_at",
+                    ],
+                ),
+                (
+                    "collaborators.json",
+                    BookCollaborator,
+                    [
+                        "id",
+                        "invited_user_id",
+                        "email",
+                        "display_name",
+                        "role",
+                        "scope",
+                        "permissions",
+                        "invite_status",
+                        "invited_at",
+                        "updated_at",
+                    ],
+                ),
             ):
-                rows = (await db.execute(select(model).where(model.book_id == book.id))).scalars().all()
-                _write_json(zip_file, f"{prefix}/{filename}", [_model_payload(row, fields) for row in rows])
+                rows = (
+                    (await db.execute(select(model).where(model.book_id == book.id)))
+                    .scalars()
+                    .all()
+                )
+                _write_json(
+                    zip_file, f"{prefix}/{filename}", [_model_payload(row, fields) for row in rows]
+                )
 
     return buffer.getvalue()
 
@@ -231,13 +375,19 @@ async def collect_book_storage_keys(db: AsyncSession, book_id: uuid.UUID) -> lis
         (BookForumPost, BookForumPost.image_s3_key),
         (BookForumComment, BookForumComment.image_s3_key),
     ):
-        rows = (await db.execute(select(column).where(model.book_id == book_id, column.is_not(None)))).scalars().all()
+        rows = (
+            (await db.execute(select(column).where(model.book_id == book_id, column.is_not(None))))
+            .scalars()
+            .all()
+        )
         for key in rows:
             add(key)
     return keys
 
 
-async def queue_book_permanent_deletion(db: AsyncSession, book: Book, confirmation_text: str, requested_by: User) -> DataDeletionRequest:
+async def queue_book_permanent_deletion(
+    db: AsyncSession, book: Book, confirmation_text: str, requested_by: User
+) -> DataDeletionRequest:
     try:
         validate_book_deletion_confirmation(confirmation_text)
     except ValueError as exc:
@@ -282,10 +432,7 @@ async def request_account_deletion(
     if user.supabase_auth_id is None:
         if not password:
             raise HTTPException(400, "Current password is required to delete this account.")
-        try:
-            password_ok = verify_password(password, user.password_hash)
-        except Exception:
-            password_ok = False
+        password_ok = verify_password_safely(password, user.password_hash)
         if not password_ok:
             raise HTTPException(403, "Current password is incorrect.")
 
@@ -295,22 +442,40 @@ async def request_account_deletion(
     followup_required = False
 
     subscriptions = (
-        await db.execute(
-            select(Subscription).where(
-                Subscription.user_id == user.id,
-                Subscription.paddle_sub_id.is_not(None),
-                Subscription.status.in_(["active", "trialing", "past_due"]),
+        (
+            await db.execute(
+                select(Subscription).where(
+                    Subscription.user_id == user.id,
+                    Subscription.paddle_sub_id.is_not(None),
+                    Subscription.status.in_(["active", "trialing", "past_due"]),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for subscription in subscriptions:
         try:
-            provider_response = await cancel_subscription_at_period_end(str(subscription.paddle_sub_id))
-            provider_actions["paddle"].append({"subscription_id": subscription.paddle_sub_id, "status": "cancelled_at_period_end", "response": provider_response})
+            provider_response = await cancel_subscription_at_period_end(
+                str(subscription.paddle_sub_id)
+            )
+            provider_actions["paddle"].append(
+                {
+                    "subscription_id": subscription.paddle_sub_id,
+                    "status": "cancelled_at_period_end",
+                    "response": provider_response,
+                }
+            )
             subscription.status = "cancelling"
-        except Exception as exc:
+        except PADDLE_PROVIDER_EXCEPTIONS as exc:
             followup_required = True
-            provider_actions["paddle"].append({"subscription_id": subscription.paddle_sub_id, "status": "followup_required", "error": str(exc)})
+            provider_actions["paddle"].append(
+                {
+                    "subscription_id": subscription.paddle_sub_id,
+                    "status": "followup_required",
+                    "error": str(exc),
+                }
+            )
 
     original_email = user.email
     supabase_result = await delete_supabase_auth_user(user.supabase_auth_id)
@@ -333,21 +498,29 @@ async def request_account_deletion(
             if key not in storage_keys:
                 storage_keys.append(key)
     forum_image_keys = (
-        await db.execute(
-            select(BookForumPost.image_s3_key).where(
-                BookForumPost.author_user_id == user.id,
-                BookForumPost.image_s3_key.is_not(None),
+        (
+            await db.execute(
+                select(BookForumPost.image_s3_key).where(
+                    BookForumPost.author_user_id == user.id,
+                    BookForumPost.image_s3_key.is_not(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     forum_comment_image_keys = (
-        await db.execute(
-            select(BookForumComment.image_s3_key).where(
-                BookForumComment.author_user_id == user.id,
-                BookForumComment.image_s3_key.is_not(None),
+        (
+            await db.execute(
+                select(BookForumComment.image_s3_key).where(
+                    BookForumComment.author_user_id == user.id,
+                    BookForumComment.image_s3_key.is_not(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for key in [*forum_image_keys, *forum_comment_image_keys]:
         if key and key not in storage_keys:
             storage_keys.append(key)
@@ -358,7 +531,11 @@ async def request_account_deletion(
     user.password_hash = hash_password(uuid.uuid4().hex + uuid.uuid4().hex)
     user.tier = "free"
     user.token_version = next_token_version(user)
-    user.deletion_status = USER_DELETION_STATUS_PROVIDER_FOLLOWUP if followup_required else USER_DELETION_STATUS_PENDING
+    user.deletion_status = (
+        USER_DELETION_STATUS_PROVIDER_FOLLOWUP
+        if followup_required
+        else USER_DELETION_STATUS_PENDING
+    )
     user.deletion_requested_at = now
     user.deletion_scheduled_for = scheduled_for
     user.deleted_at = now
@@ -387,7 +564,7 @@ async def delete_storage_keys(keys: list[str]) -> dict[str, Any]:
         try:
             await asyncio.to_thread(storage.delete_object, key)
             deleted.append(key)
-        except Exception as exc:
+        except STORAGE_IO_EXCEPTIONS as exc:
             errors[key] = str(exc)
     return {"deleted": deleted, "errors": errors}
 
@@ -405,7 +582,9 @@ async def _hard_delete_account_product_data(db: AsyncSession, request: DataDelet
     if not user_id:
         return
 
-    book_ids = list((await db.execute(select(Book.id).where(Book.user_id == user_id))).scalars().all())
+    book_ids = list(
+        (await db.execute(select(Book.id).where(Book.user_id == user_id))).scalars().all()
+    )
     for book_id in book_ids:
         await _hard_delete_book(db, book_id)
 
@@ -423,16 +602,51 @@ async def _hard_delete_account_product_data(db: AsyncSession, request: DataDelet
         if hasattr(model, "user_id"):
             await db.execute(delete(model).where(model.user_id == user_id))
 
-    await db.execute(delete(BetaReadFeedbackItem).where(or_(BetaReadFeedbackItem.author_user_id == user_id, BetaReadFeedbackItem.reader_user_id == user_id)))
+    await db.execute(
+        delete(BetaReadFeedbackItem).where(
+            or_(
+                BetaReadFeedbackItem.author_user_id == user_id,
+                BetaReadFeedbackItem.reader_user_id == user_id,
+            )
+        )
+    )
     await db.execute(delete(BetaReadQuestion).where(BetaReadQuestion.author_user_id == user_id))
-    await db.execute(delete(BetaReadAssignment).where(or_(BetaReadAssignment.author_user_id == user_id, BetaReadAssignment.reader_user_id == user_id)))
+    await db.execute(
+        delete(BetaReadAssignment).where(
+            or_(
+                BetaReadAssignment.author_user_id == user_id,
+                BetaReadAssignment.reader_user_id == user_id,
+            )
+        )
+    )
     await db.execute(delete(BookCollaborator).where(BookCollaborator.invited_user_id == user_id))
-    await db.execute(delete(BookForumInterest).where(or_(BookForumInterest.author_user_id == user_id, BookForumInterest.interested_user_id == user_id)))
+    await db.execute(
+        delete(BookForumInterest).where(
+            or_(
+                BookForumInterest.author_user_id == user_id,
+                BookForumInterest.interested_user_id == user_id,
+            )
+        )
+    )
     await db.execute(delete(BookForumPost).where(BookForumPost.author_user_id == user_id))
     await db.execute(delete(BookForumComment).where(BookForumComment.author_user_id == user_id))
     await db.execute(delete(DirectMessage).where(DirectMessage.sender_user_id == user_id))
-    await db.execute(delete(DirectConversation).where(or_(DirectConversation.participant_a_user_id == user_id, DirectConversation.participant_b_user_id == user_id)))
-    await db.execute(delete(FriendRequest).where(or_(FriendRequest.requester_user_id == user_id, FriendRequest.addressee_user_id == user_id)))
+    await db.execute(
+        delete(DirectConversation).where(
+            or_(
+                DirectConversation.participant_a_user_id == user_id,
+                DirectConversation.participant_b_user_id == user_id,
+            )
+        )
+    )
+    await db.execute(
+        delete(FriendRequest).where(
+            or_(
+                FriendRequest.requester_user_id == user_id,
+                FriendRequest.addressee_user_id == user_id,
+            )
+        )
+    )
     await db.execute(delete(AdvisorJob).where(AdvisorJob.user_id == user_id))
 
     user = await db.get(User, user_id)
@@ -447,7 +661,9 @@ async def _hard_delete_account_product_data(db: AsyncSession, request: DataDelet
         user.deleted_at = user.deleted_at or datetime.now(UTC)
 
 
-async def process_data_deletion_request(db: AsyncSession, request: DataDeletionRequest) -> dict[str, Any]:
+async def process_data_deletion_request(
+    db: AsyncSession, request: DataDeletionRequest
+) -> dict[str, Any]:
     if request.status == DATA_DELETION_STATUS_COMPLETED:
         return {"id": str(request.id), "status": request.status, "skipped": True}
 
@@ -481,19 +697,29 @@ async def process_data_deletion_request(db: AsyncSession, request: DataDeletionR
     return {"id": str(request.id), "status": request.status, "storage": storage_result}
 
 
-async def process_due_data_deletion_requests(db: AsyncSession, *, limit: int = 50) -> dict[str, Any]:
+async def process_due_data_deletion_requests(
+    db: AsyncSession, *, limit: int = 50
+) -> dict[str, Any]:
     now = datetime.now(UTC)
     requests = (
-        await db.execute(
-            select(DataDeletionRequest)
-            .where(
-                DataDeletionRequest.status.in_([DATA_DELETION_STATUS_PENDING, DATA_DELETION_STATUS_FAILED]),
-                DataDeletionRequest.scheduled_for <= now,
+        (
+            await db.execute(
+                select(DataDeletionRequest)
+                .where(
+                    DataDeletionRequest.status.in_(
+                        [DATA_DELETION_STATUS_PENDING, DATA_DELETION_STATUS_FAILED]
+                    ),
+                    DataDeletionRequest.scheduled_for <= now,
+                )
+                .order_by(
+                    DataDeletionRequest.scheduled_for.asc(), DataDeletionRequest.requested_at.asc()
+                )
+                .limit(limit)
             )
-            .order_by(DataDeletionRequest.scheduled_for.asc(), DataDeletionRequest.requested_at.asc())
-            .limit(limit)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     results = []
     for request in requests:
@@ -513,4 +739,6 @@ async def book_or_owner_deleted(db: AsyncSession, book_id: uuid.UUID) -> bool:
     if not row:
         return True
     _, deletion_status, deleted_at = row
-    return (deletion_status or USER_DELETION_STATUS_ACTIVE) != USER_DELETION_STATUS_ACTIVE or deleted_at is not None
+    return (
+        deletion_status or USER_DELETION_STATUS_ACTIVE
+    ) != USER_DELETION_STATUS_ACTIVE or deleted_at is not None

@@ -2,6 +2,7 @@
 Prediction engine - RAG over book chunks + GPT-4o-mini reasoning.
 Phase 3 feature.
 """
+
 import json
 import uuid
 
@@ -11,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.engine.search.semantic import semantic_search
 from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.retry_utils import LLM_MAX_RETRIES
 
 
 def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+
 
 PREDICT_SYSTEM = """You are analysing a novel. The user asks a prediction question.
 Based ONLY on the evidence provided (story context up to the current chapter),
@@ -79,7 +82,7 @@ async def predict(
             content = r.choices[0].message.content or "{}"
             data = json.loads(content)
             return data.get("theories", [])
-        except Exception:
+        except (json.JSONDecodeError, AttributeError, IndexError, KeyError, TypeError):
             return []
     finally:
         await client.close()

@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.models.book import Book
@@ -16,6 +17,7 @@ from app.services.refund_service import (
 
 async def _register_user(client, email: str) -> tuple[dict[str, str], uuid.UUID]:
     from app.core.security import create_access_token
+
     response = await client.post(
         "/api/v1/auth/register",
         json={
@@ -70,7 +72,9 @@ async def _grant_admin(
 
 @pytest.mark.asyncio
 async def test_admin_queue_depth_reports_redis_lengths(client, db, monkeypatch):
-    headers, user_id = await _register_user(client, f"admin-queue-depth-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"admin-queue-depth-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     user = await db.get(User, user_id)
     assert user is not None
     await _grant_admin(client, db, user_id, headers)
@@ -116,8 +120,12 @@ async def test_admin_queue_depth_reports_redis_lengths(client, db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_subscription_metrics_reports_trial_conversion_and_post_cancel_churn(client, db):
-    headers, user_id = await _register_user(client, f"admin-subscription-metrics-{uuid.uuid4().hex[:8]}@lorevia.app")
+async def test_admin_subscription_metrics_reports_trial_conversion_and_post_cancel_churn(
+    client, db
+):
+    headers, user_id = await _register_user(
+        client, f"admin-subscription-metrics-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     admin_user = await db.get(User, user_id)
     assert admin_user is not None
     await _grant_admin(client, db, user_id, headers)
@@ -209,8 +217,12 @@ async def test_admin_subscription_metrics_reports_trial_conversion_and_post_canc
 
 
 @pytest.mark.asyncio
-async def test_admin_public_demo_routes_require_moderation_scope_and_old_public_write_paths_are_gone(client, db):
-    headers, user_id = await _register_user(client, f"admin-public-demo-scope-{uuid.uuid4().hex[:8]}@lorevia.app")
+async def test_admin_public_demo_routes_require_moderation_scope_and_old_public_write_paths_are_gone(
+    client, db
+):
+    headers, user_id = await _register_user(
+        client, f"admin-public-demo-scope-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     user = await db.get(User, user_id)
     assert user is not None
     await _grant_admin(client, db, user_id, headers, scopes=["billing_admin"], is_owner=False)
@@ -242,7 +254,9 @@ async def test_admin_public_demo_routes_require_moderation_scope_and_old_public_
 
 @pytest.mark.asyncio
 async def test_admin_can_create_and_append_public_demo_books_only_through_admin_routes(client, db):
-    headers, user_id = await _register_user(client, f"admin-public-demo-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"admin-public-demo-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     user = await db.get(User, user_id)
     assert user is not None
     await _grant_admin(client, db, user_id, headers, scopes=["moderation_admin"], is_owner=False)
@@ -255,7 +269,11 @@ async def test_admin_can_create_and_append_public_demo_books_only_through_admin_
             "genre": "Fantasy",
             "description": "Safe internal public demo.",
             "chapters": [
-                {"title": "The Gate Opens", "text": "Nora crossed the ash gate.", "description": "Opening beat."},
+                {
+                    "title": "The Gate Opens",
+                    "text": "Nora crossed the ash gate.",
+                    "description": "Opening beat.",
+                },
             ],
         },
         headers=headers,
@@ -306,7 +324,9 @@ async def test_admin_can_create_and_append_public_demo_books_only_through_admin_
 
 @pytest.mark.asyncio
 async def test_admin_refund_review_create_requires_admin(client):
-    headers, _user_id = await _register_user(client, f"refund-non-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, _user_id = await _register_user(
+        client, f"refund-non-admin-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
 
     response = await client.post(
         "/api/v1/admin/refunds/reviews",
@@ -322,8 +342,12 @@ async def test_admin_refund_review_create_requires_admin(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_refund_review_create_auto_submits_eligible_monthly_refund(client, db, monkeypatch):
-    admin_headers, admin_user_id = await _register_user(client, f"refund-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
+async def test_admin_refund_review_create_auto_submits_eligible_monthly_refund(
+    client, db, monkeypatch
+):
+    admin_headers, admin_user_id = await _register_user(
+        client, f"refund-admin-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
     await _grant_admin(client, db, admin_user_id, admin_headers)
@@ -376,9 +400,16 @@ async def test_admin_refund_review_create_auto_submits_eligible_monthly_refund(c
         assert subscription_id == "sub_123"
         return {"id": "sub_123", "status": "canceled"}
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment)
-    monkeypatch.setattr("app.services.refund_service.cancel_subscription_immediately", fake_cancel_subscription_immediately)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.cancel_subscription_immediately",
+        fake_cancel_subscription_immediately,
+    )
 
     response = await client.post(
         "/api/v1/admin/refunds/reviews",
@@ -401,8 +432,12 @@ async def test_admin_refund_review_create_auto_submits_eligible_monthly_refund(c
 
 
 @pytest.mark.asyncio
-async def test_admin_refund_review_create_stores_manual_review_when_usage_exists(client, db, monkeypatch):
-    admin_headers, admin_user_id = await _register_user(client, f"refund-manual-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
+async def test_admin_refund_review_create_stores_manual_review_when_usage_exists(
+    client, db, monkeypatch
+):
+    admin_headers, admin_user_id = await _register_user(
+        client, f"refund-manual-admin-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
     await _grant_admin(client, db, admin_user_id, admin_headers)
@@ -458,8 +493,12 @@ async def test_admin_refund_review_create_stores_manual_review_when_usage_exists
     async def fail_create_refund_adjustment(*args, **kwargs):
         raise AssertionError("Provider refund creation should not run for manual-review cases")
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fail_create_refund_adjustment)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fail_create_refund_adjustment
+    )
 
     response = await client.post(
         "/api/v1/admin/refunds/reviews",
@@ -480,7 +519,9 @@ async def test_admin_refund_review_create_stores_manual_review_when_usage_exists
 
 @pytest.mark.asyncio
 async def test_admin_refund_review_manual_approve_and_deny_paths(client, db, monkeypatch):
-    admin_headers, admin_user_id = await _register_user(client, f"refund-decision-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
+    admin_headers, admin_user_id = await _register_user(
+        client, f"refund-decision-admin-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
     await _grant_admin(client, db, admin_user_id, admin_headers)
@@ -547,8 +588,13 @@ async def test_admin_refund_review_manual_approve_and_deny_paths(client, db, mon
         assert subscription_id == "sub_decision_123"
         return {"id": "sub_decision_123", "status": "canceled"}
 
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment)
-    monkeypatch.setattr("app.services.refund_service.cancel_subscription_immediately", fake_cancel_subscription_immediately)
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.cancel_subscription_immediately",
+        fake_cancel_subscription_immediately,
+    )
 
     approve_response = await client.post(
         f"/api/v1/admin/refunds/reviews/{review.id}/approve",
@@ -572,8 +618,12 @@ async def test_admin_refund_review_manual_approve_and_deny_paths(client, db, mon
 
 
 @pytest.mark.asyncio
-async def test_admin_refund_review_surfaces_partial_provider_failure_for_follow_up(client, db, monkeypatch):
-    admin_headers, admin_user_id = await _register_user(client, f"refund-followup-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
+async def test_admin_refund_review_surfaces_partial_provider_failure_for_follow_up(
+    client, db, monkeypatch
+):
+    admin_headers, admin_user_id = await _register_user(
+        client, f"refund-followup-admin-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
     await _grant_admin(client, db, admin_user_id, admin_headers)
@@ -620,14 +670,21 @@ async def test_admin_refund_review_surfaces_partial_provider_failure_for_follow_
         return {"id": "adj_followup_123", "status": "pending_approval"}
 
     async def fail_cancel_subscription_immediately(subscription_id: str):
-        raise RuntimeError(
+        raise httpx.HTTPError(
             "provider timeout authorization=Bearer refund-admin-secret "
             "database_url=postgresql://admin_refund:admin_pass@db.example.com/refunds"
         )
 
-    monkeypatch.setattr("app.services.refund_service.get_transaction_summary", fake_get_transaction_summary)
-    monkeypatch.setattr("app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment)
-    monkeypatch.setattr("app.services.refund_service.cancel_subscription_immediately", fail_cancel_subscription_immediately)
+    monkeypatch.setattr(
+        "app.services.refund_service.get_transaction_summary", fake_get_transaction_summary
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.create_refund_adjustment", fake_create_refund_adjustment
+    )
+    monkeypatch.setattr(
+        "app.services.refund_service.cancel_subscription_immediately",
+        fail_cancel_subscription_immediately,
+    )
 
     response = await client.post(
         "/api/v1/admin/refunds/reviews",
@@ -643,15 +700,25 @@ async def test_admin_refund_review_surfaces_partial_provider_failure_for_follow_
     payload = response.json()
     assert payload["status"] == REFUND_STATUS_PROVIDER_FOLLOWUP_REQUIRED
     assert payload["paddle_adjustment_id"] == "adj_followup_123"
-    assert payload["provider_response_json"]["cancel_subscription_error"] == CANCEL_SUBSCRIPTION_ERROR_MESSAGE
-    assert "refund-admin-secret" not in payload["provider_response_json"]["cancel_subscription_error_redacted"]
-    assert "admin_pass" not in payload["provider_response_json"]["cancel_subscription_error_redacted"]
+    assert (
+        payload["provider_response_json"]["cancel_subscription_error"]
+        == CANCEL_SUBSCRIPTION_ERROR_MESSAGE
+    )
+    assert (
+        "refund-admin-secret"
+        not in payload["provider_response_json"]["cancel_subscription_error_redacted"]
+    )
+    assert (
+        "admin_pass" not in payload["provider_response_json"]["cancel_subscription_error_redacted"]
+    )
     assert "[REDACTED]" in payload["provider_response_json"]["cancel_subscription_error_redacted"]
 
 
 @pytest.mark.asyncio
 async def test_admin_refund_review_deny_rejects_reviews_already_submitted_to_provider(client, db):
-    admin_headers, admin_user_id = await _register_user(client, f"refund-deny-admin-{uuid.uuid4().hex[:8]}@lorevia.app")
+    admin_headers, admin_user_id = await _register_user(
+        client, f"refund-deny-admin-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     admin_user = await db.get(User, admin_user_id)
     assert admin_user is not None
     await _grant_admin(client, db, admin_user_id, admin_headers)
@@ -733,7 +800,9 @@ async def test_admin_refund_review_deny_rejects_reviews_already_submitted_to_pro
 
 @pytest.mark.asyncio
 async def test_admin_csrf_allows_valid_bearer_access_token(client, db):
-    headers, user_id = await _register_user(client, f"admin-csrf-bearer-valid-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"admin-csrf-bearer-valid-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     await _grant_admin(client, db, user_id, headers)
 
     response = await client.get("/api/v1/admin/session", headers=headers)
@@ -745,7 +814,9 @@ async def test_admin_csrf_allows_valid_bearer_access_token(client, db):
 async def test_admin_csrf_falls_back_to_cookie_when_bearer_is_invalid(client, db):
     from app.utils.admin_security import ADMIN_CSRF_COOKIE_NAME, ADMIN_CSRF_HEADER_NAME
 
-    headers, user_id = await _register_user(client, f"admin-csrf-cookie-fallback-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"admin-csrf-cookie-fallback-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     await _grant_admin(client, db, user_id, headers)
 
     session_response = await client.get("/api/v1/admin/session", headers=headers)
@@ -774,7 +845,9 @@ async def test_admin_csrf_falls_back_to_cookie_when_bearer_is_invalid(client, db
 
 @pytest.mark.asyncio
 async def test_admin_csrf_rejects_missing_bearer_and_csrf_header(client, db):
-    headers, user_id = await _register_user(client, f"admin-csrf-reject-{uuid.uuid4().hex[:8]}@lorevia.app")
+    headers, user_id = await _register_user(
+        client, f"admin-csrf-reject-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
     await _grant_admin(client, db, user_id, headers)
 
     del headers["Authorization"]

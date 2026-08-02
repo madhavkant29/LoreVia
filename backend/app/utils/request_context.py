@@ -4,7 +4,9 @@ import contextvars
 import uuid
 
 _request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
-_request_user_id: contextvars.ContextVar[uuid.UUID | None] = contextvars.ContextVar("request_user_id", default=None)
+_request_user_id: contextvars.ContextVar[uuid.UUID | None] = contextvars.ContextVar(
+    "request_user_id", default=None
+)
 
 
 def set_request_id(request_id: str | None) -> None:
@@ -21,4 +23,3 @@ def set_request_user_id(user_id: uuid.UUID | None) -> None:
 
 def get_request_user_id() -> uuid.UUID | None:
     return _request_user_id.get()
-

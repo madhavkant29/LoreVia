@@ -120,7 +120,9 @@ async def test_get_owned_scene_returns_matching_scene():
 @pytest.mark.asyncio
 async def test_get_owned_scene_raises_404_when_missing():
     with pytest.raises(screenplay_utils.HTTPException) as exc:
-        await screenplay_utils.get_owned_scene(_FakeDB([_Result(scalar=None)]), uuid.uuid4(), uuid.uuid4())
+        await screenplay_utils.get_owned_scene(
+            _FakeDB([_Result(scalar=None)]), uuid.uuid4(), uuid.uuid4()
+        )
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "Scene not found"
@@ -205,7 +207,11 @@ async def test_get_screenplay_stats_builds_aggregate_payload():
         _FakeDB(
             [
                 _Result(scalar=SimpleNamespace(id=uuid.uuid4())),
-                _Result(first=SimpleNamespace(total_scenes=3, total_words=700, int_scenes=2, ext_scenes=1)),
+                _Result(
+                    first=SimpleNamespace(
+                        total_scenes=3, total_words=700, int_scenes=2, ext_scenes=1
+                    )
+                ),
                 _Result(first=SimpleNamespace(total_dialogue_lines=4, dialogue_words=120)),
                 _Result(all_rows=character_rows),
             ]
@@ -312,11 +318,17 @@ async def test_get_character_dialogue_verifies_book_before_returning_lines():
 @pytest.mark.asyncio
 async def test_search_and_filter_helpers_raise_404_for_unowned_book():
     with pytest.raises(screenplay_utils.HTTPException) as search_exc:
-        await screenplay_utils.search_scenes(_FakeDB([_Result(scalar=None)]), uuid.uuid4(), "archive", uuid.uuid4())
+        await screenplay_utils.search_scenes(
+            _FakeDB([_Result(scalar=None)]), uuid.uuid4(), "archive", uuid.uuid4()
+        )
     with pytest.raises(screenplay_utils.HTTPException) as filter_exc:
-        await screenplay_utils.filter_scenes_by_type(_FakeDB([_Result(scalar=None)]), uuid.uuid4(), "INT", uuid.uuid4())
+        await screenplay_utils.filter_scenes_by_type(
+            _FakeDB([_Result(scalar=None)]), uuid.uuid4(), "INT", uuid.uuid4()
+        )
     with pytest.raises(screenplay_utils.HTTPException) as location_exc:
-        await screenplay_utils.get_scene_by_location(_FakeDB([_Result(scalar=None)]), uuid.uuid4(), "Archive", uuid.uuid4())
+        await screenplay_utils.get_scene_by_location(
+            _FakeDB([_Result(scalar=None)]), uuid.uuid4(), "Archive", uuid.uuid4()
+        )
 
     assert search_exc.value.status_code == 404
     assert filter_exc.value.status_code == 404

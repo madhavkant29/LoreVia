@@ -2,7 +2,7 @@ import uuid
 
 from app.models.character import Character, CharacterState, CharacterVoiceProfile
 from app.models.intelligence import CharacterRelationship
-from app.utils.character_utils import build_character_arc_tracker
+from app.utils.characters.tracking import build_character_arc_tracker
 
 
 def test_build_character_arc_tracker_surfaces_timeline_and_diagnostics():
@@ -84,7 +84,12 @@ def test_build_character_arc_tracker_surfaces_timeline_and_diagnostics():
 
     assert tracker["goal"] == "Keep the caravan alive."
     assert tracker["arc_timeline"][0] == "Chapter 1: Refuses leadership"
-    assert any("Motivation changed, but no scene explains why." == item for item in tracker["diagnostics"])
-    assert any("Relationship with Joren shifts from hostile to trusting too abruptly." == item for item in tracker["diagnostics"])
+    assert any(
+        "Motivation changed, but no scene explains why." == item for item in tracker["diagnostics"]
+    )
+    assert any(
+        "Relationship with Joren shifts from hostile to trusting too abruptly." == item
+        for item in tracker["diagnostics"]
+    )
     assert any(item["label"] == "Build" for item in tracker["physical_description_history"])
     assert any("Signature phrase" in item for item in tracker["voice_markers"])
