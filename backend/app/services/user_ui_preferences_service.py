@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.book import Book
 from app.models.user import User, UserBookUiPreference, UserUiPreference
 from app.schemas.user import (
-    UserBookUiPreferencePatch,
     UserBookUiPreferenceOut,
+    UserBookUiPreferencePatch,
     UserUiPreferenceImportBody,
     UserUiPreferenceImportOut,
     UserUiPreferenceOut,
@@ -455,12 +455,8 @@ async def get_or_create_user_book_ui_preference(
         ).scalar_one_or_none()
         if preference:
             return preference
-    default_preset = (
-        "draft" if global_preference.complexity_mode == "focused" else "all"
-    )
-    preference = UserBookUiPreference(
-        user_id=user.id, book_id=book_id, book_preset=default_preset
-    )
+    default_preset = "draft" if global_preference.complexity_mode == "focused" else "all"
+    preference = UserBookUiPreference(user_id=user.id, book_id=book_id, book_preset=default_preset)
     db.add(preference)
     await db.flush()
     return preference
@@ -559,7 +555,10 @@ async def import_user_ui_preferences(
     incoming_global = body.global_preferences or {}
     if body.mode == "replace":
         next_global = _merge_payload(
-            copy.deepcopy(GLOBAL_DEFAULTS), incoming_global, GLOBAL_DEFAULTS, _normalize_global_field
+            copy.deepcopy(GLOBAL_DEFAULTS),
+            incoming_global,
+            GLOBAL_DEFAULTS,
+            _normalize_global_field,
         )
     else:
         next_global = _merge_payload(
@@ -587,7 +586,10 @@ async def import_user_ui_preferences(
         current_book = _serialize_book_payload(book_preference)
         if body.mode == "replace":
             next_book = _merge_payload(
-                copy.deepcopy(BOOK_DEFAULTS), raw_book_preference, BOOK_DEFAULTS, _normalize_book_field
+                copy.deepcopy(BOOK_DEFAULTS),
+                raw_book_preference,
+                BOOK_DEFAULTS,
+                _normalize_book_field,
             )
         else:
             next_book = _merge_payload(

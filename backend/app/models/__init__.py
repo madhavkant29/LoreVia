@@ -81,7 +81,7 @@ from app.models.user import (
     TrialEmailEvent,
     User,
     UserBookUiPreference,
-    UserUiPreference,
     UserRateLimitOverride,
+    UserUiPreference,
     UserWritingActivity,
 )

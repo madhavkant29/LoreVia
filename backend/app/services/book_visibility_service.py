@@ -27,7 +27,10 @@ def _public_url(book: Book) -> str | None:
 
 
 def _public_badge(book: Book) -> str | None:
-    if bool(getattr(book, "is_public", False)) and getattr(book, "public_status", "") == "published":
+    if (
+        bool(getattr(book, "is_public", False))
+        and getattr(book, "public_status", "") == "published"
+    ):
         return "Public sample"
     if getattr(book, "public_share_status", "") == "pending":
         return "Public review"

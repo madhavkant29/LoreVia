@@ -210,9 +210,7 @@ async def test_standard_users_get_all_preset_for_new_book_preferences(client, db
     await db.commit()
     await db.refresh(book)
 
-    response = await client.get(
-        f"/api/v1/auth/me/ui-preferences/books/{book.id}", headers=headers
-    )
+    response = await client.get(f"/api/v1/auth/me/ui-preferences/books/{book.id}", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["book_preset"] == "all"

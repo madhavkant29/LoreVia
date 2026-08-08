@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.user import UserUiPreference
-from app.schemas.user import UiPreferenceOperation, UserUiPreferenceImportBody, UserUiPreferencePatch
+from app.schemas.user import (
+    UiPreferenceOperation,
+    UserUiPreferenceImportBody,
+    UserUiPreferencePatch,
+)
 from app.services import user_ui_preferences_service as service
 
 

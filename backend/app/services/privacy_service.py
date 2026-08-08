@@ -52,8 +52,8 @@ from app.models.user import (
     TrialEmailEvent,
     User,
     UserBookUiPreference,
-    UserUiPreference,
     UserLoginActivity,
+    UserUiPreference,
     UserWritingActivity,
 )
 from app.services.paddle_service import cancel_subscription_at_period_end
