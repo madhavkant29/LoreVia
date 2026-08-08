@@ -272,7 +272,6 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-
     - name: Extract metadata for frontend
       id: meta-frontend
       uses: docker/metadata-action@v6
@@ -292,45 +291,3 @@ jobs:
         labels: ${{ steps.meta-frontend.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-
-  deploy:
-    needs: [build-and-push-docker]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: production
-
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Validate deployment secrets
-      env:
-        VPS_HOST: ${{ secrets.VPS_HOST }}
-        VPS_USER: ${{ secrets.VPS_USER }}
-        VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-        VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
-      run: |
-        test -n "$VPS_HOST" || { echo "Missing production secret: VPS_HOST"; exit 1; }
-        test -n "$VPS_USER" || { echo "Missing production secret: VPS_USER"; exit 1; }
-        test -n "$VPS_SSH_KEY" || { echo "Missing production secret: VPS_SSH_KEY"; exit 1; }
-        test -n "$VPS_KNOWN_HOSTS" || { echo "Missing production secret: VPS_KNOWN_HOSTS"; exit 1; }
-
-    - name: Deploy to production
-      env:
-        VPS_HOST: ${{ secrets.VPS_HOST }}
-        VPS_USER: ${{ secrets.VPS_USER }}
-        VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-        VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
-      run: |
-        install -m 700 -d ~/.ssh
-        printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/lorevia_deploy
-        chmod 600 ~/.ssh/lorevia_deploy
-        printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
-        ssh -i ~/.ssh/lorevia_deploy -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
-          "test -d /opt/lorevia/current && test -x /opt/lorevia/current/deploy.sh && command -v docker >/dev/null && command -v pg_dump >/dev/null"
-        ssh -i ~/.ssh/lorevia_deploy -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
-          "cd /opt/lorevia/current && bash -lc 'ENABLE_SYSTEMD_UNIT=0 ALEMBIC_ALLOWED_DESTRUCTIVE_UPGRADE_REVISIONS=20260724_continuity_ledger ./deploy.sh'"
-
-    - name: Verify production health
-      run: |
-        curl --fail --show-error --silent --retry 6 --retry-all-errors --retry-max-time 90 https://api.getlorevia.com/health
-        curl --fail --show-error --silent --retry 6 --retry-all-errors --retry-max-time 90 https://api.getlorevia.com/ready
