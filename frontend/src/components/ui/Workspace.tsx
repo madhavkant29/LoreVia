@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react"
 
 import { cn } from "@/lib/utils/text"
+import { ActionableEmptyState } from "@/components/ui/ActionableEmptyState"
 
 export function WorkspacePage({
   children,
@@ -100,17 +101,14 @@ export function WorkspaceEmptyState({
   title,
   body,
   className,
+  variant = "empty",
 }: {
   title: string
   body: string
   className?: string
+  variant?: "empty" | "no_results" | "processing" | "partial_ready" | "gated" | "recoverable_failure" | "support_required"
 }) {
-  return (
-    <div className={cn("app-empty-state", className)}>
-      <p className="text-lg font-semibold text-[rgb(var(--foreground))]">{title}</p>
-      <p className="mt-2 text-sm leading-7 text-[rgb(var(--muted-foreground))]">{body}</p>
-    </div>
-  )
+  return <ActionableEmptyState title={title} body={body} variant={variant} className={className} />
 }
 
 export function WorkspaceTabButton({

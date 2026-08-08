@@ -1,8 +1,11 @@
+"use client"
+
 import type { ReactNode } from "react"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/Button"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
 import type { NextBestAction } from "@/types/ux"
 
 import { formatNumber, type MetricTone } from "./LibraryClient.helpers"
@@ -16,6 +19,8 @@ export function NextActionPanel({
   actions: NextBestAction[]
 }) {
   const primary = actions[0]
+  const snoozeRecommendation = useUiPreferencesStore((state) => state.snoozeRecommendation)
+  const dismissRecommendation = useUiPreferencesStore((state) => state.dismissRecommendation)
 
   return (
     <section className={`rounded-sm border p-5 ${isDark ? "border-white/[0.08] bg-[#101b24]" : "border-stone-200 bg-white"}`}>
@@ -33,6 +38,16 @@ export function NextActionPanel({
               {primary.label}
             </Button>
           )}
+          {primary.fingerprint ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => void snoozeRecommendation(primary.id, primary.fingerprint as string)}>
+                Snooze 24 hours
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => void dismissRecommendation(primary.id, primary.fingerprint as string)}>
+                Dismiss
+              </Button>
+            </div>
+          ) : null}
         </>
       ) : (
         <p className={`mt-3 text-sm leading-7 ${isDark ? "text-[#a6a39b]" : "text-stone-600"}`}>

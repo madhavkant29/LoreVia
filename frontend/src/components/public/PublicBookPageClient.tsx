@@ -2,6 +2,9 @@
 
 import Link from "next/link"
 import type { Route } from "next"
+
+import { Dialog } from "@/components/ui/Dialog"
+import { VisibilityBadge } from "@/components/ui/VisibilityBadge"
 import { useQuery } from "@tanstack/react-query"
 import React, { useEffect, useRef, useState } from "react"
 
@@ -100,6 +103,7 @@ export function PublicBookPageClient({
         </div>
 
         <div className="mt-8 max-w-3xl">
+          <VisibilityBadge state="public_sample" />
           <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-teal-300" : "text-teal-700"}`}>
             {book.content_source_type === "public_domain" ? "Public-domain demo" : "Public book"}
           </p>
@@ -209,16 +213,14 @@ export function PublicBookPageClient({
       </div>
 
       {reportOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
-          <div className={`w-full max-w-2xl rounded-lg border p-6 ${isDark ? "border-white/10 bg-[#0f1116]" : "border-stone-200 bg-white"}`}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>Report</p>
-                <h2 className="mt-2 text-2xl font-semibold">Report a copyright or policy issue</h2>
-              </div>
-              <button type="button" onClick={() => setReportOpen(false)} className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Close</button>
-            </div>
-
+        <Dialog
+          open
+          onClose={() => setReportOpen(false)}
+          eyebrow="Report"
+          title="Report a copyright or policy issue"
+          size="lg"
+          closeOnOutside={!submitting}
+        >
             <div className="mt-6 grid gap-4">
               <label className="grid gap-2 text-sm">
                 <span>Report reason</span>
@@ -276,8 +278,7 @@ export function PublicBookPageClient({
                 {submitting ? "Sending..." : "Submit report"}
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       ) : null}
     </main>
   )

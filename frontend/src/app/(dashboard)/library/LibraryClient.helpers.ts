@@ -3,6 +3,7 @@ import type { Route } from "next"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book, BookStatus } from "@/types/book"
 import type { NextBestAction, RecentActivityItem } from "@/types/ux"
+import { resolveNextBestActions, type NextBestActionCandidate } from "@/lib/workspace/nextBestActionResolver"
 
 export type SortOption = "recent" | "title" | "progress"
 export type ViewMode = "grid" | "list"
@@ -242,45 +243,60 @@ export function buildLibraryNextBestActions({
   visibleBooks,
   hasAnyProjects,
   onCreateProject,
+  recommendationSnoozes = {},
 }: {
   visibleBooks: Book[]
   hasAnyProjects: boolean
   onCreateProject: () => void
+  recommendationSnoozes?: Record<string, unknown>
 }): NextBestAction[] {
+  const failedBook = visibleBooks.find((book) => !book.archived_at && book.status === "failed")
   const processingBook = visibleBooks.find((book) => !book.archived_at && book.status === "processing")
   const readyBook = visibleBooks.find((book) => !book.archived_at && book.status === "ready")
+  const candidates: NextBestActionCandidate[] = []
   if (!hasAnyProjects) {
-    return [
-      {
+    candidates.push({
         id: "new-project",
         label: "New Project",
         description: "Create or import your first manuscript.",
         onSelect: onCreateProject,
-      },
-    ]
+        priority: "fallback",
+        fingerprint: "library-empty",
+      })
+  }
+  if (failedBook) {
+    candidates.push({
+      id: `failed:${failedBook.id}`,
+      label: "Review processing failure",
+      description: `${failedBook.title} needs attention before story tools can refresh.`,
+      href: getBookHref(failedBook) as Route,
+      tone: "danger",
+      priority: "failed_processing",
+      fingerprint: `${failedBook.id}:${failedBook.status}:${getBookUpdatedAt(failedBook)}`,
+    })
   }
   if (processingBook) {
-    return [
-      {
+    candidates.push({
         id: `processing:${processingBook.id}`,
         label: "Check processing",
         description: `${processingBook.title} is refreshing extraction and story memory.`,
         href: getBookHref(processingBook) as Route,
         tone: "secondary",
-      },
-    ]
+        priority: "active_drafting",
+        fingerprint: `${processingBook.id}:${processingBook.status}:${getBookUpdatedAt(processingBook)}`,
+      })
   }
   if (readyBook) {
-    return [
-      {
+    candidates.push({
         id: `continue:${readyBook.id}`,
         label: "Continue project",
         description: getProgressLine(readyBook),
         href: getBookHref(readyBook) as Route,
-      },
-    ]
+        priority: "active_drafting",
+        fingerprint: `${readyBook.id}:${getBookUpdatedAt(readyBook)}`,
+      })
   }
-  return []
+  return resolveNextBestActions(candidates, recommendationSnoozes)
 }
 
 export function libraryFilterSummary({

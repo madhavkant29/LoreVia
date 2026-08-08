@@ -175,7 +175,7 @@ async function flushUi(times = 3) {
 }
 
 function clickByText(text: string, index = 0) {
-  const matches = Array.from(container?.querySelectorAll("button, a") ?? []).filter((element) =>
+  const matches = Array.from(document.body.querySelectorAll("button, a")).filter((element) =>
     element.textContent?.includes(text) || element.getAttribute("aria-label")?.includes(text)
   )
   const match = matches[index] as HTMLElement | undefined
@@ -187,7 +187,7 @@ function clickByText(text: string, index = 0) {
 }
 
 function clickExactButton(text: string, index = 0) {
-  const matches = Array.from(container?.querySelectorAll("button") ?? []).filter((element) =>
+  const matches = Array.from(document.body.querySelectorAll("button")).filter((element) =>
     element.textContent?.trim() === text
   )
   const match = matches[index] as HTMLElement | undefined
@@ -404,8 +404,8 @@ describe("LibraryPage shared-book filtering", () => {
     clickByText("Open actions for Aster Draft")
     clickExactButton("Delete permanently")
     await flushUi()
-    expect(container?.textContent).toContain("Delete Aster Draft permanently?")
-    const inputs = Array.from(container?.querySelectorAll("input") ?? []) as HTMLInputElement[]
+    expect(document.body.textContent).toContain("Delete Aster Draft permanently?")
+    const inputs = Array.from(document.body.querySelectorAll("input")) as HTMLInputElement[]
     const deleteInput = inputs[inputs.length - 1]
     setValue(deleteInput, "DELETE BOOK")
     clickExactButton("Delete permanently", 1)
@@ -414,8 +414,8 @@ describe("LibraryPage shared-book filtering", () => {
 
     clickByText("Open actions for Aster Draft")
     clickExactButton("Publish publicly")
-    expect(container?.textContent).toContain("Publish your own original work")
-    const publishInputs = Array.from(container?.querySelectorAll("input") ?? [])
+    expect(document.body.textContent).toContain("Publish your own original work")
+    const publishInputs = Array.from(document.body.querySelectorAll("input"))
     const rightsCheckbox = publishInputs.find((input) => input.type === "checkbox") as HTMLInputElement
     act(() => rightsCheckbox.click())
     await flushUi()
@@ -442,12 +442,10 @@ describe("LibraryPage shared-book filtering", () => {
     await flushUi()
     expect(mockRefetch).toHaveBeenCalled()
 
-    const asterCard = Array.from(container?.querySelectorAll('[role="button"]') ?? []).find((element) =>
-      element.textContent?.includes("Aster Draft")
-    ) as HTMLElement | undefined
-    expect(asterCard).toBeTruthy()
+    const asterLink = container?.querySelector<HTMLAnchorElement>('a[aria-label="Open Aster Draft"]')
+    expect(asterLink).toBeTruthy()
     act(() => {
-      asterCard?.click()
+      asterLink?.click()
     })
     expect(mockPush).toHaveBeenLastCalledWith("/book-1")
   })

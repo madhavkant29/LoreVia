@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const useQueryMock = vi.hoisted(() => vi.fn())
 const useParamsMock = vi.hoisted(() => vi.fn(() => ({ bookId: "book-1" })))
 const setTimelineCollapsedSectionMock = vi.hoisted(() => vi.fn())
-const setTimelineAllCollapsedMock = vi.hoisted(() => vi.fn())
+const patchBookPreferencesMock = vi.hoisted(() => vi.fn())
+const hydrateBookPreferencesMock = vi.hoisted(() => vi.fn())
 const captureMock = vi.hoisted(() => vi.fn())
 const preferencesState = vi.hoisted(() => ({
   theme: "light" as "light" | "dark",
@@ -71,9 +72,24 @@ vi.mock("@/lib/query/cacheKeys", () => ({
 vi.mock("@/lib/stores/preferencesStore", () => ({
   usePreferencesStore: () => ({
     theme: preferencesState.theme,
-    timelineCollapsedSections: preferencesState.timelineCollapsedSections,
+  }),
+}))
+vi.mock("@/lib/stores/uiPreferencesStore", () => ({
+  defaultBookUiPreference: (bookId: string) => ({
+    book_id: bookId,
+    timeline_collapsed_sections: preferencesState.timelineCollapsedSections,
+  }),
+  useUiPreferencesStore: (selector: (state: Record<string, unknown>) => unknown) => selector({
+    preferences: { complexity_mode: "standard" },
+    bookPreferences: {
+      "book-1": {
+        book_id: "book-1",
+        timeline_collapsed_sections: preferencesState.timelineCollapsedSections,
+      },
+    },
+    hydrateBook: hydrateBookPreferencesMock,
+    patchBook: patchBookPreferencesMock,
     setTimelineCollapsedSection: setTimelineCollapsedSectionMock,
-    setTimelineAllCollapsed: setTimelineAllCollapsedMock,
   }),
 }))
 vi.mock("@/lib/analytics/posthog", () => ({ capture: captureMock }))
@@ -178,7 +194,8 @@ beforeEach(() => {
   preferencesState.theme = "light"
   preferencesState.timelineCollapsedSections = {}
   setTimelineCollapsedSectionMock.mockReset()
-  setTimelineAllCollapsedMock.mockReset()
+  patchBookPreferencesMock.mockReset()
+  hydrateBookPreferencesMock.mockReset()
   captureMock.mockReset()
   useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
     const key = Array.isArray(queryKey) ? queryKey.join(":") : String(queryKey)
@@ -217,10 +234,10 @@ describe("timeline runtime page", () => {
     await clickButton("Plot Threads")
     await clickButton("Relationship Shifts")
 
-    expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("characters", true)
-    expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("plotThreads", true)
-    expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("relationships", true)
-    expect(setTimelineAllCollapsedMock).toHaveBeenCalledWith(true)
+    expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("book-1", "characters", true)
+    expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("book-1", "plotThreads", true)
+    expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("book-1", "relationships", true)
+    expect(patchBookPreferencesMock).toHaveBeenCalled()
   })
 
   it("renders reader, dark, loading, empty, and error timeline states", async () => {

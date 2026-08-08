@@ -334,13 +334,13 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
   await page.keyboard.press("Control+K")
   await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible()
-  await page.getByLabel("Search commands").fill("open manuscript")
-  await expect(page.getByRole("button", { name: /open manuscript: sky of ash/i })).toBeVisible()
+  await page.getByLabel("Search commands").fill("manuscript")
+  await expect(page.getByRole("option", { name: /manuscript editor: sky of ash/i })).toBeVisible()
   await page.keyboard.press("Escape")
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.getByRole("button", { name: /^new project$/i }).click()
-  await expect(page.getByRole("heading", { name: /upload book/i })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: /upload book/i })).toBeVisible()
 })
 
 test("settings page updates the public username", async ({ page }) => {

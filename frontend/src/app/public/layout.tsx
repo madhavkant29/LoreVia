@@ -1,8 +1,8 @@
 import type { Metadata } from "next"
 
 import { QueryProvider } from "@/components/app/QueryProvider"
-import { Navbar } from "@/components/layout/Navbar"
 import { SiteFooter } from "@/components/layout/SiteFooter"
+import { PublicContextChrome } from "@/components/public/PublicContextChrome"
 
 export const metadata: Metadata = {
   robots: {
@@ -15,7 +15,7 @@ export default function PublicContentLayout({ children }: { children: React.Reac
   return (
     <QueryProvider>
       <div className="app-shell min-h-screen">
-        <Navbar />
+        <PublicContextChrome />
         {children}
       </div>
       <SiteFooter />

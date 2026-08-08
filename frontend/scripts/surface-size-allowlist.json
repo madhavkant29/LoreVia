@@ -1,0 +1,46 @@
+{
+  "src/app/(dashboard)/settings/page.tsx": {
+    "maxLines": 784,
+    "reason": "Complex account settings workspace with extracted controls and searchable categories."
+  },
+  "src/app/(reader)/[bookId]/advisor/page.tsx": {
+    "maxLines": 878,
+    "reason": "Complex advisor orchestrator with message, finding, and status presenters extracted."
+  },
+  "src/app/admin/page.tsx": {
+    "maxLines": 1264,
+    "reason": "Legacy admin console orchestrator."
+  },
+  "src/app/(reader)/[bookId]/export/page.tsx": {
+    "maxLines": 993,
+    "reason": "Legacy export workflow page awaiting shared disclosure primitives."
+  },
+  "src/app/(reader)/[bookId]/collaboration/page.tsx": {
+    "maxLines": 978,
+    "reason": "Complex collaborator and beta-reader permission workflow."
+  },
+  "src/app/(dashboard)/series/page.tsx": {
+    "maxLines": 894,
+    "reason": "Complex multi-book continuity workspace with an accessible intelligence dialog."
+  },
+  "src/app/(reader)/[bookId]/beta-feedback/page.tsx": {
+    "maxLines": 864,
+    "reason": "Legacy beta feedback workflow page."
+  },
+  "src/app/(reader)/[bookId]/page.tsx": {
+    "maxLines": 786,
+    "reason": "Book overview orchestrates processing, visibility, and registry-driven cards."
+  },
+  "src/app/(reader)/[bookId]/author-loop/page.tsx": {
+    "maxLines": 669,
+    "reason": "Legacy author loop workflow page."
+  },
+  "src/app/(dashboard)/stats/page.tsx": {
+    "maxLines": 526,
+    "reason": "Legacy stats page slightly above orchestrator target."
+  },
+  "src/components/intelligence/RelationshipGraph.tsx": {
+    "maxLines": 1199,
+    "reason": "Cytoscape lifecycle and inspector orchestrator with controls and view primitives extracted."
+  }
+}

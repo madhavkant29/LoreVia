@@ -56,7 +56,7 @@ function bodyText() {
 }
 
 function button(label: string, index = 0) {
-  const matches = Array.from(document.body.querySelectorAll("button")).filter((item) =>
+  const matches = Array.from(document.body.querySelectorAll<HTMLElement>('button, [role="menuitem"]')).filter((item) =>
     item.textContent?.includes(label) || item.getAttribute("aria-label") === label,
   )
   const target = matches[index]
@@ -66,7 +66,12 @@ function button(label: string, index = 0) {
 
 async function click(label: string, index = 0) {
   await act(async () => {
-    button(label, index).dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    const target = button(label, index)
+    if (target.getAttribute("aria-haspopup") === "menu") {
+      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }))
+    } else {
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    }
     await flush()
   })
 }
@@ -143,6 +148,7 @@ describe("additional reader runtime component coverage", () => {
     await click("Edit cover photo")
     expect(bodyText()).toContain("Upload new photo")
     expect(bodyText()).toContain("Remove cover photo")
+    await click("Upload new photo")
 
     const input = document.body.querySelector('input[type="file"]') as HTMLInputElement
     const file = new File(["cover"], "cover.png", { type: "image/png" })

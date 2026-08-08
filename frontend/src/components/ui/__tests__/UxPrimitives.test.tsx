@@ -70,8 +70,8 @@ describe("UX primitives", () => {
       />,
     )
 
-    expect(rendered.querySelector('[role="dialog"]')?.textContent).toContain("Delete note?")
-    const buttons = Array.from(rendered.querySelectorAll("button"))
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain("Delete note?")
+    const buttons = Array.from(document.body.querySelectorAll("button"))
     act(() => buttons[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
     expect(resolve).toHaveBeenCalledWith(true)
   })
@@ -102,6 +102,8 @@ describe("UX primitives", () => {
           partialReady: false,
           ready: false,
           failed: true,
+          failureKind: "recoverable",
+          stateVariant: "recoverable_failure",
         }}
         onRetry={onRetry}
       />
@@ -130,6 +132,8 @@ describe("UX primitives", () => {
           partialReady: true,
           ready: false,
           failed: false,
+          failureKind: null,
+          stateVariant: "partial_ready",
         }}
         onRetry={() => undefined}
       />

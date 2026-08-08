@@ -184,6 +184,121 @@ class User(Base):
     email_preferences = relationship(
         "EmailPreference", back_populates="user", cascade="all, delete-orphan", uselist=False
     )
+    ui_preferences = relationship(
+        "UserUiPreference", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    book_ui_preferences = relationship(
+        "UserBookUiPreference", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class UserUiPreference(Base):
+    __tablename__ = "user_ui_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_user_ui_preferences_user_id"),
+        Index("ix_user_ui_preferences_user_updated", "user_id", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    complexity_mode: Mapped[str] = mapped_column(
+        String, nullable=False, default="focused", server_default="focused"
+    )
+    dashboard_visibility_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    dashboard_order_json: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    public_tool_visibility_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    density: Mapped[str] = mapped_column(
+        String, nullable=False, default="comfortable", server_default="comfortable"
+    )
+    reader_toolbar_density: Mapped[str] = mapped_column(
+        String, nullable=False, default="standard", server_default="standard"
+    )
+    locked_tool_presentation: Mapped[str] = mapped_column(
+        String, nullable=False, default="compact", server_default="compact"
+    )
+    default_workspace_shell: Mapped[str] = mapped_column(
+        String, nullable=False, default="reader", server_default="reader"
+    )
+    mobile_actions_json: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    guidance_dismissals_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    recommendation_snoozes_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    user = relationship("User", back_populates="ui_preferences")
+
+
+class UserBookUiPreference(Base):
+    __tablename__ = "user_book_ui_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", "book_id", name="uq_user_book_ui_preferences_user_book"),
+        Index("ix_user_book_ui_preferences_user_updated", "user_id", "updated_at"),
+        Index("ix_user_book_ui_preferences_book", "book_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    book_preset: Mapped[str] = mapped_column(
+        String, nullable=False, default="draft", server_default="draft"
+    )
+    advanced_tool_override: Mapped[str | None] = mapped_column(String)
+    hidden_book_tools_json: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    overview_cards_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    reader_actions_json: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    mobile_actions_json: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    panel_state_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    timeline_collapsed_sections_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    user = relationship("User", back_populates="book_ui_preferences")
 
 
 class DataDeletionRequest(Base):

@@ -119,20 +119,20 @@ async function renderPage(element: ReactElement) {
 
 async function waitForText(expected: string) {
   for (let index = 0; index < 30; index += 1) {
-    if ((container?.textContent ?? "").includes(expected)) return
+    if ((document.body.textContent ?? "").includes(expected)) return
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
   }
-  throw new Error(`Expected text not found: ${expected}. Saw: ${container?.textContent}`)
+  throw new Error(`Expected text not found: ${expected}. Saw: ${document.body.textContent}`)
 }
 
 function text() {
-  return container?.textContent ?? ""
+  return document.body.textContent ?? ""
 }
 
 function button(label: string, index = 0) {
-  const matches = Array.from(container?.querySelectorAll("button") ?? []).filter((item) =>
+  const matches = Array.from(document.body.querySelectorAll("button")).filter((item) =>
     item.textContent?.includes(label)
   )
   const match = matches[index]
@@ -261,7 +261,7 @@ describe("SeriesPage", () => {
 
     await click("Ask")
     await waitForText("Series intelligence")
-    const askInput = container?.querySelector('input[aria-label="Ask series question"]') as HTMLInputElement
+    const askInput = document.body.querySelector('input[aria-label="Ask series question"]') as HTMLInputElement
     await act(async () => {
       setFieldValue(askInput, "How should the oath pay off?")
       await Promise.resolve()
@@ -272,9 +272,9 @@ describe("SeriesPage", () => {
     expect(text()).toContain("Cached response")
 
     await click("Series continuity check")
-    const select = container?.querySelector("select") as HTMLSelectElement
-    const chapterInput = container?.querySelector('input[aria-label="Scene number"]') as HTMLInputElement
-    const passage = container?.querySelector('textarea[aria-label="Passage to cross-check"]') as HTMLTextAreaElement
+    const select = document.body.querySelector("select") as HTMLSelectElement
+    const chapterInput = document.body.querySelector('input[aria-label="Scene number"]') as HTMLInputElement
+    const passage = document.body.querySelector('textarea[aria-label="Passage to cross-check"]') as HTMLTextAreaElement
     await act(async () => {
       setFieldValue(select, "book-1")
       setFieldValue(chapterInput, "4")

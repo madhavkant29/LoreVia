@@ -35,6 +35,7 @@ const FAMILY_ITEMS: Record<WorkspaceFamily, FamilyItem[]> = {
   "publish-export": [
     { id: "export", label: "Import & export", href: (bookId) => `/${bookId}/export` as Route },
     { id: "collaboration", label: "Collaborators", href: (bookId) => `/${bookId}/collaboration` as Route },
+    { id: "visibility", label: "Visibility", href: (bookId) => `/${bookId}/visibility` as Route },
   ],
 }
 
@@ -60,7 +61,7 @@ export function WorkspaceFamilyHeader({
       <div className="flex flex-col gap-5 px-5 py-6 sm:px-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
           <p className="app-eyebrow">{familyLabel(family)}</p>
-          <h1 className="mt-3 font-display text-4xl leading-none tracking-[-0.035em] text-[rgb(var(--foreground))] sm:text-5xl">
+          <h1 className="mt-3 font-display text-4xl leading-none tracking-normal text-[rgb(var(--foreground))] sm:text-5xl">
             {title}
           </h1>
           <p className="app-copy mt-3 max-w-2xl">{description}</p>

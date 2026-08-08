@@ -270,6 +270,22 @@ describe("SettingsPage billing actions", () => {
     expect(view.textContent).toContain("Promotional emails unsubscribed")
   })
 
+  it("searches settings categories without changing routes", async () => {
+    const view = await renderSettingsPage()
+    const search = view.querySelector('input[type="search"]') as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+
+    await act(async () => {
+      setter?.call(search, "security")
+      search.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+
+    expect(view.textContent).toContain("Sign out")
+    expect(view.textContent).toContain("Danger Zone")
+    expect(view.textContent).not.toContain("Public identity")
+    expect(view.querySelector('a[href="#session"]')).not.toBeNull()
+  })
+
   it("marks the settings sidebar item for the section nearest the scroll position", async () => {
     const view = await renderSettingsPage()
     const accountLink = view.querySelector('a[href="#account"]') as HTMLAnchorElement | null

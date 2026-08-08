@@ -170,6 +170,7 @@ describe("UploadModal", () => {
     }
     container = null
     root = null
+    document.body.innerHTML = ""
   })
 
   it("prefills author mode uploads from the account username and explains the manuscript-only byline", async () => {
@@ -371,14 +372,14 @@ function renderUploadModal(props?: Partial<React.ComponentProps<typeof UploadMod
     root?.render(<UploadModal onClose={() => {}} {...props} />)
   })
 
-  return container
+  return document.body
 }
 
-function findButton(view: HTMLDivElement, label: string) {
+function findButton(view: HTMLElement, label: string) {
   return Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes(label))
 }
 
-async function clickButton(view: HTMLDivElement, label: string, index = 0) {
+async function clickButton(view: HTMLElement, label: string, index = 0) {
   const button = Array.from(view.querySelectorAll("button")).filter((candidate) => candidate.textContent?.includes(label))[index]
   if (!button) throw new Error(`Missing button ${label}\n${view.textContent ?? ""}`)
   await act(async () => {
@@ -388,7 +389,7 @@ async function clickButton(view: HTMLDivElement, label: string, index = 0) {
   })
 }
 
-async function chooseFile(view: HTMLDivElement, file: File) {
+async function chooseFile(view: HTMLElement, file: File) {
   const fileInput = view.querySelector('input[type="file"]') as HTMLInputElement | null
   if (!fileInput) throw new Error("Missing file input")
   await act(async () => {
@@ -398,7 +399,7 @@ async function chooseFile(view: HTMLDivElement, file: File) {
   })
 }
 
-function setInputValue(view: HTMLDivElement, selector: string, value: string) {
+function setInputValue(view: HTMLElement, selector: string, value: string) {
   const input = view.querySelector(selector) as HTMLInputElement | null
   if (!input) throw new Error(`Missing input ${selector}`)
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
@@ -406,7 +407,7 @@ function setInputValue(view: HTMLDivElement, selector: string, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }))
 }
 
-function setTextareaValue(view: HTMLDivElement, selector: string, value: string) {
+function setTextareaValue(view: HTMLElement, selector: string, value: string) {
   const input = view.querySelector(selector) as HTMLTextAreaElement | null
   if (!input) throw new Error(`Missing textarea ${selector}`)
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
@@ -414,7 +415,7 @@ function setTextareaValue(view: HTMLDivElement, selector: string, value: string)
   input.dispatchEvent(new Event("input", { bubbles: true }))
 }
 
-async function waitForText(view: HTMLDivElement, expected: string) {
+async function waitForText(view: HTMLElement, expected: string) {
   for (let index = 0; index < 30; index += 1) {
     if (view.textContent?.includes(expected)) return
     await act(async () => {

@@ -12,6 +12,7 @@ import {
   StoryHealthCard,
   WritingStreakCard,
   clickByText,
+  clickByTextAsync,
   getContainer,
   renderElement,
 } from "./overviewCards.test-utils"
@@ -126,9 +127,12 @@ describe("overview cards", () => {
     expect(getContainer().textContent).toContain("Writing streak")
     expect(getContainer().textContent).toContain("9 days")
 
-    clickByText("Add Scene")
-    clickByText("Add Note")
-    clickByText("Add Character")
+    await clickByTextAsync("Create")
+    await clickByTextAsync("Add Scene")
+    await clickByTextAsync("Create")
+    await clickByTextAsync("Add Note")
+    await clickByTextAsync("Create")
+    await clickByTextAsync("Add Character")
 
     expect(addScene).toHaveBeenCalledTimes(1)
     expect(navigate).toHaveBeenCalledWith("/book-1/notes")

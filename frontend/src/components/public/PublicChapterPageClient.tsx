@@ -5,6 +5,7 @@ import type { Route } from "next"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 
+import { VisibilityBadge } from "@/components/ui/VisibilityBadge"
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -65,7 +66,7 @@ export function PublicChapterPageClient({
     return (
       <div className={`min-h-screen ${isDark ? "bg-[#0a0f14] text-white" : "bg-[#f8f7f3] text-slate-950"}`}>
         <div className="mx-auto max-w-4xl px-4 py-16 text-center">
-          <p className={`text-sm uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Public sample</p>
+          <VisibilityBadge state="public_sample" />
           <h1 className="mt-4 font-serif text-3xl">This chapter is not available.</h1>
           <p className={`mx-auto mt-4 max-w-2xl text-sm leading-7 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
             The author may have unpublished this sample, the chapter may have moved, or public access may no longer be enabled for this manuscript.

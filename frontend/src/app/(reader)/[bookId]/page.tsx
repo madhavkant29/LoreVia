@@ -14,6 +14,7 @@ import { ErrorCard } from "@/components/ui/ErrorCard"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
 import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
+import { VisibilityBadge } from "@/components/ui/VisibilityBadge"
 import { capture, captureTiming } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
@@ -363,29 +364,37 @@ export default function BookOverviewPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return
+    const currentWindow = window
+    let scrollRestoreTimeout: number | null = null
 
     const gateMessageKey = `${FREE_FEATURE_GATE_FLASH_PREFIX}${normalizedBookId}`
-    const gateMessage = window.sessionStorage.getItem(gateMessageKey)
+    const gateMessage = currentWindow.sessionStorage.getItem(gateMessageKey)
     if (gateMessage) {
       setFeatureGateMessage(gateMessage)
-      window.sessionStorage.removeItem(gateMessageKey)
+      currentWindow.sessionStorage.removeItem(gateMessageKey)
     }
 
-    const saved = window.sessionStorage.getItem(overviewScrollKey)
+    const saved = currentWindow.sessionStorage.getItem(overviewScrollKey)
     if (saved) {
       const nextY = Number(saved)
       if (!Number.isNaN(nextY)) {
-        window.setTimeout(() => window.scrollTo({ top: nextY, behavior: "auto" }), 40)
+        scrollRestoreTimeout = currentWindow.setTimeout(
+          () => currentWindow.scrollTo({ top: nextY, behavior: "auto" }),
+          40,
+        )
       }
     }
 
     const saveScroll = () => {
-      window.sessionStorage.setItem(overviewScrollKey, String(window.scrollY))
+      currentWindow.sessionStorage.setItem(overviewScrollKey, String(currentWindow.scrollY))
     }
 
     saveScroll()
-    window.addEventListener("scroll", saveScroll, { passive: true })
-    return () => window.removeEventListener("scroll", saveScroll)
+    currentWindow.addEventListener("scroll", saveScroll, { passive: true })
+    return () => {
+      if (scrollRestoreTimeout !== null) currentWindow.clearTimeout(scrollRestoreTimeout)
+      currentWindow.removeEventListener("scroll", saveScroll)
+    }
   }, [normalizedBookId, overviewScrollKey])
 
   const continueChapter = progress?.current_chapter ?? 1
@@ -620,6 +629,11 @@ export default function BookOverviewPage() {
         </div>
 
         <main className="min-w-0 space-y-5">
+          <div className="flex flex-wrap gap-2">
+            <VisibilityBadge
+              state={book?.is_public || book?.public_status === "published" ? "public_sample" : isCollaboratorSession ? "shared" : "private"}
+            />
+          </div>
           <ProcessingStatusPanel
             status={normalizedProcessingStatus}
             retrying={processingRetrying}

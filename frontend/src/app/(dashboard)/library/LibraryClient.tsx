@@ -15,6 +15,7 @@ import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
 import type { Book } from "@/types/book"
@@ -54,6 +55,9 @@ export function LibraryClient() {
   const queryClient = useQueryClient()
   const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
+  const recommendationSnoozes = useUiPreferencesStore(
+    (state) => state.preferences.recommendation_snoozes,
+  )
   const authUser = useAuthStore((s) => s.user)
   const authReady = useAuthStore((s) => s.hydrated)
   const isDark = theme === "dark"
@@ -133,6 +137,7 @@ export function LibraryClient() {
     visibleBooks,
     hasAnyProjects,
     onCreateProject: startCreateProject,
+    recommendationSnoozes,
   })
   const filterSummary = libraryFilterSummary({ modeFilter, statusFilter, showArchived })
 

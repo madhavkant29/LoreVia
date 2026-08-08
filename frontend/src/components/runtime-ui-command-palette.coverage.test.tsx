@@ -28,7 +28,7 @@ describe("runtime CommandPalette", () => {
     expect(text()).toContain("The Lantern Gate")
 
     setInputValue('input[aria-label="Search commands"]', "manuscript")
-    expect(text()).toContain("Open manuscript: The Lantern Gate")
+    expect(text()).toContain("Manuscript Editor: The Lantern Gate")
     await act(async () => {
       document.querySelector("input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
       await flush()

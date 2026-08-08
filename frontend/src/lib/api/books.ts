@@ -21,6 +21,7 @@ import type {
   RelationshipGraph,
 } from "@/types/character"
 import type { BetaReadAssignment, BetaReadAssignmentCreateInput, BetaReadAssignmentListResponse } from "@/types/reader"
+import type { BookVisibilitySummary } from "@/types/uiPreferences"
 
 export interface ManuscriptImportResponse {
   book_id: string
@@ -56,6 +57,8 @@ export const booksApi = {
   listQuotes: () => apiClient.get<SavedQuote[]>("/books/quotes").then(r => r.data),
   listNotes: () => apiClient.get<BookNote[]>("/books/notes").then(r => r.data),
   get: (id: string) => apiClient.get<Book>(bookPath(id)).then(r => r.data),
+  getVisibilitySummary: (id: string) =>
+    apiClient.get<BookVisibilitySummary>(bookPath(id, "/visibility-summary")).then(r => r.data),
   getOverview: (id: string) => apiClient.get<BookOverviewPayload>(bookPath(id, "/overview")).then(r => r.data),
   retryProcessing: (id: string) => apiClient.post<BookProcessing>(bookPath(id, "/processing/retry")).then(r => {
     invalidateBookCache(id)

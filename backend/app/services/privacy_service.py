@@ -51,6 +51,8 @@ from app.models.user import (
     Subscription,
     TrialEmailEvent,
     User,
+    UserBookUiPreference,
+    UserUiPreference,
     UserLoginActivity,
     UserWritingActivity,
 )
@@ -125,6 +127,20 @@ async def build_user_data_export(db: AsyncSession, user: User) -> bytes:
     email_preferences = (
         await db.execute(select(EmailPreference).where(EmailPreference.user_id == user.id))
     ).scalar_one_or_none()
+    ui_preferences = (
+        await db.execute(select(UserUiPreference).where(UserUiPreference.user_id == user.id))
+    ).scalar_one_or_none()
+    book_ui_preferences = (
+        (
+            await db.execute(
+                select(UserBookUiPreference)
+                .where(UserBookUiPreference.user_id == user.id)
+                .order_by(UserBookUiPreference.updated_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
@@ -152,6 +168,53 @@ async def build_user_data_export(db: AsyncSession, user: User) -> bytes:
             )
             if email_preferences
             else {},
+        )
+        _write_json(
+            zip_file,
+            "ui_preferences.json",
+            {
+                "global_preferences": _model_payload(
+                    ui_preferences,
+                    [
+                        "schema_version",
+                        "revision",
+                        "complexity_mode",
+                        "dashboard_visibility_json",
+                        "dashboard_order_json",
+                        "public_tool_visibility_json",
+                        "density",
+                        "reader_toolbar_density",
+                        "locked_tool_presentation",
+                        "default_workspace_shell",
+                        "mobile_actions_json",
+                        "guidance_dismissals_json",
+                        "recommendation_snoozes_json",
+                        "updated_at",
+                    ],
+                )
+                if ui_preferences
+                else {},
+                "book_preferences": [
+                    _model_payload(
+                        preference,
+                        [
+                            "book_id",
+                            "schema_version",
+                            "revision",
+                            "book_preset",
+                            "advanced_tool_override",
+                            "hidden_book_tools_json",
+                            "overview_cards_json",
+                            "reader_actions_json",
+                            "mobile_actions_json",
+                            "panel_state_json",
+                            "timeline_collapsed_sections_json",
+                            "updated_at",
+                        ],
+                    )
+                    for preference in book_ui_preferences
+                ],
+            },
         )
         _write_json(
             zip_file,
@@ -596,6 +659,8 @@ async def _hard_delete_account_product_data(db: AsyncSession, request: DataDelet
         LlmUsageEvent,
         UserLoginActivity,
         EmailPreference,
+        UserUiPreference,
+        UserBookUiPreference,
         ReadingProgress,
         ReadingSession,
     ):

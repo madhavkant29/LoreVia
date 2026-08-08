@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import type { Route } from "next"
 
+import { Dialog } from "@/components/ui/Dialog"
 import { booksApi } from "@/lib/api/books"
 import { intelligenceApi } from "@/lib/api/intelligence"
 import { isPaidTier } from "@/lib/billing/plans"
@@ -447,7 +448,17 @@ export default function SeriesPage() {
         const modalCollectionPlural = collectionUnitName(modalHasScreenplayEpisodes, true)
         const modalCollectionSingular = collectionUnitName(modalHasScreenplayEpisodes, false)
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <Dialog
+            open
+            onClose={() => setAskSeriesId(null)}
+            title={`${activeSeries?.name ?? "Series"} intelligence`}
+            description="Ask grounded questions or run a cross-book continuity check."
+            size="lg"
+            className="!max-w-2xl border-0 bg-transparent shadow-none"
+            contentClassName="p-0"
+            titleClassName="sr-only"
+            descriptionClassName="sr-only"
+          >
             <div className={`w-full max-w-2xl rounded-lg border-2 ${surfaceClass}`}>
 
               {/* Modal header */}
@@ -669,7 +680,7 @@ export default function SeriesPage() {
                 )}
               </div>
             </div>
-          </div>
+          </Dialog>
         )
       })()}
         </div>

@@ -1,7 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+const uiPreferencesStoreMock = vi.hoisted(() => ({
+  clearActiveUser: vi.fn(),
+  hydrateForUser: vi.fn(),
+}))
+
 vi.mock("zustand/middleware", () => ({
   persist: (initializer: unknown) => initializer,
+}))
+
+vi.mock("@/lib/stores/uiPreferencesStore", () => ({
+  useUiPreferencesStore: {
+    getState: () => uiPreferencesStoreMock,
+  },
 }))
 
 import { useAuthStore } from "./authStore"
@@ -51,12 +62,13 @@ describe("zustand stores", () => {
     })
     document.documentElement.className = ""
     document.documentElement.dataset.theme = ""
+    uiPreferencesStoreMock.clearActiveUser.mockClear()
+    uiPreferencesStoreMock.hydrateForUser.mockClear()
 
     useAuthStore.setState({ user: null, hydrated: false })
     useBookModeStore.setState({ modesByBookId: {} })
     usePreferencesStore.setState({
       theme: "light",
-      timelineCollapsedSections: { characters: true, plotThreads: true, relationships: true },
     })
   })
 
@@ -146,30 +158,4 @@ describe("zustand stores", () => {
     expect(usePreferencesStore.getState().theme).toBe("dark")
   })
 
-  it("updates a single timeline collapsed section", () => {
-    usePreferencesStore.getState().setTimelineCollapsedSection("characters", false)
-
-    expect(usePreferencesStore.getState().timelineCollapsedSections.characters).toBe(false)
-    expect(usePreferencesStore.getState().timelineCollapsedSections.plotThreads).toBe(true)
-  })
-
-  it("collapses all timeline sections together", () => {
-    usePreferencesStore.getState().setTimelineAllCollapsed(true)
-
-    expect(usePreferencesStore.getState().timelineCollapsedSections).toEqual({
-      characters: true,
-      plotThreads: true,
-      relationships: true,
-    })
-  })
-
-  it("expands all timeline sections together", () => {
-    usePreferencesStore.getState().setTimelineAllCollapsed(false)
-
-    expect(usePreferencesStore.getState().timelineCollapsedSections).toEqual({
-      characters: false,
-      plotThreads: false,
-      relationships: false,
-    })
-  })
 })

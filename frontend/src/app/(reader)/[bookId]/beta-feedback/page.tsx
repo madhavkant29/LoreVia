@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation"
 import type { Route } from "next"
 
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { Dialog } from "@/components/ui/Dialog"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -796,18 +797,13 @@ export default function BetaFeedbackPage() {
     </div>
 
     {requirementsModal ? (
-      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4 py-6" role="presentation" onClick={() => setRequirementsModal(null)}>
-        <section
-          aria-modal="true"
-          role="dialog"
-          aria-labelledby="requirements-modal-title"
-          className="w-full max-w-md rounded-lg border border-[rgba(var(--border),0.9)] bg-[rgb(var(--card))] p-6 text-[rgb(var(--card-foreground))] shadow-[var(--shadow-modal)]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <p className="app-eyebrow">Requirements not met</p>
-          <h2 id="requirements-modal-title" className="mt-3 text-2xl font-semibold tracking-tight">
-            Complete these before submitting
-          </h2>
+      <Dialog
+        open
+        onClose={() => setRequirementsModal(null)}
+        eyebrow="Requirements not met"
+        title="Complete these before submitting"
+        size="sm"
+      >
           <ul className="mt-5 space-y-3">
             {requirementsModal.map((issue) => (
               <li key={issue} className={`flex items-start gap-2.5 rounded-none border px-3.5 py-2.5 text-sm ${isDark ? "border-rose-500/20 bg-rose-500/10 text-rose-300" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
@@ -827,23 +823,17 @@ export default function BetaFeedbackPage() {
               Got it
             </button>
           </div>
-        </section>
-      </div>
+      </Dialog>
     ) : null}
 
     {successModal ? (
-      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4 py-6" role="presentation" onClick={() => setSuccessModal(null)}>
-        <section
-          aria-modal="true"
-          role="dialog"
-          aria-labelledby="success-modal-title"
-          className="w-full max-w-md rounded-lg border border-[rgba(var(--border),0.9)] bg-[rgb(var(--card))] p-6 text-[rgb(var(--card-foreground))] shadow-[var(--shadow-modal)]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <p className="app-eyebrow">Success</p>
-          <h2 id="success-modal-title" className="mt-3 text-2xl font-semibold tracking-tight">
-            {successModal.title}
-          </h2>
+      <Dialog
+        open
+        onClose={() => setSuccessModal(null)}
+        eyebrow="Success"
+        title={successModal.title}
+        size="sm"
+      >
           <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             {successModal.message}
           </p>
@@ -856,8 +846,7 @@ export default function BetaFeedbackPage() {
               Got it
             </button>
           </div>
-        </section>
-      </div>
+      </Dialog>
     ) : null}
     </>
   )
