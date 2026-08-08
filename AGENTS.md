@@ -117,6 +117,13 @@ LoreVia2/
 - If env values need to be discussed, explain the required changes in the response instead of editing the file directly unless the user clearly told you to edit it.
 - For tests, use temporary in-process dummy values, monkeypatching, or documented commands rather than changing tracked or local env files.
 
+### 9. Operational Authorization Boundaries
+
+- **Agents must never create, edit, generate, apply, test, run, or trigger database migrations.** When a code change would require a migration, document the required schema change and leave all migration work to the user.
+- Agents may make code changes and run local Docker and Node commands.
+- Agents may create or update feature branches and pull requests.
+- **Agents must never merge a pull request, push to `main`, deploy to any environment, or trigger a production workflow unless the user gives explicit authorization for that exact action in the current conversation.** A general implementation plan or a request to continue is not merge or deployment authorization.
+
 ---
 
 ## Before you write any code
@@ -126,7 +133,9 @@ LoreVia2/
 3. Check `app/models/` — the model may already exist.
 4. Only then write new code, always in the right layer.
 
-## Schema Changes
+## Schema Changes (Human-Maintainer Reference Only)
+
+The following section documents repository requirements for human-maintainer migration work. It does not authorize an agent to perform migration work and does not override Rule 9.
 
 When adding a new table or changing schema:
 
