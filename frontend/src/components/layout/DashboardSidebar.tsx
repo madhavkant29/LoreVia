@@ -16,25 +16,48 @@ import { queryClient } from "@/lib/query/queryClient"
 import { prefetchChatsSidebarData, prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
+import { resolveWorkspaceTools } from "@/lib/workspace/toolResolver"
+import { toolsForPlacement } from "@/lib/workspace/toolRegistry"
 
 type NavItem = {
+  id: string
   href: Route
   label: string
   icon: (className?: string) => ReactNode
   group?: "primary" | "secondary"
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { href: "/library", label: "Library", icon: LibraryIcon },
-  { href: "/notes", label: "Notes", icon: NotesIcon },
-  { href: "/quotes", label: "Quotes", icon: QuotesIcon },
-  { href: "/series", label: "Series", icon: SeriesIcon },
-  { href: "/beta-reads", label: "Beta Reads", icon: BetaReadsIcon },
-  { href: "/public/uploads", label: "Public Uploads", icon: UploadIcon, group: "secondary" },
-  { href: "/stats", label: "Stats", icon: StatsIcon, group: "secondary" },
-  { href: "/upgrade", label: "Pricing", icon: PricingIcon, group: "secondary" },
-  { href: "/settings", label: "Settings", icon: SettingsIcon, group: "secondary" },
-]
+const DASHBOARD_TOOLS = toolsForPlacement("dashboard")
+
+function iconForTool(icon: string) {
+  switch (icon) {
+    case "library":
+      return LibraryIcon
+    case "notes":
+      return NotesIcon
+    case "quote":
+      return QuotesIcon
+    case "series":
+      return SeriesIcon
+    case "feedback":
+      return BetaReadsIcon
+    case "upload":
+      return UploadIcon
+    case "stats":
+      return StatsIcon
+    case "pricing":
+      return PricingIcon
+    case "settings":
+      return SettingsIcon
+    default:
+      return LibraryIcon
+  }
+}
+
+function navGroupForToolGroup(group: string): "primary" | "secondary" {
+  return group === "Public" || group === "Account" ? "secondary" : "primary"
+}
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/public/uploads") return pathname === "/public/uploads" || pathname === "/public/analytics"
@@ -45,17 +68,49 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   const { user } = useAuthStore()
   const authHydrated = useAuthStore((state) => state.hydrated)
   const { theme, toggleTheme } = usePreferencesStore()
+  const uiPreferences = useUiPreferencesStore((state) => state.preferences)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [desktopNav, setDesktopNav] = useState(false)
   const [badgeQueriesEnabled, setBadgeQueriesEnabled] = useState(false)
   const sidebarPrefetchedRef = useRef(false)
   const libraryPrefetchedRef = useRef(false)
   const pathname = usePathname()
   const isDark = theme === "dark"
   const showUserChrome = authHydrated && !!user
+  const navItems = useMemo<NavItem[]>(() => {
+    const resolved = resolveWorkspaceTools(DASHBOARD_TOOLS, {
+      mode: uiPreferences.complexity_mode ?? "standard",
+      activePath: pathname,
+      globalPreference: uiPreferences,
+      placement: "dashboard",
+      paidUser: user?.tier !== "free",
+    })
+    return resolved
+      .filter((item) => !item.hidden)
+      .map(({ tool, href }) => ({
+        id: tool.id,
+        href: href as Route,
+        label: tool.label,
+        icon: iconForTool(tool.icon),
+        group: navGroupForToolGroup(tool.group),
+      }))
+  }, [pathname, uiPreferences, user?.tier])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      setDesktopNav(window.innerWidth >= 1024)
+      return
+    }
+    const query = window.matchMedia("(min-width: 1024px)")
+    const update = () => setDesktopNav(query.matches)
+    update()
+    query.addEventListener("change", update)
+    return () => query.removeEventListener("change", update)
+  }, [])
 
   useEffect(() => {
     if (!user || !authHydrated || badgeQueriesEnabled) return
@@ -102,6 +157,8 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#f4f6f8] text-stone-950 transition-colors duration-150 dark:bg-[rgb(20,24,27)] dark:text-[#efe9df]">
       <aside
+        aria-hidden={!desktopNav && !mobileOpen}
+        inert={!desktopNav && !mobileOpen}
         className={`fixed inset-y-0 left-0 z-40 flex w-[15rem] flex-col border-r border-stone-200 bg-[#f4f6f8] transition-transform duration-150 dark:border-white/[0.12] dark:bg-[rgb(20,24,27)] lg:translate-x-0 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
@@ -114,14 +171,14 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
 
         <nav className="flex-1 overflow-y-auto px-2.5 py-5">
           <div className="space-y-1">
-            {NAV_ITEMS.map((item, index) => (
+            {navItems.map((item, index) => (
               <NavLink
                 key={item.href}
                 item={item}
                 active={isActivePath(pathname, item.href)}
-                separated={index > 0 && item.group === "secondary" && NAV_ITEMS[index - 1]?.group !== "secondary"}
+                separated={index > 0 && item.group === "secondary" && navItems[index - 1]?.group !== "secondary"}
                 onClick={() => setMobileOpen(false)}
-                onLibraryPrefetch={item.href === "/library" ? handleLibraryPrefetch : undefined}
+                onLibraryPrefetch={item.id === "dashboard.library" ? handleLibraryPrefetch : undefined}
               />
             ))}
           </div>
@@ -243,6 +300,7 @@ function NavLink({
     <div className={separated ? "mt-7 border-t border-stone-200 pt-5 dark:border-white/[0.08]" : undefined}>
       <Link
         href={item.href}
+        aria-current={active ? "page" : undefined}
         onClick={onClick}
         onMouseEnter={onLibraryPrefetch}
         onFocus={onLibraryPrefetch}

@@ -20,13 +20,13 @@ export function controlButtonClass(active = false) {
     "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70",
     active
-      ? "border-violet-400/40 bg-[linear-gradient(135deg,rgba(139,92,246,0.24),rgba(45,212,191,0.14))] text-white shadow-[0_10px_30px_rgba(76,29,149,0.18)]"
+      ? "border-violet-400/40 bg-violet-500/20 text-white shadow-[0_10px_30px_rgba(76,29,149,0.18)]"
       : "border-white/10 bg-white/[0.03] text-slate-200 hover:border-white/20 hover:bg-white/[0.06]"
   )
 }
 
 export function panelClass() {
-  return "rounded-lg border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,24,0.98),rgba(6,8,14,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
+  return "rounded-lg border border-white/10 bg-[#080c16] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
 }
 
 export function buildIsolatedPositions(nodes: GraphNode[]) {

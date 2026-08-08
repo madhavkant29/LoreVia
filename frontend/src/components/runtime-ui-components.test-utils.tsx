@@ -165,11 +165,11 @@ export function getContainer() {
 }
 
 export function text() {
-  return container?.textContent ?? ""
+  return document.body.textContent ?? ""
 }
 
 export async function click(label: string) {
-  const button = Array.from(container?.querySelectorAll("button") ?? []).find((node) =>
+  const button = Array.from(document.body.querySelectorAll("button") ?? []).find((node) =>
     node.textContent?.includes(label),
   )
   if (!button) throw new Error(`Missing button ${label}\n${text()}`)
@@ -180,7 +180,7 @@ export async function click(label: string) {
 }
 
 export function setInputValue(selector: string, value: string) {
-  const input = container?.querySelector(selector) as HTMLInputElement | null
+  const input = document.body.querySelector(selector) as HTMLInputElement | null
   if (!input) throw new Error(`Missing input ${selector}`)
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
   setter?.call(input, value)

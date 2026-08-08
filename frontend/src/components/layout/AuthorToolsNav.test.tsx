@@ -8,6 +8,89 @@ const useQueryMock = vi.hoisted(() => vi.fn())
 const useQueryClientMock = vi.hoisted(() => vi.fn())
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const canUseAuthorFeaturesMock = vi.hoisted(() => vi.fn())
+const uiPreferencesStoreMock = vi.hoisted(() => {
+  const makeGlobalPreference = () => ({
+    schema_version: 1,
+    revision: 1,
+    complexity_mode: "standard",
+    dashboard_visibility: {},
+    dashboard_order: [],
+    public_tool_visibility: {},
+    density: "comfortable",
+    reader_toolbar_density: "standard",
+    locked_tool_presentation: "compact",
+    default_workspace_shell: "reader",
+    mobile_actions: [],
+    guidance_dismissals: {},
+    recommendation_snoozes: {},
+    updated_at: null,
+  })
+  const makeBookPreference = (bookId = "book-1", preset = "all", advancedToolOverride: "show" | "hide" | null = null) => ({
+    book_id: bookId,
+    schema_version: 1,
+    revision: 1,
+    book_preset: preset,
+    advanced_tool_override: advancedToolOverride,
+    hidden_book_tools: [],
+    overview_cards: {},
+    reader_actions: [],
+    mobile_actions: [],
+    panel_state: {},
+    timeline_collapsed_sections: {},
+    updated_at: null,
+  })
+  const listeners = new Set<() => void>()
+  let state: any
+  const notify = () => listeners.forEach((listener) => listener())
+  const reset = () => {
+    state = {
+      preferences: makeGlobalPreference(),
+      bookPreferences: { "book-1": makeBookPreference() },
+      hydrateBook: vi.fn(),
+      setBookPreset: vi.fn(async (bookId: string, preset: string) => {
+        const current = state.bookPreferences[bookId] ?? makeBookPreference(bookId)
+        state = {
+          ...state,
+          bookPreferences: {
+            ...state.bookPreferences,
+            [bookId]: { ...current, book_preset: preset },
+          },
+        }
+        notify()
+      }),
+      patchBook: vi.fn(async (bookId: string, operations: Array<{ path: string; value?: unknown }>) => {
+        const current = state.bookPreferences[bookId] ?? makeBookPreference(bookId)
+        const next = { ...current }
+        for (const operation of operations) {
+          if (operation.path === "/advanced_tool_override") {
+            next.advanced_tool_override = operation.value
+          }
+          if (operation.path === "/book_preset") {
+            next.book_preset = operation.value
+          }
+          if (operation.path === "/hidden_book_tools" && Array.isArray(operation.value)) {
+            next.hidden_book_tools = operation.value
+          }
+        }
+        state = {
+          ...state,
+          bookPreferences: { ...state.bookPreferences, [bookId]: next },
+        }
+        notify()
+      }),
+    }
+  }
+  reset()
+  return {
+    getState: () => state,
+    makeBookPreference,
+    reset,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+})
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
@@ -40,6 +123,19 @@ vi.mock("@/lib/stores/authStore", () => ({
   useAuthStore: useAuthStoreMock,
 }))
 
+vi.mock("@/lib/stores/uiPreferencesStore", async () => {
+  const ReactModule = await vi.importActual<typeof import("react")>("react")
+  return {
+    defaultBookUiPreference: (bookId: string) => uiPreferencesStoreMock.makeBookPreference(bookId, "draft"),
+    useUiPreferencesStore: (selector: (state: any) => unknown) =>
+      ReactModule.useSyncExternalStore(
+        uiPreferencesStoreMock.subscribe,
+        () => selector(uiPreferencesStoreMock.getState()),
+        () => selector(uiPreferencesStoreMock.getState()),
+      ),
+  }
+})
+
 import { AuthorToolsNav } from "./AuthorToolsNav"
 
 let container: HTMLDivElement | null = null
@@ -63,6 +159,7 @@ describe("AuthorToolsNav", () => {
     useQueryClientMock.mockReset()
     useAuthStoreMock.mockReset()
     canUseAuthorFeaturesMock.mockReset()
+    uiPreferencesStoreMock.reset()
     container = null
     root = null
   })
@@ -177,6 +274,29 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')?.textContent).toContain("Author Lens")
   })
 
+  it("switches book presets from the author navigation", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+    const draftButton = findButton(view, "Draft")
+    act(() => draftButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+
+    expect(uiPreferencesStoreMock.getState().bookPreferences["book-1"].book_preset).toBe("draft")
+    expect(view.querySelector('[data-testid="author-nav-item-characters"]')).toBeNull()
+    expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')?.textContent).toContain("Manuscript Editor")
+  })
+
+  it("keeps story bible preset focused on story memory tools", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav()
+    const bibleButton = findButton(view, "Bible")
+    act(() => bibleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+
+    expect(view.querySelector('[data-testid="author-nav-item-characters"]')?.textContent).toContain("Character Bible")
+    expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')).toBeNull()
+  })
+
   it("groups story bible and analyze tools and hides advanced entries by default", () => {
     mockBaseState()
 
@@ -239,6 +359,10 @@ function renderAuthorToolsNav({ railSize, mode = "author" }: { railSize?: "defau
   })
 
   return container
+}
+
+function findButton(view: HTMLDivElement, label: string) {
+  return Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes(label))
 }
 
 function mockBaseState({

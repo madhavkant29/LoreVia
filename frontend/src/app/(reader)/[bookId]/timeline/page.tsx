@@ -10,6 +10,8 @@ import { WorkspaceEmptyState, WorkspaceMetric, WorkspacePage, WorkspacePanel } f
 import { booksApi } from "@/lib/api/books"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { defaultBookUiPreference, useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { Book } from "@/types/book"
 import type { CharacterTimelineTrack, PlotThreadTimelineTrack, RelationshipTimelineMarker, TimelineChapter, TimelineResponse } from "@/types/reader"
@@ -19,12 +21,30 @@ const CELL_WIDTH = 68
 
 export default function TimelinePage() {
   const { bookId } = useParams<{ bookId: string }>()
-  const { theme, timelineCollapsedSections, setTimelineCollapsedSection, setTimelineAllCollapsed } = usePreferencesStore()
+  const { theme } = usePreferencesStore()
+  const preferenceBookId = normalizeBookRouteId(bookId)
+  const hydrateBookPreferences = useUiPreferencesStore((state) => state.hydrateBook)
+  const patchBookPreferences = useUiPreferencesStore((state) => state.patchBook)
+  const setTimelineCollapsedSection = useUiPreferencesStore((state) => state.setTimelineCollapsedSection)
+  const timelineCollapsedSections = useUiPreferencesStore(
+    (state) => (
+      state.bookPreferences[preferenceBookId]
+      ?? defaultBookUiPreference(preferenceBookId, state.preferences.complexity_mode)
+    ).timeline_collapsed_sections,
+  )
   const isDark = theme === "dark"
 
   useEffect(() => {
     capture("major_events_opened", { book_id: bookId })
-  }, [bookId])
+    void hydrateBookPreferences(preferenceBookId)
+  }, [bookId, hydrateBookPreferences, preferenceBookId])
+  const setTimelineAllCollapsed = (collapsed: boolean) => {
+    void patchBookPreferences(preferenceBookId, [
+      { op: "set", path: "/timeline_collapsed_sections/characters", value: collapsed },
+      { op: "set", path: "/timeline_collapsed_sections/plotThreads", value: collapsed },
+      { op: "set", path: "/timeline_collapsed_sections/relationships", value: collapsed },
+    ])
+  }
   const { data: book = null } = useQuery<Book>({
     queryKey: asQueryKey(bookCacheKey(bookId, "detail")),
     queryFn: () => booksApi.get(bookId),
@@ -87,7 +107,7 @@ export default function TimelinePage() {
                   isDark={isDark}
                   isCollapsed={timelineCollapsedSections.characters ?? false}
                   onToggle={(collapsed) => {
-                    setTimelineCollapsedSection("characters", collapsed)
+                    void setTimelineCollapsedSection(preferenceBookId, "characters", collapsed)
                     if (collapsed) {
                       setTimelineAllCollapsed(true)
                     }
@@ -115,7 +135,7 @@ export default function TimelinePage() {
                   isDark={isDark}
                   isCollapsed={timelineCollapsedSections.plotThreads ?? false}
                   onToggle={(collapsed) => {
-                    setTimelineCollapsedSection("plotThreads", collapsed)
+                    void setTimelineCollapsedSection(preferenceBookId, "plotThreads", collapsed)
                     if (collapsed) {
                       setTimelineAllCollapsed(true)
                     }
@@ -144,7 +164,7 @@ export default function TimelinePage() {
                   isDark={isDark}
                   isCollapsed={timelineCollapsedSections.relationships ?? false}
                   onToggle={(collapsed) => {
-                    setTimelineCollapsedSection("relationships", collapsed)
+                    void setTimelineCollapsedSection(preferenceBookId, "relationships", collapsed)
                     if (collapsed) {
                       setTimelineAllCollapsed(true)
                     }

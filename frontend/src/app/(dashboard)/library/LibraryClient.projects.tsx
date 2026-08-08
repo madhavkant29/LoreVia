@@ -1,9 +1,13 @@
 import type { MouseEvent } from "react"
+import Link from "next/link"
+import type { Route } from "next"
 
 import { Button } from "@/components/ui/Button"
 import { ProcessingStatusStrip } from "@/components/ui/ResponsivenessStatus"
 import { Tooltip } from "@/components/ui/Tooltip"
+import { VisibilityBadge } from "@/components/ui/VisibilityBadge"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
+import { getBookHref } from "@/lib/utils/bookRoutes"
 import type { Book } from "@/types/book"
 
 import {
@@ -55,6 +59,24 @@ type ProjectDisplayProps = {
   onAddChapter: () => void
   onPublish: () => void
   onUnpublish: () => void
+}
+
+function ProjectPrimaryLink({ book, onOpen, onPrefetch }: Pick<ProjectDisplayProps, "book" | "onOpen" | "onPrefetch">) {
+  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    onOpen()
+  }
+
+  return (
+    <Link
+      href={getBookHref(book) as Route}
+      onClick={handleClick}
+      onFocus={onPrefetch}
+      className="absolute inset-0 z-10 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/40"
+      aria-label={`Open ${book.title}`}
+    />
+  )
 }
 
 export function EmptyPanel({
@@ -125,30 +147,14 @@ export function ProjectCard({
   const toneClass = isDark ? "text-[#f5f0e8]" : "text-stone-950"
   const subtextClass = isDark ? "text-[#b8b2a8]" : "text-stone-600"
   const metaClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
-  const ignoreNestedActionClick = (event: MouseEvent<HTMLElement>) => {
-    return event.target instanceof HTMLElement && Boolean(event.target.closest("button,a"))
-  }
-
   return (
     <article
-      role="button"
-      tabIndex={0}
-      onClick={(event) => {
-        if (ignoreNestedActionClick(event)) return
-        onOpen()
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault()
-          onOpen()
-        }
-      }}
       onMouseEnter={onPrefetch}
-      onFocus={onPrefetch}
-      className={`group relative cursor-pointer rounded-sm border p-4 transition duration-150 hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 sm:p-5 ${
+      className={`group relative rounded-sm border p-4 transition duration-150 hover:border-[#9fc1be] focus-within:border-[#9fc1be] sm:p-5 ${
         isDark ? "border-white/[0.08] bg-[#101b24] hover:bg-[#13212b]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"
       }`}
     >
+      <ProjectPrimaryLink book={book} onOpen={onOpen} onPrefetch={onPrefetch} />
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-4">
@@ -175,13 +181,10 @@ export function ProjectCard({
               <p className={`mt-1 truncate text-xs ${subtextClass}`}>
                 {getGenreLabel(book)} <span className={metaClass}>·</span> {book.work_type === "screenplay" ? "Screenplay" : "Novel"}
               </p>
-              {publicSampleStatus ? (
-                <Tooltip content="Public sample visibility">
-                  <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
-                    {publicSampleStatus}
-                  </span>
-                </Tooltip>
-              ) : null}
+              <VisibilityBadge
+                state={publicSampleStatus ? "public_sample" : book.collaboration_role ? "shared" : "private"}
+                className="mt-2"
+              />
             </div>
           </div>
 
@@ -287,28 +290,12 @@ export function ProjectRow({
   const publicSampleStatus = getPublicSampleStatus(book)
   const subtextClass = isDark ? "text-[#b8b2a8]" : "text-stone-600"
   const metaClass = isDark ? "text-[#9f9b94]" : "text-stone-500"
-  const ignoreNestedActionClick = (event: MouseEvent<HTMLElement>) => {
-    return event.target instanceof HTMLElement && Boolean(event.target.closest("button,a"))
-  }
-
   return (
     <article
-      role="button"
-      tabIndex={0}
-      onClick={(event) => {
-        if (ignoreNestedActionClick(event)) return
-        onOpen()
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault()
-          onOpen()
-        }
-      }}
       onMouseEnter={onPrefetch}
-      onFocus={onPrefetch}
-      className={`relative cursor-pointer rounded-sm border px-5 py-5 transition hover:border-[#9fc1be] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1f615d]/30 ${isDark ? "border-white/[0.08] bg-[#101b24] hover:bg-[#13212b]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"}`}
+      className={`relative rounded-sm border px-5 py-5 transition hover:border-[#9fc1be] focus-within:border-[#9fc1be] ${isDark ? "border-white/[0.08] bg-[#101b24] hover:bg-[#13212b]" : "border-stone-200 bg-white hover:bg-[#fcfbf8]"}`}
     >
+      <ProjectPrimaryLink book={book} onOpen={onOpen} onPrefetch={onPrefetch} />
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-4">
           <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md border ${accentClass}`}>
@@ -332,13 +319,10 @@ export function ProjectRow({
             <p className={`mt-1 truncate text-xs ${subtextClass}`}>
               {getGenreLabel(book)} <span className={metaClass}>·</span> {book.work_type === "screenplay" ? "Screenplay" : "Novel"}
             </p>
-            {publicSampleStatus ? (
-              <Tooltip content="Public sample visibility">
-                <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.14em] ${isDark ? "bg-cyan-400/12 text-cyan-200" : "bg-cyan-100 text-cyan-800"}`}>
-                  {publicSampleStatus}
-                </span>
-              </Tooltip>
-            ) : null}
+            <VisibilityBadge
+              state={publicSampleStatus ? "public_sample" : book.collaboration_role ? "shared" : "private"}
+              className="mt-2"
+            />
             <div className="mt-2">
               <ProjectStatusBadge status={book.status} isDark={isDark} />
             </div>
@@ -364,7 +348,7 @@ export function ProjectRow({
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between gap-3 xl:justify-end">
+        <div className="relative z-20 flex items-center justify-between gap-3 xl:justify-end">
           {book.mode === "author" ? (
             <Tooltip content={`Add a ${storyUnitLabel(book.work_type)} to this project`}>
               <Button

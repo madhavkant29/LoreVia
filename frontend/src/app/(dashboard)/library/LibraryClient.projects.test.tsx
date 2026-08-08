@@ -77,7 +77,9 @@ describe("LibraryClient project presentation", () => {
     const createMarkup = renderToStaticMarkup(<CreateProjectCard isDark onCreate={vi.fn()} />)
 
     expect(cardMarkup).toContain("The Glass Archive")
-    expect(cardMarkup).toContain("Public book live")
+    expect(cardMarkup).toContain("Public sample")
+    expect(cardMarkup).toContain('href="/the-glass-archive--book-1"')
+    expect(cardMarkup).not.toContain('role="button"')
     expect(cardMarkup).toContain("Pin")
     expect(rowMarkup).toContain("Row Project")
     expect(rowMarkup).toContain("Screenplay")

@@ -43,3 +43,12 @@ export function identify(userId: string, properties?: AnalyticsProps) {
   }
 }
 
+export function resetIdentity() {
+  try {
+    if (typeof window === "undefined") return
+    window.__loreviaPosthog?.reset()
+  } catch {
+    // never block UX on analytics
+  }
+}
+

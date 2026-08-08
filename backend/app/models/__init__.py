@@ -80,6 +80,8 @@ from app.models.user import (
     SubscriptionEvent,
     TrialEmailEvent,
     User,
+    UserBookUiPreference,
     UserRateLimitOverride,
+    UserUiPreference,
     UserWritingActivity,
 )

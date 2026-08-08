@@ -179,6 +179,35 @@ async def test_build_user_data_export_includes_account_book_chapter_and_domain_f
         beta_reader_enabled=True,
         updated_at=datetime.now(UTC),
     )
+    ui_preference = SimpleNamespace(
+        schema_version=1,
+        revision=2,
+        complexity_mode="standard",
+        dashboard_visibility_json={"dashboard.stats": "user_hidden"},
+        dashboard_order_json=[],
+        public_tool_visibility_json={},
+        density="comfortable",
+        reader_toolbar_density="standard",
+        locked_tool_presentation="compact",
+        default_workspace_shell="reader",
+        mobile_actions_json=[],
+        guidance_dismissals_json={},
+        recommendation_snoozes_json={},
+        updated_at=datetime.now(UTC),
+    )
+    book_ui_preference = SimpleNamespace(
+        book_id=book.id,
+        schema_version=1,
+        revision=3,
+        book_preset="draft",
+        advanced_tool_override="show",
+        hidden_book_tools_json=["book.search"],
+        overview_cards_json={},
+        reader_actions_json=[],
+        mobile_actions_json=[],
+        panel_state_json={},
+        updated_at=datetime.now(UTC),
+    )
     domain_row = SimpleNamespace(
         id=uuid.uuid4(),
         title="Note",
@@ -189,7 +218,13 @@ async def test_build_user_data_export_includes_account_book_chapter_and_domain_f
 
     class SequenceDb:
         def __init__(self):
-            self.results = [[book], [preference], [chapter]] + [[domain_row] for _ in range(10)]
+            self.results = [
+                [book],
+                [preference],
+                [ui_preference],
+                [book_ui_preference],
+                [chapter],
+            ] + [[domain_row] for _ in range(10)]
 
         async def execute(self, _statement):
             return FakeScalarResult(self.results.pop(0))
@@ -210,10 +245,14 @@ async def test_build_user_data_export_includes_account_book_chapter_and_domain_f
     with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
         names = set(archive.namelist())
         account = json.loads(archive.read("account.json"))
+        ui_preferences = json.loads(archive.read("ui_preferences.json"))
         chapters = json.loads(archive.read(f"books/{book.id}/chapters.json"))
         notes = json.loads(archive.read(f"books/{book.id}/notes.json"))
 
     assert account["email"] == "mara@example.test"
+    assert ui_preferences["global_preferences"]["complexity_mode"] == "standard"
+    assert ui_preferences["book_preferences"][0]["book_id"] == str(book.id)
+    assert ui_preferences["book_preferences"][0]["hidden_book_tools_json"] == ["book.search"]
     assert chapters[0]["manuscript"]["text"] == "Chapter body"
     assert notes[0]["title"] == "Note"
     assert f"books/{book.id}/beta_read_assignments.json" in names

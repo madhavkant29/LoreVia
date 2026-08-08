@@ -28,6 +28,7 @@ export type NextBestAction = {
   href?: Route
   onSelect?: () => void
   tone?: "primary" | "secondary" | "danger"
+  fingerprint?: string
 }
 
 export type ConfirmDialogConfig = {
@@ -55,6 +56,8 @@ export type ToastMessage = {
   title?: string
   body: string
   tone?: "default" | "success" | "warning" | "danger"
+  actionLabel?: string
+  onAction?: () => void
 }
 
 export type SmartEmptyStateAction = {

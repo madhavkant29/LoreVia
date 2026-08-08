@@ -1,9 +1,11 @@
-import { type ButtonHTMLAttributes } from "react"
+import { forwardRef, type ButtonHTMLAttributes } from "react"
 import { cn } from "@/lib/utils/text"
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "ghost" | "danger"
   size?: "sm" | "md" | "lg"
+  busy?: boolean
+  busyLabel?: string
 }
 
 const variants = {
@@ -13,21 +15,27 @@ const variants = {
   danger:    "bg-red-600 text-white border border-red-600 hover:bg-red-700 hover:border-red-700",
 }
 const sizes = {
-  sm: "px-3 py-2 text-xs rounded-xl",
-  md: "px-4 py-2.5 text-sm rounded-xl",
-  lg: "px-6 py-3 text-base rounded-md",
+  sm: "min-h-11 px-3 py-2 text-xs rounded-md",
+  md: "min-h-11 px-4 py-2.5 text-sm rounded-md",
+  lg: "min-h-12 px-6 py-3 text-base rounded-md",
 }
 
-export function Button({ variant = "primary", size = "md", className, children, ...props }: Props) {
+export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
+  { variant = "primary", size = "md", busy = false, busyLabel, className, children, disabled, ...props },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       className={cn(
-        "font-medium transition-all duration-150 ease-out disabled:cursor-not-allowed disabled:opacity-50",
+        "font-medium tracking-normal transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))] focus-visible:ring-offset-2 motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-50",
         variants[variant], sizes[size], className
       )}
+      aria-busy={busy || undefined}
+      disabled={disabled || busy}
       {...props}
     >
-      {children}
+      {busy && busyLabel ? busyLabel : children}
     </button>
   )
-}
+})

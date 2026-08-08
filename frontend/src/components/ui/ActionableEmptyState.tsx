@@ -9,19 +9,27 @@ import type { SmartEmptyStateAction } from "@/types/ux"
 export function ActionableEmptyState({
   title,
   body,
-  actions,
+  actions = [],
+  variant = "empty",
   className = "",
 }: {
   title: string
   body: string
-  actions: SmartEmptyStateAction[]
+  actions?: SmartEmptyStateAction[]
+  variant?: "empty" | "no_results" | "processing" | "partial_ready" | "gated" | "recoverable_failure" | "support_required"
   className?: string
 }) {
   const primary = choosePrimaryEmptyStateAction(actions)
   const secondary = actions.find((action) => action !== primary)
 
   return (
-    <div className={`app-empty-state ${className}`}>
+    <div
+      className={`app-empty-state ${className}`}
+      role={variant === "recoverable_failure" || variant === "support_required" ? "alert" : "status"}
+      aria-live={variant === "processing" || variant === "partial_ready" ? "polite" : undefined}
+      data-state-variant={variant}
+    >
+      <p className="app-eyebrow">{variantLabel(variant)}</p>
       <p className="text-lg font-semibold text-[rgb(var(--foreground))]">{title}</p>
       <p className="mx-auto mt-2 max-w-2xl text-sm leading-7 text-[rgb(var(--muted-foreground))]">{body}</p>
       {primary || secondary ? (
@@ -32,6 +40,18 @@ export function ActionableEmptyState({
       ) : null}
     </div>
   )
+}
+
+function variantLabel(variant: NonNullable<Parameters<typeof ActionableEmptyState>[0]["variant"]>) {
+  switch (variant) {
+    case "no_results": return "No results"
+    case "processing": return "Processing"
+    case "partial_ready": return "Partially ready"
+    case "gated": return "Access required"
+    case "recoverable_failure": return "Action needed"
+    case "support_required": return "Support required"
+    default: return "Empty"
+  }
 }
 
 function EmptyStateButton({

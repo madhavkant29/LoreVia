@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { Route } from "next"
 import Link from "next/link"
 
@@ -11,9 +11,14 @@ import { Button } from "@/components/ui/Button"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { useCachedBookDetail } from "@/lib/hooks/useBookDetail"
 import { useNavigationPrefetch } from "@/lib/hooks/useNavigationPrefetch"
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import { useAuthStore } from "@/lib/stores/authStore"
+import { defaultBookUiPreference, useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
+import { workspaceToolRegistry } from "@/lib/workspace/toolRegistry"
+import { resolveWorkspaceTool } from "@/lib/workspace/toolResolver"
 import type { Book } from "@/types/book"
 import type { CollaborationPermissions } from "@/types/book"
+import type { BookPreset } from "@/types/uiPreferences"
 
 type BookMode = "reader" | "author"
 
@@ -51,6 +56,7 @@ type NavIcon =
   | "quote"
   | "files"
   | "plus"
+  | "settings"
   | "chevron-right"
 
 type NavItem = {
@@ -71,7 +77,27 @@ type NavSection = {
 }
 
 const READER_SHELL_ITEM_IDS = new Set(["overview", "read", "chapters", "summaries", "search", "timeline", "beta-feedback"])
-const FREE_OWNER_AUTHOR_ITEM_IDS = new Set(["overview", "read", "chapters", "advisor", "export"])
+const FREE_OWNER_AUTHOR_ITEM_IDS = new Set(["overview", "read", "chapters", "advisor", "export", "visibility"])
+const BOOK_PRESET_OPTIONS: Array<{ value: BookPreset; label: string }> = [
+  { value: "draft", label: "Draft" },
+  { value: "review", label: "Review" },
+  { value: "story_bible", label: "Bible" },
+  { value: "share", label: "Share" },
+  { value: "all", label: "All" },
+]
+const NAV_TOOL_IDS: Record<string, string> = {
+  "plot-threads": "book.plot_threads",
+  "world-gap": "book.world_gap",
+  "cross-book-wiki": "book.cross_book_wiki",
+  "editorial-review": "book.editorial_review",
+  "beta-feedback": "book.beta_feedback",
+  "author-loop": "book.author_lens",
+}
+const TOOL_BY_ID = new Map(workspaceToolRegistry.map((tool) => [tool.id, tool]))
+
+function toolIdForNavItem(itemId: string) {
+  return NAV_TOOL_IDS[itemId] ?? `book.${itemId}`
+}
 
 function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermissions | null) {
   if (!permissions) return false
@@ -101,6 +127,7 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
     case "export":
       return permissions.can_export
     case "collaboration":
+    case "visibility":
       return false
     default:
       return true
@@ -153,6 +180,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
       { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", helper: "Manage who can access the book and what each collaborator is allowed to do.", icon: "users" },
       { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Review", helper: "Review chapter comments and assignment feedback.", icon: "users" },
       { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", helper: "Bring files in, send drafts out, and package the manuscript for other workflows.", icon: "files" },
+      { id: "visibility", label: "Visibility Center", href: `/${bookId}/visibility` as Route, tone: "Recovery", helper: "Review private, shared, beta, and public status and restore hidden workspace tools.", icon: "settings" },
       { id: "author-loop", label: "Author Lens", href: `/${bookId}/author-loop` as Route, tone: "Advanced", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark", advanced: true },
     ],
   },
@@ -171,6 +199,7 @@ export function AuthorToolsNav({
   railSize = "default",
 }: AuthorToolsNavProps) {
   const tier = useAuthStore((state) => state.user?.tier)
+  const preferenceBookId = normalizeBookRouteId(bookId)
   const { data: cachedBook = null } = useCachedBookDetail(bookId)
   const book = bookData ?? cachedBook
   const collaborationRole = book?.collaboration_role ?? null
@@ -182,8 +211,37 @@ export function AuthorToolsNav({
   const showAuthorSections = currentShell === "author" && (isOwnerSession || hasOwnAuthorAccess || hasCollaboratorAccess)
   const isLimitedFreeOwner = currentShell === "author" && isOwnerSession && !hasOwnAuthorAccess
   const { prefetchByNavId } = useNavigationPrefetch(bookId)
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const hydrateBookPreferences = useUiPreferencesStore((state) => state.hydrateBook)
+  const patchBookPreferences = useUiPreferencesStore((state) => state.patchBook)
+  const setBookPreset = useUiPreferencesStore((state) => state.setBookPreset)
+  const uiPreferences = useUiPreferencesStore((state) => state.preferences)
+  const bookPreference = useUiPreferencesStore(
+    (state) => state.bookPreferences[preferenceBookId]
+      ?? defaultBookUiPreference(preferenceBookId, state.preferences.complexity_mode),
+  )
+  const advancedToolOverride = useUiPreferencesStore(
+    (state) => state.bookPreferences[preferenceBookId]?.advanced_tool_override,
+  )
+  const showAdvanced =
+    advancedToolOverride === "show" ||
+    (advancedToolOverride !== "hide" && uiPreferences.complexity_mode === "power")
   const processingReady = book?.status === "ready"
+  const resolverBook = (book ?? {
+    id: bookId,
+    status: "ready",
+    collaboration_role: null,
+    collaboration_permissions: null,
+  }) as Book
+
+  useEffect(() => {
+    void hydrateBookPreferences(preferenceBookId)
+  }, [hydrateBookPreferences, preferenceBookId])
+
+  const toggleAdvancedTools = () => {
+    void patchBookPreferences(preferenceBookId, [
+      { op: "set", path: "/advanced_tool_override", value: showAdvanced ? "hide" : "show" },
+    ])
+  }
 
   const sections = useMemo(
     () =>
@@ -192,8 +250,8 @@ export function AuthorToolsNav({
           if (currentShell === "reader") {
             return !section.authorOnly
           }
-            if (isLimitedFreeOwner) {
-              return section.title === "Write" || section.title === "Analyze" || section.title === "Share & Export"
+          if (isLimitedFreeOwner) {
+            return section.title === "Write" || section.title === "Analyze" || section.title === "Share & Export"
           }
           if (showAuthorSections || !section.authorOnly) {
             return true
@@ -203,19 +261,32 @@ export function AuthorToolsNav({
         .map((section) => ({
           ...section,
           items: section.items.filter((item) => {
-            if (currentShell === "reader") {
-              return READER_SHELL_ITEM_IDS.has(item.id)
+            if (currentShell === "reader" && !READER_SHELL_ITEM_IDS.has(item.id)) return false
+            if (isLimitedFreeOwner && !FREE_OWNER_AUTHOR_ITEM_IDS.has(item.id)) return false
+            const tool = TOOL_BY_ID.get(toolIdForNavItem(item.id))
+            if (tool) {
+              const resolved = resolveWorkspaceTool(tool, {
+                mode: uiPreferences.complexity_mode,
+                activePath: item.id === active ? item.href : null,
+                book: resolverBook,
+                bookPreference,
+                globalPreference: uiPreferences,
+                placement: "book",
+                hasAuthorAccess: hasOwnAuthorAccess,
+                currentChapter,
+              })
+              if (resolved.hidden) return false
+              if (resolved.access !== "available") return false
+            } else if (item.advanced && !showAdvanced && item.id !== active) {
+              return false
             }
-            if (isLimitedFreeOwner) {
-              return FREE_OWNER_AUTHOR_ITEM_IDS.has(item.id)
-            }
-            if (item.advanced && !showAdvanced && item.id !== active) return false
-            if (isOwnerSession || hasOwnAuthorAccess || !collaborationRole) return true
+            if (currentShell === "reader") return true
+            if (isOwnerSession || !collaborationRole) return true
             return canSeeCollaboratorItem(item.id, collaborationPermissions)
           }),
         }))
         .filter((section) => section.items.length > 0),
-    [active, bookId, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasOwnAuthorAccess, isLimitedFreeOwner, isOwnerSession, showAdvanced, showAuthorSections]
+    [active, bookId, bookPreference, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasOwnAuthorAccess, isLimitedFreeOwner, isOwnerSession, resolverBook, showAdvanced, showAuthorSections, uiPreferences]
   )
   const rail = variant === "rail"
   const [isPinnedOpen, setIsPinnedOpen] = useState(false)
@@ -262,13 +333,22 @@ export function AuthorToolsNav({
           <p className={`mt-3 line-clamp-2 px-1 text-xs leading-5 transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-500" : "text-stone-500"}`}>
             {description}
           </p>
+          {currentShell === "author" ? (
+            <PresetSelector
+              bookId={preferenceBookId}
+              currentPreset={bookPreference.book_preset}
+              isDark={isDark}
+              labelVisibility={labelVisibility}
+              setBookPreset={setBookPreset}
+            />
+          ) : null}
 
           <div className={`mt-5 space-y-5 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : "max-h-[calc(100vh-12rem)] overflow-y-auto pr-1"}`}>
             {sections.map((section) => {
               const sectionMarkup = (
               <div>
                 <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-                  {section.title}{section.processingDependent && !processingReady ? " · processing" : ""}
+                  {section.title}{section.processingDependent && !processingReady ? " - processing" : ""}
                 </p>
                 <div className="space-y-1">
                   {section.items.map((item) => {
@@ -277,6 +357,7 @@ export function AuthorToolsNav({
                       <Link
                         key={item.id}
                         href={item.href}
+                        aria-current={selected ? "page" : undefined}
                         title={item.label}
                         data-testid={`author-nav-item-${item.id}`}
                         onMouseEnter={() => prefetchByNavId(item.id)}
@@ -337,7 +418,7 @@ export function AuthorToolsNav({
               )
             })}
             {currentShell === "author" ? (
-              <button type="button" onClick={() => setShowAdvanced((value) => !value)} className={`w-full rounded-md border px-3 py-2 text-left text-xs font-semibold ${labelVisibility} ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
+              <button type="button" onClick={toggleAdvancedTools} className={`w-full rounded-md border px-3 py-2 text-left text-xs font-semibold ${labelVisibility} ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
                 {showAdvanced ? "Hide advanced tools" : "Show advanced tools"}
               </button>
             ) : null}
@@ -354,13 +435,22 @@ export function AuthorToolsNav({
       <p className={`mt-3 line-clamp-2 px-1 text-xs leading-5 transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-500" : "text-stone-500"}`}>
         {description}
       </p>
+      {currentShell === "author" ? (
+        <PresetSelector
+          bookId={preferenceBookId}
+          currentPreset={bookPreference.book_preset}
+          isDark={isDark}
+          labelVisibility={labelVisibility}
+          setBookPreset={setBookPreset}
+        />
+      ) : null}
 
       <div className={`mt-5 space-y-5 ${rail ? "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1" : "max-h-[calc(100vh-12rem)] overflow-y-auto pr-1"}`}>
         {sections.map((section) => {
           const sectionMarkup = (
           <div>
             <p className={`mb-2 px-1 text-3xs font-semibold uppercase tracking-[0.24em] transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-600" : "text-stone-400"}`}>
-              {section.title}{section.processingDependent && !processingReady ? " · processing" : ""}
+              {section.title}{section.processingDependent && !processingReady ? " - processing" : ""}
             </p>
             <div className="space-y-1">
               {section.items.map((item) => {
@@ -369,6 +459,7 @@ export function AuthorToolsNav({
                   <Link
                     key={item.id}
                     href={item.href}
+                    aria-current={selected ? "page" : undefined}
                     title={item.label}
                     data-testid={`author-nav-item-${item.id}`}
                     onMouseEnter={() => prefetchByNavId(item.id)}
@@ -429,7 +520,7 @@ export function AuthorToolsNav({
           )
         })}
         {currentShell === "author" ? (
-          <button type="button" onClick={() => setShowAdvanced((value) => !value)} className={`w-full rounded-md border px-3 py-2 text-left text-xs font-semibold ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
+          <button type="button" onClick={toggleAdvancedTools} className={`w-full rounded-md border px-3 py-2 text-left text-xs font-semibold ${isDark ? "border-white/10 text-slate-300 hover:bg-white/5" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
             {showAdvanced ? "Hide advanced tools" : "Show advanced tools"}
           </button>
         ) : null}
@@ -455,6 +546,48 @@ function NavHeader({
       <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
         <h2 className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
       </div>
+    </div>
+  )
+}
+
+function PresetSelector({
+  bookId,
+  currentPreset,
+  isDark,
+  labelVisibility,
+  setBookPreset,
+}: {
+  bookId: string
+  currentPreset: BookPreset
+  isDark: boolean
+  labelVisibility: string
+  setBookPreset: (bookId: string, preset: BookPreset) => Promise<void>
+}) {
+  return (
+    <div className={`mt-4 grid grid-cols-5 gap-1 transition-opacity duration-200 ${labelVisibility}`} aria-label="Book task preset">
+      {BOOK_PRESET_OPTIONS.map((preset) => {
+        const active = currentPreset === preset.value
+        return (
+          <button
+            key={preset.value}
+            type="button"
+            aria-pressed={active}
+            title={preset.label}
+            onClick={() => void setBookPreset(bookId, preset.value)}
+            className={`min-h-11 overflow-hidden rounded-sm border px-1 text-center text-[0.65rem] font-semibold leading-tight transition-colors ${
+              active
+                ? isDark
+                  ? "border-teal-300/30 bg-teal-500/15 text-teal-100"
+                  : "border-teal-800 bg-teal-800 text-white"
+                : isDark
+                  ? "border-white/[0.08] text-slate-400 hover:bg-white/[0.05] hover:text-slate-100"
+                  : "border-stone-200 text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+            }`}
+          >
+            {preset.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -500,6 +633,8 @@ function NavSvg({ icon }: { icon: NavIcon }) {
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 7h6l2 2h8v9a2 2 0 01-2 2H6a2 2 0 01-2-2V7z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 13h5M14.5 10.5L17 13l-2.5 2.5" /></svg>
     case "plus":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+    case "settings":
+      return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7z" /><path strokeLinecap="round" strokeLinejoin="round" d="M19 12a7.2 7.2 0 00-.1-1.2l2-1.5-2-3.4-2.4 1a7 7 0 00-2-1.1L14.2 3h-4.4l-.3 2.8a7 7 0 00-2 1.1l-2.4-1-2 3.4 2 1.5A7.2 7.2 0 005 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.4-1a7 7 0 002 1.1l.3 2.8h4.4l.3-2.8a7 7 0 002-1.1l2.4 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" /></svg>
     case "chevron-right":
       return <svg className={common} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="m9 6 6 6-6 6" /></svg>
     case "book":

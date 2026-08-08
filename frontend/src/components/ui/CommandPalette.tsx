@@ -8,31 +8,92 @@ import { useRouter } from "next/navigation"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
+import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import { filterCommandActions, getRecentCommandActions, recordRecentCommandAction } from "@/lib/utils/uxActions"
+import { resolveWorkspaceTools } from "@/lib/workspace/toolResolver"
+import { toolsForPlacement } from "@/lib/workspace/toolRegistry"
+import { COMMAND_PALETTE_EVENT } from "@/components/ui/ShortcutHelp"
+import { Dialog } from "@/components/ui/Dialog"
 import type { Book } from "@/types/book"
+import type { UserBookUiPreference, UserUiPreference } from "@/types/uiPreferences"
 import type { CommandAction } from "@/types/ux"
 
-const BASE_ACTIONS: CommandAction[] = [
-  { id: "nav:library", label: "Open Library", href: "/library", group: "Navigation", keywords: ["projects", "dashboard"] },
-  { id: "nav:public", label: "Open Public Uploads", href: "/public/uploads", group: "Navigation", keywords: ["browse", "authors"] },
+const EXTRA_BASE_ACTIONS: CommandAction[] = [
   { id: "nav:forum", label: "Open Public Forum", href: "/public/forum", group: "Navigation", keywords: ["community", "discussion"] },
-  { id: "nav:stats", label: "Open Writing Stats", href: "/stats", group: "Navigation", keywords: ["goals", "progress"] },
   { id: "nav:notifications", label: "Open Notifications", href: "/notifications", group: "Navigation", keywords: ["updates", "inbox"] },
-  { id: "nav:settings", label: "Open Settings", href: "/settings", group: "Navigation", keywords: ["account", "preferences"] },
-  { id: "nav:pricing", label: "Open Pricing", href: "/upgrade", group: "Navigation", keywords: ["billing", "plan"] },
 ]
 
-function buildBookActions(books: Book[]): CommandAction[] {
+const DASHBOARD_COMMAND_TOOLS = toolsForPlacement("dashboard")
+const BOOK_COMMAND_TOOLS = toolsForPlacement("command").filter((tool) => tool.id.startsWith("book."))
+
+function hiddenDescription(reason: string | undefined, access: string) {
+  if (access === "plan_locked") return "Plan locked; available from search so upgrade/recovery stays clear."
+  if (access === "permission_denied") return "Not available with your current permissions."
+  if (access === "processing_blocked") return "Available after processing finishes."
+  if (reason === "hidden_by_user") return "Hidden from navigation; command search can still open it."
+  if (reason === "hidden_by_preset") return "Hidden by the current task preset."
+  if (reason === "hidden_by_mode") return "Hidden by the current workspace mode."
+  return undefined
+}
+
+function buildBaseActions(preferences: UserUiPreference): CommandAction[] {
+  const registryActions = resolveWorkspaceTools(DASHBOARD_COMMAND_TOOLS, {
+    mode: preferences.complexity_mode,
+    globalPreference: preferences,
+    placement: "command",
+  }).map(({ tool, href, reason, access }) => ({
+    id: `registry:${tool.id}`,
+    label: `Open ${tool.label}`,
+    description: hiddenDescription(reason, access) ?? tool.description ?? tool.group,
+    href: href as Route,
+    group: tool.group,
+    keywords: tool.keywords,
+  }))
+  return [
+    ...registryActions,
+    ...EXTRA_BASE_ACTIONS,
+    {
+      id: "visibility:dashboard",
+      label: "Edit workspace visibility",
+      href: "/settings" as Route,
+      group: "Visibility",
+      keywords: ["visibility", "hidden", "layout", "tools"],
+    },
+    {
+      id: "mode:switch",
+      label: "Switch workspace mode",
+      href: "/settings" as Route,
+      group: "Visibility",
+      keywords: ["focused", "standard", "power", "mode"],
+    },
+  ]
+}
+
+function buildBookActions(
+  books: Book[],
+  preferences: UserUiPreference,
+  bookPreferences: Record<string, UserBookUiPreference>,
+  hasAuthorAccess: boolean,
+): CommandAction[] {
   return books.flatMap((book) => {
     const href = getBookHref(book) as Route
-    const manuscriptHref = getBookHref(book, "/manuscript") as Route
-    const askHref = getBookHref(book, "/ask") as Route
-    const charactersHref = getBookHref(book, "/characters") as Route
-    const graphHref = getBookHref(book, "/graph") as Route
-    const advisorHref = getBookHref(book, "/advisor") as Route
-    const searchHref = getBookHref(book, "/search") as Route
     const baseKeywords = [book.title, book.author, book.genre, book.mode, book.status].filter(Boolean) as string[]
+    const toolActions = resolveWorkspaceTools(BOOK_COMMAND_TOOLS, {
+      mode: preferences.complexity_mode,
+      book,
+      bookPreference: bookPreferences[book.id],
+      globalPreference: preferences,
+      placement: "command",
+      hasAuthorAccess,
+    }).map(({ tool, href: toolHref, reason, access }) => ({
+      id: `book:${book.id}:${tool.id}`,
+      label: `${tool.label}: ${book.title}`,
+      description: hiddenDescription(reason, access) ?? tool.description ?? tool.group,
+      href: toolHref as Route,
+      group: tool.group,
+      keywords: [...baseKeywords, ...tool.keywords],
+    }))
     return [
       {
         id: `book:${book.id}:open`,
@@ -43,49 +104,20 @@ function buildBookActions(books: Book[]): CommandAction[] {
         keywords: baseKeywords,
       },
       {
-        id: `book:${book.id}:manuscript`,
-        label: `Open manuscript: ${book.title}`,
-        description: "Jump to the manuscript editor",
-        href: manuscriptHref,
-        group: "Project tools",
-        keywords: [...baseKeywords, "write", "draft", "editor"],
+        id: `book:${book.id}:visibility`,
+        label: `Edit visibility: ${book.title}`,
+        href: getBookHref(book, "/visibility") as Route,
+        group: "Visibility",
+        keywords: [...baseKeywords, "visibility", "hidden", "sharing"],
       },
       {
-        id: `book:${book.id}:ask`,
-        label: `Ask LoreVia: ${book.title}`,
-        description: "Ask grounded questions with citations",
-        href: askHref,
-        group: "Project tools",
-        keywords: [...baseKeywords, "ask", "citations", "question"],
+        id: `book:${book.id}:show-hidden`,
+        label: `Show hidden tools: ${book.title}`,
+        href: getBookHref(book, "/visibility") as Route,
+        group: "Visibility",
+        keywords: [...baseKeywords, "show hidden tools", "restore"],
       },
-      {
-        id: `book:${book.id}:characters`,
-        label: `Open character bible: ${book.title}`,
-        href: charactersHref,
-        group: "Story bible",
-        keywords: [...baseKeywords, "characters", "story bible"],
-      },
-      {
-        id: `book:${book.id}:graph`,
-        label: `Open relationship graph: ${book.title}`,
-        href: graphHref,
-        group: "Story bible",
-        keywords: [...baseKeywords, "graph", "relationships"],
-      },
-      {
-        id: `book:${book.id}:advisor`,
-        label: `Run story advisor: ${book.title}`,
-        href: advisorHref,
-        group: "Review center",
-        keywords: [...baseKeywords, "continuity", "scan", "advisor"],
-      },
-      {
-        id: `book:${book.id}:search`,
-        label: `Search writing: ${book.title}`,
-        href: searchHref,
-        group: "Review center",
-        keywords: [...baseKeywords, "search", "passages"],
-      },
+      ...toolActions,
     ]
   })
 }
@@ -94,6 +126,8 @@ export function CommandPalette() {
   const router = useRouter()
   const user = useAuthStore((state) => state.user)
   const authHydrated = useAuthStore((state) => state.hydrated)
+  const preferences = useUiPreferencesStore((state) => state.preferences)
+  const bookPreferences = useUiPreferencesStore((state) => state.bookPreferences)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [activeIndex, setActiveIndex] = useState(0)
@@ -108,8 +142,11 @@ export function CommandPalette() {
   })
 
   const actions = useMemo(
-    () => [...BASE_ACTIONS, ...buildBookActions(booksQuery.data ?? [])],
-    [booksQuery.data],
+    () => [
+      ...buildBaseActions(preferences),
+      ...buildBookActions(booksQuery.data ?? [], preferences, bookPreferences, Boolean(user && user.tier !== "free")),
+    ],
+    [bookPreferences, booksQuery.data, preferences, user?.tier],
   )
   const recentActions = useMemo(() => getRecentCommandActions(actions), [actions])
   const filteredActions = useMemo(() => filterCommandActions(actions, query), [actions, query])
@@ -126,7 +163,12 @@ export function CommandPalette() {
       }
     }
     window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    const onOpenRequest = () => setOpen(true)
+    window.addEventListener(COMMAND_PALETTE_EVENT, onOpenRequest)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener(COMMAND_PALETTE_EVENT, onOpenRequest)
+    }
   }, [])
 
   useEffect(() => {
@@ -152,19 +194,20 @@ export function CommandPalette() {
     }
   }
 
-  if (!open) return null
-
   return (
-    <div className="fixed inset-0 z-[75] bg-black/50 px-4 py-16" role="presentation">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="command-palette-title"
-        className="mx-auto w-full max-w-2xl overflow-hidden rounded-lg border border-[rgba(var(--border),0.9)] bg-[rgb(var(--card))] text-[rgb(var(--card-foreground))] shadow-[var(--shadow-modal)]"
-      >
-        <div className="border-b border-[rgba(var(--border),0.72)] px-5 py-4">
-          <p id="command-palette-title" className="app-eyebrow">Command palette</p>
-          <p className="mt-2 text-xs text-[rgb(var(--muted-foreground))]">Jump to a project, tool, or action.</p>
+    <Dialog
+      open={open}
+      onClose={() => setOpen(false)}
+      title="Command palette"
+      description="Jump to a project, tool, or action."
+      size="lg"
+      initialFocusRef={inputRef}
+      contentClassName="p-0"
+      titleClassName="px-5 pt-4 text-sm"
+      descriptionClassName="mt-1 px-5 text-xs leading-5"
+      className="overflow-hidden"
+    >
+        <div className="border-b border-[rgba(var(--border),0.72)] px-5 pb-4">
           <input
             ref={inputRef}
             value={query}
@@ -185,9 +228,14 @@ export function CommandPalette() {
             }}
             className="mt-3 w-full bg-transparent text-lg outline-none"
             aria-label="Search commands"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls="command-palette-results"
+            aria-activedescendant={visibleActions[activeIndex] ? `command-option-${activeIndex}` : undefined}
           />
         </div>
-        <div className="max-h-[27rem] overflow-y-auto p-2">
+        <div id="command-palette-results" role="listbox" aria-label="Command results" className="max-h-[27rem] overflow-y-auto p-2">
           {booksQuery.isLoading ? (
             <p className="px-3 py-4 text-sm text-[rgb(var(--muted-foreground))]">Loading project actions...</p>
           ) : visibleActions.length === 0 ? (
@@ -196,6 +244,9 @@ export function CommandPalette() {
             visibleActions.map((action, index) => (
               <button
                 key={action.id}
+                id={`command-option-${index}`}
+                role="option"
+                aria-selected={activeIndex === index}
                 type="button"
                 onClick={() => runAction(action)}
                 className={`flex w-full items-start justify-between gap-4 rounded-md px-3 py-3 text-left transition ${
@@ -217,9 +268,8 @@ export function CommandPalette() {
         </div>
         <div className="flex items-center justify-between border-t border-[rgba(var(--border),0.72)] px-5 py-3 text-xs text-[rgb(var(--muted-foreground))]">
           <span>Enter to open / Esc to close</span>
-          <span>{isPending ? "Opening..." : "Ctrl/⌘ K"}</span>
+          <span>{isPending ? "Opening..." : "Ctrl/Cmd K"}</span>
         </div>
-      </section>
-    </div>
+    </Dialog>
   )
 }

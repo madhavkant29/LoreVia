@@ -207,22 +207,23 @@ describe("zero-coverage client runtime components", () => {
     expect(container?.textContent).toContain("Sign in or create account")
   })
 
-  it("toggles shortcut help from the keyboard and records dismissal", async () => {
+  it("opens and closes shortcut help from the keyboard", async () => {
     await renderElement(<ShortcutHelp />)
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
       await Promise.resolve()
     })
-    expect(container?.textContent).toContain("Shortcuts")
-    await clickButton("Dismiss")
-    expect(window.localStorage.getItem("lorevia-shortcut-help-dismissed:v1")).toBe("true")
+    expect(document.body.textContent).toContain("Keyboard shortcuts")
+    expect(document.body.textContent).toContain("Open command palette")
 
     await act(async () => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+      document.querySelector('[role="dialog"]')?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      )
       await Promise.resolve()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
-    expect(container?.textContent).not.toContain("Press ? anytime")
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
   })
 
   it("mounts the app runtime providers and dynamic browser-only services", async () => {
@@ -286,7 +287,7 @@ async function flushAsync() {
 }
 
 async function clickButton(text: string) {
-  const button = Array.from(container?.querySelectorAll("button") ?? []).find((node) => node.textContent?.includes(text))
+  const button = Array.from(document.body.querySelectorAll("button")).find((node) => node.textContent?.includes(text))
   expect(button, `button containing ${text}`).toBeTruthy()
   await act(async () => {
     button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))

@@ -1,5 +1,6 @@
 ﻿"use client"
 
+import { X } from "lucide-react"
 import { memo } from "react"
 
 import { AdvancedImportSettings } from "@/components/modals/upload/AdvancedImportSettings"
@@ -9,6 +10,7 @@ import { UploadResultsPanel } from "@/components/modals/upload/UploadResultsPane
 import { UploadSourceStep } from "@/components/modals/upload/UploadSourceStep"
 import { useUploadModalController } from "@/components/modals/upload/useUploadModalController"
 import { UploadWizardSteps } from "@/components/modals/upload/UploadWizardPanels"
+import { Dialog } from "@/components/ui/Dialog"
 import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
 import { Skeleton } from "@/components/ui/Skeleton"
 import type { BookMode } from "@/lib/stores/bookModeStore"
@@ -41,12 +43,13 @@ export const UploadModal = memo(function UploadModal({
     postImportSynopsis, postImportPassages, postImportThreads, postImportSuggestions, user, confirm,
     booksApi, existingBookId, refetchBooks, primaryActionDisabled, primaryActionLabel,
   } = useUploadModalController({ onClose, initialMode, initialExistingBookId, presentation })
+  const TitleElement = isInline ? "h2" : "div"
 
   const content = (
       <div className={shellClassName} onClick={(e) => e.stopPropagation()}>
         <div className={`relative border-b px-6 py-5 ${isDark ? "border-white/10" : "border-slate-200/80"}`}>
           <div>
-            <h2 className="text-xl font-semibold tracking-tight">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}</h2>
+            <TitleElement className="text-xl font-semibold tracking-normal">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}</TitleElement>
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isManagingExisting
                 ? "Paste or upload one scene, chapter, or script segment, process it incrementally, and review what changed before moving on."
@@ -65,7 +68,7 @@ export const UploadModal = memo(function UploadModal({
             }`}
             aria-label="Close upload modal"
           >
-            x
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -298,11 +301,20 @@ export const UploadModal = memo(function UploadModal({
   )
 
   return isInline ? content : (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 pt-6 md:pt-10"
-      onClick={onClose}
+    <Dialog
+      open
+      onClose={onClose}
+      title={isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}
+      description={isManagingExisting
+        ? "Add and process the next story unit in this project."
+        : "Import a manuscript into a private workspace."}
+      size="xl"
+      className="!max-w-5xl border-0 bg-transparent shadow-none"
+      contentClassName="p-0"
+      titleClassName="sr-only"
+      descriptionClassName="sr-only"
     >
       {content}
-    </div>
+    </Dialog>
   )
 })

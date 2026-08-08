@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
 
 import type { ToastMessage } from "@/types/ux"
+import { Button } from "@/components/ui/Button"
 
 type ToastInput = Omit<ToastMessage, "id">
 type ToastContextValue = {
@@ -26,7 +27,7 @@ export function StatusToastProvider({ children }: { children: ReactNode }) {
     setMessages((current) => [...current, { ...message, id }].slice(-3))
     window.setTimeout(() => {
       setMessages((current) => current.filter((item) => item.id !== id))
-    }, 3600)
+    }, message.onAction ? 6000 : 3600)
   }, [])
 
   const value = useMemo(() => ({ notify }), [notify])
@@ -43,6 +44,11 @@ export function StatusToastProvider({ children }: { children: ReactNode }) {
           >
             {message.title ? <p className="font-semibold">{message.title}</p> : null}
             <p className={message.title ? "mt-1 leading-6 text-[rgb(var(--muted-foreground))]" : "leading-6"}>{message.body}</p>
+            {message.actionLabel && message.onAction ? (
+              <Button variant="ghost" size="sm" className="mt-2" onClick={message.onAction}>
+                {message.actionLabel}
+              </Button>
+            ) : null}
           </div>
         ))}
       </div>

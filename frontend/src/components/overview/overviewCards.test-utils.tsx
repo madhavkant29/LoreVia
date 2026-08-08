@@ -56,7 +56,7 @@ export async function renderElement(element: ReactElement) {
 }
 
 export function clickByText(text: string) {
-  const button = Array.from(container?.querySelectorAll("button") ?? []).find((item) =>
+  const button = Array.from(document.body.querySelectorAll<HTMLElement>('button, [role="menuitem"]')).find((item) =>
     item.textContent?.includes(text)
   )
   if (!button) throw new Error(`Missing button: ${text}`)
@@ -66,12 +66,16 @@ export function clickByText(text: string) {
 }
 
 export async function clickByTextAsync(text: string) {
-  const button = Array.from(container?.querySelectorAll("button") ?? []).find((item) =>
+  const button = Array.from(document.body.querySelectorAll<HTMLElement>('button, [role="menuitem"]')).find((item) =>
     item.textContent?.includes(text)
   )
   if (!button) throw new Error(`Missing button: ${text}`)
   await act(async () => {
-    button.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    if (button.getAttribute("aria-haspopup") === "menu") {
+      button.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }))
+    } else {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    }
     await Promise.resolve()
   })
 }

@@ -123,6 +123,28 @@ class BookOverviewOut(BaseModel):
     summary_collection: SummaryCollectionResponseOut | None = None
 
 
+class VisibilitySummaryItemOut(BaseModel):
+    state: str
+    label: str
+    count: int | None = None
+    detail: str | None = None
+
+
+class BookVisibilitySummaryOut(BaseModel):
+    book_id: uuid.UUID
+    access_class: BookAccessClassLiteral
+    workspace_shell: WorkspaceShellLiteral
+    badges: list[str] = Field(default_factory=list)
+    private_status: VisibilitySummaryItemOut
+    collaborators: VisibilitySummaryItemOut
+    beta_readers: VisibilitySummaryItemOut
+    public_publishing: VisibilitySummaryItemOut
+    public_discussion: VisibilitySummaryItemOut
+    rights: VisibilitySummaryItemOut
+    moderation: VisibilitySummaryItemOut
+    public_url: str | None = None
+
+
 class ReaderBootstrapOut(BaseModel):
     profile: Literal["critical", "full"] = "full"
     overview: BookOverviewOut

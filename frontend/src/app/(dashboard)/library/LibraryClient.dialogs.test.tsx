@@ -1,8 +1,31 @@
-import { describe, expect, it, vi } from "vitest"
-import { renderToStaticMarkup } from "react-dom/server"
+// @vitest-environment jsdom
+
+import { act } from "react"
+import type { ReactElement } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PermanentDeleteBookDialog, PublishBookDialog } from "./LibraryClient.dialogs"
 import type { Book } from "@/types/book"
+
+let container: HTMLDivElement | null = null
+let root: Root | null = null
+
+afterEach(() => {
+  act(() => root?.unmount())
+  container?.remove()
+  document.body.innerHTML = ""
+  root = null
+  container = null
+})
+
+function renderDialog(element: ReactElement) {
+  container = document.createElement("div")
+  document.body.appendChild(container)
+  root = createRoot(container)
+  act(() => root?.render(element))
+  return document.body.textContent ?? ""
+}
 
 function book(overrides: Partial<Book> = {}): Book {
   return {
@@ -35,7 +58,7 @@ const themeProps = {
 
 describe("LibraryClient dialogs", () => {
   it("renders the publish dialog with rights confirmation copy", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDialog(
       <PublishBookDialog
         {...themeProps}
         publishSlug="glass-archive"
@@ -47,7 +70,7 @@ describe("LibraryClient dialogs", () => {
         onConfirmedChange={vi.fn()}
         onCancel={vi.fn()}
         onPublish={vi.fn()}
-      />
+      />,
     )
 
     expect(markup).toContain("Publish your own original work")
@@ -57,7 +80,7 @@ describe("LibraryClient dialogs", () => {
   })
 
   it("renders the permanent delete dialog with validation state", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDialog(
       <PermanentDeleteBookDialog
         {...themeProps}
         book={book()}
@@ -67,7 +90,7 @@ describe("LibraryClient dialogs", () => {
         onConfirmationChange={vi.fn()}
         onCancel={vi.fn()}
         onConfirm={vi.fn()}
-      />
+      />,
     )
 
     expect(markup).toContain("Delete The Glass Archive permanently?")

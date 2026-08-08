@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { memo, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import cytoscape from "cytoscape"
 
@@ -11,6 +11,32 @@ import { RELATIONSHIP_COLORS } from "@/lib/constants"
 import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { cn } from "@/lib/utils/text"
 import type { RelationshipGraph as GraphData } from "@/types/character"
+import {
+  ArrangeIcon,
+  CheckIcon,
+  CompactSelectionSummary,
+  EmptyInspector,
+  EyeIcon,
+  FilterSelect,
+  FitIcon,
+  GraphStatusPill,
+  GraphToolbarButton,
+  GridIcon,
+  HandIcon,
+  InspectorMetric,
+  InspectorSection,
+  LinksIcon,
+  MinusIcon,
+  PlusIcon,
+  RelationshipLabelChecklist,
+  ResetIcon,
+  ScopeIcon,
+  TargetIcon,
+  TrashIcon,
+  UsersIcon,
+  type GraphEdgeView,
+  type GraphNodeView,
+} from "./RelationshipGraph.controls"
 import {
   BASE_LAYOUT,
   buildIsolatedPositions,
@@ -50,217 +76,12 @@ type Selection =
   | null
 
 type GraphNode = GraphData["nodes"][number]
-type GraphEdge = GraphData["edges"][number]
-type GraphNodeView = GraphNode & { label: string; relationshipCount: number }
-type GraphEdgeView = GraphEdge & { id: string; relationshipId?: string | null; label: string }
 type InteractionMode = "arrange" | "inspect"
 type GraphTestHandle = {
   cy: cytoscape.Core
   selectNode: (id: string) => void
   selectEdge: (id: string) => void
   clearSelection: () => void
-}
-
-function GraphToolbarButton({
-  active = false,
-  ariaPressed,
-  children,
-  disabled = false,
-  icon,
-  onClick,
-}: {
-  active?: boolean
-  ariaPressed?: boolean
-  children: ReactNode
-  disabled?: boolean
-  icon: ReactNode
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={ariaPressed}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(controlButtonClass(active), disabled && "cursor-not-allowed opacity-45")}
-    >
-      {icon}
-      <span>{children}</span>
-    </button>
-  )
-}
-
-function GraphStatusPill({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-300">
-      <span className="text-slate-400">{icon}</span>
-      <span>{children}</span>
-    </div>
-  )
-}
-
-function FilterSelect({
-  filterId,
-  filterType,
-  relationshipTypes,
-  setFilterType,
-}: {
-  filterId: string
-  filterType: string | null
-  relationshipTypes: string[]
-  setFilterType: (value: string | null) => void
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <label htmlFor={filterId} className="sr-only">Filter relationships</label>
-      <div className="relative min-w-[132px]">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-          <FilterIcon className="h-4 w-4" />
-        </span>
-        <select
-          id={filterId}
-          aria-label="Filter relationships"
-          value={filterType ?? ""}
-          onChange={(event) => setFilterType(event.target.value || null)}
-          className="w-full appearance-none rounded-xl border border-white/10 bg-[#0b1020] py-2 pl-9 pr-9 text-sm text-slate-100 transition hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-        >
-          <option value="">All</option>
-          {relationshipTypes.map((type) => (
-            <option key={type} value={type}>
-              {relationshipLabel(type)}
-            </option>
-          ))}
-        </select>
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
-          <ChevronDownIcon className="h-4 w-4" />
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function InspectorMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-slate-300">{label}</span>
-      <span className="font-semibold text-white">{value}</span>
-    </div>
-  )
-}
-
-function RelationshipLabelChecklist({
-  label,
-  options,
-  selected,
-  onChange,
-}: {
-  label: string
-  options: readonly string[]
-  selected: string[]
-  onChange: (labels: string[]) => void
-}) {
-  const selectedSet = new Set(selected)
-  return (
-    <fieldset className="rounded-lg border border-white/10 bg-black/15 p-3">
-      <legend className="px-1 text-xs text-slate-400">{label}</legend>
-      <div className="mt-2 grid max-h-36 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-        {options.map((option) => (
-          <label key={option} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-white/[0.04]">
-            <input
-              type="checkbox"
-              checked={selectedSet.has(option)}
-              onChange={(event) => {
-                if (event.target.checked) {
-                  onChange(Array.from(new Set([...selected, option])))
-                } else {
-                  onChange(selected.filter((item) => item !== option))
-                }
-              }}
-              className="h-3.5 w-3.5 rounded border-white/20 bg-[#0b1020] text-violet-500 focus:ring-violet-400"
-            />
-            <span className="truncate">{relationshipFacetLabel(option)}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  )
-}
-
-function InspectorSection({
-  children,
-  title,
-}: {
-  children: ReactNode
-  title: string
-}) {
-  return (
-    <section className="rounded-md border border-white/10 bg-black/20 p-4">
-      <p className="text-3xs font-semibold uppercase tracking-[0.24em] text-slate-500">{title}</p>
-      <div className="mt-3">{children}</div>
-    </section>
-  )
-}
-
-function EmptyInspector({
-  edgeCount,
-  nodeCount,
-}: {
-  edgeCount: number
-  nodeCount: number
-}) {
-  return (
-    <div className="space-y-5">
-      <div>
-        <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Inspector</p>
-        <h3 className="mt-3 text-[2rem] font-semibold tracking-tight text-white">Read the map</h3>
-      </div>
-
-      <p className="text-sm leading-7 text-slate-400">
-        Select a character to inspect their role in the network, or select a connection to read the relationship note. Arrange mode is best when you want to cluster the cast your own way.
-      </p>
-
-      <InspectorSection title="Visible now">
-        <div className="space-y-3 text-sm">
-          <InspectorMetric label="Visible characters" value={nodeCount} />
-          <InspectorMetric label="Visible connections" value={edgeCount} />
-        </div>
-      </InspectorSection>
-
-      <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-white/10 bg-[radial-gradient(circle_at_top,rgba(139,92,246,0.18),transparent_38%),rgba(255,255,255,0.02)] px-6 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full border border-violet-400/40 bg-violet-500/8 text-violet-200">
-          <CursorIcon className="h-7 w-7" />
-        </div>
-        <p className="mt-5 text-lg font-semibold text-white">Select a character or connection</p>
-        <p className="mt-2 max-w-xs text-sm leading-7 text-slate-400">
-          Use the graph to explore relationships between characters in your manuscript.
-        </p>
-      </div>
-
-      <InspectorSection title="Tip">
-        <p className="text-sm leading-7 text-slate-300">
-          Drag nodes to cluster related characters. Your layout is saved automatically.
-        </p>
-      </InspectorSection>
-    </div>
-  )
-}
-
-function CompactSelectionSummary({
-  selectedEdge,
-  selectedNode,
-}: {
-  selectedEdge: GraphEdgeView | null
-  selectedNode: GraphNodeView | null
-}) {
-  if (selectedNode) {
-    return <>{selectedNode.name} selected. {selectedNode.relationshipCount ?? 0} visible ties.</>
-  }
-
-  if (selectedEdge) {
-    return <>{relationshipLabel(selectedEdge.type)} selected.</>
-  }
-
-  return <>Select a node to sync the graph with the character profile.</>
 }
 
 function installGraphTestHandle(cy: cytoscape.Core) {
@@ -1374,148 +1195,5 @@ export const RelationshipGraph = memo(function RelationshipGraph({
     </div>
   )
 })
-
-function ArrangeIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h4v4H7zM13 7h4v4h-4zM7 13h4v4H7zM13 13h4v4h-4z" />
-    </svg>
-  )
-}
-
-function CheckIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12.5l4.2 4.2L19 7" />
-    </svg>
-  )
-}
-
-function ChevronDownIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-    </svg>
-  )
-}
-
-function CursorIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 4l5.5 14 2.3-5.3L18 10 5 4z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12.5 12.7L17 18" />
-    </svg>
-  )
-}
-
-function EyeIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6z" />
-      <circle cx="12" cy="12" r="2.8" />
-    </svg>
-  )
-}
-
-function FilterIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16l-6 7v5l-4 2v-7L4 6z" />
-    </svg>
-  )
-}
-
-function FitIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l-5-5M15 9l5-5M15 15l5 5M9 15l-5 5" />
-    </svg>
-  )
-}
-
-function GridIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8 8h.01M12 8h.01M16 8h.01M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01" />
-    </svg>
-  )
-}
-
-function HandIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V6a1.5 1.5 0 013 0v4M11 10V4.8a1.5 1.5 0 013 0V10M14 10V6.4a1.5 1.5 0 013 0v6.8l1.2-.9a1.6 1.6 0 012.3.4c.4.6.3 1.5-.2 2l-4.1 4.5a4 4 0 01-3 1.3h-2.5a4 4 0 01-3.7-2.5L5 13.5A1.7 1.7 0 016.5 11H8z" />
-    </svg>
-  )
-}
-
-function LinksIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l4-4M7 17H6a4 4 0 010-8h3M17 7h1a4 4 0 010 8h-3" />
-    </svg>
-  )
-}
-
-function MinusIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
-    </svg>
-  )
-}
-
-function PlusIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
-    </svg>
-  )
-}
-
-function ResetIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M20 11a8 8 0 10-2.34 5.66L20 14M20 14v-5h-5" />
-    </svg>
-  )
-}
-
-function ScopeIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <circle cx="11" cy="11" r="6" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M20 20l-4.2-4.2" />
-    </svg>
-  )
-}
-
-function TargetIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <circle cx="12" cy="12" r="7" />
-      <circle cx="12" cy="12" r="2.5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-    </svg>
-  )
-}
-
-function TrashIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M9 7V5h6v2M8 7l.7 11.2A2 2 0 0010.7 20h2.6a2 2 0 001.99-1.8L16 7" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v5M14 11v5" />
-    </svg>
-  )
-}
-
-function UsersIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 11a3 3 0 100-6 3 3 0 000 6zM4 19a5 5 0 0110 0M17 11a2.5 2.5 0 100-5M15.5 15.5A4.5 4.5 0 0120 20" />
-    </svg>
-  )
-}
 
 export default RelationshipGraph

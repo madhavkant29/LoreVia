@@ -14,6 +14,8 @@ export type NormalizedProcessingStatus = {
   partialReady: boolean
   ready: boolean
   failed: boolean
+  failureKind: "recoverable" | "support_required" | null
+  stateVariant: "processing" | "partial_ready" | "ready" | "recoverable_failure" | "support_required"
 }
 
 const STAGE_LABELS: Record<ProcessingStage, string> = {
@@ -68,10 +70,11 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
   const chaptersCompleted = nonNegativeInt(processing?.chapters_completed)
   const chaptersTotal = nonNegativeInt(processing?.chapters_total)
   const retryActions = Array.isArray(processing?.retry_actions) ? processing.retry_actions : []
+  const retryExplicitlyDisabled = processing?.retry_available === false
   const retryAvailable = Boolean(
     processing?.retry_available
     || retryActions.some((action) => action !== "wait_for_analysis")
-    || stage === "failed"
+    || (stage === "failed" && !retryExplicitlyDisabled)
     || processing?.last_error
   )
   const resumeAvailable = Boolean(
@@ -79,6 +82,7 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
   )
   const partialReady = stage !== "ready" && stage !== "failed" && chaptersCompleted !== null && chaptersCompleted > 0
   const detail = buildProcessingDetail(stage, chaptersCompleted, chaptersTotal, progressPct, partialReady)
+  const failureKind = stage === "failed" ? (retryAvailable ? "recoverable" : "support_required") : null
 
   return {
     stage,
@@ -96,6 +100,16 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
     partialReady,
     ready: stage === "ready",
     failed: stage === "failed",
+    failureKind,
+    stateVariant: stage === "ready"
+      ? "ready"
+      : failureKind === "recoverable"
+        ? "recoverable_failure"
+        : failureKind === "support_required"
+          ? "support_required"
+          : partialReady
+            ? "partial_ready"
+            : "processing",
   }
 }
 

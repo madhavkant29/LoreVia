@@ -112,20 +112,20 @@ async function renderPage(element: ReactElement) {
 
 async function waitForText(expected: string) {
   for (let index = 0; index < 30; index += 1) {
-    if ((container?.textContent ?? "").includes(expected)) return
+    if ((document.body.textContent ?? "").includes(expected)) return
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
   }
-  throw new Error(`Expected text not found: ${expected}. Saw: ${container?.textContent}`)
+  throw new Error(`Expected text not found: ${expected}. Saw: ${document.body.textContent}`)
 }
 
 function text() {
-  return container?.textContent ?? ""
+  return document.body.textContent ?? ""
 }
 
 function button(label: string, index = 0) {
-  const matches = Array.from(container?.querySelectorAll("button") ?? []).filter((item) =>
+  const matches = Array.from(document.body.querySelectorAll("button")).filter((item) =>
     item.textContent?.includes(label)
   )
   const match = matches[index]

@@ -55,4 +55,16 @@ describe("normalizeProcessingStatus", () => {
     expect(status?.label).toBe("Processing paused")
     expect(status?.detail).toBe("Wait for reset")
   })
+
+  it("distinguishes support-required failures from retryable failures", () => {
+    const status = normalizeProcessingStatus({
+      status: "failed",
+      stage: "failed",
+      retry_available: false,
+    })
+
+    expect(status?.retryAvailable).toBe(false)
+    expect(status?.failureKind).toBe("support_required")
+    expect(status?.stateVariant).toBe("support_required")
+  })
 })

@@ -7,6 +7,7 @@ import { useParams } from "next/navigation"
 
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { Tooltip } from "@/components/ui/Tooltip"
+import { VisibilityBadge } from "@/components/ui/VisibilityBadge"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -403,6 +404,12 @@ export default function CollaborationPage() {
             family="publish-export"
             title={`${book?.title ?? "Story"} collaborators`}
             description="Share exact chapters, story-bible surfaces, and editing powers with beta readers, editors, and coauthors without opening the entire draft."
+            actions={
+              <>
+                <VisibilityBadge state={sortedCollaborators.length > 0 ? "shared" : "private"} />
+                <VisibilityBadge state="beta_readers" label={`Beta readers ${betaAssignments.length}`} />
+              </>
+            }
           />
           {status ? <p className={`text-sm font-semibold ${status.includes("Could") ? "text-rose-400" : "text-emerald-400"}`}>{status}</p> : null}
 

@@ -35,7 +35,7 @@ async function renderElement(element: ReactElement) {
 }
 
 async function clickButton(label: string) {
-  const button = Array.from(container?.querySelectorAll("button") ?? []).find((item) => item.textContent?.includes(label))
+  const button = Array.from(document.body.querySelectorAll("button")).find((item) => item.textContent?.includes(label))
   expect(button).toBeTruthy()
   await act(async () => {
     button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
@@ -98,6 +98,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root?.unmount())
   container?.remove()
+  document.body.innerHTML = ""
   root = null
   container = null
 })
@@ -117,8 +118,8 @@ describe("PublicBookPageClient", () => {
     expect(apiMock.trackView).toHaveBeenCalledWith("atlas-rising", { eventType: "book_view" })
 
     await clickButton("Report this book")
-    const textareas = Array.from(view.querySelectorAll("textarea"))
-    const inputs = Array.from(view.querySelectorAll("input"))
+    const textareas = Array.from(document.body.querySelectorAll("textarea"))
+    const inputs = Array.from(document.body.querySelectorAll("input"))
     await act(async () => {
       setValue(textareas[0], "This copies my original work.")
       setValue(textareas[1], "The opening paragraph is duplicated.")
@@ -137,20 +138,20 @@ describe("PublicBookPageClient", () => {
       reporterEmail: "owner@example.test",
       copyrightOwnerName: "Rights Owner",
     }))
-    expect(view.textContent).toContain("Report received.")
+    expect(document.body.textContent).toContain("Report received.")
   })
 
   it("switches to a non-copyright report and closes the modal", async () => {
     const view = await renderElement(<PublicBookPageClient bookId="book-1" />)
     await clickButton("Report this book")
-    const select = view.querySelector("select") as HTMLSelectElement
+    const select = document.body.querySelector("select") as HTMLSelectElement
     await act(async () => {
       setValue(select, "spam")
       await Promise.resolve()
     })
-    expect(view.textContent).not.toContain("Original work description")
+    expect(document.body.textContent).not.toContain("Original work description")
     await clickButton("Cancel")
-    expect(view.textContent).not.toContain("Report a copyright or policy issue")
+    expect(document.body.textContent).not.toContain("Report a copyright or policy issue")
   })
 
   it("renders loading and missing states and configures initial query data", async () => {

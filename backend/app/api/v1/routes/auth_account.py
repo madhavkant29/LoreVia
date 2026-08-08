@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +24,28 @@ from app.schemas.auth import (
     TierLimitsOut,
     UserOut,
 )
+from app.schemas.user import (
+    UserBookUiPreferenceOut,
+    UserBookUiPreferencePatch,
+    UserUiPreferenceExportOut,
+    UserUiPreferenceImportBody,
+    UserUiPreferenceImportOut,
+    UserUiPreferenceOut,
+    UserUiPreferencePatch,
+)
 from app.services.privacy_service import build_user_data_export, request_account_deletion
+from app.services.user_ui_preferences_service import (
+    PreferenceConflictError,
+    PreferenceValidationError,
+    export_user_ui_preferences,
+    get_or_create_user_book_ui_preference,
+    get_or_create_user_ui_preference,
+    import_user_ui_preferences,
+    patch_user_book_ui_preference,
+    patch_user_ui_preference,
+    serialize_user_book_ui_preference,
+    serialize_user_ui_preference,
+)
 from app.utils.auth_cookies import clear_auth_cookies, get_device_cookie
 from app.utils.auth_utils import next_token_version
 from app.utils.cookie_utils import auth_cookie_secure
@@ -71,6 +96,112 @@ async def export_my_data(
         media_type="application/zip",
         headers={"Content-Disposition": 'attachment; filename="lorevia-data-export.zip"'},
     )
+
+
+@router.get("/me/ui-preferences", response_model=UserUiPreferenceOut)
+async def get_my_ui_preferences(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    preference = await get_or_create_user_ui_preference(db, current_user)
+    await db.commit()
+    await db.refresh(preference)
+    return serialize_user_ui_preference(preference)
+
+
+@router.patch("/me/ui-preferences", response_model=UserUiPreferenceOut)
+async def update_my_ui_preferences(
+    body: UserUiPreferencePatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        preference = await patch_user_ui_preference(db, current_user, body)
+    except PreferenceConflictError as exc:
+        return JSONResponse(
+            status_code=409,
+            content=jsonable_encoder(
+                {
+                    "detail": "Preference revision conflict.",
+                    "latest_revision": exc.conflict.latest_revision,
+                    "latest": exc.conflict.latest,
+                }
+            ),
+        )
+    except PreferenceValidationError as exc:
+        raise HTTPException(400, str(exc))
+    await db.commit()
+    await db.refresh(preference)
+    return serialize_user_ui_preference(preference)
+
+
+@router.get(
+    "/me/ui-preferences/books/{book_id}",
+    response_model=UserBookUiPreferenceOut,
+)
+async def get_my_book_ui_preferences(
+    book_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    preference = await get_or_create_user_book_ui_preference(db, current_user, book_id)
+    await db.commit()
+    await db.refresh(preference)
+    return serialize_user_book_ui_preference(preference)
+
+
+@router.patch(
+    "/me/ui-preferences/books/{book_id}",
+    response_model=UserBookUiPreferenceOut,
+)
+async def update_my_book_ui_preferences(
+    book_id: uuid.UUID,
+    body: UserBookUiPreferencePatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        preference = await patch_user_book_ui_preference(db, current_user, book_id, body)
+    except PreferenceConflictError as exc:
+        return JSONResponse(
+            status_code=409,
+            content=jsonable_encoder(
+                {
+                    "detail": "Preference revision conflict.",
+                    "latest_revision": exc.conflict.latest_revision,
+                    "latest": exc.conflict.latest,
+                }
+            ),
+        )
+    except PreferenceValidationError as exc:
+        raise HTTPException(400, str(exc))
+    await db.commit()
+    await db.refresh(preference)
+    return serialize_user_book_ui_preference(preference)
+
+
+@router.get("/me/ui-preferences/export", response_model=UserUiPreferenceExportOut)
+async def export_my_ui_preferences(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = await export_user_ui_preferences(db, current_user)
+    await db.commit()
+    return payload
+
+
+@router.post("/me/ui-preferences/import", response_model=UserUiPreferenceImportOut)
+async def import_my_ui_preferences(
+    body: UserUiPreferenceImportBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await import_user_ui_preferences(db, current_user, body)
+    except PreferenceValidationError as exc:
+        raise HTTPException(400, str(exc))
+    await db.commit()
+    return result
 
 
 @router.delete("/me", response_model=AccountDeletionOut)
