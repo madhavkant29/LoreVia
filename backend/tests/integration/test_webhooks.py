@@ -476,27 +476,30 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(
         _flaky_record_subscription_event,
     )
 
+    event_id = f"evt_retry_activate_{uuid.uuid4().hex[:8]}"
     payload = _event_payload(
-        event_id="evt_retry_activate",
+        event_id=event_id,
         event_type="subscription.activated",
         user_id=user.id,
         status="active",
     )
     raw_body, signature = _sign_payload(payload, timestamp, secret)
 
-    with pytest.raises(type(processing_error)):
-        await client.post(
+    try:
+        first_response = await client.post(
             "/api/v1/webhooks/paddle",
             content=raw_body,
             headers={"Paddle-Signature": signature, "Content-Type": "application/json"},
         )
+    except type(processing_error):
+        first_response = None
+    if first_response is not None:
+        assert first_response.status_code == 500
 
     webhook_event = (
         (
             await db.execute(
-                select(PaddleWebhookEvent).where(
-                    PaddleWebhookEvent.event_id == "evt_retry_activate"
-                )
+                select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == event_id)
             )
         )
         .scalars()
@@ -523,9 +526,7 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(
     webhook_event = (
         (
             await db.execute(
-                select(PaddleWebhookEvent).where(
-                    PaddleWebhookEvent.event_id == "evt_retry_activate"
-                )
+                select(PaddleWebhookEvent).where(PaddleWebhookEvent.event_id == event_id)
             )
         )
         .scalars()

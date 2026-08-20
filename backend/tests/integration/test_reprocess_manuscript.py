@@ -69,6 +69,23 @@ async def _add_chapter(db, book_id: uuid.UUID, number: int = 1, text: str = "Som
     return chapter
 
 
+async def _chapter_executions(db, book_id: uuid.UUID) -> list[TaskExecution]:
+    return (
+        (
+            await db.execute(
+                select(TaskExecution)
+                .where(
+                    TaskExecution.book_id == book_id,
+                    TaskExecution.task_name == "extraction_tasks.process_chapter",
+                )
+                .order_by(TaskExecution.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 @pytest.mark.asyncio
 async def test_reprocess_requires_confirmation(client, db, monkeypatch):
     headers, user_id = await _register_author(
@@ -132,8 +149,9 @@ async def test_reprocess_uploaded_manuscript_success(client, db, monkeypatch):
     assert body["charge_kind"] is None
     assert body["processed_words_reserved"] == 9
     assert body["chapters_queued"] == 2
-    assert len(dispatched) == 1
-    assert all(item["kwargs"]["kwargs"]["rebuild_run_id"] for item in dispatched)
+    executions = await _chapter_executions(db, book.id)
+    assert len(executions) == 2
+    assert all(execution.rebuild_run_id for execution in executions)
     usage_event = (
         await db.execute(
             select(ProcessingUsageEvent).where(ProcessingUsageEvent.book_id == book.id)
@@ -269,7 +287,7 @@ async def test_reprocess_success(client, db, monkeypatch):
     assert body["status"] == "processing"
     assert body["chapters_queued"] >= 1
     assert body["total_words"] > 0
-    assert len(dispatched) >= 1
+    assert len(await _chapter_executions(db, book_id)) >= 1
 
     book_after = await db.get(Book, book_id)
     assert book_after.status == "processing"
@@ -333,7 +351,7 @@ async def test_reprocess_charge_failure_invalidates_queued_rebuild(client, db, m
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Something went wrong. Please try again."
-    assert len(dispatched) == 1
+    assert len(await _chapter_executions(db, book.id)) == 1
     await db.refresh(book)
     assert book.status == "failed"
     assert get_rebuild_run_id(book) is None
@@ -504,8 +522,9 @@ async def test_editor_project_import_auto_reprocesses_once_at_word_threshold_wit
     assert book.status == "processing"
     assert book.writer_workspace["reprocess"]["last_reason"] == "auto_first_2000_words"
     assert book.writer_workspace["reprocess"]["auto_first_threshold_words"] == 2000
-    assert len(dispatched) == 1
-    assert dispatched[0]["kwargs"]["kwargs"]["rebuild_run_id"]
+    executions = await _chapter_executions(db, book.id)
+    assert len(executions) == 1
+    assert executions[0].rebuild_run_id
     assert charge_count == 0
 
 
@@ -603,9 +622,10 @@ async def test_manual_chapter_reprocess_queues_one_chapter_without_upload_charge
     body = response.json()
     assert body["chapters_queued"] == 1
     assert body["upload_charge_consumed"] is False
-    assert len(dispatched) == 1
-    assert dispatched[0]["kwargs"]["args"] == [book_id, 1]
-    assert dispatched[0]["kwargs"]["kwargs"]["manual_reprocess"] is True
+    executions = await _chapter_executions(db, uuid.UUID(book_id))
+    assert len(executions) == 1
+    assert executions[0].chapter_number == 1
+    assert executions[0].arguments_json["manual_reprocess"] is True
     from app.models.book import Book, BookUploadCharge
 
     book = await db.get(Book, uuid.UUID(book_id))
