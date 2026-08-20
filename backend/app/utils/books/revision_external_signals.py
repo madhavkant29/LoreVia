@@ -20,9 +20,7 @@ def _severity(value: str | None) -> str:
     return "low"
 
 
-async def build_revision_external_signals(
-    db: AsyncSession, *, book: Book
-) -> list[dict[str, Any]]:
+async def build_revision_external_signals(db: AsyncSession, *, book: Book) -> list[dict[str, Any]]:
     annotations = list(
         (
             await db.execute(
@@ -86,7 +84,9 @@ async def build_revision_external_signals(
             .limit(1)
         )
     ).scalar_one_or_none()
-    for suggestion in ((advisor_job.result_json or {}).get("suggestions") or []) if advisor_job else []:
+    for suggestion in (
+        ((advisor_job.result_json or {}).get("suggestions") or []) if advisor_job else []
+    ):
         if not isinstance(suggestion, dict):
             continue
         signals.append(

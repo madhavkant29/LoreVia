@@ -48,9 +48,7 @@ def build_beta_read_guest_link(assignment: BetaReadAssignment) -> dict[str, Any]
     }
 
 
-async def resolve_beta_read_guest_assignment(
-    db: AsyncSession, *, token: str
-) -> BetaReadAssignment:
+async def resolve_beta_read_guest_assignment(db: AsyncSession, *, token: str) -> BetaReadAssignment:
     payload = decode_token(token)
     resource = str((payload or {}).get("res") or "")
     if (payload or {}).get("type") != "asset" or not resource.startswith(GUEST_RESOURCE_PREFIX):
@@ -65,7 +63,10 @@ async def resolve_beta_read_guest_assignment(
         raise HTTPException(404, "This review link is invalid or has expired.")
     if assignment.reader_user_id is not None:
         raise HTTPException(404, "This review link is invalid or has expired.")
-    if assignment.state not in ACTIVE_READER_STATES or ensure_timezone(assignment.expires_at) <= utc_now():
+    if (
+        assignment.state not in ACTIVE_READER_STATES
+        or ensure_timezone(assignment.expires_at) <= utc_now()
+    ):
         raise HTTPException(410, "This review link is no longer active.")
     return assignment
 

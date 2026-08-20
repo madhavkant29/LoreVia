@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
 
 from app.utils.books.revision_milestones import create_revision_round
 

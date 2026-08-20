@@ -99,7 +99,11 @@ def parse_scrivener_archive(raw: bytes) -> list[dict]:
                 ),
                 None,
             )
-            candidates = list(draft.iter("BinderItem")) if draft is not None else list(root.iter("BinderItem"))
+            candidates = (
+                list(draft.iter("BinderItem"))
+                if draft is not None
+                else list(root.iter("BinderItem"))
+            )
             chapters = []
             for item in candidates:
                 if str(item.attrib.get("Type") or "").lower() != "text":
@@ -120,11 +124,17 @@ def parse_scrivener_archive(raw: bytes) -> list[dict]:
                 if content_member.file_size > SCRIVENER_MAX_DOCUMENT_BYTES:
                     raise HTTPException(413, "A Scrivener manuscript document is too large.")
                 content = archive.read(content_member)
-                text = _rtf_to_text(content) if content_name.lower().endswith(".rtf") else content.decode("utf-8", errors="replace")
+                text = (
+                    _rtf_to_text(content)
+                    if content_name.lower().endswith(".rtf")
+                    else content.decode("utf-8", errors="replace")
+                )
                 if text.strip():
                     chapters.append({"number": len(chapters) + 1, "title": title, "text": text})
             if not chapters:
-                raise HTTPException(400, "No manuscript documents were found in this Scrivener project.")
+                raise HTTPException(
+                    400, "No manuscript documents were found in this Scrivener project."
+                )
             return chapters
     except zipfile.BadZipFile as exc:
         raise HTTPException(400, "Invalid Scrivener archive.") from exc
@@ -135,7 +145,9 @@ def parse_scrivener_archive(raw: bytes) -> list[dict]:
 def build_scrivener_archive(project_title: str, chapters: list[dict]) -> bytes:
     safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "-", project_title).strip("-") or "LoreVia-Project"
     project_folder = f"{safe_stem}.scriv"
-    root = ElementTree.Element("ScrivenerProject", Version="2.0", Identifier=str(uuid.uuid4()).upper())
+    root = ElementTree.Element(
+        "ScrivenerProject", Version="2.0", Identifier=str(uuid.uuid4()).upper()
+    )
     binder = ElementTree.SubElement(root, "Binder")
     draft = ElementTree.SubElement(
         binder, "BinderItem", UUID=str(uuid.uuid4()).upper(), Type="DraftFolder"

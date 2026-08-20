@@ -10,9 +10,14 @@ def _assignment(state: str = "submitted"):
 
 def _item(assignment_id, kind, chapter_number, body, *, status="open", question_id=None):
     return SimpleNamespace(
-        id=uuid.uuid4(), assignment_id=assignment_id, kind=kind,
-        chapter_number=chapter_number, body=body, anchor_text=None,
-        metadata_json={"author_status": status}, question_id=question_id,
+        id=uuid.uuid4(),
+        assignment_id=assignment_id,
+        kind=kind,
+        chapter_number=chapter_number,
+        body=body,
+        anchor_text=None,
+        metadata_json={"author_status": status},
+        question_id=question_id,
     )
 
 
@@ -28,12 +33,18 @@ def test_consensus_groups_hotspots_themes_and_disagreement():
     payload = build_beta_read_consensus_payload([first, second], items, [])
 
     assert payload["summary"] == {
-        "reader_count": 2, "submitted_reader_count": 1, "feedback_item_count": 3,
-        "open_feedback_count": 2, "hotspot_count": 2, "disagreement_count": 1,
+        "reader_count": 2,
+        "submitted_reader_count": 1,
+        "feedback_item_count": 3,
+        "open_feedback_count": 2,
+        "hotspot_count": 2,
+        "disagreement_count": 1,
     }
     assert payload["chapter_hotspots"][0]["chapter_number"] == 3
     assert payload["chapter_hotspots"][0]["disagreement"] is True
-    assert any(theme["label"] == "timeline" and theme["reader_count"] == 2 for theme in payload["themes"])
+    assert any(
+        theme["label"] == "timeline" and theme["reader_count"] == 2 for theme in payload["themes"]
+    )
     assert payload["revision_candidates"][0]["chapter_number"] == 3
 
 
@@ -46,8 +57,11 @@ def test_consensus_collects_answers_by_question():
     payload = build_beta_read_consensus_payload([assignment], items, [question])
 
     assert payload["question_consensus"][0] == {
-        "question_id": str(question_id), "prompt": "Where did you lose momentum?",
-        "answer_count": 1, "reader_count": 1, "answers": ["During the chase"],
+        "question_id": str(question_id),
+        "prompt": "Where did you lose momentum?",
+        "answer_count": 1,
+        "reader_count": 1,
+        "answers": ["During the chase"],
     }
 
 
@@ -62,7 +76,9 @@ def test_consensus_groups_equivalent_questions_across_assignments():
     ]
     items = [
         _item(first.id, "answer", None, "Yes, immediately", question_id=first_question_id),
-        _item(second.id, "answer", None, "Only after the next scene", question_id=second_question_id),
+        _item(
+            second.id, "answer", None, "Only after the next scene", question_id=second_question_id
+        ),
     ]
 
     payload = build_beta_read_consensus_payload([first, second], items, questions)
