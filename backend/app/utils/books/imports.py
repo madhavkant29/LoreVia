@@ -41,6 +41,19 @@ async def next_chapter_number(db: AsyncSession, book_id: uuid.UUID) -> int:
 async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bool) -> list[dict]:
     lower = filename.lower()
     stem = os.path.splitext(os.path.basename(filename))[0] or "Imported chapter"
+    if lower.endswith(".scrivzip") or lower.endswith(".scriv.zip"):
+        from app.utils.scrivener_utils import parse_scrivener_archive
+
+        chapters = await asyncio.to_thread(parse_scrivener_archive, raw)
+        if split_into_chapters:
+            return chapters
+        return [
+            {
+                "title": stem,
+                "text": "\n\n".join(str(chapter.get("text") or "") for chapter in chapters),
+                "number": 1,
+            }
+        ]
     if lower.endswith(".pdf"):
         from app.parsers.pdf_parser import parse_pdf
 

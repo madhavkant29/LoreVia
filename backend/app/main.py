@@ -23,6 +23,7 @@ from app.core.events import on_shutdown, on_startup
 from app.utils.exception_boundaries import HTTP_LAST_RESORT_EXCEPTIONS
 from app.utils.logging.errors import (
     public_error_message,
+    redact_sensitive_text,
     request_log_context,
     sanitize_validation_errors,
     scrub_sentry_event,
@@ -254,7 +255,7 @@ class SecurityHeadersMiddleware:
                 extra={
                     "request_id": request_id,
                     "method": scope.get("method"),
-                    "path": scope.get("path"),
+                    "path": redact_sensitive_text(str(scope.get("path") or "")),
                 },
             )
             # If response hasn't started, send a 500 error response
@@ -288,7 +289,7 @@ class SecurityHeadersMiddleware:
                 extra={
                     "request_id": request_id,
                     "method": scope.get("method"),
-                    "path": scope.get("path"),
+                    "path": redact_sensitive_text(str(scope.get("path") or "")),
                     "duration_ms": duration_ms,
                 },
             )

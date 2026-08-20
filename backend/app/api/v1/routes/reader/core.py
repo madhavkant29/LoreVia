@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Any, cast
 
@@ -79,7 +80,7 @@ async def get_chapter_media_public(
         raise HTTPException(401, "Invalid chapter media token")
 
     try:
-        raw = download_book(media.storage_key)
+        raw = await asyncio.to_thread(download_book, media.storage_key)
     except STORAGE_IO_EXCEPTIONS:
         raise HTTPException(404, "Chapter media not found")
 

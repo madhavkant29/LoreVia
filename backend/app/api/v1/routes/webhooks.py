@@ -1,8 +1,11 @@
+import json
+
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.services.paddle_service import paddle_webhooks_configured, verify_webhook_signature
 from app.services.paddle_webhook_service import process_paddle_webhook
 from app.utils.billing_utils import event_id_from_paddle_payload
+from app.utils.webhook_request_utils import read_paddle_webhook_body
 
 router = APIRouter()
 
@@ -14,13 +17,15 @@ async def paddle_webhook(
     if not paddle_webhooks_configured():
         raise HTTPException(503, "Paddle webhooks are not configured")
 
-    payload = await request.body()
+    payload = await read_paddle_webhook_body(request)
     if not verify_webhook_signature(payload, paddle_signature):
         raise HTTPException(400, "Invalid request.")
 
     try:
-        event = await request.json()
-    except (UnicodeDecodeError, ValueError):
+        event = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(400, "Invalid request.")
+    if not isinstance(event, dict):
         raise HTTPException(400, "Invalid request.")
     event_id = event_id_from_paddle_payload(event)
     if not event_id:

@@ -869,6 +869,7 @@ class WriterWorkspaceOut(BaseModel):
     typewriter_mode: TypewriterModeOut = Field(default_factory=TypewriterModeOut)
     manuscript_layout: ManuscriptLayoutOut = Field(default_factory=ManuscriptLayoutOut)
     structure_tree: list[WorkspaceStructureNodeOut] = Field(default_factory=list)
+    revision_rounds: list[dict[str, Any]] = Field(default_factory=list)
     reprocess: ReprocessMetadataOut = Field(default_factory=ReprocessMetadataOut)
     processing: BookProcessingOut | None = None
     index_format: str = "arabic"
@@ -1160,6 +1161,7 @@ class RevisionIntelligenceOut(BaseModel):
     scene_advice: list[RevisionActionItemOut] = Field(default_factory=list)
     confusion_map: list[RevisionActionItemOut] = Field(default_factory=list)
     voice_alerts: list[RevisionActionItemOut] = Field(default_factory=list)
+    external_signals: list[RevisionActionItemOut] = Field(default_factory=list)
     priority_findings: list[RevisionActionItemOut] = Field(default_factory=list)
     activation: RevisionActivationOut = Field(default_factory=RevisionActivationOut)
     analysis_complete: bool = False
@@ -1175,6 +1177,74 @@ class RevisionIntelligenceOut(BaseModel):
     coverage: dict[str, Any] = Field(default_factory=dict)
     stale_finding_count: int = 0
     analysis_limitations: list[str] = Field(default_factory=list)
+
+
+class RevisionRoundCreateBody(BaseModel):
+    label: str = Field(..., min_length=1, max_length=120)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class RevisionRoundChapterOut(BaseModel):
+    number: int
+    title: str
+    version_id: str | None = None
+    content_version: int
+    word_count: int
+
+
+class RevisionRoundSummaryOut(BaseModel):
+    chapter_count: int = 0
+    word_count: int = 0
+    scene_count: int = 0
+    open_finding_count: int = 0
+    high_severity_count: int = 0
+    open_beta_feedback_count: int = 0
+
+
+class RevisionRoundOut(BaseModel):
+    id: str
+    label: str
+    note: str | None = None
+    created_at: datetime
+    chapters: list[RevisionRoundChapterOut] = Field(default_factory=list)
+    summary: RevisionRoundSummaryOut = Field(default_factory=RevisionRoundSummaryOut)
+
+
+class RevisionRoundListOut(BaseModel):
+    items: list[RevisionRoundOut] = Field(default_factory=list)
+
+
+class RevisionRoundComparisonOut(BaseModel):
+    base_round_id: str
+    target_round_id: str | None = None
+    changed_chapters: list[int] = Field(default_factory=list)
+    added_chapters: list[int] = Field(default_factory=list)
+    removed_chapters: list[int] = Field(default_factory=list)
+    chapter_delta: int = 0
+    word_count_delta: int = 0
+    scene_count_delta: int = 0
+    open_finding_delta: int = 0
+    open_beta_feedback_delta: int = 0
+
+
+class WorkflowBridgeChapterPreviewOut(BaseModel):
+    incoming_number: int
+    incoming_title: str
+    matched_chapter_number: int | None = None
+    status: Literal["new", "changed", "unchanged"]
+    incoming_word_count: int = 0
+    current_word_count: int | None = None
+
+
+class WorkflowBridgePreviewOut(BaseModel):
+    format: str
+    preview_token: str
+    incoming_chapter_count: int
+    new_count: int = 0
+    changed_count: int = 0
+    unchanged_count: int = 0
+    chapters: list[WorkflowBridgeChapterPreviewOut] = Field(default_factory=list)
+    preserved_chapter_numbers: list[int] = Field(default_factory=list)
 
 
 class ContinuityScanRequest(BaseModel):

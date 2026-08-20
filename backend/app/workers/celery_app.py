@@ -234,9 +234,12 @@ if result_backend_ssl_options:
     celery_app.conf.redis_backend_use_ssl = result_backend_ssl_options
 
 
-@signals.before_task_publish.connect
-def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
+@signals.task_prerun.connect
+def _task_prerun_set_request_id(sender=None, task=None, **kwargs):
     try:
+        active_task = task or sender
+        request = getattr(active_task, "request", None)
+        headers = getattr(request, "headers", None) or {}
         request_id = (headers or {}).get("request_id")
         set_request_id(request_id)
         if request_id and settings.SENTRY_DSN:
@@ -246,11 +249,13 @@ def _task_prerun_set_request_id(sender=None, headers=None, body=None, **kwargs):
         return
 
 
-@signals.after_task_publish.connect
-def _task_postrun_clear_request_id(sender=None, headers=None, body=None, **kwargs):
+@signals.task_postrun.connect
+def _task_postrun_clear_request_id(sender=None, **kwargs):
     try:
         set_request_id(None)
         set_request_user_id(None)
+        if settings.SENTRY_DSN:
+            sentry_sdk.set_tag("request_id", None)
     except BEST_EFFORT_CLEANUP_EXCEPTIONS:
         return
 

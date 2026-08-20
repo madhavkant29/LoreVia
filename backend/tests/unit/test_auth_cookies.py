@@ -130,6 +130,13 @@ def test_set_auth_cookies_disables_secure_for_local_http(monkeypatch):
     assert auth_cookie_secure() is False
 
 
+def test_auth_cookie_secure_cannot_be_downgraded_by_production_app_url(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.APP_URL", "http://getlorevia.com", raising=False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+
+    assert auth_cookie_secure() is True
+
+
 def test_clear_auth_cookies_sets_expired_headers(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.APP_URL", "https://getlorevia.com", raising=False)
     monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)

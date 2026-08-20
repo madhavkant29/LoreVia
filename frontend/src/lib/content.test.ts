@@ -23,7 +23,7 @@ describe("content helpers", () => {
 
   it("returns an answer page by slug", () => {
     expect(getAnswerPageBySlug("how-do-i-track-character-arcs")?.question).toBe(
-      "How do I track character arcs?"
+      "How Do I Track Character Arcs?"
     )
   })
 
@@ -58,8 +58,8 @@ describe("content helpers", () => {
     expect(getAllPublicContentPaths()).toHaveLength(expectedCount)
   })
 
-  it("doubles the public blog and answer inventory for the content hub", () => {
-    expect(blogArticles).toHaveLength(10)
+  it("exposes the complete public blog and answer inventory", () => {
+    expect(blogArticles).toHaveLength(30)
     expect(answerPages).toHaveLength(20)
   })
 
@@ -83,11 +83,11 @@ describe("content helpers", () => {
   })
 
   it("uses the newest public content date for hub pages", () => {
-    expect(getLatestContentPublishedAt()).toBe("2026-06-12")
+    expect(getLatestContentPublishedAt()).toBe("2026-08-09")
     expect(getAllPublicContentEntries()).toContainEqual(
       expect.objectContaining({
         path: "/blog",
-        publishedAt: "2026-06-12",
+        publishedAt: "2026-08-09",
         type: "hub",
       }),
     )

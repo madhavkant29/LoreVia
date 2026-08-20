@@ -7,6 +7,7 @@ from sqlalchemy import select, update
 from app.models.book import Book, Chapter
 from app.models.operations import BookProcessingRun, TaskDispatchOutbox, TaskExecution
 from app.models.user import ProcessingUsageEvent, User
+from app.services import task_execution_service
 from app.services.task_execution_service import (
     claim_task_execution,
     complete_task_execution,
@@ -326,6 +327,82 @@ async def test_claim_rejects_paused_and_terminal_executions(db):
         execution.status = status
         await db.commit()
         assert not await claim_task_execution(db, str(execution.id), str(execution.id))
+
+
+async def test_claim_rejects_duplicate_delivery_with_same_celery_task_id(db, monkeypatch):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_book",
+        processing_run=run,
+        arguments={"book_id": str(book.id)},
+    )
+    execution.status = "queued"
+    await db.commit()
+
+    async def cache_lease_created(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(task_execution_service, "cache_set_if_absent", cache_lease_created)
+
+    task_id = str(execution.id)
+    assert await claim_task_execution(db, str(execution.id), task_id) is True
+    assert await claim_task_execution(db, str(execution.id), task_id) is False
+    await db.refresh(execution)
+    assert execution.attempt_count == 1
+
+
+async def test_claim_succeeds_when_redis_lease_marker_is_unavailable(db, monkeypatch):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_book",
+        processing_run=run,
+        arguments={"book_id": str(book.id)},
+    )
+    execution.status = "queued"
+    await db.commit()
+
+    async def redis_unavailable(*_args, **_kwargs):
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(task_execution_service, "cache_set_if_absent", redis_unavailable)
+
+    assert await claim_task_execution(db, str(execution.id), str(execution.id)) is True
+    await db.refresh(execution)
+    assert execution.status == "running"
+
+
+async def test_completion_survives_redis_cleanup_failure_and_late_failure(db, monkeypatch):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="extraction_tasks.process_book",
+        processing_run=run,
+        arguments={"book_id": str(book.id)},
+    )
+    execution.status = "running"
+    await db.commit()
+
+    async def redis_unavailable(*_args, **_kwargs):
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(task_execution_service, "cache_del", redis_unavailable)
+
+    await complete_task_execution(db, str(execution.id))
+    await fail_task_execution(
+        db,
+        str(execution.id),
+        error=RuntimeError("late wrapper failure"),
+        terminal=False,
+    )
+
+    await db.refresh(execution)
+    assert execution.status == "succeeded"
+    assert execution.error_detail is None
 
 
 async def test_temporary_capacity_pause_returns_to_durable_dispatch_after_cooldown(db):

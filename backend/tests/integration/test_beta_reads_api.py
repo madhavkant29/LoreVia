@@ -6,7 +6,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
+from app.api.deps.rate_limit import rate_limit_api
 from app.core.security import create_access_token
+from app.main import api_app, app
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookCollaborator, Chapter
 from app.models.intelligence import Notification
@@ -180,6 +182,97 @@ async def test_beta_read_flow_requires_review_and_tracks_feedback_completion(cli
 
     assert author_detail.json()["assignment"]["book_average_rating"] == 4.5
     assert author_detail.json()["assignment"]["book_rating_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_guest_beta_review_tracks_scoped_progress_without_reloading_chapters(
+    client, db, monkeypatch
+):
+    author = await _create_user(db, email="guest-review-author@lorevia.test", tier="author")
+    book = await _create_book(db, author_id=author.id)
+    await _add_book_chapter(db, book_id=book.id, chapter_number=1)
+    monkeypatch.setattr(
+        "app.services.chapter_recovery_service.deserialize_manuscript_content",
+        lambda _raw: {
+            "text": "The lantern dimmed beside the gate.",
+            "html": "<p>The lantern dimmed beside the gate.</p>",
+        },
+    )
+    monkeypatch.setattr(
+        "app.services.chapter_recovery_service.download_book",
+        lambda _key: b"stored chapter payload",
+    )
+
+    create_response = await client.post(
+        f"/api/v1/books/{book.id}/beta-reads",
+        headers=_auth_headers(author.id),
+        json={
+            "reader_email": "no-account-reader@lorevia.test",
+            "task_label": "Guest review pass",
+            "window_days": 7,
+            "required_progress_pct": 100,
+            "required_feedback_item_count": 1,
+            "author_questions": ["Did the ending land?"],
+        },
+    )
+    assert create_response.status_code == 201
+    assignment_id = create_response.json()["id"]
+
+    link_response = await client.get(
+        f"/api/v1/books/{book.id}/beta-reads/{assignment_id}/guest-link",
+        headers=_auth_headers(author.id),
+    )
+    assert link_response.status_code == 200
+    token = link_response.json()["share_url"].split("/review/beta/", 1)[1]
+
+    root_rate_limit_override = app.dependency_overrides.pop(rate_limit_api, None)
+    api_rate_limit_override = api_app.dependency_overrides.pop(rate_limit_api, None)
+    try:
+        review_response = await client.get(f"/api/v1/beta-review/{token}")
+    finally:
+        if root_rate_limit_override is not None:
+            app.dependency_overrides[rate_limit_api] = root_rate_limit_override
+        if api_rate_limit_override is not None:
+            api_app.dependency_overrides[rate_limit_api] = api_rate_limit_override
+    assert review_response.status_code == 200
+    review_payload = review_response.json()
+    assert review_payload["chapters"] == [
+        {
+            "number": 1,
+            "title": "Chapter 1",
+            "text": "The lantern dimmed beside the gate.",
+        }
+    ]
+
+    progress_response = await client.post(
+        f"/api/v1/beta-review/{token}/progress",
+        json={"chapter_number": 1},
+    )
+    assert progress_response.status_code == 204
+
+    feedback_response = await client.post(
+        f"/api/v1/beta-review/{token}/feedback-items",
+        json={
+            "kind": "chapter_comment",
+            "chapter_number": 1,
+            "body": "The ending landed, but the final image could breathe longer.",
+        },
+    )
+    assert feedback_response.status_code == 201
+    feedback_payload = feedback_response.json()
+    assert "chapters" not in feedback_payload
+    assert feedback_payload["assignment"]["submission_allowed"] is True
+    assert feedback_payload["feedback_summary"]["chapter_comment_count"] == 1
+
+    submit_response = await client.post(
+        f"/api/v1/beta-review/{token}/submit-feedback",
+        json={
+            "final_feedback": "A strong ending with one pacing note.",
+            "final_rating": 4.0,
+        },
+    )
+    assert submit_response.status_code == 200
+    assert submit_response.json()["state"] == "submitted"
 
 
 @pytest.mark.asyncio

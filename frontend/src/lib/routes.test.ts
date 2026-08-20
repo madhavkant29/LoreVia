@@ -7,6 +7,7 @@ describe("route helpers", () => {
     expect(shouldSkipAuthBootstrap("/login")).toBe(true)
     expect(shouldSkipAuthBootstrap("/blog/how-to-revise")).toBe(true)
     expect(shouldSkipAuthBootstrap("/public/forum")).toBe(true)
+    expect(shouldSkipAuthBootstrap("/review/beta/signed-token")).toBe(true)
     expect(shouldSkipAuthBootstrap("/unsubscribe")).toBe(true)
     expect(shouldSkipAuthBootstrap("/library")).toBe(false)
   })

@@ -145,6 +145,9 @@ export function buildArticleJsonLd({
   dateModified,
   keywords,
   about,
+  image = DEFAULT_OG_IMAGE,
+  authorName = SITE_NAME,
+  wordCount,
 }: {
   type?: "Article" | "BlogPosting"
   title: string
@@ -154,6 +157,9 @@ export function buildArticleJsonLd({
   dateModified?: string
   keywords?: string[]
   about?: string[]
+  image?: string
+  authorName?: string
+  wordCount?: number
 }) {
   return {
     "@context": "https://schema.org",
@@ -164,6 +170,7 @@ export function buildArticleJsonLd({
     mainEntityOfPage: toAbsoluteUrl(path),
     datePublished,
     dateModified: dateModified ?? datePublished,
+    wordCount,
     inLanguage: SITE_LANGUAGE,
     keywords,
     about: about?.map((item) => ({
@@ -172,7 +179,7 @@ export function buildArticleJsonLd({
     })),
     author: {
       "@type": "Organization",
-      name: SITE_NAME,
+      name: authorName,
       url: SITE_URL,
     },
     publisher: {
@@ -184,7 +191,7 @@ export function buildArticleJsonLd({
         url: toAbsoluteUrl("/logoandtext.png"),
       },
     },
-    image: [toAbsoluteUrl(DEFAULT_OG_IMAGE)],
+    image: [toAbsoluteUrl(image)],
   }
 }
 

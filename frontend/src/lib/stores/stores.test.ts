@@ -18,6 +18,7 @@ vi.mock("@/lib/stores/uiPreferencesStore", () => ({
 import { useAuthStore } from "./authStore"
 import { useBookModeStore } from "./bookModeStore"
 import { usePreferencesStore } from "./preferencesStore"
+import { queryClient } from "@/lib/query/queryClient"
 
 describe("zustand stores", () => {
   const storage = new Map<string, string>()
@@ -65,6 +66,7 @@ describe("zustand stores", () => {
     uiPreferencesStoreMock.clearActiveUser.mockClear()
     uiPreferencesStoreMock.hydrateForUser.mockClear()
 
+    queryClient.clear()
     useAuthStore.setState({ user: null, hydrated: false })
     useBookModeStore.setState({ modesByBookId: {} })
     usePreferencesStore.setState({
@@ -105,6 +107,34 @@ describe("zustand stores", () => {
     expect(useAuthStore.getState().user).toBeNull()
     expect(useAuthStore.getState().hydrated).toBe(true)
     expect(sessionStorageData.has("lorevia-auth-user")).toBe(false)
+  })
+
+  it("removes the previous user's query cache and book modes on logout", () => {
+    useAuthStore.setState({ user: { id: "user-a" } as never, hydrated: true })
+    queryClient.setQueryData(["books"], { owner: "user-a" })
+    useBookModeStore.getState().setMode("book-a", "author")
+
+    useAuthStore.getState().logout()
+
+    expect(queryClient.getQueryData(["books"])).toBeUndefined()
+    expect(useBookModeStore.getState().modesByBookId).toEqual({})
+  })
+
+  it("removes user A's query cache and book modes on a direct A-to-B transition", () => {
+    useAuthStore.setState({ user: { id: "user-a" } as never, hydrated: true })
+    queryClient.setQueryData(["books"], { owner: "user-a" })
+    useBookModeStore.getState().setMode("book-a", "author")
+
+    useAuthStore.getState().setUser({
+      id: "user-b",
+      email: "user-b@example.com",
+      username: "user-b",
+      tier: "free",
+    } as never)
+
+    expect(queryClient.getQueryData(["books"])).toBeUndefined()
+    expect(useBookModeStore.getState().modesByBookId).toEqual({})
+    expect(useAuthStore.getState().user?.id).toBe("user-b")
   })
 
   it("returns reader as the default book mode", () => {

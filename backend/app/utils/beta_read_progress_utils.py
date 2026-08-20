@@ -51,6 +51,13 @@ async def _assignment_progress_snapshot(
     start, end = assignment_scope_bounds(assignment, int(book.total_chapters or 0))
     total = max(end - start + 1, 1)
     read_set = _read_set_from_progress(progress)
+    read_set.update(
+        int(chapter)
+        for chapter in (getattr(assignment, "metadata_json", None) or {}).get(
+            "guest_read_chapters", []
+        )
+        if isinstance(chapter, int) or str(chapter).isdigit()
+    )
     read_count = len([chapter for chapter in read_set if start <= chapter <= end])
     progress_pct = round((read_count / total) * 100, 1) if total else 0.0
     question_count = int(
@@ -122,7 +129,17 @@ async def _assignment_progress_snapshot(
         )
         comment_count = note_comment_count + chapter_comment_count
     else:
-        comment_count = 0
+        comment_count = int(
+            (
+                await db.execute(
+                    select(func.count(BetaReadFeedbackItem.id)).where(
+                        BetaReadFeedbackItem.assignment_id == assignment.id,
+                        BetaReadFeedbackItem.kind == BetaReadFeedbackKind.CHAPTER_COMMENT.value,
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
     current_chapter = int(progress.current_chapter or start) if progress is not None else start
     return {
         "book": book,
@@ -163,6 +180,14 @@ def _assignment_progress_snapshot_from_context(
     start, end = assignment_scope_bounds(assignment, int(book.total_chapters or 0))
     total = max(end - start + 1, 1)
     read_set = _read_set_from_progress(progress)
+    if progress is None and assignment.reader_user_id is None:
+        read_set = {
+            int(chapter)
+            for chapter in (getattr(assignment, "metadata_json", None) or {}).get(
+                "guest_read_chapters", []
+            )
+            if isinstance(chapter, int) or str(chapter).isdigit()
+        }
     read_count = len([chapter for chapter in read_set if start <= chapter <= end])
     progress_pct = round((read_count / total) * 100, 1) if total else 0.0
     comment_count = int(note_comment_count) + int(chapter_comment_count)

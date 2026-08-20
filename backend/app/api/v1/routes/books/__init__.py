@@ -16,6 +16,7 @@ from app.api.v1.routes.books.lifecycle import (
 from app.api.v1.routes.books.lifecycle import router as lifecycle_router
 from app.api.v1.routes.books.notes import router as notes_router
 from app.api.v1.routes.books.publish import router as publish_router
+from app.api.v1.routes.books.revision_workflow import router as revision_workflow_router
 from app.api.v1.routes.books.series import router as series_router
 from app.api.v1.routes.books.visibility import router as visibility_router
 
@@ -34,6 +35,7 @@ router.include_router(notes_router)
 router.include_router(publish_router)
 router.include_router(events_router)
 router.include_router(visibility_router)
+router.include_router(revision_workflow_router)
 
 __all__ = [
     "router",

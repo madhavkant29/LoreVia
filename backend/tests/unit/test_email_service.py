@@ -220,6 +220,32 @@ async def test_send_categorized_email_adds_visible_unsubscribe_button_for_market
 
 
 @pytest.mark.asyncio
+async def test_send_categorized_email_offloads_sync_provider_call(monkeypatch):
+    calls: list[tuple[object, tuple[object, ...]]] = []
+
+    def fake_send(payload):
+        assert payload["to"] == "reader@example.com"
+        return True
+
+    async def fake_to_thread(function, *args):
+        calls.append((function, args))
+        return function(*args)
+
+    monkeypatch.setattr(email_service, "_send", fake_send)
+    monkeypatch.setattr(email_service.asyncio, "to_thread", fake_to_thread)
+
+    delivered = await email_service._send_categorized_email(
+        email="reader@example.com",
+        subject="Account update",
+        html="<p>Hello</p>",
+        category=email_service.EMAIL_CATEGORY_TRANSACTIONAL,
+    )
+
+    assert delivered is True
+    assert calls and calls[0][0] is fake_send
+
+
+@pytest.mark.asyncio
 async def test_send_feature_launch_email_uses_professional_product_language(monkeypatch):
     captured: list[dict] = []
 

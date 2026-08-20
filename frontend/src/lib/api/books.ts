@@ -9,7 +9,7 @@ import {
 } from "@/lib/query/cacheKeys"
 import { invalidateQueryKeys } from "@/lib/query/queryClient"
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
-import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookProcessing, BookSeries, BookWorkType, CanonFact, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, ContinuityFinding, ContinuityScan, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
+import type { Book, BookCollaborator, BookEvents, BookNote, BookOverviewPayload, BookProcessing, BookSeries, BookWorkType, CanonFact, ChapterConsistencyReport, ChapterSceneOrder, ChapterVersion, ChapterVersionDetail, CollaboratorActivity, CollaborationPermissions, CollaborationRole, CollaborationScope, ContinuityFinding, ContinuityScan, EmotionalArcOverview, ImportPreview, ManuscriptAnnotation, ManuscriptBootstrapPayload, ManuscriptWorkspaceTree, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, NovelImagePlacement, NovelScene, ReaderBootstrapPayload, VaultGraph, VaultNoteRelations, VaultPreview, VaultNote, VaultNoteSaveResult, PaginatedSeries, PreWritingCheck, ReadabilityMetrics, RevisionIntelligence, RevisionRound, RevisionRoundComparison, RevisionTagSet, RevisionTagTarget, SavedQuote, SceneMetadata, SceneVersion, SceneVersionDetail, SeriesBible, StoryHealth, UserStats, WorkflowBridgePreview, WorkspaceSearchFilters, WorkspaceSearchResult, WriterWorkspace } from "@/types/book"
 import type {
   Character,
   CharacterAliasRecord,
@@ -174,6 +174,34 @@ export const booksApi = {
     apiClient.get<StoryHealth>(bookPath(id, "/story-health")).then(r => r.data),
   getRevisionIntelligence: (id: string) =>
     apiClient.get<RevisionIntelligence>(bookPath(id, "/revision-intelligence")).then(r => r.data),
+  listRevisionRounds: (id: string) =>
+    apiClient.get<{ items: RevisionRound[] }>(bookPath(id, "/revision-rounds")).then(r => r.data.items),
+  createRevisionRound: (id: string, payload: { label: string; note?: string | null }) =>
+    apiClient.post<RevisionRound>(bookPath(id, "/revision-rounds"), payload).then(r => {
+      void invalidateQueryKeys(bookCacheKey(id, "writer-workspace"))
+      return r.data
+    }),
+  compareRevisionRound: (id: string, baseRoundId: string, targetRoundId?: string | null) =>
+    apiClient.get<RevisionRoundComparison>(bookPath(id, `/revision-rounds/${baseRoundId}/compare`), {
+      params: targetRoundId ? { target_round_id: targetRoundId } : undefined,
+    }).then(r => r.data),
+  previewWorkflowBridge: (id: string, file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    return apiClient.post<WorkflowBridgePreview>(bookPath(id, "/workflow-bridge/preview"), form).then(r => r.data)
+  },
+  applyWorkflowBridge: (id: string, file: File, previewToken: string) => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("preview_token", previewToken)
+    return apiClient.post<ManuscriptImportResponse>(bookPath(id, "/workflow-bridge/apply"), form).then(r => {
+      invalidateBookCache(id)
+      invalidateReaderCache(id)
+      return r.data
+    })
+  },
+  exportScrivenerProject: (id: string) =>
+    apiClient.get<Blob>(bookPath(id, "/workflow-bridge/scrivener"), { responseType: "blob" }).then(r => r.data),
   createContinuityScan: (
     id: string,
     payload: { scope?: "full_book" | "targeted"; chapterNumbers?: number[] } = {},

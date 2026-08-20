@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import cache_del, cache_set_if_absent
 from app.models.operations import BookProcessingRun, TaskDispatchOutbox, TaskExecution
+from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running")
 TERMINAL_EXECUTION_STATUSES = ("succeeded", "failed_terminal", "dismissed")
@@ -41,6 +42,35 @@ TASK_PUBLISH_EXCEPTIONS = (
 )
 
 log = logging.getLogger("lorevia.task_execution")
+
+
+async def _set_task_execution_cache_lease_best_effort(
+    execution_id: uuid.UUID,
+    celery_task_id: str,
+) -> None:
+    try:
+        await cache_set_if_absent(
+            f"task_execution_lease:{execution_id}",
+            celery_task_id,
+            EXECUTION_LEASE_SECONDS,
+        )
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
+        log.warning(
+            "task_execution_cache_lease_set_failed execution_id=%s",
+            execution_id,
+            exc_info=True,
+        )
+
+
+async def _clear_task_execution_cache_lease_best_effort(execution_id: uuid.UUID) -> None:
+    try:
+        await cache_del(f"task_execution_lease:{execution_id}")
+    except BEST_EFFORT_CLEANUP_EXCEPTIONS:
+        log.warning(
+            "task_execution_cache_lease_delete_failed execution_id=%s",
+            execution_id,
+            exc_info=True,
+        )
 
 
 def task_identity(
@@ -261,7 +291,7 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
         return False
     now = datetime.now(UTC)
     if execution.status == "running" and execution.locked_until and execution.locked_until > now:
-        return execution.celery_task_id == celery_task_id
+        return False
     if execution.attempt_count >= execution.max_attempts:
         execution.status = "failed_terminal"
         execution.error_category = "attempt_exhausted"
@@ -269,10 +299,7 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
         execution.completed_at = now
         execution.locked_until = None
         await db.commit()
-        await cache_del(f"task_execution_lease:{execution.id}")
-        return False
-    lease_key = f"task_execution_lease:{execution.id}"
-    if not await cache_set_if_absent(lease_key, celery_task_id, EXECUTION_LEASE_SECONDS):
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
         return False
     execution.status = "running"
     execution.celery_task_id = celery_task_id
@@ -280,6 +307,7 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
     execution.started_at = execution.started_at or now
     execution.locked_until = now + timedelta(seconds=EXECUTION_LEASE_SECONDS)
     await db.commit()
+    await _set_task_execution_cache_lease_best_effort(execution.id, celery_task_id)
     import sentry_sdk
 
     sentry_sdk.set_tag("processing_run_id", str(execution.processing_run_id))
@@ -290,6 +318,10 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
 async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
     execution = await db.get(TaskExecution, uuid.UUID(execution_id), with_for_update=True)
     if execution is None:
+        return
+    if execution.status in TERMINAL_EXECUTION_STATUSES:
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
         return
     execution.status = "succeeded"
     execution.completed_at = datetime.now(UTC)
@@ -362,7 +394,7 @@ async def complete_task_execution(db: AsyncSession, execution_id: str) -> None:
             run.pause_reason = None
             run.resume_blockers = []
     await db.commit()
-    await cache_del(f"task_execution_lease:{execution.id}")
+    await _clear_task_execution_cache_lease_best_effort(execution.id)
 
 
 async def pause_task_execution(
@@ -370,6 +402,10 @@ async def pause_task_execution(
 ) -> None:
     execution = await db.get(TaskExecution, uuid.UUID(execution_id), with_for_update=True)
     if execution is None:
+        return
+    if execution.status in TERMINAL_EXECUTION_STATUSES:
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
         return
     execution.status = "paused"
     execution.error_category = reason
@@ -383,7 +419,7 @@ async def pause_task_execution(
         run.next_chapter_number = execution.chapter_number
         run.paused_at = datetime.now(UTC)
     await db.commit()
-    await cache_del(f"task_execution_lease:{execution.id}")
+    await _clear_task_execution_cache_lease_best_effort(execution.id)
 
 
 async def resume_temporary_capacity_pauses(
@@ -467,6 +503,10 @@ async def fail_task_execution(
     execution = await db.get(TaskExecution, uuid.UUID(execution_id), with_for_update=True)
     if execution is None:
         return
+    if execution.status in TERMINAL_EXECUTION_STATUSES:
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        return
     now = datetime.now(UTC)
     terminal = terminal or execution.attempt_count >= execution.max_attempts
     execution.status = "failed_terminal" if terminal else "queued"
@@ -488,7 +528,7 @@ async def fail_task_execution(
                 run.status = "failed_terminal"
                 run.completed_at = now
     await db.commit()
-    await cache_del(f"task_execution_lease:{execution.id}")
+    await _clear_task_execution_cache_lease_best_effort(execution.id)
 
 
 async def reconcile_stale_task_dispatch_outbox(db: AsyncSession, *, limit: int = 500) -> int:
@@ -1054,5 +1094,5 @@ async def release_stale_task_leases(db: AsyncSession, *, limit: int = 500) -> in
             row.status = "pending_dispatch"
         row.locked_until = None
         row.celery_task_id = None
-        await cache_del(f"task_execution_lease:{row.id}")
+        await _clear_task_execution_cache_lease_best_effort(row.id)
     return len(rows)

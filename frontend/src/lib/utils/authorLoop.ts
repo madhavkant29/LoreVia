@@ -1,6 +1,8 @@
-import type { BetaReadAssignment, BetaReadAssignmentDetail } from "@/types/betaRead"
+import type { BetaReadAssignment, BetaReadAssignmentDetail, BetaReadConsensus } from "@/types/betaRead"
 import type { Book, ChapterConsistencyReport, RevisionActionItem, RevisionBoard, RevisionIntelligence, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
+import type { NextBestActionCandidate } from "@/lib/workspace/nextBestActionResolver"
+import type { Route } from "next"
 
 export type AuthorLoopStepTone = "ready" | "working" | "attention"
 
@@ -84,6 +86,7 @@ export function buildAuthorLoopIssueCards(
     ...(revision?.scene_advice ?? []),
     ...(revision?.confusion_map ?? []),
     ...(revision?.voice_alerts ?? []),
+    ...(revision?.external_signals ?? []),
     ...(revision?.revision_plan.flatMap((revisionPass) => revisionPass.items) ?? []),
   ]
   const uniqueItems = new Map<string, RevisionActionItem>()
@@ -97,6 +100,78 @@ export function buildAuthorLoopIssueCards(
   return cards
     .filter((card) => card.status !== "fixed" && card.status !== "ignored")
     .sort((left, right) => severityRank(right.severity) - severityRank(left.severity))
+}
+
+export function buildProjectNextActions(params: {
+  book: Book | null
+  bookId: string
+  issues: AuthorLoopIssueCard[]
+  consensus: BetaReadConsensus | null
+  assignmentCount: number
+}): NextBestActionCandidate[] {
+  const { book, bookId, issues, consensus, assignmentCount } = params
+  const candidates: NextBestActionCandidate[] = []
+  const bookRoute = (path: string) => `/${bookId}${path}` as Route
+  const isShareReady = book?.status === "ready"
+    && issues.length === 0
+    && (consensus?.summary.open_feedback_count ?? 0) === 0
+  if (book?.status === "failed") {
+    candidates.push({
+      id: `project:${bookId}:processing`,
+      label: "Resume manuscript processing",
+      description: "Processing stopped before the review workspace was ready.",
+      href: bookRoute("/overview"),
+      tone: "danger",
+      priority: "failed_processing",
+      fingerprint: `failed:${book.processing?.last_error ?? "unknown"}`,
+    })
+  }
+  const severe = issues.find((issue) => issue.severity === "high")
+  if (severe) {
+    candidates.push({
+      id: `project:${bookId}:severe-finding`,
+      label: `Review: ${severe.title}`,
+      description: `${severe.citation} · ${severe.suggestedFix}`,
+      href: bookRoute("/author-loop#revision-control"),
+      tone: "primary",
+      priority: "severe_finding",
+      fingerprint: `${severe.id}:${severe.status}`,
+    })
+  }
+  if ((consensus?.summary.open_feedback_count ?? 0) > 0) {
+    candidates.push({
+      id: `project:${bookId}:beta-feedback`,
+      label: "Triage fresh reader feedback",
+      description: `${consensus?.summary.open_feedback_count} open signal(s) across ${consensus?.summary.hotspot_count} chapter hotspot(s).`,
+      href: bookRoute("/author-loop#beta-consensus"),
+      tone: "primary",
+      priority: "fresh_beta_feedback",
+      fingerprint: `${consensus?.summary.feedback_item_count}:${consensus?.summary.open_feedback_count}`,
+    })
+  }
+  if (isShareReady) {
+    candidates.push({
+      id: `project:${bookId}:export`,
+      label: "Create a share-ready draft",
+      description: "No active review blockers are waiting. Capture a revision round, then export.",
+      href: bookRoute("/export"),
+      tone: "primary",
+      priority: "export_share_ready",
+      fingerprint: `ready:${book.total_chapters ?? 0}:${assignmentCount}`,
+    })
+  }
+  if (!severe && (consensus?.summary.open_feedback_count ?? 0) === 0) {
+    candidates.push({
+      id: `project:${bookId}:manuscript`,
+      label: "Continue the manuscript",
+      description: "Return to the last active chapter and keep drafting.",
+      href: bookRoute("/manuscript"),
+      tone: "secondary",
+      priority: book?.status === "ready" && !isShareReady ? "active_drafting" : "fallback",
+      fingerprint: `draft:${book?.status ?? "pending"}:${book?.total_chapters ?? 0}`,
+    })
+  }
+  return candidates
 }
 
 export function buildCharacterReviewStats(characters: Character[]) {

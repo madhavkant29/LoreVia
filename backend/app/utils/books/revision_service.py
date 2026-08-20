@@ -36,6 +36,7 @@ from app.utils.books import (
 )
 from app.utils.books.chapter_titles import _count_words
 from app.utils.books.consistency_reports import list_chapter_consistency_reports
+from app.utils.books.revision_external_signals import build_revision_external_signals
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
     extract_dialogue_samples_by_character,
@@ -609,7 +610,8 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
         confusion_map=confusion_map,
     )
 
-    surfaced_lists = [change_impacts, scene_advice, confusion_map, voice_alerts]
+    external_signals = await build_revision_external_signals(db, book=book)
+    surfaced_lists = [change_impacts, scene_advice, confusion_map, voice_alerts, external_signals]
     for collection in surfaced_lists:
         for index, item in enumerate(collection):
             collection[index] = revision_decisions._overlay_revision_state(item, revision_state_map)
@@ -692,6 +694,7 @@ async def build_revision_intelligence_payload(db: AsyncSession, book: Book) -> d
         "scene_advice": scene_advice,
         "confusion_map": confusion_map,
         "voice_alerts": voice_alerts,
+        "external_signals": external_signals,
         "priority_findings": priority_findings,
         "activation": {
             "eligible": bool(

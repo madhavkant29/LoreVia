@@ -87,7 +87,13 @@ def _get_s3_client():
         endpoint_url=settings.S3_ENDPOINT_URL,
         aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
         aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
+        config=Config(
+            signature_version="s3v4",
+            connect_timeout=5,
+            read_timeout=30,
+            retries={"mode": "standard", "max_attempts": 3},
+            tcp_keepalive=True,
+        ),
     )
 
 

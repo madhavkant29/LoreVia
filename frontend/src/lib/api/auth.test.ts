@@ -135,8 +135,14 @@ describe("auth api", () => {
   it("logs out the current session", async () => {
     await authApi.logout()
 
-    expect(postMock).toHaveBeenCalledWith("/auth/logout")
+    expect(postMock).toHaveBeenCalledWith("/auth/logout", undefined, { timeout: 3_000 })
     expect(signOutMock).toHaveBeenCalledWith({ scope: "local" })
+  })
+
+  it("does not let provider cleanup failure mask a completed backend logout", async () => {
+    signOutMock.mockRejectedValue(new Error("provider cleanup failed"))
+
+    await expect(authApi.logout()).resolves.toEqual({ ok: true })
   })
 
   it("returns the current user on me success", async () => {

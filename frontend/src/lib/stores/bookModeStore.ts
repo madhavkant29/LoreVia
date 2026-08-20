@@ -10,6 +10,7 @@ interface BookModeStore {
   getMode: (bookId: string) => BookMode
   setMode: (bookId: string, mode: BookMode) => void
   clearMode: (bookId: string) => void
+  clearAllModes: () => void
 }
 
 export const useBookModeStore = create<BookModeStore>()(
@@ -27,8 +28,8 @@ export const useBookModeStore = create<BookModeStore>()(
           delete next[bookId]
           return { modesByBookId: next }
         }),
+      clearAllModes: () => set({ modesByBookId: {} }),
     }),
     { name: "lorevia-book-modes" }
   )
 )
-

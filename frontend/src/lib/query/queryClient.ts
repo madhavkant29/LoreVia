@@ -15,6 +15,12 @@ export const queryClient = new QueryClient({
   },
 })
 
+export function resetSessionQueries() {
+  const cancellation = queryClient.cancelQueries()
+  queryClient.clear()
+  return cancellation
+}
+
 export async function invalidateQueryKeys(matcher: string | RegExp) {
   await queryClient.invalidateQueries({
     predicate: (query) => {

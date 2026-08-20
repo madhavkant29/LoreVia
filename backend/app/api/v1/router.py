@@ -75,6 +75,7 @@ api_router.include_router(email.router, prefix="/email", tags=["email"])
 api_router.include_router(
     beta_reads.router, tags=["beta-reads"], dependencies=[Depends(rate_limit_api)]
 )
+api_router.include_router(beta_reads.guest_router, tags=["beta-reads"])
 api_router.include_router(internal.router, prefix="/internal", tags=["internal"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(

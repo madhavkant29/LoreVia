@@ -4,15 +4,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.rate_limit import rate_limit_public_asset
 from app.core.database import get_db
 from app.schemas.beta_reads import (
     BetaReadAssignmentCreateBody,
     BetaReadAssignmentDetailOut,
     BetaReadAssignmentListOut,
     BetaReadAssignmentOut,
+    BetaReadConsensusOut,
     BetaReadFeedbackItemAuthorUpdateBody,
     BetaReadFeedbackItemCreateBody,
     BetaReadFeedbackSubmitBody,
+    BetaReadGuestLinkOut,
+    BetaReadGuestProgressBody,
+    BetaReadGuestReviewOut,
     BetaReadQuestionAppendBody,
     BetaReadQuestionOut,
     BetaReadSyncOut,
@@ -26,6 +31,13 @@ from app.utils.beta_read_assignment_query_utils import (
     build_beta_read_assignment_out,
     list_book_beta_read_assignments,
     list_reader_beta_read_assignments,
+)
+from app.utils.beta_read_consensus_utils import build_beta_read_consensus
+from app.utils.beta_read_guest_utils import (
+    build_beta_read_guest_link,
+    build_beta_read_guest_review,
+    mark_beta_read_guest_chapter_read,
+    resolve_beta_read_guest_assignment,
 )
 from app.utils.beta_read_job_utils import award_submitted_beta_reads
 from app.utils.beta_read_lifecycle_utils import (
@@ -47,6 +59,7 @@ from app.utils.books.notes import (
 )
 
 router = APIRouter()
+guest_router = APIRouter()
 
 
 @router.post("/books/{book_id}/beta-reads", response_model=BetaReadAssignmentOut, status_code=201)
@@ -77,6 +90,17 @@ async def list_book_beta_reads(
     )
 
 
+@router.get("/books/{book_id}/beta-consensus", response_model=BetaReadConsensusOut)
+async def get_book_beta_read_consensus(
+    book_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    return BetaReadConsensusOut(**(await build_beta_read_consensus(db, book_id=book.id)))
+
+
 @router.get(
     "/books/{book_id}/beta-reads/{assignment_id}", response_model=BetaReadAssignmentDetailOut
 )
@@ -94,6 +118,95 @@ async def get_book_beta_read_detail(
     if assignment.book_id != book.id:
         raise HTTPException(404, "Beta read assignment not found.")
     return await build_beta_read_assignment_detail_out(db, assignment=assignment)
+
+
+@router.get(
+    "/books/{book_id}/beta-reads/{assignment_id}/guest-link",
+    response_model=BetaReadGuestLinkOut,
+)
+async def get_book_beta_read_guest_link(
+    book_id: uuid.UUID,
+    assignment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await get_owned_book(db, book_id, current_user.id)
+    require_author_access(current_user)
+    assignment = await get_beta_assignment_for_author(
+        db, assignment_id=assignment_id, author_user_id=current_user.id
+    )
+    if assignment.book_id != book.id:
+        raise HTTPException(404, "Beta read assignment not found.")
+    return BetaReadGuestLinkOut(**build_beta_read_guest_link(assignment))
+
+
+@guest_router.get(
+    "/beta-review/{token}",
+    response_model=BetaReadGuestReviewOut,
+    dependencies=[Depends(rate_limit_public_asset)],
+)
+async def get_beta_read_guest_review(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await resolve_beta_read_guest_assignment(db, token=token)
+    return await build_beta_read_guest_review(db, assignment=assignment)
+
+
+@guest_router.post(
+    "/beta-review/{token}/progress",
+    status_code=204,
+    dependencies=[Depends(rate_limit_public_asset)],
+)
+async def update_beta_read_guest_progress(
+    token: str,
+    body: BetaReadGuestProgressBody,
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await resolve_beta_read_guest_assignment(db, token=token)
+    await mark_beta_read_guest_chapter_read(
+        db,
+        assignment=assignment,
+        chapter_number=body.chapter_number,
+    )
+
+
+@guest_router.post(
+    "/beta-review/{token}/feedback-items",
+    response_model=BetaReadAssignmentDetailOut,
+    status_code=201,
+    dependencies=[Depends(rate_limit_public_asset)],
+)
+async def create_beta_read_guest_feedback_item(
+    token: str,
+    body: BetaReadFeedbackItemCreateBody,
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await resolve_beta_read_guest_assignment(db, token=token)
+    await add_beta_read_feedback_item(db, assignment=assignment, current_user=None, body=body)
+    await db.refresh(assignment)
+    return await build_beta_read_assignment_detail_out(db, assignment=assignment)
+
+
+@guest_router.post(
+    "/beta-review/{token}/submit-feedback",
+    response_model=BetaReadAssignmentOut,
+    dependencies=[Depends(rate_limit_public_asset)],
+)
+async def submit_beta_read_guest_feedback(
+    token: str,
+    body: BetaReadFeedbackSubmitBody,
+    db: AsyncSession = Depends(get_db),
+):
+    assignment = await resolve_beta_read_guest_assignment(db, token=token)
+    assignment = await submit_beta_read_feedback(
+        db,
+        assignment=assignment,
+        current_user=None,
+        final_feedback=body.final_feedback,
+        final_rating=body.final_rating,
+    )
+    return await build_beta_read_assignment_out(db, assignment=assignment)
 
 
 @router.post(

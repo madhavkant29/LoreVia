@@ -1,6 +1,6 @@
 #!/bin/bash
 # Normalize local storage permissions for named volumes, then drop privileges
-# back to the non-root app user before starting Celery or Flower.
+# back to the non-root app user before starting the requested API/worker process.
 
 set -e
 

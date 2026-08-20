@@ -269,7 +269,7 @@ async def get_book_cover_public(
     return Response(
         content=raw,
         media_type=media_type,
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "private, no-store"},
     )
 
 
