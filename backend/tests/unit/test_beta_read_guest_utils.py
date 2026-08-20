@@ -1,9 +1,9 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-import uuid
 
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
 
 from app.core.security import decode_token
 from app.utils.beta_read_guest_utils import (

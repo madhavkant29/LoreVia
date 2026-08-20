@@ -20,13 +20,13 @@ from app.schemas.books import (
 from app.services.processing_allowance_service import ensure_project_writable
 from app.services.workflow_bridge_service import apply_workflow_bridge_import
 from app.utils.billing_utils import require_author_access
+from app.utils.books.normalization import resolve_upload_format_and_work_type
 from app.utils.books.notes import get_owned_book
 from app.utils.books.revision_milestones import (
     compare_revision_rounds,
     create_revision_round,
     list_revision_rounds,
 )
-from app.utils.books.normalization import resolve_upload_format_and_work_type
 from app.utils.books.workflow_bridge import (
     build_workflow_preview_token,
     export_book_to_scrivener,
@@ -47,7 +47,9 @@ async def get_revision_rounds(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    return RevisionRoundListOut(items=[RevisionRoundOut(**item) for item in list_revision_rounds(book)])
+    return RevisionRoundListOut(
+        items=[RevisionRoundOut(**item) for item in list_revision_rounds(book)]
+    )
 
 
 @router.post("/{book_id}/revision-rounds", response_model=RevisionRoundOut, status_code=201)

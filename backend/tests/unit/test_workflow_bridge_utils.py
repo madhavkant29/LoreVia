@@ -1,7 +1,7 @@
 import uuid
 
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
 
 from app.utils.books import workflow_bridge
 
@@ -58,11 +58,41 @@ def test_workflow_preview_token_is_bound_to_user_book_and_file():
     )
 
     for changed in (
-        {"user_id": uuid.uuid4(), "book_id": book_id, "format_name": "docx", "raw": b"reviewed file", "book_state_digest": "state-v1"},
-        {"user_id": user_id, "book_id": uuid.uuid4(), "format_name": "docx", "raw": b"reviewed file", "book_state_digest": "state-v1"},
-        {"user_id": user_id, "book_id": book_id, "format_name": "scrivener", "raw": b"reviewed file", "book_state_digest": "state-v1"},
-        {"user_id": user_id, "book_id": book_id, "format_name": "docx", "raw": b"different file", "book_state_digest": "state-v1"},
-        {"user_id": user_id, "book_id": book_id, "format_name": "docx", "raw": b"reviewed file", "book_state_digest": "state-v2"},
+        {
+            "user_id": uuid.uuid4(),
+            "book_id": book_id,
+            "format_name": "docx",
+            "raw": b"reviewed file",
+            "book_state_digest": "state-v1",
+        },
+        {
+            "user_id": user_id,
+            "book_id": uuid.uuid4(),
+            "format_name": "docx",
+            "raw": b"reviewed file",
+            "book_state_digest": "state-v1",
+        },
+        {
+            "user_id": user_id,
+            "book_id": book_id,
+            "format_name": "scrivener",
+            "raw": b"reviewed file",
+            "book_state_digest": "state-v1",
+        },
+        {
+            "user_id": user_id,
+            "book_id": book_id,
+            "format_name": "docx",
+            "raw": b"different file",
+            "book_state_digest": "state-v1",
+        },
+        {
+            "user_id": user_id,
+            "book_id": book_id,
+            "format_name": "docx",
+            "raw": b"reviewed file",
+            "book_state_digest": "state-v2",
+        },
     ):
         with pytest.raises(HTTPException) as exc_info:
             workflow_bridge.verify_workflow_preview_token(token, **changed)

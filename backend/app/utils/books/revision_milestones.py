@@ -25,8 +25,9 @@ async def _current_revision_summary(
     db: AsyncSession, *, book: Book, chapters: list[Chapter]
 ) -> dict[str, int]:
     scene_count = int(
-        (await db.execute(select(func.count(NovelScene.id)).where(NovelScene.book_id == book.id)))
-        .scalar_one()
+        (
+            await db.execute(select(func.count(NovelScene.id)).where(NovelScene.book_id == book.id))
+        ).scalar_one()
         or 0
     )
     feedback_items = list(
@@ -41,7 +42,9 @@ async def _current_revision_summary(
     board_items = list(
         normalize_writer_workspace(book.writer_workspace).get("revision_board", {}).get("items", [])
     )
-    open_items = [item for item in board_items if item.get("status") not in {"resolved", "dismissed"}]
+    open_items = [
+        item for item in board_items if item.get("status") not in {"resolved", "dismissed"}
+    ]
     high_count = sum(
         1
         for item in open_items
@@ -172,9 +175,14 @@ async def compare_revision_rounds(
         ),
         "added_chapters": sorted(set(target_chapters) - set(base_chapters)),
         "removed_chapters": sorted(set(base_chapters) - set(target_chapters)),
-        "chapter_delta": int(target_summary.get("chapter_count") or 0) - int(base_summary.get("chapter_count") or 0),
-        "word_count_delta": int(target_summary.get("word_count") or 0) - int(base_summary.get("word_count") or 0),
-        "scene_count_delta": int(target_summary.get("scene_count") or 0) - int(base_summary.get("scene_count") or 0),
-        "open_finding_delta": int(target_summary.get("open_finding_count") or 0) - int(base_summary.get("open_finding_count") or 0),
-        "open_beta_feedback_delta": int(target_summary.get("open_beta_feedback_count") or 0) - int(base_summary.get("open_beta_feedback_count") or 0),
+        "chapter_delta": int(target_summary.get("chapter_count") or 0)
+        - int(base_summary.get("chapter_count") or 0),
+        "word_count_delta": int(target_summary.get("word_count") or 0)
+        - int(base_summary.get("word_count") or 0),
+        "scene_count_delta": int(target_summary.get("scene_count") or 0)
+        - int(base_summary.get("scene_count") or 0),
+        "open_finding_delta": int(target_summary.get("open_finding_count") or 0)
+        - int(base_summary.get("open_finding_count") or 0),
+        "open_beta_feedback_delta": int(target_summary.get("open_beta_feedback_count") or 0)
+        - int(base_summary.get("open_beta_feedback_count") or 0),
     }

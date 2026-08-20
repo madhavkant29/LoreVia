@@ -12,22 +12,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.beta_read import BetaReadAssignment, BetaReadFeedbackItem, BetaReadQuestion
 
 _STOP_WORDS = {
-    "about", "after", "again", "also", "because", "before", "being", "chapter",
-    "could", "didn", "does", "felt", "from", "have", "into", "just", "more",
-    "really", "scene", "some", "that", "their", "there", "they", "this", "very",
-    "what", "when", "where", "which", "while", "with", "would", "your",
+    "about",
+    "after",
+    "again",
+    "also",
+    "because",
+    "before",
+    "being",
+    "chapter",
+    "could",
+    "didn",
+    "does",
+    "felt",
+    "from",
+    "have",
+    "into",
+    "just",
+    "more",
+    "really",
+    "scene",
+    "some",
+    "that",
+    "their",
+    "there",
+    "they",
+    "this",
+    "very",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "with",
+    "would",
+    "your",
 }
 
 
 def _feedback_text(item: BetaReadFeedbackItem) -> str:
-    return " ".join(part.strip() for part in (item.body or "", item.anchor_text or "") if part.strip())
+    return " ".join(
+        part.strip() for part in (item.body or "", item.anchor_text or "") if part.strip()
+    )
 
 
 def _theme_words(text: str) -> set[str]:
     return {
-        word
-        for word in re.findall(r"[a-z][a-z'-]{3,}", text.lower())
-        if word not in _STOP_WORDS
+        word for word in re.findall(r"[a-z][a-z'-]{3,}", text.lower()) if word not in _STOP_WORDS
     }
 
 
@@ -47,17 +77,11 @@ def build_beta_read_consensus_payload(
     for chapter_number, chapter_items in chapter_groups.items():
         counts = Counter(item.kind for item in chapter_items)
         negative_readers = {
-            item.assignment_id
-            for item in chapter_items
-            if item.kind in {"confusing", "boring"}
+            item.assignment_id for item in chapter_items if item.kind in {"confusing", "boring"}
         }
-        favorite_readers = {
-            item.assignment_id for item in chapter_items if item.kind == "favorite"
-        }
+        favorite_readers = {item.assignment_id for item in chapter_items if item.kind == "favorite"}
         disagreement = bool(
-            negative_readers
-            and favorite_readers
-            and len(negative_readers | favorite_readers) > 1
+            negative_readers and favorite_readers and len(negative_readers | favorite_readers) > 1
         )
         score = (
             counts["confusing"] * 3
@@ -96,8 +120,12 @@ def build_beta_read_consensus_payload(
                 "label": label,
                 "mention_count": len(matched),
                 "reader_count": len(readers),
-                "chapter_numbers": sorted({int(item.chapter_number) for item in matched if item.chapter_number}),
-                "evidence": list(dict.fromkeys(_feedback_text(item) for item in matched if _feedback_text(item)))[:3],
+                "chapter_numbers": sorted(
+                    {int(item.chapter_number) for item in matched if item.chapter_number}
+                ),
+                "evidence": list(
+                    dict.fromkeys(_feedback_text(item) for item in matched if _feedback_text(item))
+                )[:3],
             }
         )
     themes.sort(key=lambda item: (-item["reader_count"], -item["mention_count"], item["label"]))
@@ -111,11 +139,7 @@ def build_beta_read_consensus_payload(
     question_consensus = []
     for grouped_questions in question_groups.values():
         question_ids = {question.id for question in grouped_questions}
-        answers = [
-            item
-            for item in scoped_items
-            if item.question_id in question_ids and item.body
-        ]
+        answers = [item for item in scoped_items if item.question_id in question_ids and item.body]
         if not answers:
             continue
         first_question = grouped_questions[0]
@@ -135,7 +159,7 @@ def build_beta_read_consensus_payload(
             continue
         chapter_items = chapter_groups[hotspot["chapter_number"]]
         candidate_id = hashlib.sha1(
-            f"beta-consensus:{hotspot['chapter_number']}".encode("utf-8")
+            f"beta-consensus:{hotspot['chapter_number']}".encode()
         ).hexdigest()[:20]
         revision_candidates.append(
             {
@@ -152,13 +176,17 @@ def build_beta_read_consensus_payload(
         )
 
     open_count = sum(
-        1 for item in scoped_items if str((item.metadata_json or {}).get("author_status") or "open") == "open"
+        1
+        for item in scoped_items
+        if str((item.metadata_json or {}).get("author_status") or "open") == "open"
     )
     submitted_states = {"submitted", "completed"}
     return {
         "summary": {
             "reader_count": len(assignments),
-            "submitted_reader_count": sum(1 for item in assignments if item.state in submitted_states),
+            "submitted_reader_count": sum(
+                1 for item in assignments if item.state in submitted_states
+            ),
             "feedback_item_count": len(scoped_items),
             "open_feedback_count": open_count,
             "hotspot_count": sum(1 for item in hotspots if item["signal_score"] >= 2),
@@ -171,16 +199,18 @@ def build_beta_read_consensus_payload(
     }
 
 
-async def build_beta_read_consensus(
-    db: AsyncSession, *, book_id: uuid.UUID
-) -> dict[str, Any]:
+async def build_beta_read_consensus(db: AsyncSession, *, book_id: uuid.UUID) -> dict[str, Any]:
     assignments = list(
         (await db.execute(select(BetaReadAssignment).where(BetaReadAssignment.book_id == book_id)))
         .scalars()
         .all()
     )
     items = list(
-        (await db.execute(select(BetaReadFeedbackItem).where(BetaReadFeedbackItem.book_id == book_id)))
+        (
+            await db.execute(
+                select(BetaReadFeedbackItem).where(BetaReadFeedbackItem.book_id == book_id)
+            )
+        )
         .scalars()
         .all()
     )

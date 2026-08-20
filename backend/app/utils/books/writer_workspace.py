@@ -428,7 +428,9 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
     for item in source.get("revision_rounds") or []:
         if not isinstance(item, dict) or not item.get("id") or not item.get("created_at"):
             continue
-        chapters = [chapter for chapter in (item.get("chapters") or []) if isinstance(chapter, dict)]
+        chapters = [
+            chapter for chapter in (item.get("chapters") or []) if isinstance(chapter, dict)
+        ]
         revision_rounds.append(
             {
                 "id": str(item["id"]),

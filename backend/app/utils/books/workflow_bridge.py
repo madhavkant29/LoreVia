@@ -33,8 +33,7 @@ def build_workflow_preview_token(
 ) -> str:
     digest = hashlib.sha256(raw).hexdigest()
     resource = (
-        f"{WORKFLOW_PREVIEW_RESOURCE_PREFIX}{book_id}:{format_name}:"
-        f"{digest}:{book_state_digest}"
+        f"{WORKFLOW_PREVIEW_RESOURCE_PREFIX}{book_id}:{format_name}:{digest}:{book_state_digest}"
     )
     return create_asset_token(str(user_id), resource, expires_minutes=60)
 
@@ -85,11 +84,7 @@ async def load_workflow_book_state_digest(
     book_id: object,
     lock_for_update: bool = False,
 ) -> str:
-    statement = (
-        select(Chapter)
-        .where(Chapter.book_id == book_id)
-        .order_by(Chapter.number.asc())
-    )
+    statement = select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number.asc())
     if lock_for_update:
         statement = statement.with_for_update()
     chapters = list((await db.execute(statement)).scalars().all())
@@ -132,7 +127,9 @@ async def preview_workflow_import(
     current_texts = await asyncio.gather(
         *(asyncio.to_thread(download_stored_text_or_empty, chapter) for chapter in current)
     )
-    current_by_number = {int(chapter.number): (chapter, text) for chapter, text in zip(current, current_texts)}
+    current_by_number = {
+        int(chapter.number): (chapter, text) for chapter, text in zip(current, current_texts)
+    }
     matched_numbers: set[int] = set()
     previews = []
     for index, chapter in enumerate(incoming, start=1):
@@ -148,7 +145,11 @@ async def preview_workflow_import(
             current_chapter, current_text = match
             matched_number = int(current_chapter.number)
             matched_numbers.add(matched_number)
-            status = "unchanged" if _content_digest(incoming_text) == _content_digest(current_text) else "changed"
+            status = (
+                "unchanged"
+                if _content_digest(incoming_text) == _content_digest(current_text)
+                else "changed"
+            )
             current_word_count = int(current_chapter.word_count or len(current_text.split()))
         previews.append(
             {
@@ -160,7 +161,10 @@ async def preview_workflow_import(
                 "current_word_count": current_word_count,
             }
         )
-    counts = {status: sum(1 for item in previews if item["status"] == status) for status in ("new", "changed", "unchanged")}
+    counts = {
+        status: sum(1 for item in previews if item["status"] == status)
+        for status in ("new", "changed", "unchanged")
+    }
     return {
         "format": format_name,
         "book_state_digest": workflow_book_state_digest(current),

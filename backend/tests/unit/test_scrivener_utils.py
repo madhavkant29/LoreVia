@@ -1,8 +1,8 @@
 import io
 import zipfile
 
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
 
 from app.utils.scrivener_utils import build_scrivener_archive, parse_scrivener_archive
 
