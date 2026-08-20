@@ -7,6 +7,7 @@ import { useManuscriptDocumentBindings } from "./manuscriptPage.documentBindings
 import { buildManuscriptRenderProps } from "./manuscriptPage.renderProps"
 import { useManuscriptRuntimeEffects } from "./manuscriptPage.runtimeEffects"
 import { useManuscriptPageSetup } from "./manuscriptPage.setup"
+import { ManuscriptOfflineSync } from "@/components/author/ManuscriptOfflineSync"
 
 export function ManuscriptPageInner() {
   const setup = useManuscriptPageSetup()
@@ -29,6 +30,7 @@ export function ManuscriptPageInner() {
   }
 
   return (
+    <>
     <ManuscriptPageLayout
       analysisRailProps={renderProps.analysisRailProps}
       bookId={setup.bookId}
@@ -49,5 +51,7 @@ export function ManuscriptPageInner() {
       workspaceTab={setup.workspaceTab}
       writeRailProps={renderProps.writeRailProps}
     />
+    <ManuscriptOfflineSync />
+    </>
   )
 }

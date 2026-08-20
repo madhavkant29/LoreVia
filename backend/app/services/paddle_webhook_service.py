@@ -43,6 +43,7 @@ CANCELED_STATUSES = {"canceled", "cancelled"}
 SUBSCRIPTION_CONFIRMATION_EMAIL = "subscription_confirmation"
 SUBSCRIPTION_CANCELLATION_EMAIL = "subscription_cancellation"
 WEBHOOK_PROCESSING_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
+WEBHOOK_LAST_RESORT_EXCEPTIONS = (Exception,)
 
 
 async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
@@ -68,7 +69,7 @@ async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
             notification_id=notification_id,
             payload=event,
         )
-    except WEBHOOK_PROCESSING_EXCEPTIONS:
+    except WEBHOOK_LAST_RESORT_EXCEPTIONS:
         await _mark_webhook_failed(event_id=event_id, error_message=public_error_message(500))
         raise
 
@@ -183,7 +184,7 @@ async def _process_claimed_webhook(
             webhook_event.processed_at = datetime.now(UTC)
             webhook_event.last_error = None
             await db.commit()
-        except WEBHOOK_PROCESSING_EXCEPTIONS:
+        except WEBHOOK_LAST_RESORT_EXCEPTIONS:
             await db.rollback()
             raise
 

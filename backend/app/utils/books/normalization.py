@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 BOOK_WORK_TYPES = {"novel", "screenplay", "other"}
 UPLOAD_EXTENSION_TO_FORMAT = {
+    ".scriv.zip": "scrivener",
+    ".scrivzip": "scrivener",
     ".pdf": "pdf",
     ".epub": "epub",
     ".docx": "docx",
@@ -33,6 +35,7 @@ UPLOAD_EXTENSION_TO_FORMAT = {
     ".script": "fountain",
 }
 FORMAT_TO_UPLOAD_EXTENSION = {
+    "scrivener": ".scrivzip",
     "pdf": ".pdf",
     "epub": ".epub",
     "docx": ".docx",
@@ -43,7 +46,7 @@ FORMAT_TO_UPLOAD_EXTENSION = {
 }
 SCREENPLAY_INFER_FORMATS = {"fountain"}
 SCREENPLAY_INPUT_FORMATS = {"pdf", "fountain", "txt", "md"}
-TEXT_ONLY_UPLOAD_FORMATS = {"docx", "doc", "txt", "md"}
+TEXT_ONLY_UPLOAD_FORMATS = {"docx", "doc", "txt", "md", "scrivener"}
 SCENE_BREAK_LINE_RE = re.compile(r"^\s*(?:#(?:\s*#)*|\*\s*\*\s*\*)\s*$", re.MULTILINE)
 SCENE_HEADING_LINE_RE = re.compile(r"^\s*#{1,3}(?:\s+(.*?))?\s*$")
 SCENE_METADATA_LABELS = {

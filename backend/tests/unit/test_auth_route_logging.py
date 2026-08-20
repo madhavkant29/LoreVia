@@ -81,6 +81,13 @@ async def test_supabase_oauth_failure_does_not_log_response_body(monkeypatch, ca
     assert exc_info.value.status_code == 401
     assert "top-secret-value" not in caplog.text
     assert "Supabase OAuth verification failed" in caplog.text
+    verification_records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Supabase OAuth verification failed"
+    ]
+    assert verification_records
+    assert all(not hasattr(record, "response_text") for record in verification_records)
 
 
 @pytest.mark.asyncio

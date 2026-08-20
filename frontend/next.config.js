@@ -13,8 +13,13 @@ function getApiOrigin() {
 const nextConfig = {
   typedRoutes: true,
   output: "standalone",
+  transpilePackages: ["next-mdx-remote"],
+  outputFileTracingIncludes: {
+    "/*": ["./src/content/**/*.mdx"],
+  },
   productionBrowserSourceMaps: false,
   experimental: {
+    webpackBuildWorker: false,
     optimizePackageImports: [
       "@tiptap/core",
       "@tiptap/react",

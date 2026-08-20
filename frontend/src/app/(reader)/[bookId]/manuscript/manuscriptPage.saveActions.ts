@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
+import { clearQueuedManuscriptSave, enqueueManuscriptSave, isOfflineSaveError } from "@/lib/offline/manuscriptOutbox"
 import type { Book, SaveState, WriterWorkspace } from "@/types/book"
 import type { BookDraftMap } from "./manuscriptPage.helpers"
 import type { SaveTarget } from "./manuscriptPage.constants"
@@ -116,6 +117,12 @@ export function useManuscriptSaveActions({
       })
       const importedChapter = result.imported_chapters[0] ?? chapterNumber
       const nextContentVersion = result.chapter_content_versions[importedChapter]
+      await clearQueuedManuscriptSave(bookId, chapterNumber, {
+        title: currentDraft.title.trim() || `Chapter ${chapterNumber}`,
+        text: currentDraft.text,
+        html: currentDraft.html,
+        expectedContentVersion: contentVersionByChapter[chapterNumber],
+      }).catch(() => undefined)
       setSelectedChapter(importedChapter)
       if (typeof nextContentVersion === "number") {
         setContentVersionByChapter((current) => ({
@@ -140,6 +147,23 @@ export function useManuscriptSaveActions({
         setStatusMessage(`Chapter ${chapterNumber} changed in another session. Your local draft is still here. Reload the latest version or save again to intentionally overwrite it.`)
         return
       }
+      if (isOfflineSaveError(error)) {
+        const queued = await enqueueManuscriptSave({
+          bookId,
+          chapterNumber,
+          title: currentDraft.title.trim() || `Chapter ${chapterNumber}`,
+          text: currentDraft.text,
+          html: currentDraft.html,
+          expectedContentVersion: contentVersionByChapter[chapterNumber],
+        }).catch(() => null)
+        markDraftDirty(chapterNumber)
+        setStatusMessage(
+          queued
+            ? `Chapter ${chapterNumber} is saved offline and will sync when the connection returns.`
+            : `Connection lost. This browser cannot store an offline copy, so keep this tab open and retry the save when you are online.`,
+        )
+        return
+      }
       throw error
     }
   }
@@ -160,6 +184,14 @@ export function useManuscriptSaveActions({
       await loadBase()
       const importedChapter = result.imported_chapters[0] ?? activeChapterNumber
       const nextContentVersion = result.chapter_content_versions[importedChapter]
+      await clearQueuedManuscriptSave(bookId, activeChapterNumber, {
+        title: chapterTitle.trim() || `Chapter ${activeChapterNumber}`,
+        text,
+        html,
+        expectedContentVersion: selectedChapter !== null
+          ? contentVersionByChapter[activeChapterNumber]
+          : undefined,
+      }).catch(() => undefined)
       setSelectedChapter(importedChapter)
       clearDraftDirty(importedChapter)
       setBookDrafts((current) => ({
@@ -185,6 +217,21 @@ export function useManuscriptSaveActions({
       if (axios.isAxiosError(error) && error.response?.status === 409 && selectedChapter !== null) {
         await refreshChapterVersionToken(activeChapterNumber).catch(() => undefined)
         setStatusMessage(`Chapter ${activeChapterNumber} changed in another session. Your local draft is still here. Reload the latest version or save again to intentionally overwrite it.`)
+      } else if (isOfflineSaveError(error)) {
+        const queued = await enqueueManuscriptSave({
+          bookId,
+          chapterNumber: activeChapterNumber,
+          title: chapterTitle.trim() || `Chapter ${activeChapterNumber}`,
+          text,
+          html,
+          expectedContentVersion: selectedChapter !== null ? contentVersionByChapter[activeChapterNumber] : undefined,
+        }).catch(() => null)
+        markDraftDirty(activeChapterNumber)
+        setStatusMessage(
+          queued
+            ? `Chapter ${activeChapterNumber} is saved offline and will sync when the connection returns.`
+            : "Connection lost. This browser cannot store an offline copy, so keep this tab open and retry the save when you are online.",
+        )
       } else {
         setStatusMessage("Save failed. Please check the chapter number and try again.")
       }

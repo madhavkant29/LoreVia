@@ -146,6 +146,7 @@ describe("auth and root runtime pages", () => {
     expect(config.host).toContain("lorevia")
     const rules = Array.isArray(config.rules) ? config.rules : [config.rules]
     expect(rules[0]?.disallow).toContain("/auth/")
+    expect(rules[0]?.disallow).toContain("/review/")
   })
 
   it("renders the global error recovery surface", async () => {

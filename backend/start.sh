@@ -27,6 +27,8 @@ if [ "${RUN_MIGRATIONS:-}" = "1" ]; then
   echo "Run Alembic from the deploy job or a dedicated migration step before starting gunicorn."
 fi
 
+# Structured application request logging is token-scrubbed; Gunicorn's raw
+# request-line access log is disabled because capability URLs are secrets.
 exec gunicorn app.main:app \
   --worker-class uvicorn.workers.UvicornWorker \
   --workers "$WEB_CONCURRENCY" \
@@ -34,5 +36,5 @@ exec gunicorn app.main:app \
   --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
   --timeout "$GUNICORN_TIMEOUT" \
   --keep-alive "$GUNICORN_KEEPALIVE" \
-  --access-logfile - \
+  --access-logfile /dev/null \
   --error-logfile -

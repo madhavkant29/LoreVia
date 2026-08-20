@@ -2382,6 +2382,7 @@ async def test_export_cover_archive_hide_and_delete_routes(monkeypatch):
         cover_book.id, token="ok", db=_FakeDB(get_values=[cover_book])
     )
     assert response.media_type == "image/png"
+    assert response.headers["Cache-Control"] == "private, no-store"
 
     patch_route_dependency(monkeypatch, books, "book_out", _async_value({"id": str(book.id)}))
     archived = await books.archive_book(

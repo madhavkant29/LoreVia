@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.core.config import allowed_hosts
 from app.main import app
 from app.models.user import PaddleWebhookEvent, RefundReview, Subscription, SubscriptionEvent, User
+from app.utils.webhook_request_utils import PADDLE_WEBHOOK_MAX_BODY_BYTES
 
 
 def _sign_payload(payload: dict, timestamp: int, secret: str) -> tuple[bytes, str]:
@@ -151,6 +152,72 @@ async def test_paddle_webhook_rejects_invalid_signature(monkeypatch):
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Invalid request."}
+
+
+@pytest.mark.asyncio
+async def test_paddle_webhook_rejects_payload_larger_than_one_mib(monkeypatch):
+    monkeypatch.setattr("app.api.v1.routes.webhooks.paddle_webhooks_configured", lambda: True)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
+        response = await client.post(
+            "/api/v1/webhooks/paddle",
+            content=b"x" * (PADDLE_WEBHOOK_MAX_BODY_BYTES + 1),
+            headers={
+                "Paddle-Signature": "ts=1700000000;h1=unused",
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Paddle webhook payload exceeds 1 MiB."}
+
+
+@pytest.mark.asyncio
+async def test_paddle_webhook_verifies_and_parses_the_same_raw_body(monkeypatch):
+    raw_body = (
+        b' { "event_id" : "evt_exact_bytes", "event_type" : "subscription.updated", "data" : {} }\n'
+    )
+    captured: dict[str, object] = {}
+
+    def fake_verify_webhook_signature(payload: bytes, signature: str | None) -> bool:
+        captured["verified_payload"] = payload
+        captured["signature"] = signature
+        return True
+
+    async def fake_process_paddle_webhook(event: dict):
+        captured["event"] = event
+        return {"received": True}
+
+    monkeypatch.setattr("app.api.v1.routes.webhooks.paddle_webhooks_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.api.v1.routes.webhooks.verify_webhook_signature",
+        fake_verify_webhook_signature,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.routes.webhooks.process_paddle_webhook", fake_process_paddle_webhook
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url=_trusted_base_url()
+    ) as client:
+        response = await client.post(
+            "/api/v1/webhooks/paddle",
+            content=raw_body,
+            headers={
+                "Paddle-Signature": "ts=1700000000;h1=exact",
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["verified_payload"] == raw_body
+    assert captured["event"] == {
+        "event_id": "evt_exact_bytes",
+        "event_type": "subscription.updated",
+        "data": {},
+    }
 
 
 @pytest.mark.asyncio
@@ -370,8 +437,17 @@ async def test_paddle_webhook_sends_cancellation_email_only_for_final_cancellati
     assert sent_emails == [(user.email, "author")]
 
 
+@pytest.mark.parametrize(
+    "processing_error",
+    [
+        pytest.param(RuntimeError("transient billing write failure"), id="expected-runtime"),
+        pytest.param(KeyError("unexpected payload regression"), id="unexpected-key-error"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, monkeypatch):
+async def test_paddle_webhook_failed_event_can_retry_successfully(
+    client, db, monkeypatch, processing_error
+):
     secret = "pdl_secret_test"
     timestamp = 1_700_000_000
     user = await _create_user(db)
@@ -384,7 +460,7 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, mo
     async def _flaky_record_subscription_event(*args, **kwargs):
         call_count["count"] += 1
         if call_count["count"] == 1:
-            raise RuntimeError("transient billing write failure")
+            raise processing_error
         return await original_record_subscription_event(*args, **kwargs)
 
     _patch_service_session(monkeypatch, db)
@@ -408,7 +484,7 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(client, db, mo
     )
     raw_body, signature = _sign_payload(payload, timestamp, secret)
 
-    with pytest.raises(RuntimeError, match="transient billing write failure"):
+    with pytest.raises(type(processing_error)):
         await client.post(
             "/api/v1/webhooks/paddle",
             content=raw_body,

@@ -21,6 +21,7 @@ import type { Book, NovelEpubMetadata, NovelExportPreset, NovelFrontMatter, Nove
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { CardSkeleton, RowSkeleton, SidebarSkeleton, Skeleton } from "@/components/ui/Skeleton"
 import { Tooltip } from "@/components/ui/Tooltip"
+import { WorkflowBridgePanel } from "@/components/author/WorkflowBridgePanel"
 
 const AuthorToolsNav = dynamic(
  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
@@ -415,7 +416,6 @@ export default function ExportStudioPage() {
  </>
  )}
  />
-
  {!canUseAuthorTools ? (
  <div className={` border px-5 py-4 text-sm leading-6 ${isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-800"}`} role="status">
  Free accounts can export the manuscript files for owned projects. Import, notes, character bible, and bulk author exports require an active trial, Author, or Architect plan.
@@ -911,6 +911,8 @@ export default function ExportStudioPage() {
  {status}
  </div>
  ) : null}
+
+ <WorkflowBridgePanel bookId={bookId} bookTitle={book?.title ?? "LoreVia Project"} isDark={isDark} />
 
  {vaultPreview ? (
  <VaultPreview bookId={bookId} preview={vaultPreview} isDark={isDark} />

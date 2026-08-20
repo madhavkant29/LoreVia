@@ -125,18 +125,49 @@ test("interactive demo reviews findings without API calls or mobile overflow", a
   expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
 })
 
-test("public SEO content hubs render without auth and link into article clusters", async ({ page }) => {
+test("editorial hubs and articles work without auth on desktop and mobile", async ({ page, context }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const apiRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/")) apiRequests.push(request.url())
+  })
+  await context.grantPermissions(["clipboard-read", "clipboard-write"])
   await page.goto("/blog")
 
-  await expect(page.getByRole("heading", { name: /practical guides for fiction authors/i })).toBeVisible()
-  await expect(page.getByRole("link", { name: /how to keep track of characters in a novel/i }).first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: /notes on the difficult work of keeping a story whole/i })).toBeVisible()
+  await expect(page.getByRole("link", { name: /how to build a scene list that actually helps you revise/i }).first()).toBeVisible()
+  const hubHero = page.locator(".editorial-feature img")
+  await expect(hubHero).toBeVisible()
+  expect(await hubHero.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0)
+
+  await page.goto("/blog/how-to-build-a-scene-list-for-novel-revision")
+  await expect(page.getByRole("heading", { name: /how to build a scene list that actually helps you revise/i })).toBeVisible()
+  await expect(page.getByRole("navigation", { name: "Article sections" }).first()).toBeVisible()
+  await page.getByRole("button", { name: "Copy article link" }).click()
+  await expect(page.locator('p[aria-live="polite"]')).toHaveText("Link copied")
+  await page.getByRole("button", { name: "Switch to dark mode" }).click()
+  await expect(page.locator("html")).toHaveClass(/dark/)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/answers")
+  await expect(page.getByRole("heading", { name: /start with the question on your desk/i })).toBeVisible()
+  await page.getByRole("searchbox", { name: "Search answers" }).fill("character arcs")
+  await expect(page.getByRole("link", { name: /how do i track character arcs/i })).toBeVisible()
 
   await page.goto("/answers/how-do-i-track-character-arcs")
-  await expect(page.getByRole("heading", { name: "How do I track character arcs?" })).toBeVisible()
-  await expect(page.getByRole("link", { name: /how to keep track of characters in a novel/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /how do i track character arcs/i })).toBeVisible()
+  await expect(page.getByText("Short answer", { exact: true })).toBeVisible()
+  await expect(page.locator(".editorial-mobile-toc")).toBeVisible()
+  await page.locator(".editorial-mobile-toc summary").click()
+  await expect(page.locator('.editorial-mobile-toc a[href="#define-the-starting-logic"]')).toBeVisible()
+  const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(mobileOverflow).toBe(false)
 
   await page.goto("/demo/gregor-samsa-character-tracker")
   await expect(page.getByRole("heading", { name: /tracking gregor samsa/i })).toBeVisible()
+  expect(apiRequests).toEqual([])
+  expect(pageErrors).toEqual([])
+  expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
 })
 
 test("public forum surfaces reputation and writer profile details", async ({ page }) => {

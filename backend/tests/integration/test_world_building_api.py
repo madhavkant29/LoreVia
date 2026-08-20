@@ -1,8 +1,10 @@
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from app.models.book import Book, Chapter, Series, SeriesBook
+from app.models.intelligence import WorldElement, WorldNote
 from app.utils.books.manuscript import (
     serialize_manuscript_content,
 )
@@ -232,6 +234,96 @@ async def test_world_building_documents_gap_detection_and_notes(client, db, monk
     )
     assert listed_overrides.status_code == 200
     assert any(item["canonical_name"] == "Sofya Semyonovna" for item in listed_overrides.json())
+
+
+@pytest.mark.asyncio
+async def test_world_note_rejects_elements_from_other_owned_and_other_user_books(client, db):
+    owner_headers, owner_id = await _register_user(
+        client, f"world-note-owner-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    _, other_user_id = await _register_user(
+        client, f"world-note-other-{uuid.uuid4().hex[:8]}@lorevia.app"
+    )
+    target_book = Book(
+        user_id=owner_id,
+        title="Target World",
+        format="pdf",
+        s3_key="world-notes/target.pdf",
+        status="ready",
+        mode="author",
+    )
+    other_owned_book = Book(
+        user_id=owner_id,
+        title="Other Owned World",
+        format="pdf",
+        s3_key="world-notes/other-owned.pdf",
+        status="ready",
+        mode="author",
+    )
+    other_user_book = Book(
+        user_id=other_user_id,
+        title="Other User World",
+        format="pdf",
+        s3_key="world-notes/other-user.pdf",
+        status="ready",
+        mode="author",
+    )
+    db.add_all([target_book, other_owned_book, other_user_book])
+    await db.flush()
+    target_element = WorldElement(
+        book_id=target_book.id,
+        source_scope="story",
+        element_type="location",
+        name="Target Citadel",
+    )
+    other_owned_element = WorldElement(
+        book_id=other_owned_book.id,
+        source_scope="story",
+        element_type="location",
+        name="Other Owned Citadel",
+    )
+    other_user_element = WorldElement(
+        book_id=other_user_book.id,
+        source_scope="story",
+        element_type="location",
+        name="Other User Citadel",
+    )
+    db.add_all([target_element, other_owned_element, other_user_element])
+    await db.commit()
+
+    valid_response = await client.post(
+        f"/api/v1/intelligence/{target_book.id}/world-building/notes",
+        headers=owner_headers,
+        json={
+            "world_element_id": str(target_element.id),
+            "note_type": "general_world",
+            "body": "This link stays inside the owned book.",
+        },
+    )
+    assert valid_response.status_code == 200
+    assert valid_response.json()["world_element_id"] == str(target_element.id)
+
+    for element in (other_owned_element, other_user_element):
+        response = await client.post(
+            f"/api/v1/intelligence/{target_book.id}/world-building/notes",
+            headers=owner_headers,
+            json={
+                "world_element_id": str(element.id),
+                "note_type": "general_world",
+                "body": "Must not link across book boundaries.",
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "World element not found"}
+
+    notes = (
+        (await db.execute(select(WorldNote).where(WorldNote.book_id == target_book.id)))
+        .scalars()
+        .all()
+    )
+    assert len(notes) == 1
+    assert notes[0].world_element_id == target_element.id
 
 
 @pytest.mark.asyncio

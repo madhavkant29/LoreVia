@@ -1,9 +1,30 @@
-self.addEventListener("install", () => {
-  self.skipWaiting()
+const SHELL_CACHE = "lorevia-shell-v2"
+const STATIC_CACHE = "lorevia-static-v2"
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(["/offline", "/logoandtext.png", "/manifest.webmanifest"])).then(() => self.skipWaiting()))
 })
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.delete("lorevia-offline-v1").then(() => self.clients.claim())
-  )
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => ![SHELL_CACHE, STATIC_CACHE].includes(key)).map((key) => caches.delete(key)))).then(() => self.clients.claim()))
+})
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request
+  if (request.method !== "GET") return
+  const url = new URL(request.url)
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return
+  if (request.mode === "navigate") {
+    event.respondWith(fetch(request).catch(() => caches.match("/offline")))
+    return
+  }
+  if (url.pathname.startsWith("/_next/static/") || url.pathname.startsWith("/_next/image")) {
+    event.respondWith(caches.open(STATIC_CACHE).then(async (cache) => {
+      const cached = await cache.match(request)
+      if (cached) return cached
+      const response = await fetch(request)
+      if (response.ok) await cache.put(request, response.clone())
+      return response
+    }))
+  }
 })

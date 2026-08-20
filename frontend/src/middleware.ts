@@ -36,6 +36,7 @@ const PUBLIC_PAGE_ROUTES = new Set([
   "/demo",
   "/eula",
   "/pricing",
+  "/offline",
   "/privacy",
   "/public",
   "/refund",
@@ -50,6 +51,7 @@ const PUBLIC_PAGE_PREFIXES = [
   "/compare/",
   "/demo/",
   "/public/",
+  "/review/",
 ]
 
 const PRIVATE_PAGE_ROUTES = new Set([
@@ -95,6 +97,8 @@ const NON_BOOK_TOP_LEVEL_SEGMENTS = new Set([
   "pricing",
   "privacy",
   "public",
+  "review",
+  "offline",
   "quotes",
   "refund",
   "register",

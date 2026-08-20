@@ -12,12 +12,13 @@ import { booksApi } from "@/lib/api/books"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { buildAuthorLoopIssueCards, buildAuthorLoopSteps, buildCharacterReviewStats } from "@/lib/utils/authorLoop"
+import { buildAuthorLoopIssueCards, buildAuthorLoopSteps, buildCharacterReviewStats, buildProjectNextActions } from "@/lib/utils/authorLoop"
 import { applyRevisionBoardState, buildRevisionTask, todayDateKey } from "@/lib/utils/revisionIntelligence"
 import type { BetaReadAssignment, BetaReadAssignmentDetail, BetaReadFeedbackItem } from "@/types/betaRead"
 import type { Book, GoalCalendarItem, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { BetaConsensusPanel, ProjectNextActionPanel, RevisionMilestonesPanel } from "@/components/author/AuthorLoopControlPanels"
 
 const AuthorToolsNav = dynamic(
   () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
@@ -131,6 +132,10 @@ export default function AuthorLoopPage() {
     queryKey: asQueryKey(`author-loop:${bookId}:beta-assignments`),
     queryFn: () => betaReadsApi.listBookAssignments(bookId).catch(() => []),
   })
+  const { data: consensus = null, refetch: refetchConsensus } = useQuery({
+    queryKey: asQueryKey(`author-loop:${bookId}:beta-consensus`),
+    queryFn: () => betaReadsApi.getConsensus(bookId).catch(() => null),
+  })
 
   const activeAssignmentId = selectedAssignmentId ?? assignments[0]?.id ?? null
   const { data: selectedAssignment = null, refetch: refetchAssignmentDetail } = useQuery<BetaReadAssignmentDetail | null>({
@@ -157,6 +162,10 @@ export default function AuthorLoopPage() {
   )
   const selectedFeedbackItems = selectedAssignment?.feedback_items ?? []
   const latestCharacters = characters.slice(0, 6)
+  const nextActions = useMemo(
+    () => buildProjectNextActions({ book, bookId, issues: issueCards, consensus, assignmentCount: assignments.length }),
+    [assignments.length, book, bookId, consensus, issueCards]
+  )
 
   const saveWorkspacePatch = async (patch: Partial<WriterWorkspace>) => {
     const updated = await booksApi.updateWriterWorkspace(bookId, patch)
@@ -228,6 +237,7 @@ export default function AuthorLoopPage() {
         authorQuestions: authorQuestions.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
       })
       await refetchAssignments()
+      await refetchConsensus()
       setSelectedAssignmentId(created.id)
       await refetchAssignmentDetail()
       setReaderEmail("")
@@ -236,6 +246,17 @@ export default function AuthorLoopPage() {
       setStatusMessage("Could not send that beta reader invite.")
     } finally {
       setCreatingAssignment(false)
+    }
+  }
+
+  const handleCopyGuestLink = async () => {
+    if (!selectedAssignment) return
+    try {
+      const guestLink = await betaReadsApi.getGuestLink(bookId, selectedAssignment.assignment.id)
+      await navigator.clipboard.writeText(guestLink.share_url)
+      setStatusMessage("Private guest-review link copied. It expires with this assignment.")
+    } catch {
+      setStatusMessage("Could not create that guest-review link.")
     }
   }
 
@@ -266,6 +287,7 @@ export default function AuthorLoopPage() {
         authorTaskId,
       })
       await refetchAssignmentDetail()
+      await refetchConsensus()
       setStatusMessage(
         authorStatus === "resolved"
           ? "Feedback marked resolved."
@@ -313,6 +335,8 @@ export default function AuthorLoopPage() {
             )}
           />
           {statusMessage ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{statusMessage}</p> : null}
+
+          <ProjectNextActionPanel actions={nextActions} isDark={isDark} />
 
           <section className="grid gap-3 xl:grid-cols-6">
             {steps.map((step) => (
@@ -401,7 +425,7 @@ export default function AuthorLoopPage() {
             </div>
           </section>
 
-          <section className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
+          <section id="revision-control" className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>3. Run continuity scan</p>
@@ -461,6 +485,10 @@ export default function AuthorLoopPage() {
               )}
             </div>
           </section>
+
+          <RevisionMilestonesPanel bookId={bookId} isDark={isDark} />
+
+          <BetaConsensusPanel consensus={consensus} isDark={isDark} />
 
           <section className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
@@ -569,6 +597,13 @@ export default function AuthorLoopPage() {
                         <MetricCard isDark={isDark} label="Answers" value={String(selectedAssignment.feedback_summary.answer_count)} />
                         <MetricCard isDark={isDark} label="Favorites" value={String(selectedAssignment.feedback_summary.favorite_count)} />
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyGuestLink()}
+                        className={`rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-teal-300 text-slate-950" : "bg-[#1f615d] text-white"}`}
+                      >
+                        Copy no-account review link
+                      </button>
                       <div className="space-y-3">
                         {selectedFeedbackItems.length > 0 ? selectedFeedbackItems.map((item) => (
                           <div key={item.id} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>

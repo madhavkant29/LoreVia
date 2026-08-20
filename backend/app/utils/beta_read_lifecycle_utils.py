@@ -184,7 +184,7 @@ async def start_beta_read(
     db: AsyncSession,
     *,
     assignment: BetaReadAssignment,
-    current_user: User,
+    current_user: User | None,
 ) -> BetaReadAssignment:
     now = utc_now()
     if await expire_beta_assignment_if_due(db, assignment=assignment, now=now):
@@ -217,7 +217,7 @@ async def submit_beta_read_feedback(
     db: AsyncSession,
     *,
     assignment: BetaReadAssignment,
-    current_user: User,
+    current_user: User | None,
     final_feedback: str,
     final_rating: float,
 ) -> BetaReadAssignment:

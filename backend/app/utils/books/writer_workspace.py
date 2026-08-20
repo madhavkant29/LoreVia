@@ -424,6 +424,22 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
     payload["revision_recent_edits"] = _normalize_revision_recent_edits(
         source.get("revision_recent_edits") or []
     )
+    revision_rounds: list[dict[str, Any]] = []
+    for item in source.get("revision_rounds") or []:
+        if not isinstance(item, dict) or not item.get("id") or not item.get("created_at"):
+            continue
+        chapters = [chapter for chapter in (item.get("chapters") or []) if isinstance(chapter, dict)]
+        revision_rounds.append(
+            {
+                "id": str(item["id"]),
+                "label": " ".join(str(item.get("label") or "Revision round").split())[:120],
+                "note": str(item.get("note") or "").strip()[:1000] or None,
+                "created_at": str(item["created_at"]),
+                "chapters": chapters,
+                "summary": item.get("summary") if isinstance(item.get("summary"), dict) else {},
+            }
+        )
+    payload["revision_rounds"] = revision_rounds[-20:]
     payload["processing"] = (
         _normalize_internal_processing_state(source.get("processing"))
         if isinstance(source.get("processing"), dict)

@@ -119,3 +119,11 @@ def test_validate_document_upload_bytes_applies_archive_safety_to_docx(monkeypat
         validate_document_upload_bytes("story.docx", archive_buffer.getvalue(), "docx")
 
     assert exc_info.value.status_code == 400
+
+
+def test_validate_document_upload_bytes_accepts_scrivener_archive():
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("Novel.scriv/Novel.scrivx", "<ScrivenerProject />")
+
+    validate_document_upload_bytes("Novel.scrivzip", output.getvalue(), "scrivener")

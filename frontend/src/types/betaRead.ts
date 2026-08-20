@@ -98,3 +98,53 @@ export interface BetaReadAssignmentDetail {
 export interface BetaReadAssignmentListResponse {
   items: BetaReadAssignment[]
 }
+
+export interface BetaReadChapterHotspot {
+  chapter_number: number
+  signal_score: number
+  reader_count: number
+  confusing_count: number
+  boring_count: number
+  favorite_count: number
+  comment_count: number
+  disagreement: boolean
+  evidence: string[]
+}
+
+export interface BetaReadConsensus {
+  summary: {
+    reader_count: number
+    submitted_reader_count: number
+    feedback_item_count: number
+    open_feedback_count: number
+    hotspot_count: number
+    disagreement_count: number
+  }
+  chapter_hotspots: BetaReadChapterHotspot[]
+  themes: Array<{
+    label: string
+    mention_count: number
+    reader_count: number
+    chapter_numbers: number[]
+    evidence: string[]
+  }>
+  question_consensus: Array<{
+    question_id: string
+    prompt: string
+    answer_count: number
+    reader_count: number
+    answers: string[]
+  }>
+  revision_candidates: Array<{
+    id: string
+    title: string
+    description: string
+    severity: string
+    chapter_number?: number | null
+    feedback_item_ids: string[]
+  }>
+}
+
+export interface BetaReadGuestReview extends BetaReadAssignmentDetail {
+  chapters: Array<{ number: number; title: string; text: string }>
+}

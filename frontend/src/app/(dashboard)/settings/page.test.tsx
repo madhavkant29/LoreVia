@@ -8,6 +8,8 @@ const logoutMock = vi.hoisted(() => vi.fn())
 const setThemeMock = vi.hoisted(() => vi.fn())
 const portalMock = vi.hoisted(() => vi.fn())
 const setUsernameMock = vi.hoisted(() => vi.fn())
+const logoutApiMock = vi.hoisted(() => vi.fn())
+const clearAuthCookiesMock = vi.hoisted(() => vi.fn())
 const getEmailPreferencesMock = vi.hoisted(() => vi.fn())
 const updateEmailPreferencesMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
@@ -52,12 +54,16 @@ vi.mock("@/components/ui/Workspace", () => ({
 
 vi.mock("@/lib/api/auth", () => ({
   authApi: {
-    logout: vi.fn(),
+    logout: logoutApiMock,
     setReadingMode: vi.fn(),
     setDailyWordGoal: vi.fn(),
     setMessagingPermission: vi.fn(),
     setUsername: setUsernameMock,
   },
+}))
+
+vi.mock("@/lib/api/client", () => ({
+  clearAuthCookies: clearAuthCookiesMock,
 }))
 
 vi.mock("@/lib/api/billing", () => ({
@@ -111,6 +117,8 @@ describe("SettingsPage billing actions", () => {
     setThemeMock.mockReset()
     portalMock.mockReset()
     setUsernameMock.mockReset()
+    logoutApiMock.mockReset()
+    clearAuthCookiesMock.mockReset()
     getEmailPreferencesMock.mockReset()
     updateEmailPreferencesMock.mockReset()
     authState.user = {
@@ -345,6 +353,24 @@ describe("SettingsPage billing actions", () => {
 
     requestAnimationFrameMock.mockRestore()
     cancelAnimationFrameMock.mockRestore()
+  })
+
+  it("clears local auth and redirects after a failed bounded server logout", async () => {
+    logoutApiMock.mockRejectedValue(new Error("network unavailable"))
+    const view = await renderSettingsPage()
+    const button = findButton(view, "Sign out")
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(logoutApiMock).toHaveBeenCalledTimes(1)
+    expect(logoutMock).toHaveBeenCalledTimes(1)
+    expect(logoutApiMock.mock.invocationCallOrder[0]).toBeLessThan(logoutMock.mock.invocationCallOrder[0])
+    expect(clearAuthCookiesMock).toHaveBeenCalledTimes(1)
+    expect(replaceMock).toHaveBeenCalledWith("/login")
   })
 })
 

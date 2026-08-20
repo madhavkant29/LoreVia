@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from app.utils.request_context import get_request_id, get_request_user_id, set_request_user_id
 from app.workers import celery_app
 
 
@@ -52,6 +54,34 @@ def test_worker_process_init_detaches_parent_database_pool(monkeypatch):
         loop.close()
 
     dispose.assert_awaited_once_with(close=False)
+
+
+def test_task_runtime_installs_and_clears_published_request_context(monkeypatch):
+    task = SimpleNamespace(request=SimpleNamespace(headers={"request_id": "request-123"}))
+    monkeypatch.setattr(celery_app.settings, "SENTRY_DSN", None)
+
+    celery_app._task_prerun_set_request_id(task=task)
+    set_request_user_id(uuid.uuid4())
+
+    assert get_request_id() == "request-123"
+    assert get_request_user_id() is not None
+
+    celery_app._task_postrun_clear_request_id()
+
+    assert get_request_id() is None
+    assert get_request_user_id() is None
+
+
+def test_task_runtime_does_not_read_producer_signal_headers(monkeypatch):
+    task = SimpleNamespace(request=SimpleNamespace(headers={}))
+    monkeypatch.setattr(celery_app.settings, "SENTRY_DSN", None)
+
+    celery_app._task_prerun_set_request_id(
+        task=task,
+        headers={"request_id": "producer-process-only"},
+    )
+
+    assert get_request_id() is None
 
 
 @pytest.mark.asyncio

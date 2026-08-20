@@ -114,6 +114,28 @@ describe("betaReads api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:list:")
   })
 
+  it("uses the token-scoped guest endpoints for progress and feedback", async () => {
+    await betaReadsApi.getGuestReview("signed/token")
+    await betaReadsApi.markGuestChapterRead("signed/token", 4)
+    await betaReadsApi.createGuestFeedbackItem("signed/token", {
+      kind: "answer",
+      questionId: "question-4",
+      body: "The reveal landed clearly.",
+    })
+
+    expect(getMock).toHaveBeenCalledWith("/beta-review/signed%2Ftoken")
+    expect(postMock).toHaveBeenNthCalledWith(1, "/beta-review/signed%2Ftoken/progress", {
+      chapter_number: 4,
+    })
+    expect(postMock).toHaveBeenNthCalledWith(2, "/beta-review/signed%2Ftoken/feedback-items", {
+      kind: "answer",
+      chapter_number: null,
+      question_id: "question-4",
+      anchor_text: null,
+      body: "The reveal landed clearly.",
+    })
+  })
+
   it("updates author triage state for a feedback item", async () => {
     await betaReadsApi.updateBookFeedbackItem("book-1", "assignment-2", "feedback-9", {
       authorStatus: "task_created",

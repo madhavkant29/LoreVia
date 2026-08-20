@@ -44,6 +44,20 @@ describe("books api", () => {
     expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:chapter-versions:7:")
   })
 
+  it("binds Workflow Bridge apply requests to the signed preview", async () => {
+    const file = new File(["draft"], "draft.docx")
+
+    await booksApi.applyWorkflowBridge("book-1", file, "signed-preview-token")
+
+    const [path, payload] = postMock.mock.calls[0]
+    expect(path).toBe("/books/book-1/workflow-bridge/apply")
+    expect(payload).toBeInstanceOf(FormData)
+    expect((payload as FormData).get("file")).toBe(file)
+    expect((payload as FormData).get("preview_token")).toBe("signed-preview-token")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("reader:book-1:")
+  })
+
   it("confirms upload charge when reprocessing manuscript", async () => {
     await booksApi.reprocessManuscript("book-1")
 

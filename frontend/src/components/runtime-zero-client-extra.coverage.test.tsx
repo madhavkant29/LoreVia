@@ -248,12 +248,14 @@ describe("zero-coverage client runtime components", () => {
     expect(unregister).toHaveBeenCalled()
   })
 
-  it("keeps the production service worker network-only", () => {
+  it("caches only the offline shell and public static assets", () => {
     const source = readFileSync("public/sw.js", "utf8")
 
-    expect(source).not.toContain('addEventListener("fetch"')
-    expect(source).not.toContain("caches.open")
-    expect(source).toContain('caches.delete("lorevia-offline-v1")')
+    expect(source).toContain('addEventListener("fetch"')
+    expect(source).toContain('url.pathname.startsWith("/api/")')
+    expect(source).toContain('request.mode === "navigate"')
+    expect(source).toContain('"/offline"')
+    expect(source).toContain('url.pathname.startsWith("/_next/static/")')
   })
 })
 

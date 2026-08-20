@@ -135,6 +135,7 @@ DEFAULT_WRITER_WORKSPACE = {
         "completed_finding_id": None,
     },
     "revision_recent_edits": [],
+    "revision_rounds": [],
     "index_format": "arabic",
     "reprocess": {
         "auto_reprocess_enabled": True,

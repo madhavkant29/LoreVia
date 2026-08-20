@@ -769,6 +769,7 @@ export interface WriterWorkspace {
   typewriter_mode?: TypewriterModeSettings
   manuscript_layout?: ManuscriptLayoutSettings
   structure_tree?: WorkspaceStructureNode[]
+  revision_rounds?: RevisionRound[]
   reprocess?: ReprocessMetadata
   processing?: BookProcessing | null
   index_format?: string
@@ -899,6 +900,7 @@ export interface RevisionIntelligence {
   scene_advice: RevisionActionItem[]
   confusion_map: RevisionActionItem[]
   voice_alerts: RevisionActionItem[]
+  external_signals?: RevisionActionItem[]
   priority_findings?: RevisionActionItem[]
   activation?: RevisionActivation
   analysis_complete?: boolean
@@ -909,6 +911,59 @@ export interface RevisionIntelligence {
   coverage?: Record<string, unknown>
   stale_finding_count?: number
   analysis_limitations?: string[]
+}
+
+export interface RevisionRound {
+  id: string
+  label: string
+  note?: string | null
+  created_at: string
+  chapters: Array<{
+    number: number
+    title: string
+    version_id?: string | null
+    content_version: number
+    word_count: number
+  }>
+  summary: {
+    chapter_count: number
+    word_count: number
+    scene_count: number
+    open_finding_count: number
+    high_severity_count: number
+    open_beta_feedback_count: number
+  }
+}
+
+export interface RevisionRoundComparison {
+  base_round_id: string
+  target_round_id?: string | null
+  changed_chapters: number[]
+  added_chapters: number[]
+  removed_chapters: number[]
+  chapter_delta: number
+  word_count_delta: number
+  scene_count_delta: number
+  open_finding_delta: number
+  open_beta_feedback_delta: number
+}
+
+export interface WorkflowBridgePreview {
+  format: string
+  preview_token: string
+  incoming_chapter_count: number
+  new_count: number
+  changed_count: number
+  unchanged_count: number
+  chapters: Array<{
+    incoming_number: number
+    incoming_title: string
+    matched_chapter_number?: number | null
+    status: "new" | "changed" | "unchanged"
+    incoming_word_count: number
+    current_word_count?: number | null
+  }>
+  preserved_chapter_numbers: number[]
 }
 
 export interface ContinuityEvidence {

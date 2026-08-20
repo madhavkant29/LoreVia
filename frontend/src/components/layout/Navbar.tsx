@@ -41,18 +41,18 @@ export function Navbar() {
   const showUserChrome = authHydrated && !!user
 
   const handleLogout = async () => {
-    // Clear client state IMMEDIATELY before API call to prevent race conditions
-    logout()
-    document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
-    clearAuthCookies()
     setMobileMenuOpen(false)
     setProfileMenuOpen(false)
-    router.replace("/login")
-    
-    // Then make the API call in background (don't await)
-    authApi.logout().catch(() => {
-      // ignore logout errors - client state already cleared
-    })
+    try {
+      await authApi.logout()
+    } catch {
+      // A failed remote logout must not leave authenticated client state behind.
+    } finally {
+      logout()
+      document.cookie = "lorevia_session_dead=1; Max-Age=30; Path=/; Secure; SameSite=Lax"
+      clearAuthCookies()
+      router.replace("/login")
+    }
   }
 
   useEffect(() => {

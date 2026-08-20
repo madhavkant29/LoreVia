@@ -11,7 +11,10 @@ from app.api.deps.auth import get_current_user
 from app.core.database import get_db
 from app.models.intelligence import WorldNote
 from app.schemas.world_building import WorldNoteBody, WorldNoteOut, WorldNoteStatusBody
-from app.services.world_building_access_service import get_owned_world_building_book
+from app.services.world_building_access_service import (
+    get_owned_world_building_book,
+    get_world_element_for_book,
+)
 from app.utils.billing_utils import require_author_access
 from app.utils.tag_utils import (
     ENTITY_TYPE_WORLD_NOTE,
@@ -64,6 +67,8 @@ async def create_world_note(
     require_author_access(current_user)
     world_element_id = uuid.UUID(body.world_element_id) if body.world_element_id else None
     world_document_id = uuid.UUID(body.world_document_id) if body.world_document_id else None
+    if world_element_id:
+        await get_world_element_for_book(db, book, world_element_id)
     if world_document_id:
         await get_world_building_document(db, book, world_document_id)
     note = await save_world_note(

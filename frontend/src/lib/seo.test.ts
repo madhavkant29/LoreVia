@@ -2,12 +2,35 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildBookJsonLd,
+  buildArticleJsonLd,
   buildFaqPageJsonLd,
   buildForumThreadJsonLd,
   buildProfilePageJsonLd,
 } from "./seo"
 
 describe("seo helpers", () => {
+  it("builds complete editorial article schema with truthful dates and imagery", () => {
+    expect(buildArticleJsonLd({
+      type: "BlogPosting",
+      title: "A revision guide",
+      description: "A practical guide.",
+      path: "/blog/a-revision-guide",
+      datePublished: "2026-05-14",
+      dateModified: "2026-08-08",
+      image: "/blog/heroes/a-revision-guide.webp",
+      authorName: "LoreVia Editorial",
+      wordCount: 1900,
+    })).toMatchObject({
+      "@type": "BlogPosting",
+      datePublished: "2026-05-14",
+      dateModified: "2026-08-08",
+      wordCount: 1900,
+      image: ["https://getlorevia.com/blog/heroes/a-revision-guide.webp"],
+      author: { "@type": "Organization", name: "LoreVia Editorial" },
+      publisher: { "@type": "Organization", name: "LoreVia" },
+    })
+  })
+
   it("builds faq structured data with question-answer pairs", () => {
     expect(
       buildFaqPageJsonLd([

@@ -33,23 +33,23 @@ export function PublicContentHeader({
   ] as const
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[rgba(var(--border),0.82)] bg-[#f3f4f6] dark:bg-[#171b1d]">
-      <div className="app-container flex h-[78px] items-center justify-between gap-4">
+    <header className="editorial-site-header">
+      <div className="editorial-site-header__inner">
         <Link href="/" aria-label="LoreVia home" className="transition hover:opacity-90">
-          <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-10 w-auto" priority />
+          <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-8 w-auto sm:h-9" priority />
         </Link>
 
-        <nav className="hidden items-center gap-3 md:flex">
+        <nav className="editorial-site-nav" aria-label="Editorial navigation">
           {navItems.map((item) => {
             const isActive = item.key === activeSection
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+                className={`${item.key === "demo" || item.key === "pricing" ? "hidden md:inline-flex" : "inline-flex"} editorial-site-nav__link ${
                   isActive
-                    ? "border border-[rgba(var(--border),0.84)] bg-white text-foreground dark:bg-white/10"
-                    : "text-foreground/70 hover:bg-white/70 hover:text-foreground dark:hover:bg-white/5"
+                    ? "editorial-site-nav__link--active"
+                    : ""
                 }`}
               >
                 {item.label}
@@ -58,14 +58,14 @@ export function PublicContentHeader({
           })}
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <PublicThemeToggle />
           <Link href="/login" className="hidden text-sm font-medium text-foreground/70 transition hover:text-foreground sm:inline-flex">
             Sign in
           </Link>
-          <Link href="/register" className="app-button-primary gap-2 px-4 py-2.5 text-sm">
+          <Link href="/register" className="editorial-header-cta">
             Start free
-            <ArrowIcon />
+            <span className="hidden sm:inline"><ArrowIcon /></span>
           </Link>
         </div>
       </div>

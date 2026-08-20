@@ -202,9 +202,17 @@ async def test_get_chapter_media_public_validates_token_and_download(monkeypatch
         "decode_token",
         lambda _token: {"type": "asset", "sub": str(user_id), "res": f"chapter-media:{media_id}"},
     )
+    offloaded: list[tuple[object, tuple[object, ...]]] = []
+
+    async def fake_to_thread(function, *args):
+        offloaded.append((function, args))
+        return function(*args)
+
+    monkeypatch.setattr(reader.asyncio, "to_thread", fake_to_thread)
     patch_route_dependency(monkeypatch, reader, "download_book", lambda _key: b"png")
     response = await reader.get_chapter_media_public(media_id, token="ok", db=db)
     assert response.media_type == "image/png"
+    assert offloaded and offloaded[0][1] == ("media.bin",)
 
 
 @pytest.mark.asyncio

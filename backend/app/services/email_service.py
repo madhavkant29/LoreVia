@@ -1,3 +1,4 @@
+import asyncio
 from html import escape
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -385,7 +386,7 @@ async def _send_categorized_email(
     else:
         payload["html"] = html.replace("<!-- PROMOTIONAL_FOOTER -->", "")
 
-    return _send(payload)
+    return await asyncio.to_thread(_send, payload)
 
 
 def _render_stats_grid(stats: list[tuple[str, str]]) -> str:
