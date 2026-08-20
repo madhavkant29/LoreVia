@@ -91,7 +91,7 @@ def _get_s3_client():
             signature_version="s3v4",
             connect_timeout=5,
             read_timeout=30,
-            retries={"mode": "standard", "max_attempts": 3},
+            retries={"mode": "standard", "total_max_attempts": 4},
             tcp_keepalive=True,
         ),
     )

@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.api.deps.rate_limit import rate_limit_api
 from app.core.security import create_access_token
-from app.main import api_app, app
+from app.main import _lazy_api_app, app
 from app.models.beta_read import BetaReadAssignment
 from app.models.book import Book, BookCollaborator, Chapter
 from app.models.intelligence import Notification
@@ -188,6 +188,7 @@ async def test_beta_read_flow_requires_review_and_tracks_feedback_completion(cli
 async def test_guest_beta_review_tracks_scoped_progress_without_reloading_chapters(
     client, db, monkeypatch
 ):
+    api_app = await _lazy_api_app.ensure_app()
     author = await _create_user(db, email="guest-review-author@lorevia.test", tier="author")
     book = await _create_book(db, author_id=author.id)
     await _add_book_chapter(db, book_id=book.id, chapter_number=1)

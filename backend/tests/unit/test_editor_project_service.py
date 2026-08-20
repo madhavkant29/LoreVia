@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select, update
@@ -21,7 +22,7 @@ from app.models.intelligence import (
     WorldElement,
     WorldGapAnalysis,
 )
-from app.models.operations import TaskExecution
+from app.models.operations import TaskDispatchOutbox, TaskExecution
 from app.models.tag import CustomTag
 from app.models.user import User
 
@@ -461,7 +462,13 @@ async def test_maybe_auto_reprocess_editor_project_starts_once_at_threshold(db, 
     assert triggered is True
     assert chapters_queued == 1
     assert total_words == 2000
-    assert dispatched
+    execution = await db.scalar(
+        select(TaskExecution).where(
+            TaskExecution.book_id == book.id,
+            TaskExecution.task_name == "extraction_tasks.process_chapter",
+        )
+    )
+    assert execution is not None
     assert book.writer_workspace["reprocess"]["auto_first_started_at"]
     assert book.writer_workspace["reprocess"]["last_reason"] == "auto_first_2000_words"
     charge_count = await db.scalar(
@@ -660,7 +667,7 @@ async def test_dispatch_rebuild_broker_failure_keeps_durable_work_pending(db, mo
         raise RuntimeError("queue unavailable")
 
     monkeypatch.setattr(
-        "app.workers.tasks.extraction_tasks.process_chapter_task.apply_async",
+        "app.services.task_execution_service._publish_outbox_task",
         _raise_dispatch,
     )
 
@@ -674,9 +681,33 @@ async def test_dispatch_rebuild_broker_failure_keeps_durable_work_pending(db, mo
             TaskExecution.task_name == "extraction_tasks.process_chapter",
         )
     )
+    assert execution is not None
+    outbox = await db.scalar(
+        select(TaskDispatchOutbox).where(TaskDispatchOutbox.execution_id == execution.id)
+    )
+    assert outbox is not None
+    await db.execute(
+        update(TaskDispatchOutbox)
+        .where(
+            TaskDispatchOutbox.id != outbox.id,
+            TaskDispatchOutbox.status.in_(("pending", "publish_failed")),
+        )
+        .values(status="cancelled")
+    )
+    outbox.status = "pending"
+    outbox.available_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db.commit()
+
+    from app.services.task_execution_service import publish_task_dispatch_outbox
+
+    await publish_task_dispatch_outbox(
+        db,
+        queues=("extraction", "extraction_priority"),
+        limit=1,
+    )
+    await db.refresh(execution)
 
     assert chapters_queued == 1
-    assert execution is not None
     assert execution.status == "pending_dispatch"
     assert execution.error_category == "dispatch"
     assert book.writer_workspace["processing"]["rebuild_run_id"] == "run-dispatch"

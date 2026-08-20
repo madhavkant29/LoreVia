@@ -315,7 +315,7 @@ async def test_world_note_rejects_elements_from_other_owned_and_other_user_books
         )
 
         assert response.status_code == 404
-        assert response.json() == {"detail": "World element not found"}
+        assert response.json() == {"detail": "Not found."}
 
     notes = (
         (await db.execute(select(WorldNote).where(WorldNote.book_id == target_book.id)))

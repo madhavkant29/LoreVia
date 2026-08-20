@@ -394,9 +394,8 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
     )
 
     assert response.status_code == 202
-    assert len(captured_book_tasks) == 1
 
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=12)
 
@@ -564,7 +563,7 @@ async def test_process_book_persists_isbn_and_copyright_warning(
     )
 
     assert response.status_code == 202
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
 
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=8)
@@ -691,13 +690,11 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
     )
 
     assert response.status_code == 202
-    assert len(captured_book_tasks) == 1
 
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=7)
     assert result == {"book_id": str(book_id), "chapters": 1}
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -851,7 +848,7 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
     )
 
     assert response.status_code == 202
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=6)
 
@@ -899,14 +896,6 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
 async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
     client, db, auth_headers, monkeypatch
 ):
-    captured_book_tasks: list[dict] = []
-
-    class _ProcessBookTask:
-        @staticmethod
-        def apply_async(*, args, queue, **kwargs):
-            captured_book_tasks.append({"args": args, "queue": queue, "kwargs": kwargs})
-            return None
-
     chapters = [
         {
             "number": 1,
@@ -955,7 +944,6 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
@@ -981,7 +969,7 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
     )
 
     assert response.status_code == 202
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=6)
 
@@ -1227,7 +1215,7 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
     )
 
     assert response.status_code == 202
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=6)
 
@@ -1385,7 +1373,7 @@ async def test_unresolved_relationships_become_relationship_review_records(
     )
 
     assert response.status_code == 202
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=6)
 
@@ -1486,14 +1474,12 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(
     )
 
     assert response.status_code == 202
-    assert len(captured_book_tasks) == 1
 
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=9)
 
     assert result == {"book_id": str(book_id), "chapters": 2}
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -1573,9 +1559,8 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     )
 
     assert response.status_code == 202
-    assert len(captured_book_tasks) == 1
 
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     await process_book(str(book_id), queue_wait_ms=5)
 
@@ -1682,14 +1667,13 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(
     )
 
     assert response.status_code == 202
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
 
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 3}
     assert parse_calls == [True, False]
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -1758,14 +1742,13 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
     )
 
     assert response.status_code == 202
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
 
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 2}
     assert parse_calls == [True, False]
-    assert [item["args"][1] for item in captured_chapter_tasks] == [1]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -1824,9 +1807,8 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(
     )
 
     assert response.status_code == 202
-    assert len(captured_book_tasks) == 1
 
-    book_id = uuid.UUID(str(captured_book_tasks[0]["args"][0]))
+    book_id = uuid.UUID(response.json()["book_id"])
     _bind_worker_session(monkeypatch, db)
     result = await process_book(str(book_id), queue_wait_ms=12)
 
