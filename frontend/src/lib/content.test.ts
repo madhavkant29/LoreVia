@@ -59,8 +59,8 @@ describe("content helpers", () => {
   })
 
   it("exposes the complete public blog and answer inventory", () => {
-    expect(blogArticles).toHaveLength(30)
-    expect(answerPages).toHaveLength(20)
+    expect(blogArticles).toHaveLength(50)
+    expect(answerPages).toHaveLength(40)
   })
 
   it("exposes public content entries with stable publish dates for sitemap generation", () => {
@@ -83,11 +83,11 @@ describe("content helpers", () => {
   })
 
   it("uses the newest public content date for hub pages", () => {
-    expect(getLatestContentPublishedAt()).toBe("2026-08-09")
+    expect(getLatestContentPublishedAt()).toBe("2026-08-28")
     expect(getAllPublicContentEntries()).toContainEqual(
       expect.objectContaining({
         path: "/blog",
-        publishedAt: "2026-08-09",
+        publishedAt: "2026-08-28",
         type: "hub",
       }),
     )
