@@ -8,8 +8,7 @@ import {
   countWarnings,
   deriveLibraryCollections,
   deriveLibraryMetrics,
-  estimateTargetWordCount,
-  estimateWordCount,
+  getBookWordCount,
   formatNumber,
   formatRelativeTime,
   getActiveUnit,
@@ -102,10 +101,9 @@ describe("LibraryClient helpers", () => {
     expect(getBookUpdatedAt(processingBook)).toBe("2026-06-06T00:00:00Z")
     expect(getActiveUnit(processingBook)).toBe(4)
     expect(getProgressLine(processingBook)).toBe("Chapter 4 - The Ash Gate")
-    expect(estimateWordCount(processingBook)).toBe(18_000)
-    expect(estimateWordCount(screenplay)).toBe(3_600)
-    expect(estimateTargetWordCount(screenplay, 3_600)).toBe(18_000)
-    expect(estimateTargetWordCount(processingBook, 18_000)).toBe(100_000)
+    expect(getBookWordCount(processingBook)).toBe(0)
+    expect(getBookWordCount(screenplay)).toBe(0)
+    expect(getBookWordCount(buildBook({ id: "measured", title: "Measured", total_words: 12_345 }))).toBe(12_345)
   })
 
   it("filters and sorts books consistently", () => {

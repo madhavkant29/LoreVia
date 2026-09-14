@@ -7,19 +7,28 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.feature_flags import (
+    require_cursor_page_apis_enabled,
+    require_indexed_search_enabled,
+)
 from app.api.v1.routes import manuscript_annotations, manuscript_scene_history
 from app.core.database import get_db
 from app.models.book import Chapter, ChapterVersion, NovelScene
 from app.schemas.books import (
+    ChapterContentSaveBody,
+    ChapterContentSaveOut,
     ChapterVersionDetailOut,
     ChapterVersionOut,
     ChapterVersionRestoreStatusOut,
     ManuscriptWorkspaceTreeOut,
     NovelSceneBody,
     NovelSceneOut,
+    NovelScenePageOut,
     WorkspaceSearchBody,
+    WorkspaceSearchPageOut,
     WorkspaceSearchResultOut,
 )
+from app.services.chapter_content_service import save_chapter_content
 from app.utils.billing_utils import require_author_access
 from app.utils.books.chapter_versions import (
     delete_chapter,
@@ -36,12 +45,15 @@ from app.utils.books.collaboration_access import (
 )
 from app.utils.books.scene_records import (
     delete_novel_scene,
+    get_novel_scene,
     list_novel_scenes,
+    list_novel_scenes_page,
     save_novel_scene,
 )
 from app.utils.books.workspace_search import (
     build_manuscript_workspace_tree,
     search_author_workspace,
+    search_author_workspace_page,
 )
 
 router = APIRouter()
@@ -49,9 +61,30 @@ router.include_router(manuscript_annotations.router)
 router.include_router(manuscript_scene_history.router)
 
 
+@router.put(
+    "/{book_id}/chapters/{chapter_number}/content",
+    response_model=ChapterContentSaveOut,
+)
+async def put_chapter_content(
+    book_id: uuid.UUID,
+    chapter_number: int,
+    body: ChapterContentSaveBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await save_chapter_content(
+        db,
+        book_id=book_id,
+        chapter_number=chapter_number,
+        current_user=current_user,
+        body=body,
+    )
+
+
 @router.get("/{book_id}/workspace/tree", response_model=ManuscriptWorkspaceTreeOut)
 async def get_manuscript_workspace_tree(
     book_id: uuid.UUID,
+    include_scene_bodies: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -65,6 +98,7 @@ async def get_manuscript_workspace_tree(
         book=book,
         user_id=current_user.id,
         collaborator=collaborator,
+        include_scene_bodies=include_scene_bodies,
     )
 
 
@@ -91,6 +125,43 @@ async def search_workspace(
         regex=body.regex,
         filters=body.filters.model_dump(),
         collaborator=collaborator,
+        limit=body.limit,
+    )
+
+
+@router.post(
+    "/{book_id}/workspace/search/page",
+    response_model=WorkspaceSearchPageOut,
+    dependencies=[
+        Depends(require_cursor_page_apis_enabled),
+        Depends(require_indexed_search_enabled),
+    ],
+)
+async def search_workspace_page(
+    book_id: uuid.UUID,
+    body: WorkspaceSearchBody,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Cursor page for workspace search; keep the list route for legacy clients."""
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot search the author workspace.")
+    if collaborator is None:
+        require_author_access(current_user)
+    return await search_author_workspace_page(
+        db,
+        book=book,
+        user_id=current_user.id,
+        query=body.query,
+        scopes=body.scopes,
+        case_sensitive=body.case_sensitive,
+        whole_word=body.whole_word,
+        regex=body.regex,
+        filters=body.filters.model_dump(),
+        collaborator=collaborator,
+        limit=body.limit,
+        cursor=body.cursor,
     )
 
 
@@ -122,6 +193,61 @@ async def get_novel_scenes(
         status=status,
         query=query,
     )
+
+
+@router.get(
+    "/{book_id}/scenes/page",
+    response_model=NovelScenePageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def get_novel_scenes_page(
+    book_id: uuid.UUID,
+    chapter_number: int | None = Query(None, ge=1),
+    status: str | None = Query(None),
+    query: str | None = Query(None),
+    include_body: bool = Query(False),
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=1024),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot edit the manuscript.")
+    if (
+        collaborator
+        and chapter_number is not None
+        and not collaboration_allows_chapter(collaborator, chapter_number)
+    ):
+        raise HTTPException(403, "This share cannot access that chapter.")
+    if collaborator is None:
+        require_author_access(current_user)
+    return await list_novel_scenes_page(
+        db,
+        book=book,
+        collaborator=collaborator,
+        chapter_number=chapter_number,
+        status=status,
+        query=query,
+        include_body=include_body,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+@router.get("/{book_id}/scenes/{scene_id}", response_model=NovelSceneOut)
+async def get_novel_scene_detail(
+    book_id: uuid.UUID,
+    scene_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, current_user)
+    if collaborator and not collaboration_can_edit(collaborator):
+        raise HTTPException(403, "This share cannot edit the manuscript.")
+    if collaborator is None:
+        require_author_access(current_user)
+    return await get_novel_scene(db, book=book, scene_id=scene_id, collaborator=collaborator)
 
 
 @router.post("/{book_id}/scenes", response_model=NovelSceneOut)

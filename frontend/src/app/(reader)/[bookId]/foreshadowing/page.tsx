@@ -33,8 +33,8 @@ export default function ForeshadowingPage() {
           title="Foreshadowing signals"
           description="Review planted details and early clues from available chapters without exposing unread material."
           actions={(
-            <Link href="/library" className="app-button-secondary">
-              Library
+            <Link href={`/${bookId}`} className="app-button-secondary">
+              Home
             </Link>
           )}
         />

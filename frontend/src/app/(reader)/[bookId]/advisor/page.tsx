@@ -11,6 +11,7 @@ import { buildDailyCapEventDetail } from "@/lib/limits/dailyCap"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
+import { useAdaptivePolling } from "@/lib/hooks/useAdaptivePolling"
 import { saveContextualVaultNote } from "@/lib/utils/notes"
 import { Button } from "@/components/ui/Button"
 import { Skeleton } from "@/components/ui/Skeleton"
@@ -107,10 +108,9 @@ export default function AdvisorPage() {
 
   const [suggestionsPayload, setSuggestionsPayload] = useState<{ suggestions: AdvisorSuggestion[]; meta: AdvisorScanMeta } | null>(null)
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
-  const [scanJobId, setScanJobId] = useState<string | null>(null)
   const [scanStatus, setScanStatus] = useState<"idle" | "scanning" | "complete" | "failed">("idle")
   const [scanError, setScanError] = useState<string | null>(null)
-  const scanPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [scanJobId, setScanJobId] = useState<string | null>(null)
 
   const loadSuggestions = useCallback(async () => {
     if (!canUseAuthorMode) {
@@ -132,6 +132,44 @@ export default function AdvisorPage() {
     void loadSuggestions()
   }, [loadSuggestions])
 
+  const pollScanJob = useCallback(async ({ signal }: { signal: AbortSignal }) => {
+    if (!scanJobId) throw new Error("Missing advisor scan job")
+    const response = await intelligenceApi.advisorSuggestionsJobStatus(
+      bookId,
+      scanJobId,
+      signal,
+    )
+    if (response.status === "complete" && response.result) {
+      setSuggestionsPayload(response.result)
+      setScanStatus("complete")
+      setScanJobId(null)
+    } else if (response.status === "failed") {
+      setScanStatus("failed")
+      setScanError(response.error || "Scan failed")
+      setScanJobId(null)
+    }
+    return response
+  }, [bookId, scanJobId])
+
+  const scanPolling = useAdaptivePolling({
+    enabled: Boolean(scanJobId),
+    poll: pollScanJob,
+    getProgress: (job) => job.status,
+    isTerminal: (job) => job.status === "complete" || job.status === "failed",
+    initialDelayMs: 1_000,
+    maxDelayMs: 8_000,
+    timeoutMs: 4 * 60 * 1_000,
+    resetKey: scanJobId,
+    onError: (err) => setScanError(err instanceof Error ? err.message : "Polling failed"),
+  })
+
+  useEffect(() => {
+    if (!scanPolling.timedOut) return
+    setScanJobId(null)
+    setScanStatus("failed")
+    setScanError("Scan timed out")
+  }, [scanPolling.timedOut])
+
   const startScan = useCallback(async () => {
     if (!canUseAuthorMode) {
       setScanStatus("failed")
@@ -149,54 +187,11 @@ export default function AdvisorPage() {
         return
       }
       setScanJobId(job_id)
-      pollScanJob(job_id)
     } catch (err: unknown) {
       setScanStatus("failed")
       setScanError(err instanceof Error ? err.message : "Scan failed to start")
     }
-  }, [bookId, canUseAuthorMode, scanStatus, loadSuggestions])
-
-  const pollScanJob = useCallback((jobId: string) => {
-    const poll = async (attempt: number) => {
-      try {
-        const response = await intelligenceApi.advisorSuggestionsJobStatus(bookId, jobId)
-        if (response.status === "complete" && response.result) {
-          setSuggestionsPayload(response.result)
-          setScanStatus("complete")
-          setScanJobId(null)
-          return
-        }
-        if (response.status === "failed") {
-          setScanStatus("failed")
-          setScanError(response.error || "Scan failed")
-          setScanJobId(null)
-          return
-        }
-        if (attempt < 120) {
-          scanPollRef.current = setTimeout(() => poll(attempt + 1), attempt < 10 ? 1000 : 2000)
-        } else {
-          setScanStatus("failed")
-          setScanError("Scan timed out")
-          setScanJobId(null)
-        }
-      } catch (err: unknown) {
-        if (attempt < 120) {
-          scanPollRef.current = setTimeout(() => poll(attempt + 1), attempt < 10 ? 1000 : 2000)
-        } else {
-          setScanStatus("failed")
-          setScanError(err instanceof Error ? err.message : "Polling failed")
-          setScanJobId(null)
-        }
-      }
-    }
-    poll(0)
-  }, [bookId])
-
-  useEffect(() => {
-    return () => {
-      if (scanPollRef.current) clearTimeout(scanPollRef.current)
-    }
-  }, [])
+  }, [bookId, canUseAuthorMode, loadSuggestions, scanStatus])
   const suggestions = suggestionsPayload?.suggestions ?? []
   const suggestionsMeta = suggestionsPayload?.meta ?? defaultScanMeta
 
@@ -277,7 +272,6 @@ export default function AdvisorPage() {
       const res = await intelligenceApi.advisorMessageStream(
         bookId,
         next,
-        greeting?.stats.total_chapters ?? 9999,
         {
           onDelta: (content) => {
             if (!content) return
@@ -317,7 +311,7 @@ export default function AdvisorPage() {
       setLoading(false)
       inputRef.current?.focus()
     }
-  }, [bookId, canUseAuthorMode, greeting, loading, messages])
+  }, [bookId, canUseAuthorMode, loading, messages])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {

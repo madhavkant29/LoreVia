@@ -7,10 +7,19 @@ export const metadata: Metadata = {
   description: "Read the LoreVia compliance notice for usage, content, and account obligations.",
 }
 
-export default function CompliancePage() {
+export default async function CompliancePage({
+  params,
+}: {
+  params: Promise<{ bookId: string }>
+}) {
+  const { bookId } = await params
+
   return (
     <main className="min-h-screen bg-[#071211] px-6 py-16 text-white">
       <div className="mx-auto max-w-4xl">
+        <Link href={`/${bookId}`} className="text-sm font-medium text-slate-300 underline decoration-white/30 underline-offset-4 hover:text-white">
+          Home
+        </Link>
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">LoreVia</p>
         <h1 className="mt-3 text-4xl font-semibold text-white">Compliance Notice</h1>
         <p className="mt-4 text-sm text-slate-500">Effective date: April 28, 2026</p>
@@ -50,8 +59,8 @@ export default function CompliancePage() {
           </p>
           <p className="pt-2 text-slate-400">
             Back to{" "}
-            <Link href="/" className="text-white underline decoration-white/30 underline-offset-4">
-              landing page
+            <Link href={`/${bookId}`} className="text-white underline decoration-white/30 underline-offset-4">
+              book home
             </Link>
             .
           </p>

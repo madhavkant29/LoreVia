@@ -31,7 +31,7 @@ export function ProjectOverviewCard({
       <div className="mt-6 grid gap-4 sm:grid-cols-4">
         {stats.map((stat) => (
           <div key={stat.label} className="min-w-0">
-            <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{stat.label}</p>
+            <p className={`text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{stat.label}</p>
             <p className={`mt-2 text-2xl font-semibold tracking-tight ${isDark ? "text-white" : "text-slate-950"}`}>{stat.value}</p>
             <div className="mt-5 flex items-end gap-2">
               <Icon name={stat.icon} className={`h-5 w-5 ${stat.color}`} />

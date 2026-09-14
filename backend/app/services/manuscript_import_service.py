@@ -8,12 +8,17 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
+from app.core.config import settings
 from app.core.redis import mark_user_dashboard_cache_dirty
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.progress import ReadingProgress
 from app.schemas.books import ChapterConsistencyReport, ManuscriptImportResult
+from app.services.notification_service import enqueue_revision_digest_refresh
 from app.services.processing_allowance_service import ensure_active_word_capacity
-from app.services.task_execution_service import enqueue_analysis_execution
+from app.services.task_execution_service import (
+    enqueue_analysis_execution,
+    enqueue_extraction_execution_batch,
+)
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.books.chapter_versions import snapshot_chapter_version
 from app.utils.books.manuscript import (
@@ -84,6 +89,14 @@ async def persist_manuscript_import(
     daily_words_added = 0
     imported_content_versions: dict[int, int] = {}
     imported_numbers: list[int] = []
+    analysis_candidate_numbers: list[int] = []
+    queued_extraction_chapters: list[tuple[uuid.UUID, int]] = []
+    inline_processing_limit = max(0, int(settings.MANUSCRIPT_IMPORT_INLINE_PROCESSING_MAX_CHAPTERS))
+    queue_extraction_after_import = (
+        should_auto_reprocess
+        and not getattr(book, "is_editor_project", False)
+        and len(import_jobs) > inline_processing_limit
+    )
 
     from app.services.editor_project_service import update_reprocess_metadata
 
@@ -173,8 +186,12 @@ async def persist_manuscript_import(
             db.add(writing_activity)
 
         images = [*list(job.get("images") or []), *existing_media_payloads]
-        if getattr(book, "is_editor_project", False) or not should_auto_reprocess:
-            await persist_editor_chapter_content(
+        if (
+            getattr(book, "is_editor_project", False)
+            or not should_auto_reprocess
+            or queue_extraction_after_import
+        ):
+            chapter = await persist_editor_chapter_content(
                 db,
                 book,
                 chapter_number=job_number,
@@ -188,6 +205,10 @@ async def persist_manuscript_import(
             )
             if not should_auto_reprocess:
                 update_reprocess_metadata(book, add_pending_chapters=[job_number])
+            elif queue_extraction_after_import:
+                queued_extraction_chapters.append((chapter.id, job_number))
+            if not getattr(book, "is_editor_project", False) and not queue_extraction_after_import:
+                analysis_candidate_numbers.append(job_number)
         else:
             await _process_chapter(
                 db,
@@ -205,6 +226,7 @@ async def persist_manuscript_import(
                 dispatch_analysis=False,
                 check_book_completion=False,
             )
+            analysis_candidate_numbers.append(job_number)
 
         if resolved_book_work_type != "screenplay":
             extracted_scenes = extract_novel_scene_candidates(
@@ -288,6 +310,16 @@ async def persist_manuscript_import(
         db.add(notification)
         await db.commit()
 
+    if queued_extraction_chapters:
+        await enqueue_extraction_execution_batch(
+            db,
+            book_id=book.id,
+            user_id=book.user_id,
+            chapters=queued_extraction_chapters,
+            chapters_total=len(queued_extraction_chapters),
+            run_kind="manuscript_import",
+        )
+
     if book.mode == "author" and total_chapters > 0:
         progress = (
             await db.execute(
@@ -327,7 +359,7 @@ async def persist_manuscript_import(
 
     chapter_reports: list[ChapterConsistencyReport] = []
     chapters_for_analysis: list[tuple[int, Chapter]] = []
-    for number in [] if getattr(book, "is_editor_project", False) else imported_numbers:
+    for number in [] if getattr(book, "is_editor_project", False) else analysis_candidate_numbers:
         chapter = (
             await db.execute(
                 select(Chapter).where(Chapter.book_id == book.id, Chapter.number == number)
@@ -366,6 +398,7 @@ async def persist_manuscript_import(
 
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
     await db.commit()
+    await enqueue_revision_digest_refresh(user_id=book.user_id, book_id=book.id)
 
     return ManuscriptImportResult(
         status="imported",

@@ -58,3 +58,20 @@ def test_scrivener_import_rejects_oversized_expanded_documents():
         parse_scrivener_archive(output.getvalue())
 
     assert exc_info.value.status_code == 413
+
+
+def test_scrivener_import_rejects_xml_entities():
+    project = b"""<?xml version="1.0" encoding="utf-8"?>
+    <!DOCTYPE project [<!ENTITY external SYSTEM "file:///etc/passwd">]>
+    <ScrivenerProject><Binder><BinderItem Type="DraftFolder"><Children>
+    <BinderItem UUID="CHAPTER-1" Type="Text"><Title>&external;</Title></BinderItem>
+    </Children></BinderItem></Binder></ScrivenerProject>"""
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Draft.scriv/Draft.scrivx", project)
+        archive.writestr("Draft.scriv/Files/Data/CHAPTER-1/content.txt", "Text")
+
+    with pytest.raises(HTTPException) as exc_info:
+        parse_scrivener_archive(output.getvalue())
+
+    assert exc_info.value.status_code == 400

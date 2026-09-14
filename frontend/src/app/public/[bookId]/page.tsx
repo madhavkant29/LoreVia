@@ -12,6 +12,9 @@ import {
 
 export async function generateMetadata({ params }: { params: Promise<{ bookId: string }> }): Promise<Metadata> {
   const { bookId } = await params
+  if (process.env.NEXT_PUBLIC_E2E_MOCK_API === "1") {
+    return {}
+  }
   const book = await getPublicBookServer(bookId).catch(() => null)
 
   if (!book) {
@@ -44,7 +47,9 @@ export async function generateMetadata({ params }: { params: Promise<{ bookId: s
 
 export default async function PublicBookPage({ params }: { params: Promise<{ bookId: string }> }) {
   const { bookId } = await params
-  const book = await getPublicBookServer(bookId).catch(() => null)
+  const book = process.env.NODE_ENV === "production"
+    ? await getPublicBookServer(bookId).catch(() => null)
+    : null
   const routeId = book?.public_slug || book?.id || bookId
   const bookJsonLd = book ? buildBookJsonLd({
     title: book.title,

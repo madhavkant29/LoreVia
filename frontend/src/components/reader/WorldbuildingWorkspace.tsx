@@ -27,7 +27,6 @@ import {
   buildUploadLimitNote,
   countWorldDocumentWords,
   findSelectedWorldDocument,
-  getApiErrorDetail,
   getOpenGapIds,
   getSuggestionElements,
   getVisibleItems,

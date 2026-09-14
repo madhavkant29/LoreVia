@@ -10,14 +10,14 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants = {
   primary:   "border border-transparent bg-[rgb(var(--accent))] text-white hover:opacity-95",
-  secondary: "border border-[rgba(var(--border),0.9)] bg-white/80 text-[rgb(var(--foreground))] hover:bg-white dark:bg-white/5 dark:hover:bg-white/10",
+  secondary: "border border-[rgba(var(--border),0.5)] bg-white/80 text-[rgb(var(--foreground))] hover:bg-white dark:bg-white/5 dark:hover:bg-white/10",
   ghost:     "text-[rgb(var(--muted-foreground))] hover:text-[rgb(var(--foreground))] hover:bg-[rgba(var(--foreground),0.05)]",
   danger:    "bg-red-600 text-white border border-red-600 hover:bg-red-700 hover:border-red-700",
 }
 const sizes = {
-  sm: "min-h-11 px-3 py-2 text-xs rounded-md",
-  md: "min-h-11 px-4 py-2.5 text-sm rounded-md",
-  lg: "min-h-12 px-6 py-3 text-base rounded-md",
+  sm: "min-h-11 px-3 py-2 text-xs rounded-sm",
+  md: "min-h-11 px-4 py-2.5 text-sm rounded-sm",
+  lg: "min-h-12 px-6 py-3 text-base rounded-sm",
 }
 
 export const Button = forwardRef<HTMLButtonElement, Props>(function Button(

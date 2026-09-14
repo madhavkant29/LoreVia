@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI, OpenAIError
+from openai import OpenAIError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_chat
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.llm import get_openai_client
 from app.core.redis import (
     cache_get,
     cache_set,
@@ -34,8 +35,15 @@ from app.schemas.intelligence import (
     GroundedCitationOut,
     QARequest,
 )
+from app.services.llm_circuit_breaker_service import (
+    acquire_provider_circuit_permit,
+    record_provider_failure,
+    record_provider_success,
+    release_provider_circuit_permit,
+)
 from app.services.llm_control_service import (
     fail_llm_reservation,
+    finish_llm_reservation,
     finish_llm_reservation_counts,
     reserve_llm_call,
 )
@@ -49,11 +57,13 @@ from app.utils.intelligence_utils import (
 from app.utils.llm_usage_utils import (
     assert_llm_token_capacity,
     create_tracked_chat_completion,
-    estimate_chat_completion_tokens,
+    estimate_chat_completion_token_parts,
+    is_llm_call_error,
+    is_transient_llm_provider_error,
+    public_llm_http_error_message,
     record_llm_usage_counts,
 )
 from app.utils.logging.errors import public_error_message
-from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
 GROUNDED_QA_STREAM_EXCEPTIONS = (OpenAIError, RuntimeError, ValueError, SQLAlchemyError)
@@ -88,7 +98,9 @@ async def cross_book_intelligence(
 
     book_ids = [item.id for item in comparison_books]
     sorted_book_id_strs = sorted(str(bid) for bid in book_ids)
-    books_hash = hashlib.md5(",".join(sorted_book_id_strs).encode()).hexdigest()[:12]
+    books_hash = hashlib.md5(
+        ",".join(sorted_book_id_strs).encode(), usedforsecurity=False
+    ).hexdigest()[:12]
     snapshot_hash = await compute_cross_book_snapshot_hash(db, book_ids)
 
     cached = await get_cross_book_intelligence_cache(books_hash, snapshot_hash)
@@ -106,10 +118,6 @@ async def cross_book_intelligence(
     }
     await set_cross_book_intelligence_cache(books_hash, snapshot_hash, payload)
     return CrossBookIntelligenceOut(**payload)
-
-
-def get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
 
 
 def _intelligence_sse(event: str, data: dict[str, Any]) -> str:
@@ -179,32 +187,28 @@ async def qa_endpoint(
         "- When grounded, mention the most relevant chapter number directly in the answer.\n"
     )
 
-    client = get_client()
-    try:
-        response = await create_tracked_chat_completion(
-            client=client,
-            feature="grounded_qa",
-            model=settings.OPENAI_INTEL_MODEL,
-            db=db,
-            user_id=current_user.id,
-            book_id=book.id,
-            temperature=0.2,
-            max_tokens=220,
-            messages=[
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": f"Question: {body.question}\n\nContext:\n\n"
-                    + "\n\n".join(context_blocks),
-                },
-            ],
-        )
-        answer = (response.choices[0].message.content or "").strip()
-        payload = {"answer": answer, "citations": citations}
-        await cache_set(cache_key, payload, settings.REDIS_TTL_SUMMARY)
-        return _grounded_answer_out_from_payload(payload)
-    finally:
-        await client.close()
+    response = await create_tracked_chat_completion(
+        client=get_openai_client(),
+        feature="grounded_qa",
+        model=settings.OPENAI_INTEL_MODEL,
+        db=db,
+        user_id=current_user.id,
+        book_id=book.id,
+        temperature=0.2,
+        max_tokens=220,
+        messages=[
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": f"Question: {body.question}\n\nContext:\n\n"
+                + "\n\n".join(context_blocks),
+            },
+        ],
+    )
+    answer = (response.choices[0].message.content or "").strip()
+    payload = {"answer": answer, "citations": citations}
+    await cache_set(cache_key, payload, settings.REDIS_TTL_SUMMARY)
+    return _grounded_answer_out_from_payload(payload)
 
 
 @router.post("/{book_id}/qa-stream")
@@ -265,21 +269,35 @@ async def qa_stream_endpoint(
     ]
 
     async def event_stream():
-        client = get_client()
+        client = get_openai_client()
         answer_parts: list[str] = []
         usage_counts: tuple[int, int, int] | None = None
         reservation = None
+        permit = None
+        provider_completed = False
+        provider_failure_transient: bool | None = None
         try:
-            reservation = await reserve_llm_call(
-                user_id=current_user.id,
-                estimated_tokens=estimate_chat_completion_tokens(
-                    {"messages": llm_messages, "max_tokens": 220}
-                ),
-                feature="grounded_qa",
-                operation="chat",
-                model=settings.OPENAI_INTEL_MODEL,
-                book_id=book.id,
+            estimated_prompt_tokens, estimated_completion_tokens = (
+                estimate_chat_completion_token_parts({"messages": llm_messages, "max_tokens": 220})
             )
+            permit = await acquire_provider_circuit_permit(
+                provider="openai", model=settings.OPENAI_INTEL_MODEL
+            )
+            try:
+                reservation = await reserve_llm_call(
+                    user_id=current_user.id,
+                    estimated_prompt_tokens=estimated_prompt_tokens,
+                    estimated_completion_tokens=estimated_completion_tokens,
+                    feature="grounded_qa",
+                    operation="chat",
+                    model=settings.OPENAI_INTEL_MODEL,
+                    book_id=book.id,
+                    budget_class="interactive",
+                )
+            except BaseException:
+                await release_provider_circuit_permit(permit)
+                permit = None
+                raise
             yield _intelligence_sse("stage", {"message": "Searching grounded context..."})
             stream = await client.chat.completions.create(
                 model=settings.OPENAI_INTEL_MODEL,
@@ -303,6 +321,7 @@ async def qa_stream_endpoint(
                     if content:
                         answer_parts.append(content)
                         yield _intelligence_sse("delta", {"content": content})
+            provider_completed = True
 
             if usage_counts is not None:
                 await finish_llm_reservation_counts(
@@ -311,7 +330,9 @@ async def qa_stream_endpoint(
                     completion_tokens=usage_counts[1],
                     total_tokens=usage_counts[2],
                 )
-                reservation = None
+            else:
+                await finish_llm_reservation(reservation, None)
+            reservation = None
 
             payload = {"answer": "".join(answer_parts).strip(), "citations": citations}
             await cache_set(cache_key, payload, settings.REDIS_TTL_SUMMARY)
@@ -323,8 +344,10 @@ async def qa_stream_endpoint(
             if reservation is not None:
                 await fail_llm_reservation(reservation)
                 reservation = None
-            yield _intelligence_sse("error", {"error": str(exc.detail)})
-        except GROUNDED_QA_STREAM_EXCEPTIONS:
+            yield _intelligence_sse("error", {"error": public_llm_http_error_message(exc)})
+        except GROUNDED_QA_STREAM_EXCEPTIONS as exc:
+            if not provider_completed and is_llm_call_error(exc):
+                provider_failure_transient = is_transient_llm_provider_error(exc)
             if reservation is not None:
                 await fail_llm_reservation(reservation)
                 reservation = None
@@ -332,7 +355,16 @@ async def qa_stream_endpoint(
         finally:
             if reservation is not None:
                 await fail_llm_reservation(reservation)
-            await client.close()
+            if permit is not None:
+                if provider_completed:
+                    await record_provider_success(permit)
+                elif provider_failure_transient is not None:
+                    await record_provider_failure(
+                        permit,
+                        transient=provider_failure_transient,
+                    )
+                else:
+                    await release_provider_circuit_permit(permit)
 
     return StreamingResponse(
         event_stream(),

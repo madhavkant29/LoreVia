@@ -74,7 +74,7 @@ export default function StatsPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-[2.2rem] font-semibold tracking-[-0.05em] text-[#1f615d] dark:text-[#f3ede4]">
-                      {stats ? stats.writing.today.words.toLocaleString() : "0"}
+                      {stats ? stats.writing.today.words.toLocaleString() : loading ? "Loading" : "Unavailable"}
                     </p>
                     <p className="text-base text-stone-600 dark:text-slate-300">words today</p>
                   </div>
@@ -154,12 +154,12 @@ export default function StatsPage() {
                       <ProgressSummary
                         label="Today"
                         current={stats.writing.today.words}
-                        target={stats.writing.today.target_words ?? 0}
+                        target={stats.writing.today.target_words}
                       />
                       <ProgressSummary
                         label="This Week"
                         current={stats.writing.this_week.words}
-                        target={stats.writing.this_week.target_words ?? 0}
+                        target={stats.writing.this_week.target_words}
                       />
                     </div>
                   </div>
@@ -336,7 +336,7 @@ function WritingHeatmapPanel({
       <div className="mt-5 flex items-center justify-between gap-4 text-sm text-stone-500 dark:text-slate-400">
         <p className="break-words">Each square represents one day. Darker shades indicate more words written.</p>
         <p className="shrink-0 text-[#1f615d] dark:text-[#69c6b1]">
-          {entriesTodayCount} {entriesTodayCount === 1 ? "active day" : "active days"}
+          {entriesTodayCount} {entriesTodayCount === 1 ? "entry today" : "entries today"}
         </p>
       </div>
     </div>
@@ -413,25 +413,25 @@ function ProgressSummary({
 }: {
   label: string
   current: number
-  target: number
+  target: number | null | undefined
 }) {
-  const progressPct = target > 0 ? Math.max(0, Math.min(100, Math.round((current / target) * 100))) : 0
+  const progressPct = target && target > 0 ? Math.max(0, Math.min(100, Math.round((current / target) * 100))) : null
 
   return (
     <div className="min-w-0 overflow-hidden rounded-lg border-2 border-slate-200 bg-[rgba(255,255,255,0.44)] p-4 dark:border-slate-700/70 dark:bg-[rgba(255,255,255,0.03)]">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{label}</p>
-        <p className="text-xs text-[rgb(var(--muted-foreground))]">{progressPct}%</p>
+        <p className="text-xs text-[rgb(var(--muted-foreground))]">{progressPct === null ? "No target" : `${progressPct}%`}</p>
       </div>
       <p className="mt-2 text-sm text-[rgb(var(--muted-foreground))]">
-        {current.toLocaleString()} / {target.toLocaleString()} words
+        {target == null ? `${current.toLocaleString()} words` : `${current.toLocaleString()} / ${target.toLocaleString()} words`}
       </p>
-      <div className="mt-3 h-2 rounded-full bg-[rgba(var(--foreground),0.08)]">
+      {progressPct !== null ? <div className="mt-3 h-2 rounded-full bg-[rgba(var(--foreground),0.08)]">
         <div
           className="h-full rounded-full bg-emerald-500"
           style={{ width: `${progressPct}%` }}
         />
-      </div>
+      </div> : null}
     </div>
   )
 }

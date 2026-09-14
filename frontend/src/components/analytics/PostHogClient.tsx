@@ -2,7 +2,12 @@
 
 import dynamic from "next/dynamic"
 import { usePathname } from "next/navigation"
+import { useReportWebVitals } from "next/web-vitals"
 import React from "react"
+import {
+  captureWebVital,
+  installBrowserErrorTelemetry,
+} from "@/lib/analytics/browserTelemetry"
 import {
   ANALYTICS_CONSENT_COOKIE,
   getAnalyticsConsentValue,
@@ -50,6 +55,10 @@ export function PostHogClient() {
   const analyticsKey = process.env.NEXT_PUBLIC_POSTHOG_KEY
   const useSquareCorners = pathname === "/blog" || pathname.startsWith("/blog/") || pathname === "/answers" || pathname.startsWith("/answers/")
 
+  useReportWebVitals((metric) => {
+    if (hasAnalyticsConsent(consentValue)) captureWebVital(metric)
+  })
+
   React.useEffect(() => {
     if (!analyticsKey) {
       setHydrated(true)
@@ -64,6 +73,11 @@ export function PostHogClient() {
       void initPostHog()
     }
   }, [analyticsKey])
+
+  React.useEffect(() => {
+    if (!analyticsKey || !hasAnalyticsConsent(consentValue)) return
+    return installBrowserErrorTelemetry()
+  }, [analyticsKey, consentValue])
 
   const enable = () => {
     writeAnalyticsConsentCookie("true")
@@ -89,6 +103,7 @@ export function PostHogClient() {
         <CookieConsent
           visible={showBanner ? "show" : "hidden"}
           cookieName={ANALYTICS_CONSENT_COOKIE}
+          containerClasses="lorevia-cookie-consent"
           enableDeclineButton
           setDeclineCookie
           declineButtonText="Not now"
@@ -97,10 +112,21 @@ export function PostHogClient() {
           onDecline={dismiss}
           style={{
             background: "rgba(0,0,0,0.92)",
+            border: "1px solid rgba(255,255,255,0.16)",
+            borderRadius: useSquareCorners ? "0" : "0.75rem",
+            bottom: "1rem",
+            boxShadow: "0 18px 55px rgba(0,0,0,0.35)",
             color: "white",
             fontSize: "13px",
+            left: "50%",
             lineHeight: "1.6",
+            maxWidth: "34rem",
+            right: "auto",
+            transform: "translateX(-50%)",
+            width: "calc(100% - 2rem)",
+            zIndex: "60",
           }}
+          contentStyle={{ flex: "1 1 18rem", margin: "12px 16px" }}
           buttonStyle={{
             background: "#6d28d9",
             color: "white",

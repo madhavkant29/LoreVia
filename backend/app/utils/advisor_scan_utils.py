@@ -4,13 +4,18 @@ import logging
 import uuid
 from typing import Any
 
-from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, OpenAIError
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAIError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.redis import get_proactive_scan_cache, set_proactive_scan_cache
+from app.core.llm import get_openai_client
+from app.core.redis import (
+    get_book_cache_version,
+    get_proactive_scan_cache,
+    set_proactive_scan_cache,
+)
 from app.models.book import Book, Chapter
 from app.models.character import Character, CharacterState
 from app.models.intelligence import ChapterSummary, CharacterRelationship, PlotThread, WorldElement
@@ -27,7 +32,6 @@ from app.utils.advisor_suggestions_utils import (
 )
 from app.utils.llm_usage_utils import create_tracked_chat_completion
 from app.utils.plot_thread_utils import derive_plot_thread_status, is_plot_thread_open
-from app.utils.retry_utils import LLM_MAX_RETRIES
 
 log = logging.getLogger(__name__)
 
@@ -587,13 +591,15 @@ async def build_advisor_suggestions_payload(
             "\n".join(recent_summary_blocks + open_thread_blocks + world_watch_blocks),
             heuristic_count,
         )
-        proactive_result = await get_proactive_scan_cache(str(book.id), proactive_cache_key)
+        cache_version = await get_book_cache_version(str(book.id))
+        proactive_result = await get_proactive_scan_cache(
+            str(book.id),
+            proactive_cache_key,
+            version=cache_version,
+        )
         if proactive_result is None:
             if settings.OPENAI_API_KEY and settings.OPENAI_INTEL_MODEL:
-                client = AsyncOpenAI(
-                    api_key=settings.OPENAI_API_KEY,
-                    max_retries=LLM_MAX_RETRIES,
-                )
+                client = get_openai_client()
                 try:
                     response = await create_tracked_chat_completion(
                         client=client,
@@ -632,7 +638,10 @@ async def build_advisor_suggestions_payload(
                         response.choices[0].message.content or "{}"
                     )
                     await set_proactive_scan_cache(
-                        str(book.id), proactive_cache_key, proactive_result
+                        str(book.id),
+                        proactive_cache_key,
+                        proactive_result,
+                        expected_version=cache_version,
                     )
                 except ADVISOR_SCAN_FALLBACK_ERRORS:
                     proactive_result = {

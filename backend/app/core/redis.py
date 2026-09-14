@@ -4,13 +4,16 @@ import json
 import logging
 import time
 import weakref
+from collections.abc import Awaitable
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
 
 from app.core.config import settings
+from app.utils.observability_metrics import record_redis_lookup
 
 _redis_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, aioredis.Redis] = (
     weakref.WeakKeyDictionary()
@@ -23,12 +26,16 @@ SUGGESTION_SCAN_CACHE_TTL_SECONDS = 10 * 60
 BOOK_AGGREGATE_CACHE_TTL_SECONDS = 2 * 60
 STORY_CONTEXT_CACHE_TTL_SECONDS = 10 * 60
 USER_DASHBOARD_CACHE_TTL_SECONDS = 2 * 60
+# Stats include usage and allowance display values, so use a shorter TTL than
+# the broader dashboard while still avoiding duplicate aggregate reads.
+USER_STATS_CACHE_TTL_SECONDS = 60
 READER_DERIVED_CACHE_TTL_SECONDS = 2 * 60
 PUBLIC_PROFILE_CACHE_TTL_SECONDS = 5 * 60
 PUBLIC_FORUM_COMMENTS_CACHE_TTL_SECONDS = 2 * 60
 SYNOPSIS_CACHE_TTL_SECONDS = 7 * 86400  # 604800
 EMBEDDING_CACHE_TTL_SECONDS = 30 * 60
 CROSS_BOOK_INTEL_CACHE_TTL_SECONDS = 30 * 60
+REVISION_INTELLIGENCE_CACHE_TTL_SECONDS = 2 * 60
 REDIS_OPERATION_EXCEPTIONS = (RedisError, TimeoutError, OSError)
 
 
@@ -46,28 +53,28 @@ CACHE_POLICIES: tuple[CachePolicy, ...] = (
         "advisor:book",
         "advisor",
         ADVISOR_CACHE_TTL_SECONDS,
-        "TTL plus advisor namespace delete after semantic book changes",
+        "Book cache-version marker in key plus TTL",
         "Postgres and LLM recomputation",
     ),
     CachePolicy(
         "advisor:series",
         "advisor",
         ADVISOR_CACHE_TTL_SECONDS,
-        "TTL plus advisor namespace delete after series/book changes",
+        "Series cache-version marker in key plus TTL",
         "Postgres and LLM recomputation",
     ),
     CachePolicy(
         "advisor:book:*:proactive",
         "advisor",
         PROACTIVE_SCAN_CACHE_TTL_SECONDS,
-        "TTL plus advisor namespace delete after semantic book changes",
+        "Book cache-version marker in key plus TTL",
         "Postgres and LLM recomputation",
     ),
     CachePolicy(
         "advisor:book:*:suggestions",
         "advisor",
         SUGGESTION_SCAN_CACHE_TTL_SECONDS,
-        "TTL plus advisor namespace delete after semantic book changes",
+        "Book cache-version marker in key plus TTL",
         "Postgres and LLM recomputation",
     ),
     CachePolicy(
@@ -111,6 +118,13 @@ CACHE_POLICIES: tuple[CachePolicy, ...] = (
         USER_DASHBOARD_CACHE_TTL_SECONDS,
         "User dashboard cache-version marker and day marker in key plus TTL",
         "Postgres user/book/progress records",
+    ),
+    CachePolicy(
+        "user_stats",
+        "dashboard",
+        USER_STATS_CACHE_TTL_SECONDS,
+        "User dashboard cache-version marker plus short TTL",
+        "Postgres usage, allowance, reading, and writing aggregates",
     ),
     CachePolicy(
         "reader_events",
@@ -217,6 +231,13 @@ CACHE_POLICIES: tuple[CachePolicy, ...] = (
         "Input snapshot hash plus TTL",
         "Postgres book/intelligence records",
     ),
+    CachePolicy(
+        "revision_intelligence",
+        "books",
+        REVISION_INTELLIGENCE_CACHE_TTL_SECONDS,
+        "Book cache-version marker in key plus TTL",
+        "Postgres manuscript and intelligence records",
+    ),
 )
 
 
@@ -240,6 +261,13 @@ async def get_redis() -> aioredis.Redis:
     client = _redis_clients.get(loop)
     if client is None:
         redis_url, redis_kwargs = _normalize_redis_url(settings.REDIS_URL)
+        redis_kwargs.setdefault(
+            "socket_connect_timeout", max(float(settings.REDIS_CONNECT_TIMEOUT_SECONDS), 0.05)
+        )
+        redis_kwargs.setdefault(
+            "socket_timeout", max(float(settings.REDIS_SOCKET_TIMEOUT_SECONDS), 0.05)
+        )
+        redis_kwargs.setdefault("health_check_interval", 30)
         client = aioredis.from_url(redis_url, decode_responses=True, **redis_kwargs)
         _redis_clients[loop] = client
     return client
@@ -260,60 +288,125 @@ async def close_all_redis_clients() -> None:
 
 
 async def cache_set(key: str, value: object, ttl: int) -> None:
-    r = await get_redis()
-    await r.setex(key, ttl, json.dumps(value, default=str))
+    await _cache_set_json_best_effort(key, value, ttl)
+
+
+async def cache_acquire_lock(key: str, value: object, ttl: int) -> bool | None:
+    try:
+        r = await get_redis()
+        return bool(
+            await _bounded_cache_operation(
+                r.set(key, json.dumps(value, default=str), ex=ttl, nx=True)
+            )
+        )
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_cache_lock_failed", extra={"cache_key": key}, exc_info=True)
+        return None
 
 
 async def cache_set_if_absent(key: str, value: object, ttl: int) -> bool:
     r = await get_redis()
-    return bool(await r.set(key, json.dumps(value, default=str), ex=ttl, nx=True))
+    return bool(
+        await _bounded_cache_operation(r.set(key, json.dumps(value, default=str), ex=ttl, nx=True))
+    )
 
 
 async def cache_get(key: str) -> object | None:
-    r = await get_redis()
-    data = await r.get(key)
-    return json.loads(data) if data else None
+    return await _cache_get_json_best_effort(key)
 
 
 async def cache_del(key: str) -> None:
-    r = await get_redis()
-    await r.delete(key)
+    try:
+        r = await get_redis()
+        await _bounded_cache_operation(r.delete(key))
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_cache_delete_failed", extra={"cache_key": key}, exc_info=True)
 
 
 async def cache_get_int(key: str, default: int = 0) -> int:
-    r = await get_redis()
-    value = await r.get(key)
-    return int(value) if value is not None else default
+    try:
+        r = await get_redis()
+        value = await _bounded_cache_operation(r.get(key))
+        record_redis_lookup(hit=value is not None)
+        return int(value) if value is not None else default
+    except REDIS_OPERATION_EXCEPTIONS:
+        record_redis_lookup(hit=False)
+        log.warning("redis_cache_get_int_failed", extra={"cache_key": key}, exc_info=True)
+        return default
 
 
 async def cache_incr(key: str, default: int = 1) -> int:
-    r = await get_redis()
-    if await r.exists(key):
-        return int(await r.incr(key))
-    await r.set(key, str(default))
-    return default
+    try:
+        r = await get_redis()
+        if await _bounded_cache_operation(r.exists(key)):
+            return int(await _bounded_cache_operation(r.incr(key)))
+        await _bounded_cache_operation(r.set(key, str(default)))
+        return default
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_cache_increment_failed", extra={"cache_key": key}, exc_info=True)
+        return default
 
 
 async def cache_set_version_marker(key: str) -> int:
-    r = await get_redis()
     candidate = int(time.time() * 1000)
-    existing = await r.get(key)
-    if existing is not None:
-        try:
-            candidate = max(candidate, int(existing) + 1)
-        except ValueError:
-            pass
-    await r.set(key, str(candidate))
+    try:
+        r = await get_redis()
+        increment = getattr(r, "incr", None)
+        if increment is not None:
+            return int(await _bounded_cache_operation(increment(key)))
+        existing = await _bounded_cache_operation(r.get(key))
+        if existing is not None:
+            try:
+                candidate = max(candidate, int(existing) + 1)
+            except ValueError:
+                pass
+        await _bounded_cache_operation(r.set(key, str(candidate)))
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning(
+            "redis_cache_version_marker_failed",
+            extra={"cache_key": key},
+            exc_info=True,
+        )
     return candidate
+
+
+async def cache_set_version_markers(keys: list[str]) -> list[int]:
+    unique_keys = list(dict.fromkeys(key for key in keys if key))
+    if not unique_keys:
+        return []
+    try:
+        r = await get_redis()
+        pipeline_factory = getattr(r, "pipeline", None)
+        if pipeline_factory is not None:
+            pipeline = pipeline_factory(transaction=False)
+            for key in unique_keys:
+                pipeline.incr(key)
+            values = await _bounded_cache_operation(pipeline.execute())
+            return [int(value) for value in values]
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning(
+            "redis_cache_version_markers_failed",
+            extra={"marker_count": len(unique_keys)},
+            exc_info=True,
+        )
+        return [int(time.time() * 1000) for _key in unique_keys]
+    return [await cache_set_version_marker(key) for key in unique_keys]
+
+
+async def _bounded_cache_operation(awaitable: Awaitable[Any]) -> Any:
+    timeout = max(float(settings.REDIS_CACHE_OPERATION_TIMEOUT_SECONDS), 0.05)
+    return await asyncio.wait_for(awaitable, timeout=timeout)
 
 
 async def _cache_get_json_best_effort(key: str) -> object | None:
     try:
         r = await get_redis()
-        data = await r.get(key)
+        data = await _bounded_cache_operation(r.get(key))
     except REDIS_OPERATION_EXCEPTIONS:
+        record_redis_lookup(hit=False)
         log.warning("redis_cache_get_failed", extra={"cache_key": key}, exc_info=True)
         return None
+    record_redis_lookup(hit=bool(data))
     if not data:
         return None
     try:
@@ -321,7 +414,7 @@ async def _cache_get_json_best_effort(key: str) -> object | None:
     except json.JSONDecodeError:
         log.warning("redis_cache_payload_invalid", extra={"cache_key": key})
         try:
-            await r.delete(key)
+            await _bounded_cache_operation(r.delete(key))
         except REDIS_OPERATION_EXCEPTIONS:
             log.warning(
                 "redis_cache_delete_invalid_payload_failed", extra={"cache_key": key}, exc_info=True
@@ -332,32 +425,9 @@ async def _cache_get_json_best_effort(key: str) -> object | None:
 async def _cache_set_json_best_effort(key: str, value: object, ttl: int) -> None:
     try:
         r = await get_redis()
-        await r.setex(key, ttl, json.dumps(value, default=str))
+        await _bounded_cache_operation(r.setex(key, ttl, json.dumps(value, default=str)))
     except REDIS_OPERATION_EXCEPTIONS:
         log.warning("redis_cache_set_failed", extra={"cache_key": key}, exc_info=True)
-
-
-async def _cache_delete_by_prefixes_best_effort(prefixes: list[str]) -> None:
-    if not prefixes:
-        return
-    try:
-        r = await get_redis()
-        scan = getattr(r, "scan", None)
-        if scan is None:
-            log.warning("redis_cache_prefix_delete_scan_unavailable", extra={"prefixes": prefixes})
-            return
-        keys_to_delete: list[str] = []
-        for prefix in prefixes:
-            cursor: int | str = 0
-            while True:
-                cursor, keys = await scan(cursor=cursor, match=f"{prefix}*", count=200)
-                keys_to_delete.extend(str(key) for key in keys)
-                if cursor in (0, "0"):
-                    break
-        if keys_to_delete:
-            await r.delete(*keys_to_delete)
-    except REDIS_OPERATION_EXCEPTIONS:
-        log.warning("redis_cache_prefix_delete_failed", extra={"prefixes": prefixes}, exc_info=True)
 
 
 def _coerce_int(value: object, default: int = 0) -> int:
@@ -597,18 +667,24 @@ end
 
 
 async def delete_key_if_value(key: str, expected_value: str) -> bool:
-    r = await get_redis()
-    eval_method = getattr(r, "eval", None)
-    if callable(eval_method):
-        result = await eval_method(_DELETE_IF_OWNER_SCRIPT, 1, key, expected_value)
-        return bool(result)
+    try:
+        r = await get_redis()
+        eval_method = getattr(r, "eval", None)
+        if callable(eval_method):
+            result = await _bounded_cache_operation(
+                eval_method(_DELETE_IF_OWNER_SCRIPT, 1, key, expected_value)
+            )
+            return bool(result)
 
-    current_value = await r.get(key)
-    if isinstance(current_value, bytes):
-        current_value = current_value.decode()
-    if current_value != expected_value:
+        current_value = await _bounded_cache_operation(r.get(key))
+        if isinstance(current_value, bytes):
+            current_value = current_value.decode()
+        if current_value != expected_value:
+            return False
+        return bool(await _bounded_cache_operation(r.delete(key)))
+    except REDIS_OPERATION_EXCEPTIONS:
+        log.warning("redis_cache_owner_delete_failed", extra={"cache_key": key}, exc_info=True)
         return False
-    return bool(await r.delete(key))
 
 
 async def cache_delete_if_owner(key: str, owner_token: str) -> bool:
@@ -626,12 +702,28 @@ def key_chapter_recovery_inflight(chapter_id: str) -> str:
     return f"chapter_recovery:inflight:{chapter_id}"
 
 
+def key_revision_digest_refresh(book_id: str) -> str:
+    return f"notification:revision_digest_refresh:{book_id}"
+
+
+def key_world_analysis_refresh(scope: str, target_id: str) -> str:
+    return f"world_analysis:refresh:{scope}:{target_id}"
+
+
+def key_revision_intelligence_fill(book_id: str, version: int) -> str:
+    return f"revision_intelligence:fill:{book_id}:{version}"
+
+
+def key_maintenance_cursor(name: str) -> str:
+    return f"maintenance:cursor:{name}"
+
+
 def key_relationship_graph(book_id: str, chapter: int) -> str:
     return f"relationship:graph:{book_id}:{chapter}"
 
 
 def key_search_results(book_id: str, query: str, chapter: int) -> str:
-    q_hash = hashlib.md5(query.encode()).hexdigest()[:8]
+    q_hash = hashlib.md5(query.encode(), usedforsecurity=False).hexdigest()[:8]
     return f"book:search:{book_id}:{q_hash}:{chapter}"
 
 
@@ -692,40 +784,42 @@ def key_email_unsubscribe_token(token: str) -> str:
 
 
 def key_grounded_answer(book_id: str, chapter: int, question: str) -> str:
-    q_hash = hashlib.md5(question.strip().lower().encode()).hexdigest()[:10]
+    q_hash = hashlib.md5(question.strip().lower().encode(), usedforsecurity=False).hexdigest()[:10]
     return f"grounded_answer:{book_id}:{chapter}:{q_hash}"
 
 
-def key_advisor_response_cache(book_id: str, cache_key: str) -> str:
-    return f"advisor:book:{book_id}:message:{cache_key}"
+def key_advisor_response_cache(book_id: str, cache_key: str, version: int = 0) -> str:
+    return f"advisor:book:{book_id}:v{version}:message:{cache_key}"
 
 
-def key_editorial_review_cache(book_id: str, cache_key: str) -> str:
-    return f"advisor:book:{book_id}:editorial:{cache_key}"
+def key_editorial_review_cache(book_id: str, cache_key: str, version: int = 0) -> str:
+    return f"advisor:book:{book_id}:v{version}:editorial:{cache_key}"
 
 
-def key_prose_tighten_cache(book_id: str, cache_key: str) -> str:
-    return f"advisor:book:{book_id}:prose:{cache_key}"
+def key_prose_tighten_cache(book_id: str, cache_key: str, version: int = 0) -> str:
+    return f"advisor:book:{book_id}:v{version}:prose:{cache_key}"
 
 
-def key_voice_consistency_cache(book_id: str, cache_key: str) -> str:
-    return f"advisor:book:{book_id}:voice:{cache_key}"
+def key_voice_consistency_cache(book_id: str, cache_key: str, version: int = 0) -> str:
+    return f"advisor:book:{book_id}:v{version}:voice:{cache_key}"
 
 
-def key_proactive_scan_cache(book_id: str, cache_key: str) -> str:
-    return f"advisor:book:{book_id}:proactive:{cache_key}"
+def key_proactive_scan_cache(book_id: str, cache_key: str, version: int = 0) -> str:
+    return f"advisor:book:{book_id}:v{version}:proactive:{cache_key}"
 
 
-def key_suggestion_scan_cache(book_id: str, cache_key: str) -> str:
-    return f"advisor:book:{book_id}:suggestions:{cache_key}"
+def key_suggestion_scan_cache(book_id: str, cache_key: str, version: int = 0) -> str:
+    return f"advisor:book:{book_id}:v{version}:suggestions:{cache_key}"
 
 
-def key_series_advisor_response_cache(series_id: str, cache_key: str) -> str:
-    return f"advisor:series:{series_id}:message:{cache_key}"
+def key_series_advisor_response_cache(series_id: str, cache_key: str, version: int = 0) -> str:
+    return f"advisor:series:{series_id}:v{version}:message:{cache_key}"
 
 
-def key_series_continuity_cache(series_id: str, book_id: str, cache_key: str) -> str:
-    return f"advisor:series:{series_id}:continuity:{book_id}:{cache_key}"
+def key_series_continuity_cache(
+    series_id: str, book_id: str, cache_key: str, version: int = 0
+) -> str:
+    return f"advisor:series:{series_id}:v{version}:continuity:{book_id}:{cache_key}"
 
 
 def key_book_cache_version(book_id: str) -> str:
@@ -738,6 +832,10 @@ def key_series_cache_version(series_id: str) -> str:
 
 def key_user_dashboard_cache_version(user_id: str) -> str:
     return f"cache_version:user_dashboard:{user_id}"
+
+
+def key_user_stats_cache(user_id: str, version: int) -> str:
+    return f"user_stats:{user_id}:v{version}"
 
 
 def key_story_context_cache(book_id: str, version: int, total_ch: int) -> str:
@@ -762,6 +860,18 @@ def key_writing_dashboard_cache(user_id: str, version: int, day_marker: str) -> 
 
 def key_public_profile_cache_version(user_id: str) -> str:
     return f"cache_version:public_profile:{user_id}"
+
+
+def key_public_catalog_cache_version() -> str:
+    return "cache_version:public_catalog"
+
+
+def key_public_uploads_overview(version: int) -> str:
+    return f"public:uploads_overview:v{version}"
+
+
+def key_public_book_analytics(book_id: str, version: int) -> str:
+    return f"public:book_analytics:{book_id}:v{version}"
 
 
 def key_public_user_profile(user_id: str, username: str, version: int) -> str:
@@ -794,79 +904,157 @@ def key_relationship_evolution_cache(
     return f"reader_relationship_evolution:{book_id}:{user_id}:chapter:{chapter}:bookv:{book_version}:readv:{progress_version}"
 
 
-async def get_advisor_response_cache(book_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_advisor_response_cache(book_id, cache_key))
+def key_revision_intelligence_cache(book_id: str, version: int) -> str:
+    return f"revision_intelligence:{book_id}:bookv:{version}"
+
+
+async def _book_cache_write_version(book_id: str, expected_version: int | None) -> int | None:
+    version = await get_book_cache_version(book_id)
+    if expected_version is not None and version != expected_version:
+        return None
+    return version
+
+
+async def _series_cache_write_version(series_id: str, expected_version: int | None) -> int | None:
+    version = await get_series_cache_version(series_id)
+    if expected_version is not None and version != expected_version:
+        return None
+    return version
+
+
+async def get_advisor_response_cache(
+    book_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_book_cache_version(book_id) if version is None else version
+    payload = await _cache_get_json_best_effort(
+        key_advisor_response_cache(book_id, cache_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_advisor_response_cache(book_id: str, cache_key: str, payload: object) -> None:
+async def set_advisor_response_cache(
+    book_id: str, cache_key: str, payload: object, *, expected_version: int | None = None
+) -> None:
+    version = await _book_cache_write_version(book_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_advisor_response_cache(book_id, cache_key),
+        key_advisor_response_cache(book_id, cache_key, version),
         payload,
         ADVISOR_CACHE_TTL_SECONDS,
     )
 
 
-async def get_editorial_review_cache(book_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_editorial_review_cache(book_id, cache_key))
+async def get_editorial_review_cache(
+    book_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_book_cache_version(book_id) if version is None else version
+    payload = await _cache_get_json_best_effort(
+        key_editorial_review_cache(book_id, cache_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_editorial_review_cache(book_id: str, cache_key: str, payload: object) -> None:
+async def set_editorial_review_cache(
+    book_id: str, cache_key: str, payload: object, *, expected_version: int | None = None
+) -> None:
+    version = await _book_cache_write_version(book_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_editorial_review_cache(book_id, cache_key),
+        key_editorial_review_cache(book_id, cache_key, version),
         payload,
         ADVISOR_CACHE_TTL_SECONDS,
     )
 
 
-async def get_prose_tighten_cache(book_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_prose_tighten_cache(book_id, cache_key))
+async def get_prose_tighten_cache(
+    book_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_book_cache_version(book_id) if version is None else version
+    payload = await _cache_get_json_best_effort(
+        key_prose_tighten_cache(book_id, cache_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_prose_tighten_cache(book_id: str, cache_key: str, payload: object) -> None:
+async def set_prose_tighten_cache(
+    book_id: str, cache_key: str, payload: object, *, expected_version: int | None = None
+) -> None:
+    version = await _book_cache_write_version(book_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_prose_tighten_cache(book_id, cache_key),
+        key_prose_tighten_cache(book_id, cache_key, version),
         payload,
         ADVISOR_CACHE_TTL_SECONDS,
     )
 
 
-async def get_voice_consistency_cache(book_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_voice_consistency_cache(book_id, cache_key))
+async def get_voice_consistency_cache(
+    book_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_book_cache_version(book_id) if version is None else version
+    payload = await _cache_get_json_best_effort(
+        key_voice_consistency_cache(book_id, cache_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_voice_consistency_cache(book_id: str, cache_key: str, payload: object) -> None:
+async def set_voice_consistency_cache(
+    book_id: str, cache_key: str, payload: object, *, expected_version: int | None = None
+) -> None:
+    version = await _book_cache_write_version(book_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_voice_consistency_cache(book_id, cache_key),
+        key_voice_consistency_cache(book_id, cache_key, version),
         payload,
         ADVISOR_CACHE_TTL_SECONDS,
     )
 
 
-async def get_proactive_scan_cache(book_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_proactive_scan_cache(book_id, cache_key))
+async def get_proactive_scan_cache(
+    book_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_book_cache_version(book_id) if version is None else version
+    payload = await _cache_get_json_best_effort(
+        key_proactive_scan_cache(book_id, cache_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_proactive_scan_cache(book_id: str, cache_key: str, payload: object) -> None:
+async def set_proactive_scan_cache(
+    book_id: str, cache_key: str, payload: object, *, expected_version: int | None = None
+) -> None:
+    version = await _book_cache_write_version(book_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_proactive_scan_cache(book_id, cache_key),
+        key_proactive_scan_cache(book_id, cache_key, version),
         payload,
         PROACTIVE_SCAN_CACHE_TTL_SECONDS,
     )
 
 
-async def get_suggestion_scan_cache(book_id: str, cache_key: str) -> dict | None:
-    payload = await _cache_get_json_best_effort(key_suggestion_scan_cache(book_id, cache_key))
+async def get_suggestion_scan_cache(
+    book_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_book_cache_version(book_id) if version is None else version
+    payload = await _cache_get_json_best_effort(
+        key_suggestion_scan_cache(book_id, cache_key, version)
+    )
     return payload if isinstance(payload, dict) else None
 
 
-async def set_suggestion_scan_cache(book_id: str, cache_key: str, payload: object) -> None:
+async def set_suggestion_scan_cache(
+    book_id: str, cache_key: str, payload: object, *, expected_version: int | None = None
+) -> None:
+    version = await _book_cache_write_version(book_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_suggestion_scan_cache(book_id, cache_key),
+        key_suggestion_scan_cache(book_id, cache_key, version),
         payload,
         SUGGESTION_SCAN_CACHE_TTL_SECONDS,
     )
@@ -893,35 +1081,52 @@ async def set_synopsis_cache(
     )
 
 
-async def get_series_advisor_response_cache(series_id: str, cache_key: str) -> dict | None:
+async def get_series_advisor_response_cache(
+    series_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_series_cache_version(series_id) if version is None else version
     payload = await _cache_get_json_best_effort(
-        key_series_advisor_response_cache(series_id, cache_key)
+        key_series_advisor_response_cache(series_id, cache_key, version)
     )
     return payload if isinstance(payload, dict) else None
 
 
 async def set_series_advisor_response_cache(
-    series_id: str, cache_key: str, payload: object
+    series_id: str, cache_key: str, payload: object, *, expected_version: int | None = None
 ) -> None:
+    version = await _series_cache_write_version(series_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_series_advisor_response_cache(series_id, cache_key),
+        key_series_advisor_response_cache(series_id, cache_key, version),
         payload,
         ADVISOR_CACHE_TTL_SECONDS,
     )
 
 
-async def get_series_continuity_cache(series_id: str, book_id: str, cache_key: str) -> dict | None:
+async def get_series_continuity_cache(
+    series_id: str, book_id: str, cache_key: str, *, version: int | None = None
+) -> dict | None:
+    version = await get_series_cache_version(series_id) if version is None else version
     payload = await _cache_get_json_best_effort(
-        key_series_continuity_cache(series_id, book_id, cache_key)
+        key_series_continuity_cache(series_id, book_id, cache_key, version)
     )
     return payload if isinstance(payload, dict) else None
 
 
 async def set_series_continuity_cache(
-    series_id: str, book_id: str, cache_key: str, payload: object
+    series_id: str,
+    book_id: str,
+    cache_key: str,
+    payload: object,
+    *,
+    expected_version: int | None = None,
 ) -> None:
+    version = await _series_cache_write_version(series_id, expected_version)
+    if version is None:
+        return
     await _cache_set_json_best_effort(
-        key_series_continuity_cache(series_id, book_id, cache_key),
+        key_series_continuity_cache(series_id, book_id, cache_key, version),
         payload,
         ADVISOR_CACHE_TTL_SECONDS,
     )
@@ -932,12 +1137,9 @@ async def invalidate_advisor_cache_namespaces(
     book_id: str | None = None,
     series_ids: list[str] | None = None,
 ) -> None:
-    prefixes: list[str] = []
-    if book_id:
-        prefixes.append(f"advisor:book:{book_id}:")
-    for series_id in series_ids or []:
-        prefixes.append(f"advisor:series:{series_id}:")
-    await _cache_delete_by_prefixes_best_effort(prefixes)
+    keys = [key_book_cache_version(book_id)] if book_id else []
+    keys.extend(key_series_cache_version(series_id) for series_id in series_ids or [])
+    await cache_set_version_markers(keys)
 
 
 async def get_book_cache_version(book_id: str) -> int:
@@ -960,6 +1162,10 @@ async def get_public_profile_cache_version(user_id: str) -> int:
     return await cache_get_int(key_public_profile_cache_version(user_id), default=0)
 
 
+async def get_public_catalog_cache_version() -> int:
+    return await cache_get_int(key_public_catalog_cache_version(), default=0)
+
+
 async def mark_book_cache_dirty(book_id: str) -> int:
     return await cache_set_version_marker(key_book_cache_version(book_id))
 
@@ -978,6 +1184,10 @@ async def mark_reader_progress_cache_dirty(book_id: str, user_id: str) -> int:
 
 async def mark_public_profile_cache_dirty(user_id: str) -> int:
     return await cache_set_version_marker(key_public_profile_cache_version(user_id))
+
+
+async def mark_public_catalog_cache_dirty() -> int:
+    return await cache_set_version_marker(key_public_catalog_cache_version())
 
 
 async def get_story_context_cache(book_id: str, version: int, total_ch: int) -> str | None:
@@ -1003,6 +1213,26 @@ async def set_series_story_context_cache(series_key: str, version: int, payload:
         key_series_story_context_cache(series_key, version),
         payload,
         STORY_CONTEXT_CACHE_TTL_SECONDS,
+    )
+
+
+async def get_revision_intelligence_cache(book_id: str, version: int) -> dict | None:
+    payload = await _cache_get_json_best_effort(key_revision_intelligence_cache(book_id, version))
+    return payload if isinstance(payload, dict) else None
+
+
+async def set_revision_intelligence_cache(
+    book_id: str,
+    version: int,
+    payload: object,
+) -> None:
+    current_version = await get_book_cache_version(book_id)
+    if current_version != version:
+        return
+    await _cache_set_json_best_effort(
+        key_revision_intelligence_cache(book_id, version),
+        payload,
+        REVISION_INTELLIGENCE_CACHE_TTL_SECONDS,
     )
 
 
@@ -1160,6 +1390,28 @@ def key_public_books() -> str:
     return "public:books"
 
 
+def key_public_catalog_page(
+    *,
+    version: int,
+    catalog: str,
+    content_source_type: str,
+    search: str,
+    limit: int,
+) -> str:
+    filters = json.dumps(
+        {
+            "catalog": catalog,
+            "content_source_type": content_source_type,
+            "search": search,
+            "limit": limit,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(filters.encode("utf-8")).hexdigest()[:16]
+    return f"public:catalog:v{version}:{digest}"
+
+
 def key_public_book_detail(book_id: str) -> str:
     return f"public:book:{book_id}"
 
@@ -1175,7 +1427,9 @@ def key_public_forum_cache_version() -> str:
 def key_public_forum_posts(
     version: int, q: str, page: int, page_size: int, thread_type: str | None = None
 ) -> str:
-    query_hash = hashlib.md5(q.strip().lower().encode("utf-8")).hexdigest()[:10]
+    query_hash = hashlib.md5(q.strip().lower().encode("utf-8"), usedforsecurity=False).hexdigest()[
+        :10
+    ]
     thread_type_key = (thread_type or "all").strip().lower()
     return f"public:forum:posts:v{version}:{thread_type_key}:{query_hash}:{page}:{page_size}"
 

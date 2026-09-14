@@ -48,7 +48,7 @@ def test_create_asset_token_sets_resource_and_rejects_tampered_payloads():
     raw_payload = jwt.decode(token, options={"verify_signature": False})
     tampered = jwt.encode(
         {**raw_payload, "res": "books/book-10/cover"},
-        "wrong-secret",
+        "wrong-test-secret-with-at-least-32-characters",
         algorithm="HS256",
     )
 

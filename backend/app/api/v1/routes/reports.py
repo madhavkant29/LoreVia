@@ -15,20 +15,15 @@ from app.schemas.public import ContentReportCreateBody, ContentReportOut
 from app.utils.client_identity import trusted_client_ip
 from app.utils.public.moderation import (
     add_moderation_action,
-    copyright_report_requires_temporary_hold,
     ensure_public_content_report_not_duplicate,
     ensure_report_type_supported,
-    invalidate_public_book_caches,
     validate_public_content_report_target,
 )
 from app.utils.public.requests import (
     hash_text,
 )
 from app.utils.public_utils import (
-    MODERATION_STATUS_HIDDEN,
     MODERATION_STATUS_REPORTED,
-    PUBLIC_STATUS_HIDDEN,
-    REPORT_STATUS_CONTENT_HIDDEN,
     REPORT_STATUS_OPEN,
     REPORT_TYPE_COPYRIGHT,
 )
@@ -92,29 +87,10 @@ async def create_content_report(
         metadata={"report_type": report_type},
     )
 
-    should_hide = (
-        report_type == REPORT_TYPE_COPYRIGHT
-        and await copyright_report_requires_temporary_hold(db, book_id=book.id)
-    )
-    if should_hide:
-        book.moderation_status = MODERATION_STATUS_HIDDEN
-        book.public_status = PUBLIC_STATUS_HIDDEN
-        book.is_public = False
-        book.takedown_reason = body.reason.strip()
-        report.status = REPORT_STATUS_CONTENT_HIDDEN
-        await add_moderation_action(
-            db,
-            action_type="book_hidden",
-            actor_user_id=current_user.id if current_user is not None else None,
-            target_user_id=book.user_id,
-            book_id=book.id,
-            report_id=report.id,
-            previous_status=MODERATION_STATUS_REPORTED,
-            new_status=MODERATION_STATUS_HIDDEN,
-            reason="Book temporarily hidden after three distinct copyright reporters within 24 hours.",
-        )
-    else:
-        book.moderation_status = MODERATION_STATUS_REPORTED
+    # Reports are intake, not enforcement. Anonymous reporters can request
+    # review, but only an authenticated moderation decision may unpublish a
+    # book; otherwise coordinated reports become a censorship primitive.
+    book.moderation_status = MODERATION_STATUS_REPORTED
 
     admin_ids = (await db.execute(select(User.id).where(User.tier == "admin"))).scalars().all()
     for admin_id in admin_ids:
@@ -134,8 +110,6 @@ async def create_content_report(
         )
 
     await db.commit()
-    if should_hide:
-        await invalidate_public_book_caches(book)
     return ContentReportOut(
         id=str(report.id),
         status=report.status,

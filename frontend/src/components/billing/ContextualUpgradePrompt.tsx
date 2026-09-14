@@ -6,7 +6,7 @@ import type { Route } from "next"
 type ContextualUpgradePromptProps = {
   featureName?: string
   body?: string
-  compareHref?: Route | string
+  compareHref?: Route
   onBack?: () => void
 }
 
@@ -32,7 +32,7 @@ export function ContextualUpgradePrompt({
             Upgrade to Author
           </Link>
           <Link
-            href={compareHref as any}
+            href={compareHref}
             className="inline-flex items-center justify-center rounded-sm border border-amber-300 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 transition hover:bg-amber-100 dark:border-amber-300/30 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-300/10"
           >
             Compare plans

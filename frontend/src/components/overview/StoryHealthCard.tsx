@@ -7,7 +7,6 @@ import type { StoryHealth } from "@/types/book"
 
 import { Icon } from "./Icon"
 import { PanelTitle } from "./PanelTitle"
-import type { IconName } from "./types"
 import { panelClass } from "./utils"
 
 export function StoryHealthCard({
@@ -39,9 +38,10 @@ export function StoryHealthCard({
     )
   }
 
-  const score = storyHealth?.score ?? 0
-  const status = storyHealth?.status ?? "Loading"
-  const summary = storyHealth?.summary ?? "Syncing story metrics from your book data."
+  const healthAvailable = Boolean(storyHealth && storyHealth.available !== false)
+  const score = healthAvailable ? storyHealth!.score : 0
+  const status = storyHealth?.status ?? "Not available"
+  const summary = storyHealth?.summary ?? "Story health needs analyzed manuscript evidence before a score can be calculated."
   const healthColor = score >= 85 ? "#45d483" : score >= 70 ? "#8b5cf6" : score >= 55 ? "#f5bf3d" : "#fb7185"
   const metricColors: Record<string, { text: string; bar: string }> = {
     Continuity: { text: "text-emerald-400", bar: "bg-emerald-400" },
@@ -63,15 +63,21 @@ export function StoryHealthCard({
 
       <div className="mt-5 grid gap-5 sm:grid-cols-[8.5rem_minmax(0,1fr)] xl:grid-cols-1 2xl:grid-cols-[8.5rem_minmax(0,1fr)]">
         <div className="flex justify-center">
-          <div
-            className="relative flex h-32 w-32 items-center justify-center rounded-full"
-            style={{ background: `conic-gradient(${healthColor} 0 ${score}%, ${isDark ? "#1b2430" : "#edf0f5"} ${score}% 100%)` }}
-          >
-            <div className={`flex h-22 w-22 flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
-              <span className={`text-3xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{score}</span>
-              <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{status}</span>
+          {healthAvailable ? (
+            <div
+              className="relative flex h-32 w-32 items-center justify-center rounded-full"
+              style={{ background: `conic-gradient(${healthColor} 0 ${score}%, ${isDark ? "#1b2430" : "#edf0f5"} ${score}% 100%)` }}
+            >
+              <div className={`flex h-22 w-22 flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
+                <span className={`text-3xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{score}</span>
+                <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{status}</span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className={`flex h-32 w-32 items-center justify-center rounded-full border px-3 text-center text-xs ${isDark ? "border-white/10 text-slate-400" : "border-slate-200 text-slate-500"}`}>
+              Not enough data
+            </div>
+          )}
         </div>
 
         <div className="space-y-3">
@@ -81,14 +87,14 @@ export function StoryHealthCard({
               <div key={metric.label} className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/70"}`}>
                 <div className="flex items-center justify-between gap-3 text-xs">
                   <span className={isDark ? "text-slate-300" : "text-slate-700"}>{metric.label}</span>
-                  <span className={`font-bold ${colors.text}`}>{metric.score}%</span>
+                  <span className={`font-bold ${colors.text}`}>{metric.available === false ? "Unavailable" : `${metric.score}%`}</span>
                 </div>
-                <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-200"}`}>
+                {metric.available !== false ? <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-200"}`}>
                   <div
                     className={`h-full rounded-full ${colors.bar}`}
                     style={{ width: `${metric.score}%` }}
                   />
-                </div>
+                </div> : null}
                 <p className={`mt-2 text-3xs leading-5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>{metric.detail}</p>
               </div>
             )

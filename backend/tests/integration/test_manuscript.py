@@ -18,6 +18,7 @@ from app.models.book import (
     SceneVersion,
 )
 from app.models.character import Character, CharacterMention, CharacterState
+from app.models.generation import BookDataGeneration
 from app.models.intelligence import BookChunk, ChapterSummary
 from app.models.progress import ReadingProgress
 from app.models.tag import CustomTag
@@ -604,6 +605,7 @@ async def test_remove_chapter_deletes_direct_artifacts_and_preserves_version_his
 
 @pytest.mark.asyncio
 async def test_complete_rebuild_recovers_stale_extraction_progress(db):
+    rebuild_run_id = uuid.uuid4().hex
     user = User(
         email="stale-rebuild@example.com", username="stale-rebuild", password_hash="test-hash"
     )
@@ -623,7 +625,7 @@ async def test_complete_rebuild_recovers_stale_extraction_progress(db):
             "processing": {
                 "status": "processing",
                 "stage": "extraction",
-                "rebuild_run_id": "stale-run",
+                "rebuild_run_id": rebuild_run_id,
                 "chapters_completed": 0,
                 "chapters_total": 2,
                 "pipeline": {
@@ -636,12 +638,21 @@ async def test_complete_rebuild_recovers_stale_extraction_progress(db):
             },
             "reprocess": {
                 "last_started_at": "2026-06-01T00:00:00+00:00",
-                "last_rebuild_run_id": "stale-run",
+                "last_rebuild_run_id": rebuild_run_id,
             },
         },
     )
     db.add(book)
     await db.flush()
+    db.add(
+        BookDataGeneration(
+            id=uuid.UUID(rebuild_run_id),
+            book_id=book.id,
+            rebuild_run_id=rebuild_run_id,
+            status="staging",
+            reason="stale_progress_recovery_test",
+        )
+    )
     chapters = [
         Chapter(
             book_id=book.id,
@@ -658,7 +669,10 @@ async def test_complete_rebuild_recovers_stale_extraction_progress(db):
     db.add_all(
         [
             ChapterSummary(
-                chapter_id=chapter.id, mode="detailed", content=f"Summary {chapter.number}"
+                chapter_id=chapter.id,
+                mode="detailed",
+                content=f"Summary {chapter.number}",
+                generation_id=uuid.UUID(rebuild_run_id),
             )
             for chapter in chapters
         ]
@@ -676,4 +690,4 @@ async def test_complete_rebuild_recovers_stale_extraction_progress(db):
     assert book.writer_workspace["processing"]["pipeline"]["analysis"]["status"] == "succeeded"
     assert book.writer_workspace["processing"]["is_fully_ready"] is True
     assert "rebuild_run_id" not in book.writer_workspace["processing"]
-    assert book.writer_workspace["reprocess"]["last_completed_rebuild_run_id"] == "stale-run"
+    assert book.writer_workspace["reprocess"]["last_completed_rebuild_run_id"] == rebuild_run_id

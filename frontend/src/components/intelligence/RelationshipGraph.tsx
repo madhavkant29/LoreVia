@@ -253,7 +253,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
     }
   }, [nodeLookup, selectedEdge])
 
-  const relationshipStylesheet = useMemo<any>(
+  const relationshipStylesheet = useMemo<cytoscape.StylesheetJson>(
     () => [
       {
         selector: "node",
@@ -453,7 +453,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
       clearGraphTestHandle(cy)
       cy.destroy()
     }
-  }, [bookId, compact, filteredGraph, interactionMode, labelOverrides, theme, upToChapter])
+  }, [bookId, compact, filteredGraph, interactionMode, labelOverrides, relationshipStylesheet, theme, upToChapter])
 
   useEffect(() => {
     const cy = cyRef.current

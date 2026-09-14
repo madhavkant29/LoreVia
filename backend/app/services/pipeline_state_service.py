@@ -350,6 +350,7 @@ async def requeue_stalled_book_processing_if_needed(
     *,
     book: Book,
     now: datetime | None = None,
+    chapters: list[Chapter] | None = None,
 ) -> bool:
     if book.status != "processing":
         return False
@@ -362,15 +363,16 @@ async def requeue_stalled_book_processing_if_needed(
     if current_time - processing_started_at < STALE_PROCESSING_REQUEUE_AFTER:
         return False
 
-    chapters = (
-        (
-            await db.execute(
-                select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc())
+    if chapters is None:
+        chapters = list(
+            (
+                await db.execute(
+                    select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc())
+                )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
     if not chapters or any(chapter.processed for chapter in chapters):
         return False
 
@@ -438,49 +440,30 @@ async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) 
     if processing.get("rebuild_run_id") or _processing_pipeline_has_blocking_failure(processing):
         return False
 
-    chapter_count = int(
-        (
-            await db.execute(
-                select(func.count(func.distinct(Chapter.number)))
-                .select_from(Chapter)
-                .where(
-                    Chapter.book_id == book.id,
-                    Chapter.word_count > 0,
-                )
-            )
-        ).scalar_one()
-    )
-    if chapter_count <= 0:
-        return False
-
-    processed_count = int(
-        (
-            await db.execute(
-                select(func.count(func.distinct(Chapter.number)))
-                .select_from(Chapter)
-                .where(
-                    Chapter.book_id == book.id,
+    chapter_count, processed_count, detailed_summary_count = (
+        await db.execute(
+            select(
+                func.count(func.distinct(Chapter.number)).filter(Chapter.word_count > 0),
+                func.count(func.distinct(Chapter.number)).filter(
                     Chapter.word_count > 0,
                     Chapter.processed.is_(True),
-                )
-            )
-        ).scalar_one()
-    )
-    detailed_summary_count = int(
-        (
-            await db.execute(
-                select(func.count(func.distinct(Chapter.number)))
-                .select_from(ChapterSummary)
-                .join(Chapter, Chapter.id == ChapterSummary.chapter_id)
-                .where(
-                    Chapter.book_id == book.id,
+                ),
+                func.count(func.distinct(Chapter.number)).filter(
                     Chapter.word_count > 0,
                     Chapter.processed.is_(True),
                     ChapterSummary.mode == "detailed",
-                )
+                ),
             )
-        ).scalar_one()
-    )
+            .select_from(Chapter)
+            .outerjoin(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(Chapter.book_id == book.id)
+        )
+    ).one()
+    chapter_count = int(chapter_count or 0)
+    if chapter_count <= 0:
+        return False
+    processed_count = int(processed_count or 0)
+    detailed_summary_count = int(detailed_summary_count or 0)
     if processed_count < chapter_count or detailed_summary_count < chapter_count:
         return False
 

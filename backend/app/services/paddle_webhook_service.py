@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.database import AsyncSessionLocal
-from app.models.user import PaddleWebhookEvent, RefundReview, Subscription, User
+from app.models.user import (
+    PaddleWebhookEvent,
+    RefundReview,
+    Subscription,
+    SubscriptionEvent,
+    User,
+)
 from app.services.email_service import (
     send_subscription_cancellation,
     send_subscription_confirmation,
@@ -44,6 +50,8 @@ SUBSCRIPTION_CONFIRMATION_EMAIL = "subscription_confirmation"
 SUBSCRIPTION_CANCELLATION_EMAIL = "subscription_cancellation"
 WEBHOOK_PROCESSING_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
 WEBHOOK_LAST_RESORT_EXCEPTIONS = (Exception,)
+WEBHOOK_PROCESSING_LEASE = timedelta(minutes=5)
+PADDLE_STATE_WATERMARK_EVENT = "paddle_state_applied"
 
 
 async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
@@ -81,6 +89,7 @@ async def _claim_webhook_event(
     notification_id: str | None,
     payload: dict[str, Any],
 ) -> dict[str, bool]:
+    claimed_at = datetime.now(UTC)
     async with AsyncSessionLocal() as db:
         existing = await _get_webhook_event(db, event_id)
         if existing is None:
@@ -91,6 +100,7 @@ async def _claim_webhook_event(
                     notification_id=notification_id,
                     processing_status=WEBHOOK_STATUS_PROCESSING,
                     payload_json=payload,
+                    processed_at=claimed_at,
                 )
             )
             try:
@@ -104,8 +114,47 @@ async def _claim_webhook_event(
         if existing is None:
             raise RuntimeError(f"Unable to claim Paddle webhook event {event_id}")
 
+        if existing.processing_status == WEBHOOK_STATUS_PROCESSING:
+            retry_claim = await db.execute(
+                update(PaddleWebhookEvent)
+                .where(
+                    PaddleWebhookEvent.event_id == event_id,
+                    PaddleWebhookEvent.processing_status == WEBHOOK_STATUS_PROCESSING,
+                    func.coalesce(
+                        PaddleWebhookEvent.processed_at,
+                        PaddleWebhookEvent.first_received_at,
+                    )
+                    <= claimed_at - WEBHOOK_PROCESSING_LEASE,
+                )
+                .values(
+                    event_type=event_type,
+                    notification_id=notification_id,
+                    payload_json=payload,
+                    processed_at=claimed_at,
+                    last_error=None,
+                    duplicate_count=func.coalesce(PaddleWebhookEvent.duplicate_count, 0) + 1,
+                )
+            )
+            if retry_claim.rowcount == 1:
+                await db.commit()
+                return {"duplicate": False}
+            await db.execute(
+                update(PaddleWebhookEvent)
+                .where(
+                    PaddleWebhookEvent.event_id == event_id,
+                    PaddleWebhookEvent.processing_status == WEBHOOK_STATUS_PROCESSING,
+                )
+                .values(
+                    event_type=event_type,
+                    notification_id=notification_id,
+                    payload_json=payload,
+                    duplicate_count=func.coalesce(PaddleWebhookEvent.duplicate_count, 0) + 1,
+                )
+            )
+            await db.commit()
+            return {"duplicate": True}
+
         if existing.processing_status in {
-            WEBHOOK_STATUS_PROCESSING,
             WEBHOOK_STATUS_PROCESSED,
             WEBHOOK_STATUS_IGNORED,
         }:
@@ -127,7 +176,7 @@ async def _claim_webhook_event(
                 notification_id=notification_id,
                 payload_json=payload,
                 processing_status=WEBHOOK_STATUS_PROCESSING,
-                processed_at=None,
+                processed_at=claimed_at,
                 last_error=None,
                 duplicate_count=func.coalesce(PaddleWebhookEvent.duplicate_count, 0) + 1,
             )
@@ -163,6 +212,7 @@ async def _process_claimed_webhook(
                 return {"received": True, "ignored": True}
 
             data = payload.get("data") or {}
+            occurred_at = _event_occurred_at(payload)
             email_job: tuple[str, str, str] | None = None
             if event_type.startswith("adjustment."):
                 await apply_adjustment_webhook(
@@ -178,6 +228,7 @@ async def _process_claimed_webhook(
                     event_type=event_type,
                     data=data,
                     context=context,
+                    occurred_at=occurred_at,
                 )
 
             webhook_event.processing_status = WEBHOOK_STATUS_PROCESSED
@@ -210,6 +261,7 @@ async def _apply_subscription_change(
     event_type: str,
     data: dict[str, Any],
     context: dict[str, Any],
+    occurred_at: datetime | None,
 ) -> tuple[str, str, str] | None:
     subscription: Subscription | None = context["subscription"]
     customer_id = context["customer_id"]
@@ -220,6 +272,22 @@ async def _apply_subscription_change(
 
     if subscription is None:
         return None
+
+    if occurred_at is not None:
+        latest_applied_at = await _latest_applied_subscription_event_at(
+            db,
+            user_id=subscription.user_id,
+            paddle_customer_id=customer_id or subscription.paddle_customer_id,
+            paddle_sub_id=subscription_id or subscription.paddle_sub_id,
+        )
+        if latest_applied_at is not None and occurred_at < latest_applied_at:
+            logger.info(
+                "Ignoring stale Paddle state event %s (%s); latest applied event is %s",
+                event_id,
+                occurred_at.isoformat(),
+                latest_applied_at.isoformat(),
+            )
+            return None
 
     previous_status = _normalized_status(subscription.status)
     user = await db.get(User, subscription.user_id)
@@ -263,6 +331,7 @@ async def _apply_subscription_change(
             status=next_status,
             paddle_customer_id=subscription.paddle_customer_id,
             paddle_sub_id=subscription.paddle_sub_id,
+            occurred_at=occurred_at,
             metadata={"webhook_event_type": event_type},
         )
     if event_type == "transaction.completed":
@@ -274,6 +343,19 @@ async def _apply_subscription_change(
             transaction_id=transaction_id,
             data=data,
         )
+
+    await record_subscription_event(
+        db,
+        user_id=subscription.user_id,
+        event_type=PADDLE_STATE_WATERMARK_EVENT,
+        source_event_id=f"{event_id}:state",
+        plan=plan_to_store,
+        status=next_status,
+        paddle_customer_id=subscription.paddle_customer_id,
+        paddle_sub_id=subscription.paddle_sub_id,
+        occurred_at=occurred_at,
+        metadata={"webhook_event_type": event_type, "state_watermark": True},
+    )
 
     await _resolve_refund_follow_up_if_completed_cancellation(
         db,
@@ -456,6 +538,26 @@ async def _find_subscription(
     return None
 
 
+async def _latest_applied_subscription_event_at(
+    db,
+    *,
+    user_id,
+    paddle_customer_id: str | None,
+    paddle_sub_id: str | None,
+) -> datetime | None:
+    statement = select(func.max(SubscriptionEvent.occurred_at)).where(
+        SubscriptionEvent.user_id == user_id,
+        SubscriptionEvent.event_type == PADDLE_STATE_WATERMARK_EVENT,
+    )
+    if paddle_sub_id:
+        statement = statement.where(SubscriptionEvent.paddle_sub_id == paddle_sub_id)
+    elif paddle_customer_id:
+        statement = statement.where(SubscriptionEvent.paddle_customer_id == paddle_customer_id)
+    else:
+        return None
+    return await db.scalar(statement)
+
+
 async def _mark_webhook_failed(*, event_id: str, error_message: str) -> None:
     async with AsyncSessionLocal() as db:
         webhook_event = await _get_webhook_event(db, event_id)
@@ -577,6 +679,20 @@ def _string_or_none(value: object | None) -> str | None:
         return None
     candidate = str(value).strip()
     return candidate or None
+
+
+def _event_occurred_at(payload: dict[str, Any]) -> datetime | None:
+    raw_value = _string_or_none(payload.get("occurred_at"))
+    if raw_value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("Ignoring malformed Paddle occurred_at value")
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 async def _resolve_refund_follow_up_if_completed_cancellation(

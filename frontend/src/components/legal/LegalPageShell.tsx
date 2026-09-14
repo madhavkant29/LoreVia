@@ -103,7 +103,7 @@ export function LegalHero({
 
 export function LegalNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-8 max-w-3xl rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.94)] px-5 py-4 text-sm leading-7 text-stone-700">
+    <div className="mt-8 max-w-3xl rounded-md border border-[rgba(var(--border),0.5)] bg-[rgba(255,252,247,0.94)] px-5 py-4 text-sm leading-7 text-stone-700">
       {children}
     </div>
   )
@@ -174,7 +174,7 @@ export function LegalSection({ section, index }: { section: LegalSectionContent;
 
 export function LegalRightRail({ items }: { items: ReadonlyArray<LegalRailItem> }) {
   return (
-    <aside className="rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.94)] px-5 py-2 lg:sticky lg:top-6">
+    <aside className="rounded-md border border-[rgba(var(--border),0.5)] bg-[rgba(255,252,247,0.94)] px-5 py-2 lg:sticky lg:top-6">
       {items.map((item, index) => {
         const content = (
           <>
@@ -213,7 +213,7 @@ export function LegalContactBlock({
 }) {
   return (
     <section className="mt-4 border-t border-[rgba(var(--border),0.9)] py-10">
-      <div className="rounded-xl border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.94)] px-5 py-6 sm:px-6">
+      <div className="rounded-md border border-[rgba(var(--border),0.5)] bg-[rgba(255,252,247,0.94)] px-5 py-6 sm:px-6">
         <h2 className="text-xl font-semibold text-stone-950">{title}</h2>
         <p className="mt-3 max-w-2xl text-[15.5px] leading-8 text-stone-600">{description}</p>
         <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3 text-sm">

@@ -3,7 +3,7 @@ import hmac
 import json
 import uuid
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -69,6 +69,7 @@ def _event_payload(
     subscription_id: str = "sub_123",
     transaction_id: str = "txn_123",
     status: str = "active",
+    occurred_at: str | None = None,
 ) -> dict:
     custom_data = {"plan": plan}
     if user_id is not None:
@@ -96,12 +97,15 @@ def _event_payload(
         data["id"] = subscription_id
         data["transaction_id"] = transaction_id
 
-    return {
+    payload = {
         "event_id": event_id,
         "event_type": event_type,
         "notification_id": f"ntf_{event_id}",
         "data": data,
     }
+    if occurred_at is not None:
+        payload["occurred_at"] = occurred_at
+    return payload
 
 
 def _adjustment_payload(
@@ -349,7 +353,12 @@ async def test_paddle_webhook_deduplicates_processed_events_and_sends_confirmati
         .scalars()
         .all()
     )
-    assert [event.event_type for event in subscription_events] == ["subscription_activated"]
+    assert [
+        event.event_type
+        for event in subscription_events
+        if event.event_type != "paddle_state_applied"
+    ] == ["subscription_activated"]
+    assert sum(event.event_type == "paddle_state_applied" for event in subscription_events) == 1
 
     webhook_event = (
         (
@@ -540,7 +549,11 @@ async def test_paddle_webhook_failed_event_can_retry_successfully(
         .scalars()
         .all()
     )
-    assert [event.event_type for event in subscription_events] == ["subscription_activated"]
+    assert [
+        event.event_type
+        for event in subscription_events
+        if event.event_type != "paddle_state_applied"
+    ] == ["subscription_activated"]
 
 
 @pytest.mark.asyncio
@@ -614,7 +627,11 @@ async def test_paddle_webhook_subscription_lifecycle_and_transaction_sync(client
         .scalars()
         .all()
     )
-    assert [event.event_type for event in subscription_events] == [
+    assert [
+        event.event_type
+        for event in subscription_events
+        if event.event_type != "paddle_state_applied"
+    ] == [
         "subscription_activated",
         "subscription_past_due",
         "subscription_paused",
@@ -709,6 +726,133 @@ async def test_paddle_webhook_fails_when_supported_event_cannot_be_linked_to_loc
         .one()
     )
     assert webhook_event.processing_status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_paddle_webhook_reclaims_an_expired_processing_lease(client, db, monkeypatch):
+    secret = "pdl_secret_test"
+    timestamp = 1_700_000_000
+    user = await _create_user(db)
+    payload = _event_payload(
+        event_id="evt_expired_processing_lease",
+        event_type="subscription.activated",
+        user_id=user.id,
+        status="active",
+        occurred_at="2026-09-04T10:00:00Z",
+    )
+    db.add(
+        PaddleWebhookEvent(
+            event_id=payload["event_id"],
+            event_type=payload["event_type"],
+            notification_id=payload["notification_id"],
+            processing_status="processing",
+            payload_json=payload,
+            first_received_at=datetime.now(UTC) - timedelta(minutes=10),
+            processed_at=datetime.now(UTC) - timedelta(minutes=10),
+        )
+    )
+    await db.commit()
+
+    _patch_service_session(monkeypatch, db)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
+    monkeypatch.setattr("app.services.paddle_service.time.time", lambda: timestamp + 60)
+    raw_body, signature = _sign_payload(payload, timestamp, secret)
+
+    response = await client.post(
+        "/api/v1/webhooks/paddle",
+        content=raw_body,
+        headers={"Paddle-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    await db.refresh(user)
+    assert user.tier == "author"
+    webhook_event = await db.scalar(
+        select(PaddleWebhookEvent).where(
+            PaddleWebhookEvent.event_id == "evt_expired_processing_lease"
+        )
+    )
+    assert webhook_event.processing_status == "processed"
+    assert webhook_event.duplicate_count == 1
+
+
+@pytest.mark.asyncio
+async def test_paddle_webhook_ignores_out_of_order_subscription_state(client, db, monkeypatch):
+    secret = "pdl_secret_test"
+    timestamp = 1_700_000_000
+    user = await _create_user(db)
+
+    _patch_service_session(monkeypatch, db)
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_SECRET", secret, raising=False
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_WEBHOOK_TOLERANCE_SECONDS", 300, raising=False
+    )
+
+    events = [
+        _event_payload(
+            event_id="evt_ordered_activation",
+            event_type="subscription.activated",
+            user_id=user.id,
+            status="active",
+            occurred_at="2026-09-04T10:00:00Z",
+        ),
+        _event_payload(
+            event_id="evt_ordered_cancellation",
+            event_type="subscription.canceled",
+            user_id=user.id,
+            status="canceled",
+            occurred_at="2026-09-04T12:00:00Z",
+        ),
+        _event_payload(
+            event_id="evt_delayed_resume",
+            event_type="subscription.resumed",
+            user_id=user.id,
+            status="active",
+            occurred_at="2026-09-04T11:00:00Z",
+        ),
+    ]
+
+    for index, payload in enumerate(events):
+        signed_at = timestamp + index
+        monkeypatch.setattr(
+            "app.services.paddle_service.time.time",
+            lambda value=signed_at + 60: value,
+        )
+        raw_body, signature = _sign_payload(payload, signed_at, secret)
+        response = await client.post(
+            "/api/v1/webhooks/paddle",
+            content=raw_body,
+            headers={"Paddle-Signature": signature, "Content-Type": "application/json"},
+        )
+        assert response.status_code == 200
+
+    subscription = await db.scalar(select(Subscription).where(Subscription.user_id == user.id))
+    await db.refresh(user)
+    assert subscription.status == "canceled"
+    assert user.tier == "free"
+    watermarks = (
+        (
+            await db.execute(
+                select(SubscriptionEvent).where(
+                    SubscriptionEvent.user_id == user.id,
+                    SubscriptionEvent.event_type == "paddle_state_applied",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [event.occurred_at for event in watermarks] == [
+        datetime(2026, 9, 4, 10, tzinfo=UTC),
+        datetime(2026, 9, 4, 12, tzinfo=UTC),
+    ]
 
 
 @pytest.mark.asyncio

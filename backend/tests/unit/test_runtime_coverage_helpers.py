@@ -446,7 +446,7 @@ async def test_predict_returns_theories_from_tracked_completion(monkeypatch):
             ]
         )
 
-    monkeypatch.setattr(predictor, "get_client", lambda: FakeClient())
+    monkeypatch.setattr(predictor, "get_openai_client", lambda: FakeClient())
     monkeypatch.setattr(predictor, "semantic_search", fake_semantic_search)
     monkeypatch.setattr(predictor, "create_tracked_chat_completion", fake_chat_completion)
 
@@ -459,7 +459,8 @@ async def test_predict_returns_theories_from_tracked_completion(monkeypatch):
     )
 
     assert theories == [{"theory": "Mira will recover the key", "confidence": 0.8}]
-    assert close_calls == 1
+    # The shared process/loop-aware registry owns the client lifecycle.
+    assert close_calls == 0
 
 
 @pytest.mark.asyncio
@@ -476,11 +477,20 @@ async def test_predict_returns_empty_list_for_malformed_model_json(monkeypatch):
             choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))]
         )
 
-    monkeypatch.setattr(predictor, "get_client", lambda: FakeClient())
+    monkeypatch.setattr(predictor, "get_openai_client", lambda: FakeClient())
     monkeypatch.setattr(predictor, "semantic_search", fake_semantic_search)
     monkeypatch.setattr(predictor, "create_tracked_chat_completion", fake_chat_completion)
 
-    assert await predictor.predict(SimpleNamespace(), uuid.uuid4(), "Question?", 1) == []
+    assert (
+        await predictor.predict(
+            SimpleNamespace(),
+            uuid.uuid4(),
+            "Question?",
+            1,
+            user_id=uuid.uuid4(),
+        )
+        == []
+    )
 
 
 def test_low_level_schema_modules_import_cleanly():

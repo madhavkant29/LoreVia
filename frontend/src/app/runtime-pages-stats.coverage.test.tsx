@@ -17,9 +17,9 @@ describe("stats runtime page coverage", () => {
     await renderPage(<StatsPage />)
 
     expect(text()).toContain("Writing momentum overview")
-    expect(text()).toContain("The Mirror Room")
+    expect(text()).toContain("No entries saved today")
     expect(text()).toContain("Books finished")
-    expect(text()).toContain("LLM tokens")
+    expect(text()).toContain("AI capacity")
 
     resetRenderedPage()
     useQueryMock.mockReturnValueOnce({

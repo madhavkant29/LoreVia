@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import React, { Suspense, useDeferredValue, useState } from "react"
 
@@ -22,7 +22,7 @@ import {
   StoryMapTab,
   WorkspaceStatsTab,
 } from "./AuthorDashboardTabs"
-import type { Book, GoalCalendarItem, PreWritingCheck, RevisionActionItem, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
+import type { Book, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
 
 type IconName =
@@ -57,7 +57,7 @@ type Props = {
   greetingName: string
   canOpenManuscript: boolean
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   percentComplete: number
   chapters: ChapterListResponse["chapters"]
   unitTitle: string
@@ -256,11 +256,11 @@ export function AuthorWorkspaceDashboard({
       <section className={panelClass(isDark, "overflow-hidden p-4 sm:p-5")} data-testid="author-workspace-tabs">
         <div className="grid gap-4 border-b border-white/[0.06] pb-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] lg:items-end">
           <div>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Secondary workspace</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Secondary workspace</p>
             <h2 className={`mt-2 font-serif text-3xl leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
               {activeTab === "planning" ? "Plan with intent. Write with momentum." : "Your author command center."}
             </h2>
-            <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
               {activeTab === "planning"
                 ? "Align goals, schedule sessions, and protect the manuscript from drift."
                 : "Deep tools for planning, structure, and story intelligence."}

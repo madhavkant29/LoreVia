@@ -2,6 +2,8 @@ type PaddleCheckoutSettings = {
   allowLogout?: boolean
   displayMode?: "overlay" | "inline"
   locale?: string
+  showAddDiscounts?: boolean
+  showAddTaxId?: boolean
   successUrl?: string
   theme?: "light" | "dark"
   variant?: "one-page" | "multi-page"

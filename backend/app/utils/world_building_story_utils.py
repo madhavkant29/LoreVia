@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -219,7 +220,7 @@ async def collect_story_elements(db: AsyncSession, book: Book) -> list[WorldElem
         if not s3_key:
             continue
         try:
-            stored = deserialize_manuscript_content(download_book(s3_key))
+            stored = deserialize_manuscript_content(await asyncio.to_thread(download_book, s3_key))
         except STORAGE_IO_EXCEPTIONS:
             continue
         text = str(stored.get("text") or "")

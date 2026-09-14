@@ -1,3 +1,16 @@
+export type SeriesWorldContextItem = string | {
+  name?: string
+  title?: string
+  description?: string
+  [key: string]: unknown
+}
+
+export interface SeriesWorldAnalysis {
+  book_count?: number
+  analysis_count?: number
+  world_context?: SeriesWorldContextItem[]
+}
+
 export interface WorldBuildingDocument {
   id: string
   book_id: string

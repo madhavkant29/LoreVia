@@ -1,9 +1,7 @@
 "use client"
-
 import { useQuery } from "@tanstack/react-query"
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { useParams } from "next/navigation"
-
 import { booksApi } from "@/lib/api/books"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
@@ -12,14 +10,13 @@ import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import {
   buildSceneChapterOptions,
   extractChapterNumberFromSceneFolder,
-  findWorkspaceStructurePath,
 } from "@/lib/utils/sceneWorkspace"
 import {
   buildUniqueWorkspacePathFromCandidate,
   buildWorkspaceFolderTree,
   normalizeWorkspaceFolderPath,
 } from "@/lib/utils/workspacePaths"
-import type { Book, ManuscriptWorkspaceTree, NovelScene, SceneMetadata } from "@/types/book"
+import type { ManuscriptWorkspaceTree, SceneMetadata, WorkspaceScene } from "@/types/book"
 import type { Character } from "@/types/character"
 import { AddCharacterFromSelection } from "@/components/characters/AddCharacterFromSelection"
 import { usePromptDialog } from "@/components/ui/PromptDialog"
@@ -72,6 +69,8 @@ export default function ScenesPage() {
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
   const [addCharacterText, setAddCharacterText] = useState("")
   const selectionRef = useRef<string>("")
+  const selectedSceneIdRef = useRef(selectedSceneId)
+  selectedSceneIdRef.current = selectedSceneId
   const prompt = usePromptDialog()
 
   const { data: book = null } = useBookDetail(bookId)
@@ -82,7 +81,7 @@ export default function ScenesPage() {
     refetch: refetchTree,
   } = useQuery<ManuscriptWorkspaceTree | null>({
     queryKey: asQueryKey(bookCacheKey(bookId, "workspace-tree")),
-    queryFn: () => booksApi.getWorkspaceTree(bookId),
+    queryFn: () => booksApi.getWorkspaceTree(bookId, { includeSceneBodies: true }),
   })
 
   const scenes = useMemo(
@@ -113,7 +112,7 @@ export default function ScenesPage() {
       const folderMatches = !selectedFolder || sceneFolder(scene.path) === selectedFolder || sceneFolder(scene.path).startsWith(`${selectedFolder}/`)
       if (!folderMatches) return false
       if (!term) return true
-      return [scene.title, scene.description ?? "", scene.body, scene.path].some((value) => value.toLowerCase().includes(term))
+      return [scene.title, scene.description ?? "", scene.body ?? "", scene.path].some((value) => value.toLowerCase().includes(term))
     })
   }, [deferredSearch, scenes, selectedFolder])
 
@@ -136,9 +135,26 @@ export default function ScenesPage() {
     setCustomFolders((current) => [...new Set([...current, normalized])].sort())
   }
 
-  const syncWorkspaceSelection = (treeData: ManuscriptWorkspaceTree | null, preferredSceneId?: string | null) => {
+  const selectScene = useCallback((scene: WorkspaceScene) => {
+    const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
+    const folderPath = sceneFolder(scene.path) || defaultSceneFolder(inferredChapterNumber)
+    const sceneBody = scene.body ?? ""
+    setSelectedSceneId(scene.id)
+    setSelectedFolder(sceneFolder(scene.path) || null)
+    setTitle(scene.title)
+    setDescription(scene.description ?? "")
+    setBody(sceneBody)
+    setHtmlBody(scene.html_body ?? `<p>${sceneBody.replace(/\n/g, "<br>")}</p>`)
+    setChapterNumber(inferredChapterNumber)
+    setSceneMetadata({ ...emptySceneMetadata(), ...(scene.metadata ?? {}) })
+    setSceneFolderDraft(folderPath)
+    setStatus(null)
+    setShowBrowserOnMobile(false)
+  }, [])
+
+  const syncWorkspaceSelection = useCallback((treeData: ManuscriptWorkspaceTree | null, preferredSceneId?: string | null) => {
     const availableScenes = treeData?.scene_groups.flatMap((group) => group.scenes) ?? []
-    const nextSceneId = preferredSceneId ?? selectedSceneId
+    const nextSceneId = preferredSceneId ?? selectedSceneIdRef.current
     const matchedScene = nextSceneId ? availableScenes.find((scene) => scene.id === nextSceneId) ?? null : null
     const fallbackScene = matchedScene ?? availableScenes[0] ?? null
     if (fallbackScene) {
@@ -146,7 +162,7 @@ export default function ScenesPage() {
       return
     }
     setSelectedSceneId(null)
-  }
+  }, [selectScene])
 
   useEffect(() => {
     setCustomFolders(loadSceneFolders(bookId))
@@ -156,7 +172,7 @@ export default function ScenesPage() {
 
   useEffect(() => {
     syncWorkspaceSelection(tree)
-  }, [tree])
+  }, [syncWorkspaceSelection, tree])
 
   useEffect(() => {
     const syncSelectionMenu = () => {
@@ -207,22 +223,6 @@ export default function ScenesPage() {
 
   const handleCharacterCreated = (character: Character) => {
     setStatus(`Character "${character.name}" added to the story bible.`)
-  }
-
-  function selectScene(scene: NovelScene) {
-    const inferredChapterNumber = scene.chapter_number ?? extractChapterNumberFromSceneFolder(scene.path)
-    const folderPath = sceneFolder(scene.path) || defaultSceneFolder(inferredChapterNumber)
-    setSelectedSceneId(scene.id)
-    setSelectedFolder(sceneFolder(scene.path) || null)
-    setTitle(scene.title)
-    setDescription(scene.description ?? "")
-    setBody(scene.body)
-    setHtmlBody(scene.html_body ?? `<p>${scene.body.replace(/\n/g, "<br>")}</p>`)
-    setChapterNumber(inferredChapterNumber)
-    setSceneMetadata({ ...emptySceneMetadata(), ...(scene.metadata ?? {}) })
-    setSceneFolderDraft(folderPath)
-    setStatus(null)
-    setShowBrowserOnMobile(false)
   }
 
   function newScene(folderOverride?: string | null) {
@@ -311,7 +311,7 @@ export default function ScenesPage() {
         id: scene.id,
         title: scene.title,
         description: scene.description,
-        body: scene.body,
+        body: scene.body ?? "",
         metadata: scene.metadata,
         html_body: scene.html_body,
         path: nextPath,

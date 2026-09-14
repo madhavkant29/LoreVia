@@ -11,6 +11,7 @@ import {
   getPublicAppUrl,
   getPaddleTransactionId,
   getTransactionIdFromCheckoutUrl,
+  shouldAbandonClosedCheckout,
 } from "./paddle"
 
 describe("paddle billing helpers", () => {
@@ -70,6 +71,12 @@ describe("paddle billing helpers", () => {
     expect(getTransactionIdFromCheckoutUrl("https://getlorevia.com/checkout?_ptxn=txn_456")).toBe("txn_456")
   })
 
+  it("abandons only checkouts that have not already completed", () => {
+    expect(shouldAbandonClosedCheckout("txn_pending", null)).toBe(true)
+    expect(shouldAbandonClosedCheckout("txn_completed", "txn_completed")).toBe(false)
+    expect(shouldAbandonClosedCheckout(null, "txn_completed")).toBe(false)
+  })
+
   it("extracts the billing confirmation token from a checkout url", () => {
     expect(getBillingConfirmationTokenFromCheckoutUrl("https://getlorevia.com/checkout?_ptxn=txn_456&lvct=token_456")).toBe("token_456")
   })
@@ -92,6 +99,8 @@ describe("paddle billing helpers", () => {
     expect(settings.displayMode).toBe("overlay")
     expect(settings.variant).toBe("one-page")
     expect(settings.allowLogout).toBe(false)
+    expect(settings.showAddDiscounts).toBe(false)
+    expect(settings.showAddTaxId).toBe(false)
     expect(settings.successUrl).toBe("https://getlorevia.com/checkout/success")
   })
 

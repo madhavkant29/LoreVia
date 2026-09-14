@@ -4,17 +4,20 @@ import logging
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import mark_book_cache_dirty
 from app.models.book import Book, Chapter
+from app.models.operations import TaskExecution
 from app.schemas.books import ManuscriptReprocessBody, ManuscriptReprocessOut
 from app.services.processing_allowance_service import (
-    consume_processing_reservation,
+    MANUAL_REPROCESS_USAGE_KIND,
+    ProcessingReservationRequest,
     ensure_project_writable,
-    release_processing_reservation,
+    manual_reprocess_source_prefix,
+    release_processing_reservations_for_source_prefix,
+    reserve_processing_word_batch,
     reserve_processing_words,
 )
 from app.services.task_execution_service import (
@@ -25,15 +28,41 @@ from app.services.task_execution_service import (
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.billing_utils import require_author_access
 from app.utils.books.notes import get_owned_book
-from app.utils.ingestion_utils import build_analysis_chapter_state, load_processing_chapter_payload
+from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
+from app.utils.ingestion_utils import (
+    build_analysis_chapter_state,
+    load_processing_chapter_payload,
+)
 from app.utils.llm_usage_utils import (
     assert_manual_reprocess_token_capacity,
     estimate_manual_reprocess_tokens,
 )
 
 log = logging.getLogger(__name__)
-MANUAL_REPROCESS_FINALIZATION_ERRORS = (RuntimeError, ValueError, SQLAlchemyError)
-MANUAL_REPROCESS_CLEANUP_ERRORS = (RuntimeError, ValueError, SQLAlchemyError)
+MANUAL_REPROCESS_FINALIZATION_ERRORS = BEST_EFFORT_CLEANUP_EXCEPTIONS
+MANUAL_REPROCESS_CLEANUP_ERRORS = BEST_EFFORT_CLEANUP_EXCEPTIONS
+
+
+async def _lock_book_reprocessing(db: AsyncSession, book_id: uuid.UUID) -> None:
+    await db.execute(
+        select(func.pg_advisory_xact_lock(func.hashtext(f"manual_reprocess:{book_id}")))
+    )
+
+
+async def _chapter_extraction_is_active(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+) -> bool:
+    execution_id = await db.scalar(
+        select(TaskExecution.id)
+        .where(
+            TaskExecution.book_id == book_id,
+            TaskExecution.task_name == "extraction_tasks.process_chapter",
+            TaskExecution.status.in_(("pending_dispatch", "queued", "running", "paused")),
+        )
+        .limit(1)
+    )
+    return execution_id is not None
 
 
 async def start_manual_manuscript_reprocess(
@@ -46,12 +75,18 @@ async def start_manual_manuscript_reprocess(
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     ensure_project_writable(book)
+    user_id = current_user.id
+    resolved_book_id = book.id
 
     if not (body.confirm_processing_words or body.confirm_upload_charge):
         raise HTTPException(
             400,
             "Confirm that reprocessing will consume processed-word allowance before continuing.",
         )
+
+    await _lock_book_reprocessing(db, resolved_book_id)
+    await db.refresh(book)
+    ensure_project_writable(book)
 
     from app.services.editor_project_service import (
         dispatch_rebuild,
@@ -62,6 +97,8 @@ async def start_manual_manuscript_reprocess(
 
     if get_rebuild_run_id(book) is not None:
         raise HTTPException(409, "A rebuild is already in progress for this project")
+    if await _chapter_extraction_is_active(db, book.id):
+        raise HTTPException(409, "Chapter processing is already in progress for this project")
 
     chapters = (
         (
@@ -77,51 +114,77 @@ async def start_manual_manuscript_reprocess(
         raise HTTPException(400, "Save at least one chapter before reprocessing")
 
     requested_words = sum(int(chapter.word_count or 0) for chapter in chapters)
-    reservation_source_id = f"manual:{uuid.uuid4().hex}"
-    reservation, allowance = await reserve_processing_words(
+    rebuild_run_id = uuid.uuid4().hex
+    source_prefix = manual_reprocess_source_prefix(rebuild_run_id)
+    reservations, allowance = await reserve_processing_word_batch(
         db,
         current_user,
         book_id=book.id,
-        usage_kind="manual_reprocess",
-        source_id=reservation_source_id,
-        word_count=requested_words,
+        usage_kind=MANUAL_REPROCESS_USAGE_KIND,
+        requests=[
+            ProcessingReservationRequest(
+                source_id=f"{source_prefix}{chapter.id}:{chapter.content_version}",
+                word_count=int(chapter.word_count or 0),
+            )
+            for chapter in chapters
+        ],
     )
-    rebuild_run_id = await prepare_rebuild(db, book, reason="manual_reprocess")
+    reservation_ids_by_chapter_id = {
+        chapter.id: reservation.id
+        for chapter, reservation in zip(chapters, reservations, strict=True)
+    }
     try:
-        chapters_queued, total_words = await dispatch_rebuild(db, book)
-        await consume_processing_reservation(db, reservation.id)
+        await prepare_rebuild(
+            db,
+            book,
+            reason="manual_reprocess",
+            rebuild_run_id=rebuild_run_id,
+        )
+        chapters_queued, total_words = await dispatch_rebuild(
+            db,
+            book,
+            reservation_ids_by_chapter_id=reservation_ids_by_chapter_id,
+            manual_reprocess=True,
+            run_kind="manual_reprocess",
+        )
         await db.commit()
     except MANUAL_REPROCESS_FINALIZATION_ERRORS as exc:
         log.exception(
             "manual_reprocess_allowance_failed book_id=%s rebuild_run_id=%s",
-            book.id,
+            resolved_book_id,
             rebuild_run_id,
         )
         await db.rollback()
         try:
-            await release_processing_reservation(db, reservation.id)
+            await release_processing_reservations_for_source_prefix(
+                db,
+                user_id=user_id,
+                book_id=resolved_book_id,
+                usage_kind=MANUAL_REPROCESS_USAGE_KIND,
+                source_prefix=source_prefix,
+            )
             await db.refresh(book)
             await fail_rebuild_if_active(
                 db,
                 book,
                 expected_rebuild_run_id=rebuild_run_id,
-                error="Unable to finalize the manual reprocess allowance reservation.",
+                error="Unable to dispatch the manual reprocess.",
             )
             await db.commit()
         except MANUAL_REPROCESS_CLEANUP_ERRORS:
             await db.rollback()
             log.exception(
                 "manual_reprocess_allowance_cleanup_failed book_id=%s rebuild_run_id=%s",
-                book.id,
+                resolved_book_id,
                 rebuild_run_id,
             )
         raise HTTPException(
             503,
-            "Unable to finalize the reprocess allowance reservation. No rebuild was started.",
+            "Unable to start the reprocess. Unused processed-word reservations were released.",
         ) from exc
 
     return ManuscriptReprocessOut(
-        book_id=str(book.id),
+        book_id=str(resolved_book_id),
         status="processing",
         chapters_queued=chapters_queued,
         total_words=total_words,
@@ -143,14 +206,19 @@ async def start_manual_chapter_reprocess(
     require_author_access(current_user)
     ensure_project_writable(book)
 
+    await _lock_book_reprocessing(db, book.id)
+    await db.refresh(book)
+    ensure_project_writable(book)
+
     from app.services.editor_project_service import (
         get_rebuild_run_id,
-        purge_manual_chapter_reprocess_content,
         update_reprocess_metadata,
     )
 
     if get_rebuild_run_id(book) is not None:
         raise HTTPException(409, "A rebuild is already in progress for this project")
+    if await _chapter_extraction_is_active(db, book.id):
+        raise HTTPException(409, "Chapter processing is already in progress for this project")
     chapter = (
         await db.execute(
             select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
@@ -184,7 +252,6 @@ async def start_manual_chapter_reprocess(
         word_count=int(chapter.word_count or 0),
     )
 
-    await purge_manual_chapter_reprocess_content(db, book=book, chapter=chapter)
     chapter.analysis_state = build_analysis_chapter_state(
         chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
         status="queued",
@@ -201,6 +268,7 @@ async def start_manual_chapter_reprocess(
         book_id=book.id,
         run_kind="manual_reprocess",
         chapters_total=1,
+        reuse_active=False,
     )
     execution = await ensure_task_execution(
         db,

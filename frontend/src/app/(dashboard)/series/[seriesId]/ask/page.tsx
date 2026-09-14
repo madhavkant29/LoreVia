@@ -13,8 +13,8 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { renderMarkdownHtml } from "@/lib/utils/richText"
 import { Skeleton } from "@/components/ui/Skeleton"
-import type { BookSeries, PaginatedSeries } from "@/types/book"
-import type { AdvisorMessage, AdvisorResponse } from "@/types/intelligence"
+import type { PaginatedSeries } from "@/types/book"
+import type { AdvisorMessage } from "@/types/intelligence"
 
 const SUGGESTED_QUESTIONS = [
   { category: "Characters", question: "Who is the most recurring side character?" },
@@ -35,10 +35,9 @@ export default function SeriesAskPage() {
     queryFn: () => booksApi.listSeries(),
     enabled: Boolean(seriesId),
   })
-  const seriesList = paginatedSeries?.items ?? []
+  const seriesList = useMemo(() => paginatedSeries?.items ?? [], [paginatedSeries?.items])
   const [askQuery, setAskQuery] = useState("")
   const [askMessages, setAskMessages] = useState<AdvisorMessage[]>([])
-  const [askResponse, setAskResponse] = useState<AdvisorResponse | null>(null)
   const [askLoading, setAskLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const series = useMemo(() => seriesList.find((s) => s.id === seriesId) ?? null, [seriesId, seriesList])
@@ -74,9 +73,11 @@ export default function SeriesAskPage() {
         }
         return [...prev, { role: "assistant", content: response.reply }]
       })
-      setAskResponse(response)
     } catch {
-      setAskResponse({ reply: "Failed to get a response. Please try again.", intent: "general", response_type: "standard", retrieved_passages: [], cached: false })
+      setAskMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "I could not answer that right now. Please try again." },
+      ])
     } finally {
       setAskLoading(false)
     }

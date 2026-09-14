@@ -10,6 +10,7 @@ import { clamp, formatNumber, panelClass, severityClass } from "@/components/ove
 import { CoverEditOverlay } from "@/components/ui/CoverEditOverlay"
 import { ErrorCard } from "@/components/ui/ErrorCard"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
+import { WorkspaceModeSwitcher } from "@/components/reader/WorkspaceModeSwitcher"
 import { buildIssueDisplay } from "@/lib/utils/storyFeedback"
 import type { Book, PreWritingCheck, StoryHealth } from "@/types/book"
 import type { ChapterListResponse } from "@/types/reader"
@@ -45,14 +46,13 @@ export function OverviewHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {canUseAuthorMode ? (
-            <ModeToggle
-              isDark={isDark}
-              activeMode={activeBookMode}
-              modeSaving={modeSaving}
-              onModeChange={onModeChange}
-            />
-          ) : null}
+          <WorkspaceModeSwitcher
+            isDark={isDark}
+            activeMode={activeBookMode}
+            modeSaving={modeSaving}
+            writingAvailable={canUseAuthorMode}
+            onModeChange={onModeChange}
+          />
 
           <button
             type="button"
@@ -89,7 +89,7 @@ export function CurrentProjectCard({
   isDark: boolean
   canOpenManuscript: boolean
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   percentComplete: number
   dailyWords: number
   dailyTarget: number
@@ -102,13 +102,22 @@ export function CurrentProjectCard({
   onCoverUpdated: (book: Book) => void
 }) {
   const goalProgress = clamp((dailyWords / Math.max(1, dailyTarget)) * 100, 0, 100)
-  const manuscriptProgress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
-  const etaDays = currentWords && dailyTarget > 0 ? Math.max(1, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget)) : null
-  const etaDate = etaDays ? new Date(Date.now() + etaDays * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Syncing"
+  const hasBookTarget = typeof targetWords === "number" && targetWords > 0
+  const manuscriptProgress = clamp(
+    hasBookTarget && currentWords !== null ? (currentWords / targetWords) * 100 : percentComplete,
+    0,
+    100,
+  )
+  const etaDays = hasBookTarget && currentWords !== null && dailyTarget > 0
+    ? Math.max(0, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget))
+    : null
+  const etaDate = etaDays !== null
+    ? new Date(Date.now() + etaDays * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+    : "No target set"
 
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current project</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Current project</p>
       <div className="mt-4 grid gap-5 md:grid-cols-[9rem_minmax(0,1fr)] xl:grid-cols-[10rem_minmax(0,1fr)]">
         <SmartBookCover
           src={resolvedCoverUrl}
@@ -127,10 +136,14 @@ export function CurrentProjectCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className={`break-words text-2xl font-semibold tracking-tight sm:text-3xl ${isDark ? "text-white" : "text-slate-950"}`}>{book.title}</h2>
-            <span className="text-xs font-semibold text-teal-600">{book.work_type === "screenplay" ? "Screenplay" : "Manuscript"}</span>
+            <span className={`text-xs font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>{book.work_type === "screenplay" ? "Screenplay" : "Manuscript"}</span>
           </div>
           <p className={`mt-3 max-w-xl break-words text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-            {book.public_description?.trim() || `The draft is ${Math.round(manuscriptProgress)}% complete, with the next pass centered on pacing, continuity, and scene-by-scene momentum.`}
+            {book.public_description?.trim() || (
+              currentWords !== null
+                ? `${currentWords.toLocaleString()} manuscript words saved${hasBookTarget ? ` toward a ${targetWords.toLocaleString()}-word target` : ""}.`
+                : "No project description has been added."
+            )}
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             {canOpenManuscript ? (
@@ -157,10 +170,10 @@ export function CurrentProjectCard({
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <HeroMetric isDark={isDark} label="Draft progress" value={`${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`} note={`${Math.round(manuscriptProgress)}% of target`} progress={manuscriptProgress} />
+        <HeroMetric isDark={isDark} label="Draft progress" value={hasBookTarget ? `${formatNumber(currentWords)} / ${targetWords.toLocaleString()}` : `${formatNumber(currentWords)} words`} note={hasBookTarget ? `${Math.round(manuscriptProgress)}% of target` : "No book target set"} progress={hasBookTarget ? manuscriptProgress : undefined} />
         <HeroMetric isDark={isDark} label="Daily target" value={`${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`} note="Today's quota" progress={goalProgress} />
-        <HeroMetric isDark={isDark} label="Writing rhythm" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} note="Current streak" progress={Math.min(100, loginStreakDays * 12)} />
-        <HeroMetric isDark={isDark} label="Est. completion" value={etaDate} note={etaDays ? `In ${etaDays} day${etaDays === 1 ? "" : "s"}` : "Add a daily goal"} progress={etaDays ? clamp(100 - etaDays, 6, 100) : 0} />
+        <HeroMetric isDark={isDark} label="Writing rhythm" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} note="Current streak" />
+        <HeroMetric isDark={isDark} label="Est. completion" value={etaDate} note={etaDays !== null ? (etaDays === 0 ? "Target reached" : `In ${etaDays} day${etaDays === 1 ? "" : "s"}`) : "Set a book target to calculate"} />
       </div>
     </section>
   )
@@ -189,13 +202,13 @@ export function RecentChaptersCard({
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent chapters</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Latest chapters</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <StatusPill isDark={isDark} label={book.status === "ready" ? "Drafting" : book.status.replace(/_/g, " ")} tone="violet" />
             <StatusPill isDark={isDark} label={`${chapters.length} indexed ${unitTitle.toLowerCase()}${chapters.length === 1 ? "" : "s"}`} tone="slate" />
           </div>
         </div>
-        <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className="text-xs font-semibold text-teal-600">
+        <button type="button" onClick={() => onNavigate(`/${bookId}/manuscript`)} className={`text-xs font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>
           Open draft
         </button>
       </div>
@@ -208,15 +221,15 @@ export function RecentChaptersCard({
             className={`flex w-full items-start justify-between gap-3 rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
             <div className="min-w-0">
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{unitPrefix} {chapter.number}</p>
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>{unitPrefix} {chapter.number}</p>
               <p className={`mt-1 break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{chapter.title || `${unitTitle} ${chapter.number}`}</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{chapter.read ? "Opened recently" : "Ready to draft"}</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{chapter.read ? "Opened" : "Not opened"}</p>
             </div>
-            <span className="text-xs font-semibold text-teal-600">{chapter.read ? "Read" : "Open"}</span>
+            <span className={`text-xs font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>{chapter.read ? "Read" : "Open"}</span>
           </button>
         )) : (
-          <p className={`rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
-            {unitTitle} indexing is still syncing.
+          <p className={`rounded-md border border-dashed px-4 py-6 text-sm ${isDark ? "border-white/[0.08] text-slate-300" : "border-slate-200 text-slate-600"}`}>
+            No {unitTitle.toLowerCase()}s are available yet.
           </p>
         )}
       </div>
@@ -244,7 +257,7 @@ export function StoryPulseCard({
   if (storyHealthError && !storyHealth && onRetryStoryHealth) {
     return (
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story pulse</p>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Story pulse</p>
         <div className="mt-4">
           <ErrorCard
             message="Failed to load story health"
@@ -257,33 +270,36 @@ export function StoryPulseCard({
     )
   }
 
-  const score = storyHealth?.score ?? 0
-  const status = storyHealth?.status ?? "Syncing"
-  const summary = storyHealth?.summary ?? "LoreVia is still building the latest story pulse."
+  const healthAvailable = Boolean(storyHealth && storyHealth.available !== false)
+  const score = healthAvailable ? storyHealth!.score : 0
+  const status = storyHealth?.status ?? "Not available"
+  const summary = storyHealth?.summary ?? "Story health needs analyzed manuscript evidence before a score can be calculated."
   const healthColor = score >= 85 ? "#45d483" : score >= 70 ? "#8b5cf6" : score >= 55 ? "#f5bf3d" : "#fb7185"
-  const topMetrics = (storyHealth?.metrics ?? []).slice(0, 3)
+  const topMetrics = (storyHealth?.metrics ?? []).filter((metric) => metric.available !== false).slice(0, 3)
   const selectedMetric = topMetrics.find((metric) => metric.label === selectedMetricLabel) ?? null
 
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story pulse</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Story pulse</p>
           <h2 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Key metrics only.</h2>
         </div>
         <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>{status}</span>
       </div>
 
       <div className="mt-5 flex items-center gap-4">
-        <div
-          className="relative flex h-24 w-24 items-center justify-center rounded-full"
-          style={{ background: `conic-gradient(${healthColor} 0 ${score}%, ${isDark ? "#1b2430" : "#edf0f5"} ${score}% 100%)` }}
-        >
-          <div className={`flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
-            <span className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{score}</span>
-            <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>health</span>
+        {healthAvailable ? (
+          <div
+            className="relative flex h-24 w-24 items-center justify-center rounded-full"
+            style={{ background: `conic-gradient(${healthColor} 0 ${score}%, ${isDark ? "#1b2430" : "#edf0f5"} ${score}% 100%)` }}
+          >
+            <div className={`flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
+              <span className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{score}</span>
+              <span className={`text-3xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>health</span>
+            </div>
           </div>
-        </div>
+        ) : null}
         <p className={`min-w-0 break-words text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{summary}</p>
       </div>
 
@@ -340,7 +356,7 @@ export function ActiveIssuesCard({
   processingSummary: string | null
 }) {
   const issues = [
-    { title: "Character Inconsistencies", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, href: `/${bookId}/reports` },
+    { title: "Continuity Flags", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, href: `/${bookId}/reports` },
     { title: "World Gaps", rawCount: worldGapCount, severity: "Medium", icon: "gap" as IconName, href: `/${bookId}/world-gap` },
     { title: "Timeline Conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, href: `/${bookId}/timeline` },
   ].map((issue) => ({
@@ -352,7 +368,7 @@ export function ActiveIssuesCard({
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Next actions</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Next actions</p>
             <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Keep the risky parts visible.</h2>
           </div>
           <Icon name="spark" className="h-5 w-5 text-teal-700" />
@@ -387,7 +403,7 @@ export function ActiveIssuesCard({
             <Icon name={issue.icon} className="h-5 w-5 text-teal-700" />
             <div className="min-w-0 flex-1">
               <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{issue.title}</p>
-              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{issue.label}</p>
+              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{issue.label}</p>
             </div>
             <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClass(issue.severity, isDark)}`}>{issue.severity}</span>
           </button>
@@ -408,7 +424,7 @@ export function CompactQuickLinksCard({
 }) {
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Workspace links</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Workspace links</p>
       <div className="mt-4 space-y-3">
         {links.map((link) => (
           <button
@@ -420,7 +436,7 @@ export function CompactQuickLinksCard({
             <Icon name={link.icon} className="mt-0.5 h-5 w-5 text-teal-700" />
             <div className="min-w-0">
               <p className={`break-words text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{link.title}</p>
-              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{link.body}</p>
+              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{link.body}</p>
             </div>
           </button>
         ))}
@@ -468,7 +484,7 @@ export function RecentSignalsCard({
   if (preWritingCheckError && recentAlerts.length === 0 && chapters.length === 0 && onRetryPreWritingCheck) {
     return (
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent signals</p>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Recent signals</p>
         <div className="mt-4">
           <ErrorCard
             message="Failed to load recent signals"
@@ -483,7 +499,7 @@ export function RecentSignalsCard({
 
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recent signals</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Recent signals</p>
       <div className="mt-4 space-y-3">
         {recentEntries.length > 0 ? recentEntries.map((entry) => (
           <button
@@ -493,48 +509,13 @@ export function RecentSignalsCard({
             className={`w-full rounded-md border px-4 py-3 text-left transition ${isDark ? "border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]" : "border-slate-200 bg-white hover:bg-slate-50"}`}
           >
               <p className={`break-words text-sm font-medium leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.title}</p>
-              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{entry.note}</p>
+              <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{entry.note}</p>
             </button>
         )) : (
-          <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Signals will appear here as the workspace syncs.</p>
+          <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>Signals will appear here as the workspace syncs.</p>
         )}
       </div>
     </section>
-  )
-}
-
-function ModeToggle({
-  isDark,
-  activeMode,
-  modeSaving,
-  onModeChange,
-}: {
-  isDark: boolean
-  activeMode: "reader" | "author"
-  modeSaving: boolean
-  onModeChange: (nextMode: "reader" | "author") => void
-}) {
-  return (
-    <div className={`flex rounded-full border p-1 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50"}`}>
-      {(["reader", "author"] as const).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          disabled={modeSaving}
-          aria-pressed={activeMode === mode}
-          onClick={() => onModeChange(mode)}
-          className={`rounded-full px-4 py-2 text-xs font-semibold capitalize transition ${
-            activeMode === mode
-              ? "bg-teal-800 text-white"
-              : isDark
-                ? "text-slate-300 hover:bg-white/[0.06]"
-                : "text-slate-600 hover:bg-white"
-          }`}
-        >
-          {mode}
-        </button>
-      ))}
-    </div>
   )
 }
 
@@ -549,16 +530,18 @@ function HeroMetric({
   label: string
   value: string
   note: string
-  progress: number
+  progress?: number
 }) {
   return (
     <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200 bg-slate-50"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>{label}</p>
       <p className={`mt-2 break-words text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</p>
-      <div className={`mt-3 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-200"}`}>
-        <div className="h-full rounded-full bg-teal-700" style={{ width: `${clamp(progress, 0, 100)}%` }} />
-      </div>
-      <p className={`mt-2 text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{note}</p>
+      {typeof progress === "number" ? (
+        <div className={`mt-3 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/[0.08]" : "bg-slate-200"}`}>
+          <div className="h-full rounded-full bg-teal-700" style={{ width: `${clamp(progress, 0, 100)}%` }} />
+        </div>
+      ) : null}
+      <p className={`mt-2 text-3xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{note}</p>
     </div>
   )
 }
@@ -581,7 +564,7 @@ function StatusPill({
 export function RevisionPreviewPlaceholder({ isDark }: { isDark: boolean }) {
   return (
     <section className={panelClass(isDark, "flex min-h-64 items-center justify-center p-5")}>
-      <p className={`text-sm ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision intelligence is still syncing.</p>
+      <p className={`text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Revision intelligence is still syncing.</p>
     </section>
   )
 }

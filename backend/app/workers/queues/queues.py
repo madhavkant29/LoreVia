@@ -7,4 +7,5 @@ TASK_QUEUES = [
     Queue("analysis_priority", routing_key="analysis_priority"),
     Queue("embedding", routing_key="embedding"),
     Queue("intelligence", routing_key="intelligence"),
+    Queue("maintenance", routing_key="maintenance"),
 ]

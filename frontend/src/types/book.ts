@@ -73,11 +73,45 @@ export interface Book {
   collaboration_permissions?: CollaborationPermissions | null
 }
 
+/** Lightweight book payload returned by the navigation/picker selector API. */
+export type BookSelector = Pick<
+  Book,
+  | "id"
+  | "title"
+  | "author"
+  | "genre"
+  | "cover_url"
+  | "mode"
+  | "status"
+  | "work_type"
+  | "total_chapters"
+  | "hidden_at"
+  | "archived_at"
+  | "is_public"
+  | "source_kind"
+  | "public_share_status"
+  | "public_description"
+  | "primary_series_id"
+  | "series_name"
+  | "series_order"
+  | "workspace_shell"
+  | "access_class"
+  | "can_switch_workspace_mode"
+  | "collaboration_role"
+  | "collaboration_permissions"
+>
+
 export interface BookOverviewPayload {
   book: Book
   progress: ReadingProgress
   chapter_list: ChapterListResponse
   summary_collection: SummaryCollectionResponse
+  world_stats?: {
+    active_documents: number
+    corpus_words: number
+    extracted_elements: number
+    total_items: number
+  } | null
 }
 
 export interface ReaderBootstrapPayload {
@@ -284,6 +318,12 @@ export interface PublicBook {
   public_updated_at?: string | null
 }
 
+export interface PublicBookPage {
+  items: PublicBook[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
 export interface PublicBookDetail extends PublicBook {
   chapters: PublicChapterMeta[]
   visibility_notice?: string | null
@@ -297,6 +337,7 @@ export interface PublicChapter {
   chapter_title: string | null
   chapter_description: string | null
   total_chapters: number | null
+  content_url?: string | null
   text_url: string | null
   text_content?: string | null
   html_content?: string | null
@@ -325,6 +366,16 @@ export interface BookNote {
   tags?: string[]
   created_at: string
   updated_at: string
+}
+
+export interface BookNotePageItem extends Omit<BookNote, "body"> {
+  body: string | null
+}
+
+export interface BookNotePage {
+  items: BookNotePageItem[]
+  next_cursor: string | null
+  has_more: boolean
 }
 
 export interface RevisionTagSet {
@@ -407,6 +458,12 @@ export interface VaultNoteLink {
   created_at: string
 }
 
+export interface SavedQuotePage {
+  items: SavedQuote[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
 export interface VaultNoteTag {
   id: string
   book_id: string
@@ -472,6 +529,10 @@ export interface UserStats {
     llm_prompt_tokens?: number
     llm_completion_tokens?: number
     llm_total_tokens?: number
+    ai_interactive_available?: boolean
+    ai_processing_available?: boolean
+    ai_capacity_usage_percent?: number
+    ai_capacity_resets_at?: string | null
     total_chapters_tracked: number
     saved_quotes: number
     active_analyzed_words: number
@@ -542,6 +603,7 @@ export interface StoryHealthMetric {
   label: string
   score: number
   detail: string
+  available?: boolean
 }
 
 export interface StoryHealth {
@@ -549,6 +611,7 @@ export interface StoryHealth {
   status: string
   summary: string
   metrics: StoryHealthMetric[]
+  available?: boolean
 }
 
 export interface PreWritingCharacter {
@@ -744,6 +807,23 @@ export interface RevisionBoard {
   last_generated_at?: string | null
 }
 
+export interface FirstImpressionState {
+  status: "not_started" | "queued" | "running" | "complete" | "failed"
+  job_id?: string | null
+  report_id?: string | null
+  request_hash?: string | null
+  source_fingerprint?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  error_code?: string | null
+}
+
+export interface WorkspaceActivationState {
+  completed_at?: string | null
+  completion_action?: string | null
+  completed_finding_id?: string | null
+}
+
 export interface GoalCalendarItem {
   id: string
   title: string
@@ -764,6 +844,8 @@ export interface WriterWorkspace {
   novel_front_matter?: NovelFrontMatter
   novel_epub_metadata?: NovelEpubMetadata
   revision_board: RevisionBoard
+  activation?: WorkspaceActivationState
+  first_impression?: FirstImpressionState
   editor_preferences?: EditorPreferences
   reading_themes?: ReadingThemes
   typewriter_mode?: TypewriterModeSettings
@@ -1067,6 +1149,32 @@ export interface NovelScene {
   updated_at: string
 }
 
+export interface VaultNotePageItem extends Omit<VaultNote, "content"> {
+  content: string | null
+}
+
+export interface VaultNotePage {
+  items: VaultNotePageItem[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
+export interface NovelScenePageItem extends Omit<NovelScene, "body" | "html_body"> {
+  body: string | null
+  html_body: string | null
+}
+
+export interface NovelScenePage {
+  items: NovelScenePageItem[]
+  next_cursor: string | null
+  has_more: boolean
+}
+
+export interface WorkspaceScene extends Omit<NovelScene, "body" | "html_body"> {
+  body?: string | null
+  html_body?: string | null
+}
+
 export interface WorkspaceChapterNode {
   chapter_number: number
   title?: string | null
@@ -1081,7 +1189,7 @@ export interface WorkspaceSceneGroup {
   chapter_number?: number | null
   structure_version?: number | null
   collapsed_by_default: boolean
-  scenes: NovelScene[]
+  scenes: WorkspaceScene[]
 }
 
 export interface ManuscriptWorkspaceTree {
@@ -1109,6 +1217,13 @@ export interface WorkspaceSearchResult {
   scene_id?: string | null
   note_path?: string | null
   rank: number
+}
+
+export interface WorkspaceSearchPage {
+  items: WorkspaceSearchResult[]
+  next_cursor: string | null
+  has_more: boolean
+  index_status: "ready" | "building" | "not_requested"
 }
 
 export interface ChapterSceneOrder {
@@ -1140,8 +1255,17 @@ export interface BookProcessing {
   retry_available?: boolean
   processing_run_id?: string | null
   pause_reason?: string | null
+  auto_resume?: boolean
   resume_available?: boolean
-  resume_blockers?: Array<{ kind?: string; detail?: string }>
+  resume_blockers?: Array<{
+    kind?: string
+    detail?: string
+    window?: string | null
+    windows?: string[]
+    next_resume_at?: string | null
+    auto_resume?: boolean
+    permanent?: boolean
+  }>
   next_chapter_number?: number | null
   next_resume_at?: string | null
   pipeline?: {

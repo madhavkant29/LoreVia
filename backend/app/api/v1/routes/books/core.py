@@ -3,12 +3,12 @@ import uuid
 from typing import Any
 
 import bleach  # type: ignore[import-untyped]
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
-# â”€â”€â”€ Upload limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Upload limits ────────────────────────────────────────────────────────────
 MAX_BOOK_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 MAX_COVER_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
@@ -32,6 +32,7 @@ def _clean_optional_text(value: str | None) -> str | None:
 
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.feature_flags import require_cursor_page_apis_enabled
 from app.core.database import get_db
 from app.core.redis import (
     mark_book_cache_dirty,
@@ -47,22 +48,23 @@ from app.schemas.books import (
     BookForumMetadataBody,
     BookModeBody,
     BookNoteOut,
+    BookNotePageOut,
     BookOut,
+    BookPageOut,
     BookProcessingOut,
-    PrivateUserStats,
-    PublicUserStats,
+    BookSelectorOut,
+    SavedQuotePageOut,
     UserStatsOut,
 )
-from app.services.library_stats_service import load_library_aggregate_stats
+from app.services.book_listing_service import list_user_book_selectors, list_user_books_page
 from app.services.pipeline_state_service import (
     continue_book_processing,
     enqueue_processing_state_repair_if_needed,
     retry_book_processing,
 )
-from app.services.processing_allowance_service import (
-    summarize_processing_allowances,
-)
-from app.utils.billing_utils import calculate_upload_usage_summary, require_author_access
+from app.services.saved_content_service import list_saved_notes_page, list_saved_quotes_page
+from app.services.user_stats_service import get_user_stats_cached
+from app.utils.billing_utils import require_author_access
 from app.utils.books.collaboration_access import (
     get_book_with_collaboration_access,
     require_book_owner_access,
@@ -79,16 +81,12 @@ from app.utils.books.writer_workspace import (
     touch_public_book_updated_at,
 )
 from app.utils.db_utils import run_read_with_retry
-from app.utils.llm_usage_utils import summarize_llm_usage_for_user
-from app.utils.user_utils import (
-    build_writing_dashboard_stats,
-)
 
 router = APIRouter()
 log = logging.getLogger("lorevia.books")
 
 
-# â”€â”€â”€ Book mode & metadata â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Book mode & metadata ────────────────────────────────────────────────────
 
 
 @router.put("/{book_id}/mode", response_model=BookOut)
@@ -138,15 +136,69 @@ async def update_book_forum_metadata(
     return await book_out(db, book, current_user.id)
 
 
-# â”€â”€â”€ Book listing & stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Book listing & stats ────────────────────────────────────────────────────
+
+
+@router.get(
+    "/page",
+    response_model=BookPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_books_page(
+    include_hidden: bool = Query(False),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, max_length=512),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    async def load_page() -> BookPageOut:
+        return await list_user_books_page(
+            db,
+            user_id=current_user.id,
+            user_email=str(current_user.email),
+            include_hidden=include_hidden,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    return await run_read_with_retry(db, load_page)
+
+
+@router.get(
+    "/selector",
+    response_model=list[BookSelectorOut],
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_book_selectors(
+    include_hidden: bool = Query(False),
+    limit: int = Query(200, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Navigation-sized project records; avoids progress and aggregate work."""
+    return await run_read_with_retry(
+        db,
+        lambda: list_user_book_selectors(
+            db,
+            user_id=current_user.id,
+            user_email=str(current_user.email),
+            include_hidden=include_hidden,
+            limit=limit,
+        ),
+    )
 
 
 @router.get("/", response_model=list[BookOut])
 async def list_books(
     include_hidden: bool = Query(False),
+    response: Response = None,  # type: ignore[assignment]
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    if response is not None:
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = '</api/v1/books/page>; rel="successor-version"'
+    log.info("deprecated_books_list_requested", extra={"metric": "books.legacy_list_requested"})
     current_user_id = current_user.id
     current_user_email = str(current_user.email).strip().lower()
 
@@ -177,13 +229,6 @@ async def list_books(
             shared_rows = [row for row in shared_rows if row[0].hidden_at is None]
 
         shared_books = [book for book, _ in shared_rows]
-        repair_seen_book_ids: set[uuid.UUID] = set()
-        for candidate in [*books, *shared_books]:
-            if candidate.id in repair_seen_book_ids:
-                continue
-            repair_seen_book_ids.add(candidate.id)
-            await enqueue_processing_state_repair_if_needed(candidate)
-
         owned_payloads = await build_book_out_list(db, books=books, user_id=current_user_id)
         shared_payloads = await build_book_out_list(
             db,
@@ -202,52 +247,7 @@ async def get_user_stats(
     current_user=Depends(get_current_user),
 ):
     require_author_access(current_user)
-    library_stats = await load_library_aggregate_stats(db, current_user.id)
-    saved_quotes = int(
-        (
-            await db.execute(
-                select(func.count(QuoteEntry.id)).where(QuoteEntry.user_id == current_user.id)
-            )
-        ).scalar()
-        or 0
-    )
-    writing_stats = await build_writing_dashboard_stats(db, current_user)
-    upload_usage = await calculate_upload_usage_summary(db, current_user)
-    processing_allowances = await summarize_processing_allowances(db, current_user)
-    llm_usage = await summarize_llm_usage_for_user(db, current_user.id)
-
-    return UserStatsOut(
-        public=PublicUserStats(
-            total_books_read=library_stats.total_books_read,
-            total_words_read=library_stats.total_words_read,
-        ),
-        private=PrivateUserStats(
-            total_uploads=upload_usage.total_uploads,
-            manuscript_uploads=upload_usage.manuscript_uploads,
-            worldbuilding_uploads=upload_usage.worldbuilding_uploads,
-            upload_limit=upload_usage.upload_limit,
-            uploads_remaining=upload_usage.uploads_remaining,
-            upload_limit_unlimited=upload_usage.upload_limit_unlimited,
-            active_analyzed_words=processing_allowances.active_analyzed_words,
-            active_word_limit=processing_allowances.active_word_limit,
-            active_words_remaining=processing_allowances.active_words_remaining,
-            monthly_processed_words=processing_allowances.monthly_processed_words,
-            monthly_processed_word_limit=processing_allowances.monthly_processed_word_limit,
-            monthly_processed_words_remaining=processing_allowances.monthly_processed_words_remaining,
-            source_storage_bytes=processing_allowances.source_storage_bytes,
-            source_storage_limit_bytes=processing_allowances.source_storage_limit_bytes,
-            source_storage_remaining_bytes=processing_allowances.source_storage_remaining_bytes,
-            allowances_enforced=processing_allowances.allowances_enforced,
-            total_token_consumption=library_stats.total_token_consumption,
-            llm_request_count=llm_usage.request_count,
-            llm_prompt_tokens=llm_usage.prompt_tokens,
-            llm_completion_tokens=llm_usage.completion_tokens,
-            llm_total_tokens=llm_usage.total_tokens,
-            total_chapters_tracked=library_stats.total_chapters_tracked,
-            saved_quotes=saved_quotes,
-        ),
-        writing=writing_stats,
-    )
+    return await get_user_stats_cached(db, current_user)
 
 
 @router.get("/quotes")
@@ -286,6 +286,23 @@ async def list_saved_quotes(
     ]
 
 
+@router.get(
+    "/quotes/page",
+    response_model=SavedQuotePageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_saved_quotes_page_endpoint(
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, max_length=512),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    require_author_access(current_user)
+    return await list_saved_quotes_page(
+        db, user_id=current_user.id, limit=limit, cursor=cursor
+    )
+
+
 @router.get("/notes", response_model=list[BookNoteOut])
 async def list_saved_notes(
     db: AsyncSession = Depends(get_db),
@@ -295,7 +312,29 @@ async def list_saved_notes(
     return await list_user_notes(db, current_user.id)
 
 
-# â”€â”€â”€ Book detail & overview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+@router.get(
+    "/notes/page",
+    response_model=BookNotePageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_saved_notes_page_endpoint(
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, max_length=512),
+    include_body: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    require_author_access(current_user)
+    return await list_saved_notes_page(
+        db,
+        user_id=current_user.id,
+        limit=limit,
+        cursor=cursor,
+        include_body=include_body,
+    )
+
+
+# ─── Book detail & overview ──────────────────────────────────────────────────
 
 
 @router.get("/{book_id}", response_model=BookOut)

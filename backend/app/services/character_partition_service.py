@@ -34,6 +34,7 @@ async def partition_book_character_for_user(
         created = await partition_character(
             db,
             source=character,
+            user_id=current_user.id,
             partitions=[{"name": item.name, "aliases": item.aliases} for item in body.partitions],
         )
     except ValueError as exc:

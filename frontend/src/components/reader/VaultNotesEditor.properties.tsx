@@ -93,6 +93,7 @@ export function VaultNotePropertiesPanel({
           <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Send to scenes</p>
           <div className="mt-3 flex gap-2">
             <select
+              aria-label="Scene destination"
               value={sceneChapterNumber ?? ""}
               onChange={(event) => onSceneChapterNumberChange(event.target.value ? Number(event.target.value) : null)}
               className={`min-w-0 flex-1 rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-[#09111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}

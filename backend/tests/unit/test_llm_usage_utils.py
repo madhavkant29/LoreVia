@@ -31,7 +31,7 @@ def _use_offline_token_counter(monkeypatch):
     )
 
 
-def test_llm_call_error_classification_keeps_retries_at_call_boundary():
+def test_llm_call_error_classification_retries_only_provider_failures():
     connection_error = APIConnectionError(
         request=Request("POST", "https://api.openai.com/v1/chat/completions")
     )
@@ -41,16 +41,99 @@ def test_llm_call_error_classification_keeps_retries_at_call_boundary():
     assert llm_usage_utils.is_llm_call_error(connection_error)
     assert llm_usage_utils.is_retryable_llm_call_error(connection_error)
     assert llm_usage_utils.is_llm_call_error(capacity_error)
-    assert llm_usage_utils.is_retryable_llm_call_error(capacity_error)
+    assert not llm_usage_utils.is_retryable_llm_call_error(capacity_error)
     assert llm_usage_utils.is_llm_call_error(usage_error)
     assert not llm_usage_utils.is_retryable_llm_call_error(usage_error)
     assert not llm_usage_utils.is_llm_call_error(ValueError("parse failure"))
 
 
+def test_public_llm_http_error_message_keeps_allowance_message():
+    exc = HTTPException(
+        429,
+        {
+            "kind": "llm_budget",
+            "message": "Monthly AI capacity has been reached.",
+            "next_resume_at": "2026-09-01T00:00:00+00:00",
+        },
+    )
+
+    assert (
+        llm_usage_utils.public_llm_http_error_message(exc)
+        == "Monthly AI capacity has been reached."
+    )
+
+
+@pytest.mark.asyncio
+async def test_customer_scoped_call_without_user_fails_before_provider():
+    called = False
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+
+    async def _create(**_kwargs):
+        nonlocal called
+        called = True
+        return SimpleNamespace()
+
+    client.chat.completions.create = _create
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_tracked_chat_completion(
+            client=client,
+            feature="advisor_message",
+            model="gpt-4o-mini",
+            user_id=None,
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["kind"] == "llm_attribution"
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_token_capacity_without_customer_attribution_fails_closed(db):
+    with pytest.raises(HTTPException) as exc_info:
+        await llm_usage_utils.assert_llm_token_capacity(
+            db,
+            estimated_tokens=100,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["kind"] == "llm_attribution"
+
+
+@pytest.mark.asyncio
+async def test_explicit_system_scope_can_call_provider_without_customer_reservation():
+    response = SimpleNamespace(choices=[])
+    calls = 0
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+
+    async def _create(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return response
+
+    client.chat.completions.create = _create
+
+    result = await create_tracked_chat_completion(
+        client=client,
+        feature="system_maintenance",
+        model="gpt-4o-mini",
+        user_id=None,
+        billing_scope="system",
+        messages=[],
+    )
+
+    assert result is response
+    assert calls == 1
+
+
 @pytest.mark.asyncio
 async def test_summarize_llm_usage_for_user_returns_totals(db):
     user = User(
-        email="llm-usage@lorevia.app", username="llmusage", password_hash="hash", tier="author"
+        email="llm-usage@lorevia.app",
+        username="llmusage",
+        password_hash="hash",
+        tier="author",
     )
     db.add(user)
     await db.flush()
@@ -328,6 +411,87 @@ async def test_manual_reprocess_token_capacity_blocks_window_overage(
 
 
 @pytest.mark.asyncio
+async def test_token_capacity_reports_latest_eligible_reset_across_windows(db, monkeypatch):
+    unique_suffix = uuid.uuid4().hex[:8]
+    user = User(
+        email=f"token-reset-{unique_suffix}@lorevia.app",
+        username=f"tokenreset{unique_suffix}",
+        password_hash="hash",
+        tier="free",
+    )
+    db.add(user)
+    await db.flush()
+    now = datetime.now(UTC).replace(microsecond=0)
+    user.created_at = now - timedelta(days=60)
+    db.add_all(
+        [
+            LlmUsageEvent(
+                user_id=user.id,
+                provider="openai",
+                model="gpt-test",
+                operation="chat_completion",
+                feature="manual_reprocess",
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=80,
+                created_at=now - timedelta(days=6),
+            ),
+            LlmUsageEvent(
+                user_id=user.id,
+                provider="openai",
+                model="gpt-test",
+                operation="chat_completion",
+                feature="manual_reprocess",
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=80,
+                created_at=now - timedelta(hours=4),
+            ),
+        ]
+    )
+    await db.commit()
+    monkeypatch.setattr(llm_usage_utils.settings, "FREE_LLM_TOKENS_5H", 100, raising=False)
+    monkeypatch.setattr(llm_usage_utils.settings, "FREE_LLM_TOKENS_WEEK", 150, raising=False)
+    monkeypatch.setattr(llm_usage_utils.settings, "FREE_LLM_TOKENS_MONTH", 1000, raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await assert_manual_reprocess_token_capacity(db, user, estimated_tokens=30, now=now)
+
+    detail = exc.value.detail
+    assert detail["kind"] == "llm_tokens"
+    assert detail["windows"] == ["5-hour", "weekly"]
+    assert detail["auto_resume"] is True
+    assert datetime.fromisoformat(detail["next_resume_at"]) == now + timedelta(days=1, seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_token_request_larger_than_window_cap_is_marked_permanent(db, monkeypatch):
+    unique_suffix = uuid.uuid4().hex[:8]
+    user = User(
+        email=f"token-permanent-{unique_suffix}@lorevia.app",
+        username=f"tokenpermanent{unique_suffix}",
+        password_hash="hash",
+        tier="free",
+    )
+    db.add(user)
+    await db.flush()
+    user.created_at = datetime.now(UTC) - timedelta(days=60)
+    await db.commit()
+    monkeypatch.setattr(llm_usage_utils.settings, "FREE_LLM_TOKENS_5H", 100, raising=False)
+    monkeypatch.setattr(llm_usage_utils.settings, "FREE_LLM_TOKENS_WEEK", 100, raising=False)
+    monkeypatch.setattr(llm_usage_utils.settings, "FREE_LLM_TOKENS_MONTH", 100, raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await assert_manual_reprocess_token_capacity(db, user, estimated_tokens=101)
+
+    detail = exc.value.detail
+    assert detail["kind"] == "llm_tokens"
+    assert detail["auto_resume"] is False
+    assert detail["permanent"] is True
+    assert detail["next_resume_at"] is None
+
+
+@pytest.mark.asyncio
 async def test_tracked_chat_completion_blocks_before_openai_call_when_token_cap_exceeded(
     db, monkeypatch
 ):
@@ -388,7 +552,10 @@ async def test_tracked_chat_completion_blocks_before_openai_call_when_token_cap_
 @pytest.mark.asyncio
 async def test_tracked_embedding_blocks_before_openai_call_when_token_cap_exceeded(db, monkeypatch):
     user = User(
-        email="embed-block@lorevia.app", username="embedblock", password_hash="hash", tier="free"
+        email="embed-block@lorevia.app",
+        username="embedblock",
+        password_hash="hash",
+        tier="free",
     )
     db.add(user)
     await db.flush()

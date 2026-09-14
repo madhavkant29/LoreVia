@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildReaderChapterPreview,
+  estimateChapterRemainingReadingMinutes,
   estimateRemainingReadingMinutes,
   formatBookFormatLabel,
   formatReadingDuration,
@@ -32,6 +33,21 @@ describe("reader overview utils", () => {
       chapters_left: 10,
       chapters_read_count: 10,
     })).toBe(200)
+  })
+
+  it("does not invent reading time when the stored word count is unavailable", () => {
+    expect(estimateRemainingReadingMinutes({
+      total_words: undefined,
+      total_tokens: 12000,
+      total_chapters: 5,
+      work_type: "novel",
+    }, null)).toBeNull()
+    expect(formatReadingDuration(null)).toBe("Not available")
+  })
+
+  it("estimates chapter time from its measured word count and saved position", () => {
+    expect(estimateChapterRemainingReadingMinutes(2300, 0.5)).toBe(5)
+    expect(estimateChapterRemainingReadingMinutes(undefined, 0.5)).toBeNull()
   })
 
   it("builds a chapter preview window around the current chapter", () => {

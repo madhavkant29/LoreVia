@@ -39,11 +39,12 @@ export function PublicChapterPageClient({
   const { data: text = "" } = useQuery<string>({
     queryKey: asQueryKey(`public:chapter-text:${bookId}:${chapterNum}`),
     queryFn: async () => {
-      if (!chapter?.text_url || chapter.text_content) return chapter?.text_content || ""
-      const response = await fetch(chapter.text_url)
+      const contentUrl = chapter?.content_url || chapter?.text_url
+      if (!contentUrl || chapter.text_content) return chapter?.text_content || ""
+      const response = await fetch(contentUrl)
       return response.text()
     },
-    enabled: Boolean(chapter && (chapter.text_content || chapter.text_url)),
+    enabled: Boolean(chapter && (chapter.text_content || chapter.content_url || chapter.text_url)),
     initialData: initialChapter?.text_content || undefined,
   })
 

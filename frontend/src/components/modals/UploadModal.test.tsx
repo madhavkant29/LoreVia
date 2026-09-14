@@ -9,6 +9,7 @@ const captureMock = vi.hoisted(() => vi.fn())
 const captureTimingMock = vi.hoisted(() => vi.fn())
 const setUserMock = vi.hoisted(() => vi.fn())
 const setBookModeMock = vi.hoisted(() => vi.fn())
+const pushMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
   user: {
     id: "user-1",
@@ -22,14 +23,20 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
 }))
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}))
+
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
     listSeries: vi.fn(),
     list: vi.fn(),
+    listSelector: vi.fn(),
     getStats: vi.fn(),
     get: vi.fn(),
     upload: uploadMock,
     importManuscript: vi.fn(),
+    saveChapterContent: vi.fn(),
     previewUpload: vi.fn(),
     createEmptyProject: vi.fn(),
     delete: vi.fn(),
@@ -94,7 +101,7 @@ vi.mock("@/lib/analytics/posthog", () => ({
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
   bookCacheKey: (...parts: string[]) => parts.join(":"),
-  booksListCacheKey: () => "books:list",
+  booksSelectorCacheKey: () => "books:selector",
   booksSeriesCacheKey: () => "books:series",
   booksStatsCacheKey: () => "books:stats",
 }))
@@ -116,6 +123,7 @@ describe("UploadModal", () => {
     useQueryMock.mockReset()
     uploadMock.mockReset()
     vi.mocked(booksApi.importManuscript).mockReset()
+    vi.mocked(booksApi.saveChapterContent).mockReset()
     vi.mocked(booksApi.previewUpload).mockReset()
     vi.mocked(booksApi.createEmptyProject).mockReset()
     vi.mocked(booksApi.delete).mockReset()
@@ -130,6 +138,7 @@ describe("UploadModal", () => {
     captureTimingMock.mockReset()
     setUserMock.mockReset()
     setBookModeMock.mockReset()
+    pushMock.mockReset()
     authState.user = {
       id: "user-1",
       email: "author@getlorevia.com",
@@ -141,6 +150,15 @@ describe("UploadModal", () => {
     uploadMock.mockResolvedValue({ book_id: "book-99" })
     vi.mocked(booksApi.previewUpload).mockResolvedValue(importPreviewFixture() as never)
     vi.mocked(booksApi.importManuscript).mockResolvedValue(importResponseFixture() as never)
+    vi.mocked(booksApi.saveChapterContent).mockResolvedValue({
+      status: "created",
+      book_id: "book-1",
+      chapter_number: 4,
+      content_version: 1,
+      client_mutation_id: "mutation-1",
+      saved_at: "2026-01-01T00:00:00Z",
+      story_memory_status: "queued",
+    } as never)
     vi.mocked(booksApi.createEmptyProject).mockResolvedValue({ book_id: "empty-1" } as never)
     vi.mocked(booksApi.delete).mockResolvedValue({} as never)
     vi.mocked(intelligenceApi.editorialReview).mockResolvedValue({
@@ -176,6 +194,7 @@ describe("UploadModal", () => {
   it("prefills author mode uploads from the account username and explains the manuscript-only byline", async () => {
     const view = renderUploadModal({ initialMode: "author" })
 
+    expect(view.textContent).toContain("what is working first, then evidence-backed revision opportunities")
     expect(view.textContent).toContain("This name appears on this manuscript only.")
     expect(view.textContent).toContain("different pen name or byline")
 
@@ -198,7 +217,8 @@ describe("UploadModal", () => {
   })
 
   it("submits an overridden manuscript author without changing the account username", async () => {
-    const view = renderUploadModal({ initialMode: "author" })
+    const onClose = vi.fn()
+    const view = renderUploadModal({ initialMode: "author", onClose })
 
     const titleInput = view.querySelector('input[aria-label="Title"]') as HTMLInputElement | null
     const authorInput = view.querySelector('input[aria-label="Manuscript author or pen name"]') as HTMLInputElement | undefined
@@ -231,6 +251,7 @@ describe("UploadModal", () => {
       submitButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await Promise.resolve()
     })
+    await waitFor(() => uploadMock.mock.calls.length > 0)
 
     expect(uploadMock).toHaveBeenCalledWith(
       expect.any(File),
@@ -242,11 +263,12 @@ describe("UploadModal", () => {
     expect(authState.user.username).toBe("author")
     expect(captureMock).toHaveBeenCalledWith("upload_started", expect.objectContaining({ mode: "author", kind: "new_upload" }))
     expect(captureMock).toHaveBeenCalledWith("book_uploaded", expect.not.objectContaining({ manuscript_text: expect.anything() }))
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it("removes the private workspace notice and renders author upload options with explicit colors", async () => {
     useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
-      if (queryKey === "books:list") {
+      if (queryKey === "books:selector") {
         return {
           data: [
             {
@@ -317,7 +339,7 @@ describe("UploadModal", () => {
 
   it("imports pasted chapters into existing author books and renders post-import review", async () => {
     useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
-      if (queryKey === "books:list") {
+      if (queryKey === "books:selector") {
         return {
           data: [
             {
@@ -343,20 +365,22 @@ describe("UploadModal", () => {
     setTextareaValue(view, "textarea", "Mara repeats the gate oath.")
     await clickButton(view, "Add Chapter & Process")
 
-    expect(booksApi.importManuscript).toHaveBeenCalledWith(
+    expect(booksApi.saveChapterContent).toHaveBeenCalledWith(
       "book-1",
+      4,
       expect.objectContaining({
         text: "Mara repeats the gate oath.",
         title: "The Oath",
-        chapterNumber: 4,
-        replaceExisting: false,
-        splitIntoChapters: true,
+        expectedContentVersion: 0,
+        clientMutationId: expect.any(String),
       }),
     )
+    expect(booksApi.importManuscript).not.toHaveBeenCalled()
     await waitForText(view, "Immediate continuity review")
     expect(view.textContent).toContain("Immediate continuity review")
     expect(view.textContent).toContain("Strong upload")
     expect(view.textContent).toContain("Oath thread")
+    expect(pushMock).toHaveBeenCalledWith("/book-1/manuscript?chapter=4")
 
     await clickButton(view, "Download continuity report")
     expect(intelligenceApi.continuityReport).toHaveBeenCalled()
@@ -383,10 +407,21 @@ async function clickButton(view: HTMLElement, label: string, index = 0) {
   const button = Array.from(view.querySelectorAll("button")).filter((candidate) => candidate.textContent?.includes(label))[index]
   if (!button) throw new Error(`Missing button ${label}\n${view.textContent ?? ""}`)
   await act(async () => {
-    button.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    button.click()
     await Promise.resolve()
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
+}
+
+async function waitFor(assertion: () => boolean) {
+  for (let index = 0; index < 30; index += 1) {
+    if (assertion()) return
+    await act(async () => {
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  throw new Error("Timed out waiting for condition")
 }
 
 async function chooseFile(view: HTMLElement, file: File) {

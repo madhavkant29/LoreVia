@@ -12,7 +12,7 @@ import { booksApi } from "@/lib/api/books"
 import { BrandLockup } from "@/components/layout/BrandLockup"
 import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
-import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, booksSelectorCacheKey } from "@/lib/query/cacheKeys"
 import { queryClient } from "@/lib/query/queryClient"
 import { prefetchChatsSidebarData, prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
@@ -114,8 +114,8 @@ export function Navbar() {
     if (libraryPrefetchedRef.current) return
     libraryPrefetchedRef.current = true
     queryClient.prefetchQuery({
-      queryKey: asQueryKey(booksListCacheKey(true)),
-      queryFn: () => booksApi.list(true),
+      queryKey: asQueryKey(booksSelectorCacheKey(true)),
+      queryFn: () => booksApi.listSelector(true),
     })
   }, [])
 

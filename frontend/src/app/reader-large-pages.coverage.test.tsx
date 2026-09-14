@@ -77,9 +77,19 @@ describe("large reader runtime pages", () => {
     expect(booksApiMock.createChapterSnapshot).toHaveBeenCalled()
     expect(booksApiMock.getChapterVersionDetail).toHaveBeenCalledWith("book-1", "version-1")
     expect(booksApiMock.restoreChapterVersion).toHaveBeenCalledWith("book-1", "version-1")
+    await flushUi()
+    expect(booksApiMock.getRestoreStatus).toHaveBeenCalledWith(
+      "book-1",
+      "version-1",
+      expect.any(AbortSignal),
+    )
 
     await clickText("Save now")
-    expect(booksApiMock.importManuscript).toHaveBeenCalledWith("book-1", expect.objectContaining({ chapterNumber: 2 }))
+    expect(booksApiMock.saveChapterContent).toHaveBeenCalledWith(
+      "book-1",
+      2,
+      expect.objectContaining({ expectedContentVersion: 3, clientMutationId: expect.any(String) }),
+    )
 
     await clickText("New chapter")
     expect(container?.textContent).toContain("Chapter 3")

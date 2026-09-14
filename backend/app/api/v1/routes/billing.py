@@ -7,9 +7,25 @@ from app.api.deps.auth import get_current_user, get_optional_current_user
 from app.api.deps.rate_limit import rate_limit_api
 from app.core.database import get_db
 from app.models.user import Subscription, User
-from app.schemas.billing import BillingConfirmationOut, CheckoutBody
+from app.schemas.billing import (
+    BillingConfirmationOut,
+    CheckoutAbandonBody,
+    CheckoutAbandonOut,
+    CheckoutBody,
+    CheckoutPreviewBody,
+    CheckoutPreviewOut,
+)
+from app.services.billing_checkout_service import (
+    CheckoutQuoteError,
+    DuplicateSubscriptionError,
+    TrialCheckoutConfirmationRequired,
+    abandon_checkout_session,
+    create_checkout_session,
+    get_checkout_preview,
+)
 from app.services.paddle_service import (
-    create_checkout_url,
+    PaddlePriceChangedError,
+    PaddlePriceConfigurationError,
     create_portal_url,
     get_transaction_summary,
     paddle_is_configured,
@@ -25,6 +41,7 @@ from app.utils.billing_utils import (
     paddle_plan_is_configured,
     verify_billing_confirmation_token,
 )
+from app.utils.client_identity import trusted_client_ip
 from app.utils.logging import get_logger
 
 router = APIRouter()
@@ -32,9 +49,60 @@ log = get_logger("lorevia.billing")
 PADDLE_ROUTE_ERRORS = (RuntimeError, httpx.HTTPError, KeyError, ValueError)
 
 
+@router.post(
+    "/checkout/preview",
+    response_model=CheckoutPreviewOut,
+    dependencies=[Depends(rate_limit_api)],
+)
+async def preview_checkout(
+    body: CheckoutPreviewBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    plan = normalize_plan_code(body.plan)
+    billing_enabled = paddle_is_configured() and paddle_plan_is_configured(plan)
+    try:
+        disclosure = await get_checkout_preview(
+            db,
+            current_user,
+            plan,
+            client_ip=trusted_client_ip(request),
+            billing_enabled=billing_enabled,
+        )
+    except DuplicateSubscriptionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PaddlePriceConfigurationError as exc:
+        log.error(
+            "paddle_price_configuration_invalid",
+            extra={"plan": plan, "detail": str(exc)},
+        )
+        raise HTTPException(
+            503,
+            "Paid checkout is temporarily unavailable while billing price settings are reviewed.",
+        ) from exc
+    except PADDLE_ROUTE_ERRORS:
+        log.exception(
+            "paddle_checkout_preview_failed",
+            extra={"user_id": str(current_user.id), "plan": plan},
+        )
+        raise HTTPException(502, "Unable to verify the Paddle checkout total.")
+
+    return CheckoutPreviewOut(
+        **disclosure.__dict__,
+        billing_enabled=billing_enabled,
+        message=(
+            None
+            if billing_enabled
+            else f"Paddle is not configured for {plan.replace('_', ' ')} in this environment."
+        ),
+    )
+
+
 @router.post("/checkout", dependencies=[Depends(rate_limit_api)])
 async def start_checkout(
     body: CheckoutBody,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -49,52 +117,77 @@ async def start_checkout(
             "message": f"Paddle is not configured for {plan.replace('_', ' ')} in this environment.",
         }
 
-    existing = (
-        (
-            await db.execute(
-                select(Subscription)
-                .where(Subscription.user_id == current_user.id)
-                .order_by(Subscription.created_at.desc())
-            )
-        )
-        .scalars()
-        .first()
-    )
-
-    if not existing:
-        existing = Subscription(
-            user_id=current_user.id,
-            plan=plan,
-            status="pending",
-        )
-        db.add(existing)
-    else:
-        existing.plan = plan
-        existing.status = "pending"
-
-    await db.commit()
-
     try:
-        checkout_url, customer_id, transaction_id = await create_checkout_url(
-            str(current_user.id),
-            current_user.email,
+        checkout = await create_checkout_session(
+            db,
+            current_user,
             plan,
-            existing_customer_id=existing.paddle_customer_id,
+            confirmed_immediate_charge=body.confirmed_immediate_charge,
+            quote_token=body.quote_token,
+            client_ip=trusted_client_ip(request),
         )
+    except DuplicateSubscriptionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except TrialCheckoutConfirmationRequired as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except CheckoutQuoteError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PaddlePriceChangedError as exc:
+        raise HTTPException(
+            409,
+            "Paddle checkout details changed. Close this dialog and review the current payment details again.",
+        ) from exc
+    except PaddlePriceConfigurationError as exc:
+        log.error(
+            "paddle_price_configuration_invalid",
+            extra={"plan": plan, "detail": str(exc)},
+        )
+        raise HTTPException(
+            503,
+            "Paid checkout is temporarily unavailable while billing price settings are reviewed.",
+        ) from exc
     except PADDLE_ROUTE_ERRORS:
         log.exception(
-            "paddle_checkout_failed", extra={"user_id": str(current_user.id), "plan": plan}
+            "paddle_checkout_failed",
+            extra={"user_id": str(current_user.id), "plan": plan},
         )
         raise HTTPException(502, "Unable to start Paddle checkout.")
 
-    existing.paddle_customer_id = customer_id
-    existing.paddle_transaction_id = transaction_id
-    await db.commit()
-    confirmation_token = create_billing_confirmation_token(transaction_id)
+    confirmation_token = create_billing_confirmation_token(checkout.transaction_id)
     return {
-        "checkout_url": append_billing_confirmation_token(checkout_url, confirmation_token),
+        "checkout_url": append_billing_confirmation_token(
+            checkout.checkout_url, confirmation_token
+        ),
         "billing_enabled": True,
     }
+
+
+@router.post(
+    "/checkout/abandon",
+    response_model=CheckoutAbandonOut,
+    dependencies=[Depends(rate_limit_api)],
+)
+async def abandon_checkout(
+    body: CheckoutAbandonBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        result = await abandon_checkout_session(
+            db,
+            current_user,
+            body.transaction_id,
+        )
+    except PADDLE_ROUTE_ERRORS:
+        log.exception(
+            "paddle_checkout_abandon_failed",
+            extra={
+                "user_id": str(current_user.id),
+                "transaction_id": body.transaction_id,
+            },
+        )
+        raise HTTPException(502, "Unable to close the pending Paddle checkout.")
+    return CheckoutAbandonOut(**result.__dict__)
 
 
 @router.get("/confirmation", response_model=BillingConfirmationOut)

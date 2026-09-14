@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-# â”€â”€â”€ Upload limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Upload limits ────────────────────────────────────────────────────────────
 MAX_BOOK_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 MAX_COVER_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
@@ -108,7 +108,7 @@ async def get_book_overview(
     )
 
 
-# â”€â”€â”€ Analysis & intelligence endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Analysis & intelligence endpoints ───────────────────────────────────────
 
 
 @router.get("/{book_id}/pre-writing-check", response_model=PreWritingCheckOut)
@@ -226,7 +226,7 @@ async def get_book_chapter_versions(
     return await list_chapter_versions(db, book, chapter_number, limit)
 
 
-# â”€â”€â”€ Writer workspace â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Writer workspace ────────────────────────────────────────────────────────
 
 
 @router.get("/{book_id}/writer-workspace", response_model=WriterWorkspaceOut)
@@ -285,7 +285,7 @@ async def update_writer_workspace(
     return build_writer_workspace_response(book)
 
 
-# â”€â”€â”€ Emotional arc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Emotional arc ───────────────────────────────────────────────────────────
 
 
 @router.get("/{book_id}/emotional-arc", response_model=EmotionalArcOverviewOut)
@@ -317,4 +317,4 @@ async def get_emotional_arc(
     return EmotionalArcOverviewOut(**build_emotional_arc_payload(characters))
 
 
-# â”€â”€â”€ Book lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Book lifecycle ──────────────────────────────────────────────────────────

@@ -1,10 +1,19 @@
 import { spawn } from "node:child_process"
-import { rmSync } from "node:fs"
+import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
-const distDir = ".next"
+const port = process.env.E2E_PORT || "3001"
+const distDir = process.env.E2E_NEXT_DIST_DIR || `.next-e2e-${port}`
+if (!/^\.next-e2e-\d+$/.test(distDir)) {
+  throw new Error("Refusing to use an unexpected E2E build directory.")
+}
+
 const outputPath = path.resolve(process.cwd(), distDir)
 const expectedOutputPath = path.join(process.cwd(), distDir)
+const filesToRestore = ["tsconfig.json", "next-env.d.ts"].map((filename) => {
+  const filePath = path.resolve(process.cwd(), filename)
+  return { filePath, original: readFileSync(filePath, "utf8") }
+})
 
 if (outputPath !== expectedOutputPath) {
   throw new Error("Refusing to clean an unexpected E2E build directory.")
@@ -12,11 +21,17 @@ if (outputPath !== expectedOutputPath) {
 
 rmSync(outputPath, { force: true, recursive: true })
 
+function restoreGeneratedConfig() {
+  for (const file of filesToRestore) {
+    writeFileSync(file.filePath, file.original)
+  }
+}
+
 const nextBin = path.resolve("node_modules/next/dist/bin/next")
-const port = process.env.E2E_PORT || "3001"
 const child = spawn(process.execPath, [nextBin, "dev", "-p", port, "--hostname", "localhost"], {
   env: {
     ...process.env,
+    E2E_NEXT_DIST_DIR: distDir,
   },
   stdio: "inherit",
 })
@@ -34,13 +49,22 @@ function shutdown(signal) {
     const taskkill = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
     })
-    taskkill.on("close", () => process.exit(0))
-    setTimeout(() => process.exit(0), 2_000).unref()
+    taskkill.on("close", () => {
+      restoreGeneratedConfig()
+      process.exit(0)
+    })
+    setTimeout(() => {
+      restoreGeneratedConfig()
+      process.exit(0)
+    }, 2_000).unref()
     return
   }
 
   child.kill(signal)
-  setTimeout(() => process.exit(0), 2_000).unref()
+  setTimeout(() => {
+    restoreGeneratedConfig()
+    process.exit(0)
+  }, 2_000).unref()
 }
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -48,5 +72,6 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 child.on("exit", (code) => {
+  restoreGeneratedConfig()
   process.exit(code ?? 1)
 })

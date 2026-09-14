@@ -46,7 +46,6 @@ export const NotificationBell = memo(function NotificationBell({ enabled = true 
     enabled: enabled || open,
     pollMs: false,
     refreshOnFocus: true,
-    syncRevisionDigests: open,
   })
   const isDark = theme === "dark"
   const hasUnread = unreadCount > 0

@@ -176,7 +176,12 @@ def recommended_paddle_default_checkout_url() -> str:
     if "://" not in raw_app_url:
         raw_app_url = f"https://{raw_app_url.lstrip('/')}"
     parts = urlsplit(raw_app_url)
-    if not settings.DEBUG and parts.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
+    # These are rejected URL hostnames; this code does not bind a network socket.
+    if not settings.DEBUG and parts.hostname in {  # nosec B104
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+    }:
         raw_app_url = default_app_url
     return f"{raw_app_url.rstrip('/')}/checkout"
 

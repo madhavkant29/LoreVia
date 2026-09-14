@@ -332,6 +332,7 @@ def build_plot_thread_payload(
     *,
     current_chapter: int | None,
     tags: list[str] | None = None,
+    include_detail_fields: bool = True,
 ) -> dict[str, Any]:
     title = normalize_plot_thread_title(getattr(thread, "title", ""))
     introduced_at = getattr(thread, "introduced_at", None)
@@ -344,7 +345,11 @@ def build_plot_thread_payload(
         resolved_at=resolved_at,
         current_chapter=current_chapter,
     )
-    related_characters = normalize_related_characters(getattr(thread, "character_ids", None) or [])
+    related_characters = (
+        normalize_related_characters(getattr(thread, "character_ids", None) or [])
+        if include_detail_fields
+        else []
+    )
     return {
         "id": str(getattr(thread, "id")),
         "title": title,
@@ -357,21 +362,29 @@ def build_plot_thread_payload(
         "last_mentioned": last_mentioned_at,
         "mention_count": int(getattr(thread, "mention_count", 0) or 0),
         "importance": int(getattr(thread, "importance", 5) or 5),
-        "note": getattr(thread, "note", None),
+        "note": getattr(thread, "note", None) if include_detail_fields else None,
         "character_ids": related_characters,
         "related_characters": related_characters,
-        "risk": derive_plot_thread_risk(
-            title=title,
-            status=getattr(thread, "status", None),
-            importance=getattr(thread, "importance", None),
-            introduced_at=introduced_at,
-            last_mentioned_at=last_mentioned_at,
-            current_chapter=current_chapter,
+        "risk": (
+            derive_plot_thread_risk(
+                title=title,
+                status=getattr(thread, "status", None),
+                importance=getattr(thread, "importance", None),
+                introduced_at=introduced_at,
+                last_mentioned_at=last_mentioned_at,
+                current_chapter=current_chapter,
+            )
+            if include_detail_fields
+            else None
         ),
-        "suggested_action": derive_plot_thread_suggested_action(
-            status=getattr(thread, "status", None),
-            current_chapter=current_chapter,
-            last_mentioned_at=last_mentioned_at,
+        "suggested_action": (
+            derive_plot_thread_suggested_action(
+                status=getattr(thread, "status", None),
+                current_chapter=current_chapter,
+                last_mentioned_at=last_mentioned_at,
+            )
+            if include_detail_fields
+            else None
         ),
         "tags": tags or [],
     }

@@ -4,6 +4,7 @@ import asyncio
 import sys
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -102,7 +103,9 @@ def test_process_chapter_task_fails_cleanly_when_payload_missing(monkeypatch):
         extraction_tasks.process_chapter_task.run(str(book_id), 4)
 
 
-def test_process_chapter_task_pauses_llm_usage_limit_without_replaying_paid_work(monkeypatch):
+def test_process_chapter_task_pauses_llm_usage_limit_without_replaying_paid_work(
+    monkeypatch,
+):
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -166,7 +169,58 @@ def test_process_chapter_task_pauses_llm_usage_limit_without_replaying_paid_work
     assert fake_session.commits == 1
 
 
-def test_process_chapter_task_stays_paused_regardless_of_previous_retry_count(monkeypatch):
+def test_process_chapter_task_fails_unresumable_token_request(monkeypatch):
+    error = HTTPException(
+        429,
+        {
+            "kind": "llm_tokens",
+            "detail": "Request exceeds every token window.",
+            "auto_resume": False,
+            "permanent": True,
+            "next_resume_at": None,
+        },
+    )
+    calls = 0
+
+    def run(coro):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            coro.close()
+            return True
+        if calls == 2:
+            coro.close()
+            raise error
+        return asyncio.run(coro)
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    fail = AsyncMock()
+    monkeypatch.setattr(extraction_tasks, "run_worker_coro", run)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: Session())
+    monkeypatch.setattr("app.services.task_execution_service.fail_task_execution", fail)
+    extraction_tasks.process_chapter_task.request.retries = 0
+
+    result = extraction_tasks.process_chapter_task.run(
+        str(uuid.uuid4()),
+        4,
+        execution_id="11111111-1111-1111-1111-111111111111",
+    )
+
+    assert result == {"failed": "llm_token_limit"}
+    fail.assert_awaited_once()
+    assert fail.await_args.kwargs["terminal"] is True
+    assert fail.await_args.kwargs["category"] == "llm_token_limit"
+
+
+def test_process_chapter_task_stays_paused_regardless_of_previous_retry_count(
+    monkeypatch,
+):
     calls: list[str] = []
 
     def _fake_run_worker_coro(coro):
@@ -210,7 +264,9 @@ def test_process_chapter_task_does_not_retry_transient_provider_failure(monkeypa
     assert retry_calls == []
 
 
-def test_process_chapter_task_retries_transient_db_failure_before_work_starts(monkeypatch):
+def test_process_chapter_task_retries_transient_db_failure_before_work_starts(
+    monkeypatch,
+):
     deadlock = OperationalError("SELECT books", {}, RuntimeError("deadlock detected"))
     retry_calls: list[dict] = []
 
@@ -278,7 +334,9 @@ def test_process_book_task_uses_shared_worker_runner(monkeypatch):
     assert calls == ["coroutine"]
 
 
-def test_process_chapter_task_successfully_processes_and_sets_reprocess_guard(monkeypatch):
+def test_process_chapter_task_successfully_processes_and_sets_reprocess_guard(
+    monkeypatch,
+):
     book_id = uuid.uuid4()
     book = SimpleNamespace(
         id=book_id,
@@ -323,10 +381,14 @@ def test_process_chapter_task_successfully_processes_and_sets_reprocess_guard(mo
     monkeypatch.setattr("app.core.redis.get_redis", get_redis)
     monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
     monkeypatch.setitem(
-        sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: fake_session)
+        sys.modules,
+        "app.core.database",
+        SimpleNamespace(AsyncSessionLocal=lambda: fake_session),
     )
     monkeypatch.setitem(
-        sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel)
+        sys.modules,
+        "app.models.book",
+        SimpleNamespace(Book=object, Chapter=_FakeChapterModel),
     )
 
     result = extraction_tasks.process_chapter_task.run(str(book_id), 1, manual_reprocess=True)
@@ -381,10 +443,14 @@ def test_process_chapter_task_does_not_retry_db_failure_after_work_starts(monkey
     monkeypatch.setattr("app.core.redis.get_redis", get_redis)
     monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
     monkeypatch.setitem(
-        sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: fake_session)
+        sys.modules,
+        "app.core.database",
+        SimpleNamespace(AsyncSessionLocal=lambda: fake_session),
     )
     monkeypatch.setitem(
-        sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel)
+        sys.modules,
+        "app.models.book",
+        SimpleNamespace(Book=object, Chapter=_FakeChapterModel),
     )
 
     with pytest.raises(OperationalError):
@@ -393,7 +459,9 @@ def test_process_chapter_task_does_not_retry_db_failure_after_work_starts(monkey
     assert retry_calls == []
 
 
-def test_repair_chapter_payload_task_covers_success_missing_and_hidden_paths(monkeypatch):
+def test_repair_chapter_payload_task_covers_success_missing_and_hidden_paths(
+    monkeypatch,
+):
     book_id = uuid.uuid4()
     book = SimpleNamespace(id=book_id)
     chapter = SimpleNamespace(number=2)
@@ -414,10 +482,14 @@ def test_repair_chapter_payload_task_covers_success_missing_and_hidden_paths(mon
     monkeypatch.setattr(extraction_tasks, "repair_chapter_payload_from_source", repair)
     monkeypatch.setattr(sa, "select", lambda *_args, **_kwargs: _FakeSelect())
     monkeypatch.setitem(
-        sys.modules, "app.core.database", SimpleNamespace(AsyncSessionLocal=lambda: session)
+        sys.modules,
+        "app.core.database",
+        SimpleNamespace(AsyncSessionLocal=lambda: session),
     )
     monkeypatch.setitem(
-        sys.modules, "app.models.book", SimpleNamespace(Book=object, Chapter=_FakeChapterModel)
+        sys.modules,
+        "app.models.book",
+        SimpleNamespace(Book=object, Chapter=_FakeChapterModel),
     )
 
     assert extraction_tasks.repair_chapter_payload_task.run(str(book_id), 2) is None

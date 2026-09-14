@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { EditorContent, useEditor } from "@tiptap/react"
-import { Extension, Mark, Node, mergeAttributes } from "@tiptap/core"
+import { Extension, Node, mergeAttributes, type CommandProps } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
 import Underline from "@tiptap/extension-underline"
 import TextAlign from "@tiptap/extension-text-align"
@@ -111,8 +111,8 @@ const FontFamily = Extension.create({
   },
   addCommands() {
     return {
-      setFontFamily: (fontFamily: string) => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontFamily }).run(),
-      unsetFontFamily: () => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontFamily: null }).removeEmptyTextStyle().run(),
+      setFontFamily: (fontFamily: string) => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontFamily }).run(),
+      unsetFontFamily: () => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontFamily: null }).removeEmptyTextStyle().run(),
     }
   },
 })
@@ -136,8 +136,8 @@ const FontSize = Extension.create({
   },
   addCommands() {
     return {
-      setFontSize: (fontSize: string) => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontSize }).run(),
-      unsetFontSize: () => ({ chain }: { chain: any }) => chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+      setFontSize: (fontSize: string) => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontSize }).run(),
+      unsetFontSize: () => ({ chain }: Pick<CommandProps, "chain">) => chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
     }
   },
 })
@@ -168,9 +168,9 @@ const ParagraphStyle = Extension.create({
   },
   addCommands() {
     return {
-      setLineHeight: (lineHeight: string | null) => ({ chain }: { chain: any }) => chain().updateAttributes("paragraph", { lineHeight }).updateAttributes("heading", { lineHeight }).updateAttributes("blockquote", { lineHeight }).run(),
-      setParagraphSpacing: (marginBottom: string | null) => ({ chain }: { chain: any }) => chain().updateAttributes("paragraph", { marginBottom }).updateAttributes("heading", { marginBottom }).updateAttributes("blockquote", { marginBottom }).run(),
-      setFirstLineIndent: (textIndent: string | null) => ({ chain }: { chain: any }) => chain().updateAttributes("paragraph", { textIndent }).run(),
+      setLineHeight: (lineHeight: string | null) => ({ chain }: Pick<CommandProps, "chain">) => chain().updateAttributes("paragraph", { lineHeight }).updateAttributes("heading", { lineHeight }).updateAttributes("blockquote", { lineHeight }).run(),
+      setParagraphSpacing: (marginBottom: string | null) => ({ chain }: Pick<CommandProps, "chain">) => chain().updateAttributes("paragraph", { marginBottom }).updateAttributes("heading", { marginBottom }).updateAttributes("blockquote", { marginBottom }).run(),
+      setFirstLineIndent: (textIndent: string | null) => ({ chain }: Pick<CommandProps, "chain">) => chain().updateAttributes("paragraph", { textIndent }).run(),
     }
   },
 })

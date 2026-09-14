@@ -9,6 +9,7 @@ const booksApiMock = vi.hoisted(() => ({
   createSeries: vi.fn(),
   getSeriesBible: vi.fn(),
   list: vi.fn(),
+  listSelector: vi.fn(),
   listSeries: vi.fn(),
   removeBookFromSeries: vi.fn(),
   setSeriesBookStatus: vi.fn(),
@@ -165,6 +166,7 @@ beforeEach(() => {
   theme = "dark"
   booksApiMock.listSeries.mockResolvedValue(seriesRows)
   booksApiMock.list.mockResolvedValue(bookRows)
+  booksApiMock.listSelector.mockResolvedValue(bookRows)
   booksApiMock.createSeries.mockResolvedValue({ id: "series-2" })
   booksApiMock.getSeriesBible.mockResolvedValue({
     episode_count: 1,

@@ -55,12 +55,22 @@ export function WorkspaceFamilyHeader({
   title: string
 }) {
   const items = FAMILY_ITEMS[family]
+  const homeHref = `/${bookId}` as Route
 
   return (
     <header className="app-panel app-panel--strong overflow-hidden">
       <div className="flex flex-col gap-5 px-5 py-6 sm:px-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
-          <p className="app-eyebrow">{familyLabel(family)}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="app-eyebrow">{familyLabel(family)}</p>
+            <Link
+              href={homeHref}
+              data-testid="workspace-family-home-link"
+              className="rounded-sm text-xs font-semibold uppercase tracking-[0.18em] text-[rgb(var(--muted-foreground))] hover:text-teal-600"
+            >
+              Home
+            </Link>
+          </div>
           <h1 className="mt-3 font-display text-4xl leading-none tracking-normal text-[rgb(var(--foreground))] sm:text-5xl">
             {title}
           </h1>

@@ -37,11 +37,10 @@ function RevisionDetailCard({ item, isDark }: { item: RevisionActionItem; isDark
 export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?: "sidebar" | "page"; enabled?: boolean }) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const { items, unreadCount, loading, error, markRead, markAllRead, refresh } = useNotificationsState(40, {
+  const { items, unreadCount, loading, loadingMore, hasMore, error, markRead, markAllRead, refresh, loadMore } = useNotificationsState(40, {
     enabled,
     pollMs: 60_000,
     refreshOnFocus: true,
-    syncRevisionDigests: mode === "page" && enabled,
   })
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [loadingDetailsId, setLoadingDetailsId] = useState<string | null>(null)
@@ -79,10 +78,6 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
     const relationshipCount = typeof item.data?.relationship_count === "number" ? item.data.relationship_count : null
     const plotThreadCount = typeof item.data?.plot_thread_count === "number" ? item.data.plot_thread_count : null
     const continuityIssueCount = typeof item.data?.continuity_issue_count === "number" ? item.data.continuity_issue_count : null
-    const estimatedMinutes =
-      typeof item.data?.estimated_minutes === "number" || typeof item.data?.estimated_minutes === "string"
-        ? item.data.estimated_minutes
-        : null
     const fileSizeMb = typeof item.data?.file_size_mb === "number" ? item.data.file_size_mb : null
     const analysisComplete = item.data?.analysis_complete === true
     const summary = typeof item.data?.summary === "string" ? item.data.summary : null
@@ -161,12 +156,11 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
     if (item.kind === "upload_processing") {
       return (
         <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-stone-50"}`}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Processing Estimate</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Processing status</p>
           <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             LoreVia is still parsing and indexing this upload. You can leave the page while it finishes in the background.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {estimatedMinutes ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>ETA {estimatedMinutes} min</span> : null}
             {fileSizeMb !== null ? <span className={`rounded-full px-3 py-1 text-3xs font-semibold ${isDark ? "bg-white/10 text-slate-200" : "border border-stone-200 bg-white text-stone-700"}`}>{fileSizeMb} MB upload</span> : null}
           </div>
         </div>
@@ -347,6 +341,16 @@ export function NotificationsPanel({ mode = "sidebar", enabled = true }: { mode?
                 </article>
               )
             })}
+            {mode === "page" && hasMore ? (
+              <button
+                type="button"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                className={`w-full rounded-md border px-4 py-3 text-sm font-medium transition disabled:opacity-50 ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+              >
+                {loadingMore ? "Loading older notifications..." : "Load older notifications"}
+              </button>
+            ) : null}
           </div>
         )}
       </div>

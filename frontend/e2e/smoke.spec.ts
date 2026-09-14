@@ -32,7 +32,7 @@ test("marketing home page renders the core value proposition", async ({ page }) 
 })
 
 test("pricing and upgrade share current monthly and annual prices", async ({ page }) => {
-  await installMockApi(page)
+  await installMockApi(page, { userTier: "free" })
   const checkoutPlans: string[] = []
   page.on("request", (request) => {
     if (request.url().endsWith("/api/v1/billing/checkout") && request.method() === "POST") {
@@ -48,9 +48,9 @@ test("pricing and upgrade share current monthly and annual prices", async ({ pag
     has: page.getByRole("heading", { name: "Architect", exact: true }),
   })
   await expect(publicAuthorCard).toContainText("$19")
-  await expect(publicAuthorCard).toContainText("10 days free, then $19/mo")
+  await expect(publicAuthorCard).toContainText("Paid checkout charges $19 now")
   await expect(publicArchitectCard).toContainText("$39")
-  await expect(publicArchitectCard).toContainText("10 days free, then $39/mo")
+  await expect(publicArchitectCard).toContainText("Paid checkout charges $39 now")
 
   await page.getByRole("button", { name: "Yearly" }).click()
   await expect(publicAuthorCard).toContainText("$190")
@@ -68,18 +68,95 @@ test("pricing and upgrade share current monthly and annual prices", async ({ pag
   await expect(upgradeAuthorCard).toContainText("$19")
   await expect(upgradeArchitectCard).toContainText("$39")
   await upgradeAuthorCard.getByRole("button", { name: "Upgrade to Author" }).click()
+  await page.getByRole("button", { name: "Pay $19.00 USD now" }).click()
+  await page.getByRole("button", { name: "Cancel" }).click()
   await upgradeArchitectCard.getByRole("button", { name: "Upgrade to Architect" }).click()
+  await page.getByRole("button", { name: "Pay $39.00 USD now" }).click()
+  await page.getByRole("button", { name: "Cancel" }).click()
   await page.getByRole("button", { name: "Yearly" }).click()
   await expect(upgradeAuthorCard).toContainText("$190")
   await expect(upgradeArchitectCard).toContainText("$390")
   await upgradeAuthorCard.getByRole("button", { name: "Upgrade to Author" }).click()
+  await page.getByRole("button", { name: "Pay $190.00 USD now" }).click()
+  await page.getByRole("button", { name: "Cancel" }).click()
   await upgradeArchitectCard.getByRole("button", { name: "Upgrade to Architect" }).click()
+  await page.getByRole("button", { name: "Pay $390.00 USD now" }).click()
+  await page.getByRole("button", { name: "Cancel" }).click()
   await expect.poll(() => checkoutPlans).toEqual([
     "author_monthly",
     "architect_monthly",
     "author_annual",
     "architect_annual",
   ])
+})
+
+test("active trial checkout defaults to continuing free and requires charge confirmation", async ({ page }) => {
+  await installMockApi(page, { userTier: "trial" })
+  const checkoutBodies: Array<{
+    plan: string
+    confirmed_immediate_charge: boolean
+    quote_token: string
+  }> = []
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/v1/billing/checkout") && request.method() === "POST") {
+      checkoutBodies.push(request.postDataJSON() as {
+        plan: string
+        confirmed_immediate_charge: boolean
+        quote_token: string
+      })
+    }
+  })
+
+  await page.goto("/upgrade")
+  await expect(page.getByText("Your free trial is already active.").first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Author — temporary trial access" })).toBeVisible()
+  await expect(page.getByText(/there is no subscription to cancel or refund/i)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Continue free trial" }).first()).toBeVisible()
+  const authorCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "Author", exact: true }),
+  })
+  await authorCard.getByRole("button", { name: "View payment details" }).click()
+
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByText("Active — already started")).toBeVisible()
+  await expect(dialog.getByText("$19.00 USD", { exact: true }).first()).toBeVisible()
+  const payButton = dialog.getByRole("button", { name: "Pay $19.00 USD now" })
+  await expect(payButton).toBeDisabled()
+  await dialog.getByRole("checkbox").check()
+  await expect(payButton).toBeEnabled()
+  await payButton.click()
+
+  await expect.poll(() => checkoutBodies).toEqual([
+    {
+      plan: "author_monthly",
+      confirmed_immediate_charge: true,
+      quote_token: "signed-quote-author_monthly",
+    },
+  ])
+  await expect(dialog.getByRole("alert")).toContainText("Mock checkout requested for author_monthly")
+})
+
+test("paid accounts can manage their current plan and refund options from pricing or settings", async ({ page }) => {
+  await installMockApi(page, { userTier: "author" })
+  const portalRequest = page.waitForRequest((request) =>
+    request.url().endsWith("/api/v1/billing/portal") && request.method() === "POST",
+  )
+
+  await page.goto("/upgrade")
+  await expect(page.getByText("Your current plan")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Author", exact: true }).first()).toBeVisible()
+  await expect(page.getByRole("button", { name: "Manage billing / cancel subscription" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Refund policy" })).toHaveAttribute("href", "/refund")
+  await expect(page.getByRole("link", { name: "Request a refund" })).toHaveAttribute("href", /mailto:support@getlorevia\.com/)
+
+  await page.getByRole("button", { name: "Manage billing / cancel subscription" }).click()
+  await portalRequest
+  await expect(page).toHaveURL(/\?mock_billing_portal=1$/)
+
+  await page.goto("/settings")
+  await expect(page.getByRole("button", { name: "Manage billing / cancel subscription" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Refund policy" })).toHaveAttribute("href", "/refund")
+  await expect(page.getByRole("link", { name: "Request a refund" })).toHaveAttribute("href", /mailto:support@getlorevia\.com/)
 })
 
 test("mobile marketing header keeps sign in and registration visible", async ({ page }) => {
@@ -95,6 +172,23 @@ test("mobile marketing header keeps sign in and registration visible", async ({ 
 
   await page.getByRole("link", { name: /^sign in$/i }).click()
   await expect(page).toHaveURL(/\/login$/)
+})
+
+test("support assistant answers navigation questions with a direct workspace action", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto(BOOK_ROUTE)
+
+  await page.getByRole("button", { name: "Help", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "LoreVia Support" })
+  await expect(dialog).toBeVisible()
+
+  await dialog.getByLabel("What do you need help with?").fill("How do I access character voice area?")
+  await dialog.getByRole("button", { name: "Ask support assistant" }).click()
+
+  await expect(dialog.getByText("Open Voice Consistency from the Writing workspace")).toBeVisible()
+  await expect(dialog.getByRole("link", { name: "Open Voice Consistency" })).toHaveAttribute("href", "/book-1/voice")
+  await expect(dialog).toHaveClass(/rounded-sm/)
+  await expect(dialog).toHaveClass(/border-0/)
 })
 
 test("interactive demo reviews findings without API calls or mobile overflow", async ({ page }) => {
@@ -227,11 +321,15 @@ test("public library cross-links safe samples and writer trust", async ({ page }
 
   await expect(page.getByRole("heading", { name: /published work for focused reading/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
-  await page.getByRole("link", { name: "Discussion" }).click()
+  const ashGateCard = page
+    .locator("article")
+    .filter({ has: page.getByRole("heading", { name: "Ash Gate Sample" }) })
+    .first()
+  await ashGateCard.getByRole("link", { name: "Discussion", exact: true }).click()
 
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-1$/)
   await page.goto("/public")
-  await expect(page.getByRole("link", { name: "@author" })).toBeVisible()
+  await expect(ashGateCard.getByRole("link", { name: "@author" })).toBeVisible()
   await page.goto("/public/writers/author")
 
   await expect(page).toHaveURL(/\/public\/writers\/author$/)
@@ -363,6 +461,7 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
   await page.goto("/library")
 
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
+  await expect(page.getByTestId("first-manuscript-hero")).toHaveCount(0)
   await page.keyboard.press("Control+K")
   await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible()
   await page.getByLabel("Search commands").fill("manuscript")
@@ -371,8 +470,53 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
 
   await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.getByRole("button", { name: /^new project$/i }).click()
-  await expect(page.getByRole("dialog", { name: /upload book/i })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Upload manuscript" })).toBeVisible()
 })
+
+test("help stays clear of profile and mobile actions while support input keeps question marks", async ({ page }) => {
+  await installMockApi(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/library")
+
+  const help = page.getByRole("button", { name: "Help", exact: true })
+  const profile = page.getByRole("link", { name: "Open author public profile" })
+  await expect(help).toBeVisible()
+  await expect(profile).toBeVisible()
+
+  const desktopBoxes = await Promise.all([help.boundingBox(), profile.boundingBox()])
+  expect(desktopBoxes[0]).not.toBeNull()
+  expect(desktopBoxes[1]).not.toBeNull()
+  expect(rectanglesOverlap(desktopBoxes[0]!, desktopBoxes[1]!)).toBe(false)
+
+  await help.click()
+  const supportInput = page.getByLabel("What do you need help with?")
+  await supportInput.pressSequentially("Can I save this chapter?")
+  await expect(supportInput).toHaveValue("Can I save this chapter?")
+  await expect(page.getByRole("dialog", { name: "LoreVia Support" })).toBeVisible()
+
+  await page.getByRole("button", { name: "Close" }).last().click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  const mobileHelp = page.getByRole("button", { name: "Help", exact: true })
+  const mobileActions = page.getByRole("navigation", { name: "Primary actions" })
+  await expect(mobileHelp).toBeVisible()
+  await expect(mobileActions).toBeVisible()
+  const mobileBoxes = await Promise.all([mobileHelp.boundingBox(), mobileActions.boundingBox()])
+  expect(mobileBoxes[0]).not.toBeNull()
+  expect(mobileBoxes[1]).not.toBeNull()
+  expect(rectanglesOverlap(mobileBoxes[0]!, mobileBoxes[1]!)).toBe(false)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+})
+
+function rectanglesOverlap(
+  first: { x: number; y: number; width: number; height: number },
+  second: { x: number; y: number; width: number; height: number },
+) {
+  return first.x < second.x + second.width
+    && first.x + first.width > second.x
+    && first.y < second.y + second.height
+    && first.y + first.height > second.y
+}
 
 test("settings page updates the public username", async ({ page }) => {
   await installMockApi(page)
@@ -439,7 +583,16 @@ test("settings sidebar follows the current section while scrolling", async ({ pa
   await page.goto("/settings")
 
   await expect(page.getByRole("link", { name: "Account" })).toHaveAttribute("aria-current", "location")
-  await page.locator("#session").scrollIntoViewIfNeeded()
+  await expect(page.getByText(/Security, password reset, verification, and billing emails/i)).toBeVisible()
+  await page.locator("#session").evaluate((section) => {
+    const targetTop = section.getBoundingClientRect().top + window.scrollY - 96
+    window.scrollTo({ top: targetTop, behavior: "instant" })
+  })
+  await page.waitForFunction(() => {
+    const rect = document.getElementById("session")?.getBoundingClientRect()
+    return Boolean(rect && rect.top > 0 && rect.top < 180)
+  })
+  await page.evaluate(() => window.dispatchEvent(new Event("scroll")))
   await expect(page.getByRole("link", { name: "Session" })).toHaveAttribute("aria-current", "location")
 })
 
@@ -489,7 +642,7 @@ test("stats page shows the writing dashboard and todays entries", async ({ page 
   await installMockApi(page)
   await page.goto("/stats")
 
-  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   await dismissCookies.click({ timeout: 5000 }).catch(() => {})
 
   await expect(page.getByRole("heading", { name: "Writing momentum, not just account totals." })).toBeVisible()
@@ -513,6 +666,7 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(sidebarRail).toBeVisible()
   await sidebarRail.hover()
   await expect(sidebarRail.locator('[data-testid="author-nav-helper-overview"]')).toContainText("See progress, next steps, and the latest signals around this book.")
+  await sidebarRail.getByRole("button", { name: "Show advanced tools" }).click()
   await expect(sidebarRail.locator('[data-testid="author-nav-item-scenes"]')).toContainText("Scene Workspace")
   await expect(sidebarRail.locator('[data-testid="author-nav-item-notes"]')).toContainText("Notes Workspace")
   await expect.poll(async () => {
@@ -523,7 +677,7 @@ test("book overview opens the manuscript editor", async ({ page }) => {
     })
   }).toBe(true)
 
-  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
     await dismissCookies.click()
   }
@@ -535,18 +689,112 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await expect(page.getByText("Manuscript progress")).toBeVisible()
 })
 
-test("analysis-complete overview makes cited continuity review the primary result", async ({ page }) => {
-  await installMockApi(page, { activationPending: true })
+test("analysis-complete overview starts with the supportive first read before critique", async ({ page }) => {
+  await installMockApi(page, { activationPending: true, firstImpression: "running" })
   await page.goto(BOOK_ROUTE)
 
   await expect(page.getByTestId("activation-experience")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "What’s Working" })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByRole("heading", { name: "The Story LoreVia Is Seeing" })).toBeVisible()
   await expect(page.getByTestId("continuity-inbox")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Evidence-backed continuity review" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Turn the read into a revision path" })).toBeVisible()
+  await expect(page.getByText("Ash-dark fantasy with intimate stakes")).toBeVisible()
+  await expect(page.getByText("Full coverage: all 3 requested chapters were analyzed.")).toBeVisible()
+  await expect(page.getByText(/Nora and Kael's gate exchange gives the central relationship immediate pressure/i)).toBeVisible()
   await expect(page.getByRole("heading", { name: "1 findings need review" })).toBeVisible()
+  const ordered = await page.evaluate(() => {
+    const whatsWorking = document.querySelector('[data-testid="whats-working-section"]')
+    const understanding = document.querySelector('[data-testid="story-understanding-section"]')
+    const critique = document.querySelector('[data-testid="existing-analysis"]')
+    const improve = document.querySelector('[data-testid="improve-section"]')
+    if (!whatsWorking || !understanding || !critique || !improve) return false
+    return Boolean(
+      whatsWorking.compareDocumentPosition(understanding) & Node.DOCUMENT_POSITION_FOLLOWING
+      && understanding.compareDocumentPosition(critique) & Node.DOCUMENT_POSITION_FOLLOWING
+      && critique.compareDocumentPosition(improve) & Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })
+  expect(ordered).toBe(true)
   await page.getByRole("button", { name: /Nora may use gate knowledge before learning it/i }).click()
   await expect(page.getByText(/pressed her cut palm to the gate/)).toBeVisible()
   await expect(page.getByText(/Kael finally told Nora/)).toBeVisible()
   await page.getByRole("button", { name: "Accept", exact: true }).click()
   await expect(page.getByText("Marked accepted")).toBeVisible()
+})
+
+test("cached first-read reports open the activation experience without blocking", async ({ page }) => {
+  await installMockApi(page, { activationPending: true, firstImpression: "cached" })
+  await page.goto(BOOK_ROUTE)
+
+  await expect(page.getByRole("heading", { name: "What’s Working" })).toBeVisible()
+  await expect(page.getByText("Your first read is underway.")).toHaveCount(0)
+  await expect(page.getByTestId("continuity-inbox")).toBeVisible()
+})
+
+test("failed first-read reports expose retry and existing-analysis paths", async ({ page }) => {
+  await installMockApi(page, { activationPending: true, firstImpression: "failed" })
+  await page.goto(BOOK_ROUTE)
+
+  await expect(page.getByText("The first read paused")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Continue to existing analysis" })).toBeVisible()
+  await page.getByRole("button", { name: "Continue to existing analysis" }).click()
+  await expect(page.getByTestId("continuity-inbox")).toBeVisible()
+
+  await page.getByRole("button", { name: "Retry first read" }).click()
+  await expect(page.getByRole("heading", { name: "What’s Working" })).toBeVisible({ timeout: 15000 })
+})
+
+test("verified-clean continuity can complete first-read activation", async ({ page }) => {
+  await installMockApi(page, { activationPending: true, activationClean: true, firstImpression: "complete" })
+  const workspaceUpdates: unknown[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/books/book-1/writer-workspace") && request.method() === "PUT") {
+      workspaceUpdates.push(request.postDataJSON())
+    }
+  })
+  await page.goto(BOOK_ROUTE)
+
+  await expect(page.getByRole("heading", { name: "What’s Working" })).toBeVisible()
+  await expect(page.getByTestId("continuity-inbox-clean")).toBeVisible()
+  await expect(page.getByText("No supported continuity conflicts found.")).toBeVisible()
+  await expect.poll(() =>
+    workspaceUpdates.some((update) => (
+      typeof update === "object"
+      && update !== null
+      && (update as { activation?: { completion_action?: string } }).activation?.completion_action === "verified_clean_scan"
+    )),
+  ).toBe(true)
+})
+
+test("other author projects use existing activation analysis without first read", async ({ page }) => {
+  const firstImpressionRequests: string[] = []
+  await installMockApi(page, { activationPending: true, workType: "other" })
+  page.on("request", (request) => {
+    if (request.url().includes("/advisor/first-impression")) {
+      firstImpressionRequests.push(request.url())
+    }
+  })
+
+  await page.goto(BOOK_ROUTE)
+
+  await expect(page.getByTestId("activation-experience")).toBeVisible()
+  await expect(page.getByRole("heading", { name: /We analyzed 3 chapters in Sky of Ash/i })).toBeVisible()
+  await expect(page.getByTestId("supportive-first-read")).toHaveCount(0)
+  expect(firstImpressionRequests).toHaveLength(0)
+})
+
+test("zero-project authors see first-read upload as the primary library action", async ({ page }) => {
+  await installMockApi(page, { zeroProjects: true })
+  await page.goto("/library")
+
+  await expect(page.getByTestId("first-manuscript-hero")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Upload your manuscript for a first read" })).toBeVisible()
+  await expect(page.getByText("LoreVia begins with what is working")).toBeVisible()
+  await page.getByRole("button", { name: "Upload manuscript" }).click()
+  await expect(page.getByRole("dialog", { name: "Upload manuscript" })).toBeVisible()
+  await expect(page.getByText("what is working first, then evidence-backed revision opportunities")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Author mode$/ })).toHaveAttribute("aria-pressed", "true")
 })
 
 test("expired free owners are redirected away from author-only book routes", async ({ page }) => {
@@ -741,14 +989,14 @@ test("manuscript reprocess requires confirmation before consuming an upload", as
 
   await page.getByRole("button", { name: "Reprocess manuscript" }).click()
   await expect(page.getByRole("heading", { name: "Reprocess manuscript?" })).toBeVisible()
-  await expect(page.getByText(/This will consume 1 book upload/)).toBeVisible()
+  await expect(page.getByText(/full word count is reserved first/)).toBeVisible()
   await page.getByRole("button", { name: "Cancel" }).click()
   await expect(page.getByRole("heading", { name: "Reprocess manuscript?" })).toHaveCount(0)
   expect(reprocessRequests).toHaveLength(0)
 
   await page.getByRole("button", { name: "Reprocess manuscript" }).click()
-  await page.getByRole("button", { name: "Reprocess and use 1 upload" }).click()
-  await expect(page.getByText("Reprocessing started for 3 chapters. This consumed 1 book upload.").first()).toBeVisible()
+  await page.getByRole("button", { name: "Reserve words and reprocess" }).click()
+  await expect(page.getByText("Reprocessing started for 3 chapters. 31,500 processed words are reserved and will settle chapter by chapter.").first()).toBeVisible()
   expect(reprocessRequests).toHaveLength(1)
   expect(JSON.parse(reprocessRequests[0] ?? "{}")).toEqual({ confirm_upload_charge: true })
 })
@@ -780,12 +1028,26 @@ test("allowance-paused manuscript continues from its checkpoint", async ({ page 
   expect(continueRequests).toHaveLength(1)
 })
 
+test("token-paused manuscript shows automatic resume without a continue action", async ({ page }) => {
+  await installMockApi(page, { manuscriptProcessing: "token-auto-paused" })
+
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  await expect(page.getByText(/Reprocessing will resume automatically around/).first()).toBeVisible()
+  await expect(page.getByText(/2\/4 chapters complete/).first()).toBeVisible()
+  await expect(page.getByRole("button", { name: "Continue processing" })).toHaveCount(0)
+})
+
 test("manual chapter reprocess marks saved edits pending and starts without upload charge", async ({ page }) => {
   await installMockApi(page)
   const reprocessRequests: string[] = []
+  const firstImpressionRequests: string[] = []
   page.on("request", (request) => {
     if (request.url().includes("/manuscript/chapters/1/reprocess") && request.method() === "POST") {
       reprocessRequests.push(request.url())
+    }
+    if (request.url().includes("/advisor/first-impression")) {
+      firstImpressionRequests.push(request.url())
     }
   })
 
@@ -806,13 +1068,14 @@ test("manual chapter reprocess marks saved edits pending and starts without uplo
   await expect(page.getByText("Chapter 1 reprocessing started. This uses tokens, not a book upload.")).toBeVisible()
   await expect(page.getByText("Needs reprocess")).toHaveCount(0)
   expect(reprocessRequests).toHaveLength(1)
+  expect(firstImpressionRequests).toHaveLength(0)
 })
 
 test("manuscript workspace switches into paged preview for chapter and full-book views", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/manuscript`)
 
-  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
     await dismissCookies.click()
   }
@@ -857,7 +1120,7 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/manuscript`)
 
-  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
     await dismissCookies.click()
   }
@@ -912,12 +1175,12 @@ test("collaboration workspace creates a story-scoped share", async ({ page }) =>
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/collaboration`)
 
-  await expect(page.getByRole("heading", { name: "Sky of Ash collaborators" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: /collaborators$/i })).toBeVisible()
   await expect(page.getByRole("combobox")).toHaveValue("beta_reader")
   await expect(page.getByText("Feedback-focused role for reader response.")).toBeVisible()
   await expect(page.getByText("Can edit manuscript")).toBeVisible()
 
-  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
     await dismissCookies.click()
   }
@@ -1068,7 +1331,7 @@ test("advisor continuity scan shows metadata and proactive audit cards", async (
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/advisor`)
 
-  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
     await dismissCookies.click()
   }
@@ -1101,6 +1364,49 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
 
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+})
+
+test("AI Beta Reader runs chapter and manuscript checks and bridges results into revision work", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto(`${BOOK_ROUTE}/analysis`)
+
+  await page.getByRole("link", { name: /AI Beta Reader/i }).click()
+  await expect(page.getByRole("heading", { name: /Sky of Ash AI Beta Reader/i })).toBeVisible()
+  await page.getByRole("button", { name: "Run again" }).click()
+  await expect(page.getByText("Reading manuscript batch 2 of 2...")).toBeVisible()
+  await expect(page.getByText("Report complete.")).toBeVisible({ timeout: 15000 })
+
+  await page.getByRole("tab", { name: "Overused Language" }).click()
+  await expect(page.getByRole("heading", { name: "“silver gate”" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Open chapter 2" })).toHaveAttribute(
+    "href",
+    /ai_beta_finding=term-silver-gate/,
+  )
+
+  await page.getByRole("tab", { name: "Character Voices" }).click()
+  await expect(page.getByRole("heading", { name: "Gregor" })).toBeVisible()
+  await expect(page.getByText("42%", { exact: false }).first()).toBeVisible()
+
+  await page.getByRole("tab", { name: "Revision Priorities" }).click()
+  await page.getByRole("button", { name: "Save note" }).click()
+  await expect(page.getByText(/Saved finding to AI Beta Reader/i)).toBeVisible()
+  await page.getByRole("button", { name: "Create revision task" }).click()
+  await expect(page.getByText("Revision task created in the revision board.")).toBeVisible()
+  await page.getByRole("button", { name: "Create revision task" }).click()
+  await expect(page.getByText("That revision task already exists.")).toBeVisible()
+
+  await page.getByRole("radio", { name: "Full manuscript" }).click()
+  await page.getByRole("button", { name: "Run again" }).click()
+  await expect(page.getByText("Report complete.")).toBeVisible({ timeout: 15000 })
+})
+
+test("AI Beta Reader preserves and marks reports stale after manuscript changes", async ({ page }) => {
+  await installMockApi(page, { betaReaderStale: true })
+  await page.goto(`${BOOK_ROUTE}/ai-beta-reader`)
+
+  await expect(page.getByText("This report is from an earlier manuscript version.", { exact: false })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Human Beta Feedback" })).toHaveAttribute("href", `${BOOK_ROUTE}/beta-feedback`)
+  await expect(page.getByRole("link", { name: "Voice Consistency" })).toHaveAttribute("href", `${BOOK_ROUTE}/voice`)
 })
 
 test("voice consistency can target a selected character", async ({ page }) => {
@@ -1196,6 +1502,10 @@ test("character bible can add a manual character", async ({ page }) => {
   await page.getByLabel("Name").fill("Aunt Dahlia")
   await page.getByLabel("First chapter").fill("2")
   await page.getByLabel("Description").fill("A precise aunt with a sharp memory.")
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.isVisible().catch(() => false)) {
+    await dismissCookies.click()
+  }
   await page.getByRole("button", { name: /^create character$/i }).click()
 
   await expect(page.getByRole("heading", { name: "Aunt Dahlia" })).toBeVisible()
@@ -1243,7 +1553,7 @@ test("relationship graph inspector responds to node and edge selection", async (
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/graph`)
 
-  const dismissCookies = page.getByRole("button", { name: /not now/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
     await dismissCookies.click()
   }

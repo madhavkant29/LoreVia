@@ -210,7 +210,7 @@ export function useManuscriptDerivedState({
       : rightRailVisible
         ? "xl:grid-cols-[minmax(0,1fr)_23.5rem]"
         : "xl:grid-cols-1"
-  const chapterListItems = chapterList?.chapters ?? []
+  const chapterListItems = useMemo(() => chapterList?.chapters ?? [], [chapterList])
   const fullBookPageMap = useMemo(
     () => buildFullBookPageMap(chapterList?.chapters ?? [], bookDrafts),
     [bookDrafts, chapterList]

@@ -35,7 +35,7 @@ export function StatusToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-5 right-5 z-[90] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3" aria-live="polite">
+      <div data-lorevia-bottom-floating className="fixed bottom-5 right-5 z-[90] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3" aria-live="polite">
         {messages.map((message) => (
           <div
             key={message.id}

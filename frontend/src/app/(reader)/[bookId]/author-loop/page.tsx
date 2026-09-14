@@ -108,10 +108,18 @@ export default function AuthorLoopPage() {
     },
     refetchIntervalInBackground: false,
   })
-  const { data: characters = [] } = useQuery<Character[]>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
-    queryFn: () => booksApi.getCharacters(bookId),
+  const { data: characterData } = useQuery<Character[]>({
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters:author-loop")),
+    queryFn: () =>
+      booksApi.getCharacters<Character>(bookId, {
+        fields: ["id", "name", "first_chapter", "aliases", "description"],
+        include: [],
+      }),
   })
+  const characters = useMemo(
+    () => (Array.isArray(characterData) ? characterData : []),
+    [characterData],
+  )
   const { data: storyHealth = null } = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "story-health")),
     queryFn: () => booksApi.getStoryHealth(bookId),
@@ -435,7 +443,7 @@ export default function AuthorLoopPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <MetricPill isDark={isDark} label="Story health" value={storyHealth ? `${storyHealth.score}` : "Pending"} />
+                <MetricPill isDark={isDark} label="Story health" value={storyHealth && storyHealth.available !== false ? `${storyHealth.score}` : "Not available"} />
                 <MetricPill isDark={isDark} label="Active issues" value={String(issueCards.length)} />
                 <MetricPill isDark={isDark} label="Queued tasks" value={String(writerWorkspace?.goal_calendar.length ?? 0)} />
               </div>

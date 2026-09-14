@@ -49,7 +49,7 @@ export function AuthorOverviewTab({
 }: {
   isDark: boolean
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   chapterCount: number | null
   characterCount: number
   worldArticleCount: number
@@ -66,7 +66,11 @@ export function AuthorOverviewTab({
   onOpenManuscript: () => void
   bookId: string
 }) {
-  const manuscriptProgress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
+  const manuscriptProgress = clamp(
+    targetWords && currentWords !== null ? (currentWords / targetWords) * 100 : percentComplete,
+    0,
+    100,
+  )
   const latestChapter = chapters[chapters.length - 1]
 
   return (
@@ -79,19 +83,19 @@ export function AuthorOverviewTab({
         worldArticleCount={worldArticleCount}
       />
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>At a glance</p>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>At a glance</p>
         <div className="mt-5 space-y-3">
           <CompactProgressRow isDark={isDark} label="Draft progress" value={`${Math.round(manuscriptProgress)}%`} percent={manuscriptProgress} />
           <CompactProgressRow isDark={isDark} label="Daily quota" value={`${dailyWords.toLocaleString()} / ${dailyTarget.toLocaleString()}`} percent={(dailyWords / dailyTarget) * 100} />
-          <CompactProgressRow isDark={isDark} label="Revision pressure" value={`${totalRevisionItems} active`} percent={clamp(totalRevisionItems * 8, 0, 100)} tone="amber" />
-          <InfoLine isDark={isDark} label="Last written" value={latestChapter ? `${unitTitle} ${latestChapter.number}` : "Syncing"} />
+          <InfoLine isDark={isDark} label="Active revision items" value={String(totalRevisionItems)} />
+          <InfoLine isDark={isDark} label="Last written" value={latestChapter ? `${unitTitle} ${latestChapter.number}` : "No chapter activity"} />
           <button type="button" onClick={() => onNavigate(`/${bookId}/reports`)} className={footerLinkClass(isDark)}>
             View workspace stats <Icon name="chevron" />
           </button>
         </div>
       </section>
       <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Up next</p>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Up next</p>
         <div className="mt-5 space-y-3">
           <ActionRow isDark={isDark} icon="pen" title="Continue writing" body={latestChapter ? `${unitTitle} ${latestChapter.number}` : "Open manuscript"} onClick={onOpenManuscript} />
           <ActionRow isDark={isDark} icon="timeline" title="Review high severity risks" body={`${highSeverityItems} item${highSeverityItems === 1 ? "" : "s"} need attention`} onClick={() => onNavigate(`/${bookId}/analysis`)} tone="amber" />
@@ -246,7 +250,7 @@ export function RevisionHubTab({
     if (!hasSelectedChapter) {
       setSelectedChapterKey(null)
     }
-  }, [selectedChapterKey, chapterSeverityFilter, revisionIntelligence])
+  }, [chapterFindings, selectedChapterKey, chapterSeverityFilter, revisionIntelligence])
 
   useEffect(() => {
     if (selectedRevisionItemId === null || !revisionIntelligence) return
@@ -254,7 +258,7 @@ export function RevisionHubTab({
     if (!hasSelectedItem) {
       setSelectedRevisionItemId(null)
     }
-  }, [selectedRevisionItemId, revisionIntelligence])
+  }, [allItems, selectedRevisionItemId, revisionIntelligence])
 
   useEffect(() => {
     if (!chapterFindingsHighlighted) return
@@ -286,7 +290,7 @@ export function RevisionHubTab({
   const highCount = allItems.filter((item) => item.severity === "high").length || revisionIntelligence.summary.high_severity_count
   const mediumCount = allItems.filter((item) => item.severity === "medium").length
   const lowCount = allItems.filter((item) => item.severity === "low").length
-  const readyScore = storyHealth?.score ?? Math.max(0, 100 - highCount * 6 - mediumCount * 3 - lowCount)
+  const readyScore = storyHealth && storyHealth.available !== false ? storyHealth.score : null
 
   const selectReadinessSeverity = (severity: RevisionSeverityFilter) => {
     setChapterSeverityFilter(severity)
@@ -306,11 +310,11 @@ export function RevisionHubTab({
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${severityClass(item.severity, isDark)}`}>{item.severity}</span>
-          {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{`Chapter ${item.chapter_ref}`}</span> : null}
-          <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{item.source_label || "Revision intelligence"}</span>
+          {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-300" : "text-xs text-slate-600"}>{`Chapter ${item.chapter_ref}`}</span> : null}
+          <span className={isDark ? "text-xs text-slate-300" : "text-xs text-slate-600"}>{item.source_label || "Revision intelligence"}</span>
         </div>
         <p className={`mt-2 text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
-        <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{item.recommendation || item.description}</p>
+        <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.recommendation || item.description}</p>
         {isActive ? (
           <div className={`mt-3 rounded-md border px-3 py-3 ${isDark ? "border-sky-400/25 bg-sky-500/10" : "border-sky-200 bg-sky-50"}`}>
             <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-sky-200" : "text-sky-800"}`}>What LoreVia found</p>
@@ -321,7 +325,7 @@ export function RevisionHubTab({
                 <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-200" : "text-slate-700"}`}>{item.recommendation}</p>
               </>
             ) : null}
-            <div className={`mt-3 flex flex-wrap gap-2 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            <div className={`mt-3 flex flex-wrap gap-2 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>
               <span>Status: {item.status.replace("_", " ")}</span>
               <span>Category: {item.category}</span>
             </div>
@@ -333,9 +337,25 @@ export function RevisionHubTab({
 
   return (
     <div className="space-y-5">
+      {writerWorkspaceError && !writerWorkspace && onRetryWriterWorkspace ? (
+        <ErrorCard
+          message="Failed to load writing goals and workspace settings"
+          onRetry={onRetryWriterWorkspace}
+          variant="compact"
+          isDark={isDark}
+        />
+      ) : null}
+      {storyHealthError && !storyHealth && onRetryStoryHealth ? (
+        <ErrorCard
+          message="Failed to load the story health score"
+          onRetry={onRetryStoryHealth}
+          variant="compact"
+          isDark={isDark}
+        />
+      ) : null}
       <div className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(13rem,0.75fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(13rem,0.7fr)]">
         <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision focus</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Revision focus</p>
           <div className="mt-4 space-y-3">
             {focusCards.map((card, index) => {
               const severity = index === 0 ? "high" : index < 3 ? "medium" : "low"
@@ -358,7 +378,7 @@ export function RevisionHubTab({
         </section>
         <section className={`${panelClass(isDark, "h-full p-4 sm:p-5 transition-shadow duration-300")} ${chapterFindingsHighlighted ? (isDark ? "shadow-[0_0_0_2px_rgba(56,189,248,0.5),0_0_30px_rgba(20,184,166,0.22)]" : "shadow-[0_0_0_2px_rgba(14,116,144,0.3),0_0_26px_rgba(14,165,233,0.2)]") : ""}`}>
           <div className="flex items-center justify-between gap-3">
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Chapter-specific findings</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Chapter-specific findings</p>
             <div className="flex gap-1">
               {(["all", "high", "medium", "low"] as const).map((label) => {
                 const isActive = chapterSeverityFilter === label
@@ -370,7 +390,7 @@ export function RevisionHubTab({
                       setChapterSeverityFilter(label)
                       setSelectedChapterKey(null)
                     }}
-                    className={`rounded-full px-2 py-1 text-3xs font-semibold transition ${isActive ? (isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700") : (isDark ? "bg-white/[0.05] text-slate-400 hover:bg-white/[0.08]" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}`}
+                    className={`rounded-full px-2 py-1 text-3xs font-semibold transition ${isActive ? (isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700") : (isDark ? "bg-white/[0.05] text-slate-300 hover:bg-white/[0.08]" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}`}
                   >
                     {label[0].toUpperCase() + label.slice(1)}
                   </button>
@@ -393,29 +413,33 @@ export function RevisionHubTab({
                 >
                   <div className="min-w-0">
                     <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{title}</p>
-                    <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{subtitle}</p>
+                    <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{subtitle}</p>
                   </div>
-                  <span className="text-sm font-semibold text-teal-600">{items.length} issue{items.length === 1 ? "" : "s"}</span>
+                  <span className={`text-sm font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>{items.length} issue{items.length === 1 ? "" : "s"}</span>
                 </button>
             )})}
           </div>
         </section>
         <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Recommended fixes</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Recommended fixes</p>
           <div className="mt-4 space-y-3">
             {allItems.slice(0, 3).map((item) => (
               <div key={item.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                 <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
-                <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.recommendation || item.description}</p>
+                <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.recommendation || item.description}</p>
               </div>
             ))}
-            {allItems.length === 0 ? <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No high-impact fixes are currently surfaced.</p> : null}
+            {allItems.length === 0 ? <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>No high-impact fixes are currently surfaced.</p> : null}
           </div>
         </section>
         <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Readiness summary</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Readiness summary</p>
           <div className="mt-5 flex justify-center">
-            <ScoreRing isDark={isDark} score={readyScore} label="ready" />
+            {readyScore !== null ? (
+              <ScoreRing isDark={isDark} score={readyScore} label="ready" />
+            ) : (
+              <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>Story-health analysis is not available yet.</p>
+            )}
           </div>
           <div className="mt-4 space-y-2">
             <InfoLine
@@ -447,7 +471,7 @@ export function RevisionHubTab({
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Selected findings</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Selected findings</p>
               <h3 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{selectedInsight.title}</h3>
               <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{selectedInsight.subtitle}</p>
             </div>
@@ -461,7 +485,7 @@ export function RevisionHubTab({
           </div>
           <div className="mt-4 space-y-3">
             {selectedInsight.items.length > 0 ? selectedInsight.items.map((item) => renderClickableFinding(item)) : (
-              <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No findings are currently surfaced for this bucket.</p>
+              <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>No findings are currently surfaced for this bucket.</p>
             )}
           </div>
         </section>
@@ -470,7 +494,7 @@ export function RevisionHubTab({
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Chapter findings</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Chapter findings</p>
               <h3 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{selectedChapterFinding.title}</h3>
               <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                 {chapterSeverityFilter === "all"
@@ -488,7 +512,7 @@ export function RevisionHubTab({
           </div>
           <div className="mt-4 space-y-3">
             {selectedChapterFinding.items.length > 0 ? selectedChapterFinding.items.map((item) => renderClickableFinding(item)) : (
-              <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No findings are currently surfaced for this chapter.</p>
+              <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>No findings are currently surfaced for this chapter.</p>
             )}
           </div>
         </section>
@@ -524,7 +548,7 @@ export function PlanningTab({
   isDark: boolean
   writerWorkspace: WriterWorkspace | null
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   chapterCount: number | null
   dailyWords: number
   dailyTarget: number
@@ -548,17 +572,19 @@ export function PlanningTab({
   }
 
   const chapterTarget = writerWorkspace?.word_count_goals.chapter_target ?? 0
-  const etaDays = currentWords && dailyTarget > 0 ? Math.max(1, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget)) : null
+  const etaDays = targetWords && currentWords !== null && dailyTarget > 0
+    ? Math.max(0, Math.ceil(Math.max(0, targetWords - currentWords) / dailyTarget))
+    : null
   const incompleteItems = (writerWorkspace?.goal_calendar ?? []).filter((item) => !item.completed)
 
   return (
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <PlanningMetric isDark={isDark} label="Book goal" value={`${targetWords.toLocaleString()} words`} />
+        <PlanningMetric isDark={isDark} label="Book goal" value={targetWords ? `${targetWords.toLocaleString()} words` : "Not set"} />
         <PlanningMetric isDark={isDark} label="Chapter goal" value={chapterTarget > 0 ? `${chapterTarget.toLocaleString()} avg. words` : `${formatNumber(chapterCount)} chapters`} />
         <PlanningMetric isDark={isDark} label="Daily quota" value={`${dailyTarget.toLocaleString()} words`} />
         <PlanningMetric isDark={isDark} label="Writing streak" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} />
-        <PlanningMetric isDark={isDark} label="Target completion" value={etaDays ? `In ${etaDays} days` : "Syncing"} />
+        <PlanningMetric isDark={isDark} label="Target completion" value={etaDays !== null ? (etaDays === 0 ? "Target reached" : `In ${etaDays} days`) : "Not available"} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.45fr)] xl:auto-rows-fr">
         <GoalCalendarCard
@@ -571,23 +597,22 @@ export function PlanningTab({
         />
         <div className="space-y-5">
           <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Session goals</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Session goals</p>
             <div className="mt-4 space-y-3">
               {incompleteItems.slice(0, 3).map((item) => (
                 <div key={item.id} className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                   <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{item.title}</p>
-                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Due {formatPlannerDate(item.due_date)}</p>
+                  <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>Due {formatPlannerDate(item.due_date)}</p>
                 </div>
               ))}
-              {incompleteItems.length === 0 ? <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Add a planning item to define the next session.</p> : null}
+              {incompleteItems.length === 0 ? <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>Add a planning item to define the next session.</p> : null}
             </div>
           </section>
           <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Quotas</p>
+            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Quotas</p>
             <div className="mt-4 space-y-3">
               <CompactProgressRow isDark={isDark} label="Daily quota" value={`${dailyWords} / ${dailyTarget}`} percent={(dailyWords / dailyTarget) * 100} />
-              <CompactProgressRow isDark={isDark} label="Weekly quota" value="Workspace goal" percent={clamp((dailyWords / dailyTarget) * 70, 0, 100)} />
-              <CompactProgressRow isDark={isDark} label="This month" value={`${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`} percent={currentWords ? (currentWords / targetWords) * 100 : 0} />
+              {targetWords ? <CompactProgressRow isDark={isDark} label="Book target" value={`${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`} percent={currentWords !== null ? (currentWords / targetWords) * 100 : 0} /> : null}
             </div>
           </section>
         </div>
@@ -614,7 +639,7 @@ export function WorkspaceStatsTab({
 }: {
   isDark: boolean
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   chapterCount: number | null
   characterCount: number
   worldArticleCount: number
@@ -628,7 +653,11 @@ export function WorkspaceStatsTab({
   onOpenManuscript: () => void
 }) {
   const averageWords = chapterCount && currentWords ? Math.round(currentWords / chapterCount) : 0
-  const progress = clamp(percentComplete || (currentWords ? (currentWords / targetWords) * 100 : 0), 0, 100)
+  const progress = clamp(
+    targetWords && currentWords !== null ? (currentWords / targetWords) * 100 : percentComplete,
+    0,
+    100,
+  )
   const chapterWordStats = chapters
     .filter((chapter) => typeof chapter.word_count === "number" && chapter.word_count > 0)
     .map((chapter) => ({ label: `Ch. ${chapter.number}`, value: chapter.word_count ?? 0 }))
@@ -732,7 +761,7 @@ export function StoryMapTab({
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Memory map</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Memory map</p>
               <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Who is in play and what still needs closure.</h3>
             </div>
             <button type="button" onClick={onOpenRelationships} className="text-sm font-semibold text-teal-700">
@@ -742,32 +771,32 @@ export function StoryMapTab({
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Active characters</p>
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Active characters</p>
               <div className="mt-3 space-y-3">
                 {(preWritingCheck?.active_characters ?? []).slice(0, 4).map((character) => (
                   <div key={character.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{character.name}</p>
-                    <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                       {character.role || "Character"}{character.last_seen_chapter ? ` / last seen in Chapter ${character.last_seen_chapter}` : ""}
                     </p>
                   </div>
                 ))}
-                {(preWritingCheck?.active_characters.length ?? 0) === 0 ? <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Character memory is still syncing.</p> : null}
+                {(preWritingCheck?.active_characters.length ?? 0) === 0 ? <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>Character memory is still syncing.</p> : null}
               </div>
             </div>
 
             <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Unresolved threads</p>
+              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Unresolved threads</p>
               <div className="mt-3 space-y-3">
                 {(preWritingCheck?.unresolved_threads ?? []).slice(0, 4).map((thread) => (
                   <div key={thread.id}>
                     <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-slate-800"}`}>{thread.title}</p>
-                    <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                       {thread.status}{thread.introduced_at ? ` / introduced in Chapter ${thread.introduced_at}` : ""}
                     </p>
                   </div>
                 ))}
-                {(preWritingCheck?.unresolved_threads.length ?? 0) === 0 ? <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>No open threads are surfaced yet.</p> : null}
+                {(preWritingCheck?.unresolved_threads.length ?? 0) === 0 ? <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>No open threads are surfaced yet.</p> : null}
               </div>
             </div>
           </div>
@@ -783,18 +812,18 @@ export function StoryMapTab({
         </section>
 
         <section className={panelClass(isDark, "p-4 sm:p-5")}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Continuity findings</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Continuity findings</p>
           <div className="mt-4 space-y-3">
             {(preWritingCheck?.alerts ?? []).slice(0, 5).map((alert) => (
               <div key={`${alert.title}-${alert.chapter_ref ?? "na"}`} className={`rounded-md border px-4 py-3 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{alert.title}</p>
-                  {alert.chapter_ref ? <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Ch {alert.chapter_ref}</span> : null}
+                  {alert.chapter_ref ? <span className={`text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>Ch {alert.chapter_ref}</span> : null}
                 </div>
                 <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{alert.body}</p>
               </div>
             ))}
-            {(preWritingCheck?.alerts.length ?? 0) === 0 ? <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Continuity findings will appear here after the next intelligence pass.</p> : null}
+            {(preWritingCheck?.alerts.length ?? 0) === 0 ? <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>Continuity findings will appear here after the next intelligence pass.</p> : null}
           </div>
         </section>
       </div>
@@ -808,6 +837,13 @@ export function StoryMapTab({
           onRevisionChange={() => {}}
           onWriterWorkspaceChange={() => {}}
           variant="story-map"
+        />
+      ) : revisionIntelligenceError && onRetryRevisionIntelligence ? (
+        <ErrorCard
+          message="Failed to load revision intelligence"
+          onRetry={onRetryRevisionIntelligence}
+          variant="compact"
+          isDark={isDark}
         />
       ) : null}
     </div>
@@ -840,7 +876,7 @@ function InfoLine({ isDark, label, value, onClick, active = false }: { isDark: b
         onClick={onClick}
         className={`${baseClass} transition ${isDark ? "hover:bg-white/[0.06]" : "hover:bg-slate-50"} ${active ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
       >
-        <span className={isDark ? "min-w-0 text-left text-slate-500" : "min-w-0 text-left text-slate-400"}>{label}</span>
+        <span className={isDark ? "min-w-0 text-left text-slate-300" : "min-w-0 text-left text-slate-600"}>{label}</span>
         <span className={`max-w-[56%] break-words text-right font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
       </button>
     )
@@ -848,57 +884,18 @@ function InfoLine({ isDark, label, value, onClick, active = false }: { isDark: b
 
   return (
     <div className={baseClass}>
-      <span className={isDark ? "min-w-0 text-slate-500" : "min-w-0 text-slate-400"}>{label}</span>
+      <span className={isDark ? "min-w-0 text-slate-300" : "min-w-0 text-slate-600"}>{label}</span>
       <span className={`max-w-[56%] break-words text-right font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{value}</span>
     </div>
   )
 }
 
-function ModeToggle({
-  isDark,
-  activeMode,
-  modeSaving,
-  onModeChange,
-}: {
-  isDark: boolean
-  activeMode: "reader" | "author"
-  modeSaving: boolean
-  onModeChange: (nextMode: "reader" | "author") => void
-}) {
-  const thumbClass = activeMode === "author" ? "translate-x-full" : "translate-x-0"
-
-  return (
-    <div
-      role="group"
-      aria-label="Workspace mode"
-      className={isDark ? "relative inline-grid h-11 grid-cols-2 rounded-full border border-white/10 bg-white/[0.04] p-1" : "relative inline-grid h-11 grid-cols-2 rounded-full border border-slate-200 bg-slate-50 p-1"}
-    >
-      <span
-        aria-hidden="true"
-        className={`pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 transition-transform duration-300 ease-out ${thumbClass}`}
-      />
-      {(["reader", "author"] as const).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          onClick={() => onModeChange(mode)}
-          disabled={modeSaving}
-          aria-pressed={activeMode === mode}
-          className={`relative z-10 min-w-[5.8rem] rounded-full px-4 text-xs font-semibold uppercase tracking-[0.18em] transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/60 ${
-            activeMode === mode
-              ? "text-white"
-              : isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          {mode}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function ActionRow({ isDark, icon, title, body, onClick, tone = "default" }: { isDark: boolean; icon: IconName; title: string; body: string; onClick: () => void; tone?: "default" | "amber" | "teal" }) {
-  const iconClass = tone === "amber" ? "text-amber-300" : tone === "teal" ? "text-teal-400" : "text-slate-400"
+  const iconClass = tone === "amber"
+    ? isDark ? "text-amber-300" : "text-amber-700"
+    : tone === "teal"
+      ? isDark ? "text-teal-300" : "text-teal-700"
+      : isDark ? "text-slate-300" : "text-slate-600"
   return (
     <button
       type="button"
@@ -908,9 +905,9 @@ function ActionRow({ isDark, icon, title, body, onClick, tone = "default" }: { i
       <Icon name={icon} className={`h-5 w-5 ${iconClass}`} />
       <div className="min-w-0 flex-1">
         <p className={`break-words text-sm font-semibold leading-6 ${isDark ? "text-slate-100" : "text-slate-800"}`}>{title}</p>
-        <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{body}</p>
+        <p className={`mt-1 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{body}</p>
       </div>
-      <Icon name="chevron" className="h-4 w-4 text-teal-600" />
+      <Icon name="chevron" className={`h-4 w-4 ${isDark ? "text-teal-300" : "text-teal-700"}`} />
     </button>
   )
 }
@@ -924,7 +921,7 @@ function ScoreRing({ isDark, score, label }: { isDark: boolean; score: number; l
     >
       <div className={`flex h-20 w-20 flex-col items-center justify-center rounded-full ${isDark ? "bg-[#0d141c]" : "bg-white"}`}>
         <span className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{safeScore}</span>
-        <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</span>
+        <span className={`text-3xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{label}</span>
       </div>
     </div>
   )
@@ -933,7 +930,7 @@ function ScoreRing({ isDark, score, label }: { isDark: boolean; score: number; l
 function PlanningMetric({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
   return (
     <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>{label}</p>
       <p className={`mt-2 break-words text-lg font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
     </div>
   )
@@ -952,7 +949,7 @@ function ProgressBreakdownCard({
   isDark: boolean
   progress: number
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   chapters: ChapterListResponse["chapters"]
   dailyWords: number
   dailyTarget: number
@@ -964,12 +961,6 @@ function ProgressBreakdownCard({
   const weeklyWords = userStats?.writing.this_week.words ?? 0
   const weeklyTarget = userStats?.writing.this_week.target_words ?? null
   const rows: Array<{ label: string; value: string; percent: number; tone: "teal" | "amber" | "rose" }> = [
-    {
-      label: "Book target",
-      value: `${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`,
-      percent: progress,
-      tone: "teal",
-    },
     {
       label: "Processed chapters",
       value: `${processedChapters} / ${chapterTotal}`,
@@ -990,6 +981,15 @@ function ProgressBreakdownCard({
     },
   ]
 
+  if (targetWords) {
+    rows.unshift({
+      label: "Book target",
+      value: `${formatNumber(currentWords)} / ${targetWords.toLocaleString()}`,
+      percent: progress,
+      tone: "teal",
+    })
+  }
+
   if (weeklyTarget && weeklyTarget > 0) {
     rows.push({
       label: "Weekly goal",
@@ -1001,7 +1001,7 @@ function ProgressBreakdownCard({
 
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Progress breakdown</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Progress breakdown</p>
       <div className="mt-4 space-y-3">
         {rows.map(({ label, value, percent, tone }) => (
           <CompactProgressRow key={label} isDark={isDark} label={label} value={value} percent={percent} tone={tone} />
@@ -1029,20 +1029,20 @@ function BarChartCard({
   const maxValue = data.reduce((max, item) => Math.max(max, item.value), 0)
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{title}</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>{eyebrow}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>{title}</p>
+      <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{eyebrow}</p>
       <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>{value}</p>
       {data.length > 0 ? (
         <div className="mt-5 flex h-32 items-end gap-3 border-b border-white/10 px-2">
           {data.map((item) => (
             <div key={item.label} className="flex flex-1 flex-col items-center justify-end gap-2" title={`${item.label}: ${item.value.toLocaleString()} words`}>
               <div className="w-full rounded-t-lg bg-teal-500/80" style={{ height: `${clamp((item.value / Math.max(1, maxValue)) * 100, 8, 100)}%` }} />
-              <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.label}</span>
+              <span className={`text-3xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.label}</span>
             </div>
           ))}
         </div>
       ) : (
-        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-500" : "border-slate-200 bg-slate-50 text-slate-400"}`}>{emptyLabel}</p>
+        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>{emptyLabel}</p>
       )}
     </section>
   )
@@ -1054,19 +1054,19 @@ function TrendCard({ isDark, userStats, currentWords }: { isDark: boolean; userS
   const last30Words = userStats?.writing.last_30_days.words ?? null
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Trend overview</p>
-      <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Words written in the last 30 days</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Trend overview</p>
+      <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Words written in the last 30 days</p>
       <p className="mt-2 text-2xl font-semibold text-teal-500">{last30Words !== null ? last30Words.toLocaleString() : "No data"}</p>
       {recentDays.length > 0 ? (
         <div className="mt-5 grid h-28 items-end gap-1.5" style={{ gridTemplateColumns: `repeat(${recentDays.length}, minmax(0, 1fr))` }}>
           {recentDays.map((day) => (
-            <div key={day.key} className="rounded-t-lg bg-teal-500/70" title={`${day.label}: ${day.value.toLocaleString()} words`} style={{ height: `${day.value > 0 ? clamp((day.value / Math.max(1, maxValue)) * 100, 8, 100) : 4}%` }} />
+            <div key={day.key} className="rounded-t-lg bg-teal-500/70" title={`${day.label}: ${day.value.toLocaleString()} words`} style={{ height: `${day.value > 0 ? clamp((day.value / Math.max(1, maxValue)) * 100, 8, 100) : 0}%` }} />
           ))}
         </div>
       ) : (
-        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-500" : "border-slate-200 bg-slate-50 text-slate-400"}`}>No recent writing entries have been recorded.</p>
+        <p className={`mt-5 rounded-md border px-4 py-6 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"}`}>No recent writing entries have been recorded.</p>
       )}
-      <p className={`mt-4 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Current manuscript words: {formatNumber(currentWords)}</p>
+      <p className={`mt-4 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>Current manuscript words: {formatNumber(currentWords)}</p>
     </section>
   )
 }
@@ -1082,7 +1082,7 @@ function InsightsCard({
   isDark: boolean
   worldArticleCount: number
   currentWords: number | null
-  targetWords: number
+  targetWords: number | null
   chapters: ChapterListResponse["chapters"]
   userStats: UserStats | null
 }) {
@@ -1092,17 +1092,21 @@ function InsightsCard({
   const insights = [
     `${measuredChapters} of ${chapters.length} chapters have measured word counts.`,
     `${processedChapters} of ${chapters.length} chapters are processed for workspace intelligence.`,
-    currentWords ? `${formatNumber(currentWords)} of ${targetWords.toLocaleString()} target words are drafted.` : "Manuscript word total is not available yet.",
+    currentWords !== null
+      ? targetWords
+        ? `${formatNumber(currentWords)} of ${targetWords.toLocaleString()} target words are drafted.`
+        : `${formatNumber(currentWords)} manuscript words are drafted; no book target is set.`
+      : "Manuscript word total is not available yet.",
     last7Words !== null ? `${last7Words.toLocaleString()} words were recorded in the last 7 days.` : "Recent writing totals will appear after the stats feed syncs.",
     `${worldArticleCount.toLocaleString()} world item${worldArticleCount === 1 ? "" : "s"} are attached to this workspace.`,
   ]
   return (
     <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Insights</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Insights</p>
       <div className="mt-4 space-y-3">
         {insights.map((insight, index) => (
           <div key={insight} className={`rounded-md border px-4 py-3 text-sm leading-6 ${isDark ? "border-white/[0.06] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-white text-slate-600"}`}>
-            <span className="mr-2 font-semibold text-teal-600">{index + 1}.</span>{insight}
+            <span className={`mr-2 font-semibold ${isDark ? "text-teal-300" : "text-teal-700"}`}>{index + 1}.</span>{insight}
           </div>
         ))}
       </div>
@@ -1114,7 +1118,7 @@ function InsightsCard({
 
 function EmptyTabState({ isDark, title, body }: { isDark: boolean; title: string; body: string }) {
   return (
-    <div className={`rounded-md border border-dashed px-5 py-10 text-center ${isDark ? "border-white/[0.08] text-slate-400" : "border-slate-200 text-slate-500"}`}>
+    <div className={`rounded-md border border-dashed px-5 py-10 text-center ${isDark ? "border-white/[0.08] text-slate-300" : "border-slate-200 text-slate-600"}`}>
       <p className={`text-lg font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>{title}</p>
       <p className="mt-2 text-sm leading-6">{body}</p>
     </div>
@@ -1127,12 +1131,6 @@ function panelClass(isDark: boolean, extra = "") {
   } ${extra}`
 }
 
-function secondaryButtonClass(isDark: boolean) {
-  return `inline-flex min-h-11 items-center gap-2 rounded-md border px-4 py-2.5 text-sm font-semibold transition ${
-    isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
-  }`
-}
-
 function footerLinkClass(isDark: boolean) {
   return `mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border px-4 py-3 text-sm font-semibold transition ${
     isDark ? "border-white/10 bg-white/[0.04] text-teal-200 hover:bg-white/[0.08]" : "border-slate-200 bg-white text-teal-800 hover:bg-slate-50"
@@ -1140,9 +1138,9 @@ function footerLinkClass(isDark: boolean) {
 }
 
 function severityClass(severity: string, isDark: boolean) {
-  if (severity === "High") return isDark ? "bg-rose-500/10 text-rose-300" : "bg-rose-50 text-rose-600"
-  if (severity === "Medium") return isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-600"
-  return isDark ? "bg-emerald-500/10 text-emerald-300" : "bg-emerald-50 text-emerald-600"
+  if (severity === "High") return isDark ? "bg-rose-500/10 text-rose-300" : "bg-rose-50 text-rose-800"
+  if (severity === "Medium") return isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-50 text-amber-800"
+  return isDark ? "bg-emerald-500/10 text-emerald-300" : "bg-emerald-50 text-emerald-800"
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -1150,7 +1148,7 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function formatNumber(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "Syncing"
+  if (typeof value !== "number" || Number.isNaN(value)) return "Unavailable"
   return value.toLocaleString()
 }
 

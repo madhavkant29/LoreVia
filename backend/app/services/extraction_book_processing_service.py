@@ -21,6 +21,7 @@ from app.services.extraction_chapter_queue_service import queue_initial_extracti
 from app.services.task_execution_service import get_or_create_processing_run
 from app.utils.books.imports import parse_book_upload_for_ingestion
 from app.utils.books.scene_metadata import refresh_screenplay_scene_rows
+from app.utils.books.serialization import build_blank_cover_image
 from app.utils.compliance.copyright_check import evaluate_document_copyright
 from app.utils.ingestion_utils import (
     apply_chapter_number_strategy,
@@ -32,6 +33,43 @@ from app.utils.ingestion_utils import (
 )
 
 log = logging.getLogger("lorevia.extraction")
+
+COVER_GENERATION_EXCEPTIONS = (OSError, RuntimeError, TypeError, ValueError)
+COVER_UPLOAD_EXCEPTIONS = (BotoCoreError, ClientError, OSError, RuntimeError, TypeError, ValueError)
+
+
+async def ensure_ingested_book_cover(book: Book, raw: bytes) -> bool:
+    if book.cover_s3_key:
+        return False
+
+    cover: tuple[bytes, str] | None = None
+    if book.format == "pdf":
+        from app.parsers.pdf_parser import extract_first_page_cover
+
+        try:
+            cover = await asyncio.to_thread(extract_first_page_cover, raw)
+        except COVER_GENERATION_EXCEPTIONS:
+            log.warning("cover_extraction_failed book_id=%s", book.id, exc_info=True)
+
+    if cover is None:
+        try:
+            cover = await asyncio.to_thread(build_blank_cover_image, book.title, book.author)
+        except COVER_GENERATION_EXCEPTIONS:
+            log.warning("blank_cover_generation_failed book_id=%s", book.id, exc_info=True)
+            return False
+
+    cover_bytes, content_type = cover
+    try:
+        book.cover_s3_key = await asyncio.to_thread(
+            upload_binary,
+            f"covers/{book.user_id}/{uuid.uuid4()}.png",
+            cover_bytes,
+            content_type,
+        )
+        return True
+    except COVER_UPLOAD_EXCEPTIONS:
+        log.warning("cover_upload_failed book_id=%s", book.id, exc_info=True)
+        return False
 
 
 async def process_book_ingestion_and_queue(
@@ -71,22 +109,16 @@ async def process_book_ingestion_and_queue(
         queue_wait_ms,
     )
 
-    if book.format == "pdf" and not book.cover_s3_key:
-        from app.parsers.pdf_parser import extract_first_page_cover
+    cover_started = time.perf_counter()
+    cover_generated = await ensure_ingested_book_cover(book, raw)
+    log.info(
+        "ingestion_timing stage=cover book_id=%s elapsed_ms=%s generated=%s",
+        book_id,
+        elapsed_ms(cover_started),
+        cover_generated,
+    )
 
-        try:
-            cover = await asyncio.to_thread(extract_first_page_cover, raw)
-            if cover:
-                cover_bytes, content_type = cover
-                book.cover_s3_key = await asyncio.to_thread(
-                    upload_binary,
-                    f"covers/{book.user_id}/{uuid.uuid4()}.png",
-                    cover_bytes,
-                    content_type,
-                )
-        except (BotoCoreError, ClientError, OSError, RuntimeError, TypeError, ValueError):
-            log.warning("cover_extraction_upload_failed book_id=%s", book_id, exc_info=True)
-
+    copyright_started = time.perf_counter()
     copyright_info = await evaluate_document_copyright(
         format_name=book.format,
         raw=raw,
@@ -96,6 +128,13 @@ async def process_book_ingestion_and_queue(
         book.isbn = str(copyright_info["isbn"])
     book.copyright_warning = bool(copyright_info.get("copyright_warning", False))
     await db.commit()
+    log.info(
+        "ingestion_timing stage=copyright book_id=%s elapsed_ms=%s warning=%s isbn_found=%s",
+        book_id,
+        elapsed_ms(copyright_started),
+        book.copyright_warning,
+        bool(copyright_info.get("isbn")),
+    )
 
     parse_started = time.perf_counter()
     parsed_payload = await parse_book_upload_for_ingestion(
@@ -187,11 +226,18 @@ async def process_book_ingestion_and_queue(
 
     user = await db.get(User, book.user_id)
 
+    budget_started = time.perf_counter()
     budget_result = await apply_ingestion_token_budget(
         db,
         book=book,
         user=user,
         all_chapters=all_chapters,
+    )
+    log.info(
+        "ingestion_timing stage=budget book_id=%s elapsed_ms=%s outcome=%s",
+        book_id,
+        elapsed_ms(budget_started),
+        budget_result.get("error") or "accepted",
     )
     if budget_result.get("error") == "budget_exhausted":
         log.warning(

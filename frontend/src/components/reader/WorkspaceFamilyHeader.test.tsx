@@ -48,6 +48,12 @@ describe("WorkspaceFamilyHeader", () => {
     expect(view.querySelector('a[href="/book-1/author-loop"]')).not.toBeNull()
     expect(view.querySelector('a[href="/book-1/reports"]')?.className).toContain("app-family-tab--active")
   })
+
+  it("links child workspaces home to the book overview", () => {
+    const view = renderHeader("story-bible", "characters")
+
+    expect(view.querySelector('[data-testid="workspace-family-home-link"]')?.getAttribute("href")).toBe("/book-1")
+  })
 })
 
 function renderHeader(family: "story-bible" | "review-center", active: string) {

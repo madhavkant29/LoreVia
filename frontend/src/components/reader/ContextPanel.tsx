@@ -46,7 +46,6 @@ export const ContextPanel = memo(function ContextPanel({
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
-  const [showBiography, setShowBiography] = useState(false)
   const [showLinks, setShowLinks] = useState(false)
   const [showRecall, setShowRecall] = useState(false)
   const [recallLoading, setRecallLoading] = useState(false)
@@ -105,7 +104,7 @@ export const ContextPanel = memo(function ContextPanel({
   )
 
   // Update draft when activeCharacter changes
-  useMemo(() => {
+  useEffect(() => {
     if (activeCharacter) {
       setDraft({
         name: activeCharacter.name || "",

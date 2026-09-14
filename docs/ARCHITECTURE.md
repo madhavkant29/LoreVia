@@ -82,7 +82,7 @@ Frontend product analytics are consent-gated through PostHog. Browser exception 
 
 ## Deployment
 
-The tracked VPS stack contains Nginx, FastAPI, Redis with AOF, four Celery worker roles, Beat, and optional Flower. The API and worker runtime drop to a fixed unprivileged service user. `deploy.sh` performs the VPS release sequence, including backup/migration safeguards and health checks. The frontend image is built in CI, but its production hosting/attachment to the VPS release is not fully represented by the tracked Compose stack and must be documented or unified.
+The tracked VPS stack contains Nginx, FastAPI, Redis with AOF, four Celery worker roles, Beat, and optional Flower. The API and worker runtime drop to a fixed unprivileged service user. `deploy.sh` performs the VPS release sequence, including backup/migration safeguards and health checks. Read-only production probes on 2026-09-06 confirmed that the frontend is hosted by Vercel at `www.getlorevia.com` and its same-origin `/api/v1` rewrite reaches the Cloudflare-fronted VPS API. The Vercel production-branch setting, same-commit promotion procedure, and rollback ownership remain external deployment state and must be verified for each coordinated release.
 
 ## Non-negotiable invariants
 

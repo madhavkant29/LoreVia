@@ -9,6 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.intelligence import AdvisorSuggestionJob
+from app.services.advisor_jobs_service import (
+    ADVISOR_EXECUTION_ID_KEY,
+    advisor_job_execution_matches,
+    advisor_job_is_claimable,
+    public_advisor_job_result,
+)
 from app.utils.logging.errors import redact_sensitive_text
 
 ADVISOR_SUGGESTION_STATUS_QUEUED = "queued"
@@ -26,8 +32,8 @@ def serialize_advisor_suggestion_job(job: AdvisorSuggestionJob) -> dict[str, Any
     return {
         "job_id": str(job.id),
         "status": job.status,
-        "result": job.result_json,
-        "error": job.error_code,
+        "result": public_advisor_job_result(job.result_json),
+        "error": job.error_detail or job.error_code,
     }
 
 
@@ -64,14 +70,32 @@ async def mark_advisor_suggestion_job_running(
     db: AsyncSession,
     *,
     job_id: uuid.UUID,
+    execution_id: str | None = None,
+    now: datetime | None = None,
 ) -> AdvisorSuggestionJob | None:
-    job = await db.get(AdvisorSuggestionJob, job_id)
+    job = await db.get(AdvisorSuggestionJob, job_id, with_for_update=True)
     if job is None:
         return None
+    current = now or datetime.now(UTC)
+    normalized_execution_id = str(execution_id or "").strip()
+    if job.status not in {
+        ADVISOR_SUGGESTION_STATUS_QUEUED,
+        ADVISOR_SUGGESTION_STATUS_RUNNING,
+    }:
+        return None
+    if normalized_execution_id and not advisor_job_is_claimable(
+        job,
+        execution_id=normalized_execution_id,
+        now=current,
+    ):
+        return None
     job.status = ADVISOR_SUGGESTION_STATUS_RUNNING
+    job.result_json = (
+        {ADVISOR_EXECUTION_ID_KEY: normalized_execution_id} if normalized_execution_id else None
+    )
     job.error_code = None
     job.error_detail = None
-    job.updated_at = datetime.now(UTC)
+    job.updated_at = current
     await db.commit()
     await db.refresh(job)
     return job
@@ -82,9 +106,12 @@ async def mark_advisor_suggestion_job_complete(
     *,
     job_id: uuid.UUID,
     result_payload: dict[str, Any],
+    execution_id: str | None = None,
 ) -> AdvisorSuggestionJob | None:
-    job = await db.get(AdvisorSuggestionJob, job_id)
+    job = await db.get(AdvisorSuggestionJob, job_id, with_for_update=True)
     if job is None:
+        return None
+    if not advisor_job_execution_matches(job, execution_id):
         return None
     job.status = ADVISOR_SUGGESTION_STATUS_COMPLETE
     job.result_json = result_payload
@@ -102,9 +129,12 @@ async def mark_advisor_suggestion_job_failed(
     job_id: uuid.UUID,
     error_code: str,
     error_detail: str | None = None,
+    execution_id: str | None = None,
 ) -> AdvisorSuggestionJob | None:
-    job = await db.get(AdvisorSuggestionJob, job_id)
+    job = await db.get(AdvisorSuggestionJob, job_id, with_for_update=True)
     if job is None:
+        return None
+    if not advisor_job_execution_matches(job, execution_id):
         return None
     job.status = ADVISOR_SUGGESTION_STATUS_FAILED
     job.error_code = error_code

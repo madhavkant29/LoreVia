@@ -88,5 +88,21 @@ class DirectMessageListOut(BaseModel):
     items: list[DirectMessageOut]
 
 
+class DirectConversationPageOut(BaseModel):
+    """A bounded, cursor-addressable page of direct conversations."""
+
+    items: list[DirectConversationSummary]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class DirectMessagePageOut(BaseModel):
+    """A bounded, cursor-addressable page of direct messages."""
+
+    items: list[DirectMessageOut]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class UnreadCountOut(BaseModel):
     unread_count: int

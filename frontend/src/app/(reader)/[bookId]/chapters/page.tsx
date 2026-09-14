@@ -99,7 +99,7 @@ export default function ChapterListPage() {
   const canRemoveChapters = book?.mode === "author"
   const processedCount = useMemo(() => (data?.chapters ?? []).filter((chapter) => chapter.processed).length, [data])
   const chapterCount = data?.chapters.length ?? 0
-  const backLabel = book?.mode === "author" ? "Back to Manuscripts" : "Back to Book"
+  const backLabel = "Home"
   const subtitle = book?.mode === "author"
     ? `Showing all processed and queued ${unitLabel.toLowerCase()}s across the manuscript.`
     : `Showing the full ${unitLabel.toLowerCase()} list with your current read status.`
@@ -127,6 +127,7 @@ export default function ChapterListPage() {
               totalCount={chapterListLoading ? null : chapterCount}
               isDark={isDark}
               backLabel={backLabel}
+              homeHref={`/${bookId}`}
               primaryActionLabel="Mark book as read"
               primaryActionBusyLabel="Marking..."
               primaryActionBusy={readBusy === "book"}

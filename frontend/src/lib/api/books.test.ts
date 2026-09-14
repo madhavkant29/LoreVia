@@ -5,7 +5,6 @@ import {
   deleteMock,
   getMock,
   invalidateQueryKeysMock,
-  isAxiosErrorMock,
   patchMock,
   postMock,
   putMock,
@@ -33,6 +32,18 @@ describe("books api", () => {
     await booksApi.getPreWritingCheck("book-1")
 
     expect(getMock).toHaveBeenCalledWith("/books/book-1/pre-writing-check", { params: undefined })
+  })
+
+  it("requests workspace scene bodies only when a caller asks for them", async () => {
+    await booksApi.getWorkspaceTree("book-1")
+    await booksApi.getWorkspaceTree("book-1", { includeSceneBodies: true })
+
+    expect(getMock).toHaveBeenNthCalledWith(1, "/books/book-1/workspace/tree", {
+      params: undefined,
+    })
+    expect(getMock).toHaveBeenNthCalledWith(2, "/books/book-1/workspace/tree", {
+      params: { include_scene_bodies: true },
+    })
   })
 
   it("creates chapter snapshots and invalidates version caches", async () => {

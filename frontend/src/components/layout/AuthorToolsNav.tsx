@@ -166,6 +166,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     items: [
       { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", helper: "Review continuity risks, unresolved threads, and high-priority story pressure points.", icon: "spark" },
       { id: "editorial-review", label: "Editorial Review", href: `/${bookId}/editorial-review` as Route, tone: "Line edit", helper: "Run an editorial pass that calls out clarity, pacing, and prose-level friction.", icon: "quill" },
+      { id: "ai-beta-reader", label: "AI Beta Reader", href: `/${bookId}/ai-beta-reader` as Route, tone: "Reader pass", helper: "Find repeated language, compare character voices, and turn reader reactions into revision priorities.", icon: "analysis" },
       { id: "voice", label: "Voice Consistency", href: `/${bookId}/voice` as Route, tone: "Dialogue drift", helper: "Check whether character voice stays consistent across scenes and revisions.", icon: "voice" },
       { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", helper: "Ask direct questions about the manuscript and get answers grounded in the current draft.", icon: "chat" },
       { id: "reports", label: "Chapter Reports", href: `/${bookId}/reports` as Route, tone: "Evidence", helper: "Review chapter-level continuity evidence, new characters, and thread movement.", icon: "analysis" },
@@ -215,9 +216,10 @@ export function AuthorToolsNav({
   const patchBookPreferences = useUiPreferencesStore((state) => state.patchBook)
   const setBookPreset = useUiPreferencesStore((state) => state.setBookPreset)
   const uiPreferences = useUiPreferencesStore((state) => state.preferences)
-  const bookPreference = useUiPreferencesStore(
-    (state) => state.bookPreferences[preferenceBookId]
-      ?? defaultBookUiPreference(preferenceBookId, state.preferences.complexity_mode),
+  const storedBookPreference = useUiPreferencesStore((state) => state.bookPreferences[preferenceBookId])
+  const bookPreference = useMemo(
+    () => storedBookPreference ?? defaultBookUiPreference(preferenceBookId, uiPreferences.complexity_mode),
+    [preferenceBookId, storedBookPreference, uiPreferences.complexity_mode],
   )
   const advancedToolOverride = useUiPreferencesStore(
     (state) => state.bookPreferences[preferenceBookId]?.advanced_tool_override,
@@ -226,12 +228,16 @@ export function AuthorToolsNav({
     advancedToolOverride === "show" ||
     (advancedToolOverride !== "hide" && uiPreferences.complexity_mode === "power")
   const processingReady = book?.status === "ready"
-  const resolverBook = (book ?? {
-    id: bookId,
-    status: "ready",
-    collaboration_role: null,
-    collaboration_permissions: null,
-  }) as Book
+  const resolverBook = useMemo(
+    () =>
+      (book ?? {
+        id: bookId,
+        status: "ready",
+        collaboration_role: null,
+        collaboration_permissions: null,
+      }) as Book,
+    [book, bookId],
+  )
 
   useEffect(() => {
     void hydrateBookPreferences(preferenceBookId)
@@ -329,7 +335,7 @@ export function AuthorToolsNav({
           </span>
         </Button>
         <aside className={containerClass}>
-          <NavHeader isDark={isDark} labelVisibility={labelVisibility} title={title} />
+          <NavHeader isDark={isDark} labelVisibility={labelVisibility} title={title} bookId={bookId} active={active} />
           <p className={`mt-3 line-clamp-2 px-1 text-xs leading-5 transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-500" : "text-stone-500"}`}>
             {description}
           </p>
@@ -430,7 +436,7 @@ export function AuthorToolsNav({
 
   return (
     <aside className={containerClass} data-testid={`author-tools-nav-${variant}`}>
-      <NavHeader isDark={isDark} labelVisibility={labelVisibility} title={title} />
+      <NavHeader isDark={isDark} labelVisibility={labelVisibility} title={title} bookId={bookId} active={active} />
 
       <p className={`mt-3 line-clamp-2 px-1 text-xs leading-5 transition-opacity duration-200 ${labelVisibility} ${isDark ? "text-slate-500" : "text-stone-500"}`}>
         {description}
@@ -533,11 +539,17 @@ function NavHeader({
   isDark,
   labelVisibility,
   title,
+  bookId,
+  active,
 }: {
   isDark: boolean
   labelVisibility: string
   title: string
+  bookId: string
+  active: string
 }) {
+  const homeHref = active === "overview" ? "/library" : `/${bookId}`
+
   return (
     <div className="flex items-center gap-3 px-1">
       <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-stone-50"}`}>
@@ -545,6 +557,13 @@ function NavHeader({
       </div>
       <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
         <h2 className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
+        <Link
+          href={homeHref}
+          data-testid="author-nav-home-link"
+          className={`mt-1 inline-flex items-center rounded-sm text-3xs font-semibold uppercase tracking-[0.18em] hover:text-teal-600 ${isDark ? "text-slate-500" : "text-stone-500"}`}
+        >
+          Home
+        </Link>
       </div>
     </div>
   )

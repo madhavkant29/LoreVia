@@ -9,6 +9,7 @@ from app.api.deps.rate_limit import rate_limit_public_publish, rate_limit_public
 from app.core.database import get_db
 from app.models.book import Book
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
+from app.services.public_asset_service import revoke_public_book_assets
 from app.services.public_publish_service import submit_public_share
 from app.utils.billing_utils import require_author_access
 from app.utils.client_identity import trusted_client_ip
@@ -82,6 +83,7 @@ async def unpublish_book_publicly(
         new_status=book.public_status,
         reason="Creator unpublished book from public view.",
     )
+    await revoke_public_book_assets(book.id, db=db, strict=True)
     await db.commit()
     return PublicBookCreateOut(
         book_id=str(book.id),

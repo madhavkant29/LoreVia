@@ -31,23 +31,6 @@ interface Props {
   theme?: "light" | "dark"
 }
 
-function clampText(text: string, maxChars: number) {
-  const cleaned = text.replace(/\s+/g, " ").trim()
-  if (!cleaned) return ""
-  if (cleaned.length <= maxChars) return cleaned
-  const sliced = cleaned.slice(0, maxChars - 1)
-  const lastStop = Math.max(sliced.lastIndexOf("."), sliced.lastIndexOf(";"), sliced.lastIndexOf(","))
-  const candidate = lastStop > maxChars * 0.6 ? sliced.slice(0, lastStop + 1) : sliced
-  return `${candidate.trim()}...`
-}
-
-function firstSentence(text: string, fallbackMaxChars: number) {
-  const cleaned = text.replace(/\s+/g, " ").trim()
-  if (!cleaned) return ""
-  const match = cleaned.match(/^(.{20,}?[\.\!\?])\s/)
-  return match?.[1] ? match[1].trim() : clampText(cleaned, fallbackMaxChars)
-}
-
 function listToString(values: string[] | undefined) {
   return (values ?? []).join(", ")
 }
@@ -59,7 +42,7 @@ function stringToList(value: string) {
     .filter(Boolean)
 }
 
-export const CharacterCard = memo(function CharacterCard({ character, bookId, compact = false, editable = false, onUpdated, onDeleted, theme = "light" }: Props) {
+export const CharacterCard = memo(function CharacterCard({ character, bookId, editable = false, onUpdated, onDeleted, theme = "light" }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [editing, setEditing] = useState(false)

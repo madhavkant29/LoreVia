@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 
@@ -7,11 +8,19 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redis import mark_book_cache_dirty, mark_user_dashboard_cache_dirty
 from app.core.storage import upload_binary
 from app.engine.world.extractor import extract_world_elements_from_text, infer_element_type
 from app.models.book import Book
 from app.models.intelligence import WorldBuildingDocument, WorldElement
+from app.services.world_analysis_state_service import (
+    content_sha256,
+    mark_book_world_analysis_stale,
+    mark_related_series_world_analysis_stale,
+    record_world_source_observations,
+)
 from app.utils.books.manuscript import clean_manuscript_html, serialize_manuscript_content
+from app.utils.storage_utils import bounded_storage_map
 from app.utils.world_building_candidate_utils import (
     _apply_character_and_override_resolution,
 )
@@ -37,9 +46,11 @@ async def create_world_building_documents(
     if not documents:
         raise HTTPException(400, "No world-building content was provided")
 
+    retired_document_ids: set[uuid.UUID] = set()
     if replace_existing:
         active_documents = await list_world_building_documents(db, book)
         for current in active_documents:
+            retired_document_ids.add(current.id)
             current.is_active = False
             current.archived_at = datetime.now(UTC)
 
@@ -53,7 +64,8 @@ async def create_world_building_documents(
         )
         html = str(payload.get("html") or "").strip() or None
         serialized = serialize_manuscript_content(text, html).encode("utf-8")
-        storage_key = upload_binary(
+        storage_key = await asyncio.to_thread(
+            upload_binary,
             f"worldbuilding/{user_id}/{book.id}/{uuid.uuid4()}.json",
             serialized,
             "application/json",
@@ -65,6 +77,7 @@ async def create_world_building_documents(
             s3_key=storage_key,
             word_count=count_words(text),
             source_size_bytes=len(serialized),
+            content_sha256=content_sha256(serialized),
             is_active=True,
         )
         db.add(document)
@@ -74,7 +87,16 @@ async def create_world_building_documents(
         raise HTTPException(400, "No importable world-building content was found")
 
     await db.flush()
-    await sync_world_document_elements(db, book)
+    await sync_world_document_elements(
+        db,
+        book,
+        document_ids={document.id for document in created},
+        remove_document_ids=retired_document_ids,
+    )
+    await mark_book_world_analysis_stale(db, book_id=book.id)
+    await mark_related_series_world_analysis_stale(db, book_id=book.id)
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(str(book.user_id))
     return created
 
 
@@ -97,16 +119,24 @@ async def update_world_building_document(
     cleaned_html = clean_manuscript_html(html) if html else None
     document.title = next_title
     document.word_count = count_words(body)
-    document.s3_key = upload_binary(
+    serialized = serialize_manuscript_content(body, cleaned_html).encode("utf-8")
+    document.s3_key = await asyncio.to_thread(
+        upload_binary,
         f"worldbuilding/{book.user_id}/{book.id}/{uuid.uuid4()}.json",
-        serialize_manuscript_content(body, cleaned_html).encode("utf-8"),
+        serialized,
         "application/json",
     )
+    document.source_size_bytes = len(serialized)
+    document.content_sha256 = content_sha256(serialized)
     document.updated_at = datetime.now(UTC)
     document.is_active = True
     document.archived_at = None
     await db.flush()
-    await sync_world_document_elements(db, book)
+    await sync_world_document_elements(db, book, document_ids={document.id})
+    await mark_book_world_analysis_stale(db, book_id=book.id)
+    await mark_related_series_world_analysis_stale(db, book_id=book.id)
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(str(book.user_id))
     return document
 
 
@@ -118,34 +148,95 @@ async def delete_world_building_document(
 ) -> None:
     if document.book_id != book.id:
         raise HTTPException(404, "World-building document not found")
+    document_id = document.id
     await db.delete(document)
     await db.flush()
-    await sync_world_document_elements(db, book)
+    await sync_world_document_elements(db, book, remove_document_ids={document_id})
+    await mark_book_world_analysis_stale(db, book_id=book.id)
+    await mark_related_series_world_analysis_stale(db, book_id=book.id)
+    await mark_book_cache_dirty(str(book.id))
+    await mark_user_dashboard_cache_dirty(str(book.user_id))
 
 
-async def sync_world_document_elements(db: AsyncSession, book: Book) -> list[WorldElement]:
+async def sync_world_document_elements(
+    db: AsyncSession,
+    book: Book,
+    *,
+    document_ids: set[uuid.UUID] | None = None,
+    remove_document_ids: set[uuid.UUID] | None = None,
+) -> list[WorldElement]:
     documents = await list_world_building_documents(db, book)
+    documents_to_refresh = (
+        documents
+        if document_ids is None
+        else [document for document in documents if document.id in document_ids]
+    )
     character_registry = await load_character_registry(db, book)
     override_lookup = await load_canon_override_lookup(db, book)
-    await db.execute(
-        delete(WorldElement).where(
-            WorldElement.book_id == book.id,
-            WorldElement.source_scope == "worldbuilding",
-        )
-    )
-    await db.flush()
 
-    created: list[WorldElement] = []
-    for document in documents:
-        payload = await load_world_building_document_payload(document)
+    # Finish every required object read and candidate extraction before
+    # replacing persisted rows. A failed read therefore leaves the last
+    # completed element set intact.
+    loaded_payloads = await bounded_storage_map(
+        documents_to_refresh,
+        load_world_building_document_payload,
+    )
+    prepared: list[tuple[WorldBuildingDocument, str, list[dict]]] = []
+    for document, payload in zip(documents_to_refresh, loaded_payloads, strict=True):
         text = str(payload.get("text") or "")
+        source_fingerprint = document.content_sha256 or content_sha256(text)
         raw_candidates = extract_world_elements_from_text(text)
         normalized_candidates = _apply_character_and_override_resolution(
             raw_candidates,
             character_registry=character_registry,
             override_lookup=override_lookup,
         )
+        prepared.append((document, source_fingerprint, normalized_candidates))
+
+    replaced_ids = {document.id for document, _fingerprint, _items in prepared}
+    removed_ids = set(remove_document_ids or ())
+    delete_statement = delete(WorldElement).where(
+        WorldElement.book_id == book.id,
+        WorldElement.source_scope == "worldbuilding",
+    )
+    if document_ids is not None:
+        affected_ids = replaced_ids | removed_ids
+        if affected_ids:
+            delete_statement = delete_statement.where(WorldElement.world_document_id.in_(affected_ids))
+            await db.execute(delete_statement)
+    else:
+        await db.execute(delete_statement)
+
+    for removed_id in removed_ids:
+        await record_world_source_observations(
+            db,
+            book_id=book.id,
+            source_kind="world_document",
+            source_key=str(removed_id),
+            source_fingerprint=content_sha256(b""),
+            candidates=[],
+        )
+
+    created: list[WorldElement] = []
+    for document, source_fingerprint, normalized_candidates in prepared:
+        if document.content_sha256 != source_fingerprint:
+            document.content_sha256 = source_fingerprint
+        candidate_records = []
         for candidate in normalized_candidates:
+            candidate_record = dict(candidate)
+            candidate_record["world_document_id"] = str(document.id)
+            candidate_record["world_document_title"] = document.title
+            candidate_records.append(candidate_record)
+        await record_world_source_observations(
+            db,
+            book_id=book.id,
+            source_kind="world_document",
+            source_key=str(document.id),
+            source_fingerprint=source_fingerprint,
+            candidates=candidate_records,
+            world_document_id=document.id,
+        )
+        for candidate in candidate_records:
             name = str(candidate.get("canonical_name") or candidate.get("name") or "").strip()
             if not name:
                 continue

@@ -273,6 +273,150 @@ export interface VoiceConsistencyResponse {
   warnings: string[]
 }
 
+export type BetaReaderScope = "passage" | "chapter" | "chapter_range" | "full_book"
+export type BetaReaderCheck = "repetition" | "voice" | "reader_feedback"
+export type BetaReaderSeverity = "high" | "medium" | "low"
+
+export interface BetaReaderAnalysisRequest {
+  scope: BetaReaderScope
+  text?: string | null
+  chapter_number?: number | null
+  chapter_start?: number | null
+  chapter_end?: number | null
+  character_ids?: string[]
+  checks: BetaReaderCheck[]
+}
+
+export interface BetaReaderEvidence {
+  chapter_number: number | null
+  excerpt: string
+}
+
+export interface BetaReaderOverusedTerm {
+  id: string
+  term: string
+  kind: "word" | "phrase"
+  count: number
+  rate_per_1000: number
+  narration_count: number
+  dialogue_count: number
+  burst_detected: boolean
+  chapter_counts: Record<string, number>
+  evidence: BetaReaderEvidence[]
+}
+
+export interface BetaReaderVoice {
+  id: string
+  character_id: string
+  character_name: string
+  distinctness_score: number | null
+  confidence: "high" | "medium" | "low" | "insufficient"
+  sample_dialogue_count: number
+  sample_word_count: number
+  closest_character_id: string | null
+  closest_character_name: string | null
+  similarity_score: number | null
+  signals: Record<string, number>
+  shared_signals: string[]
+  shared_phrases: string[]
+}
+
+export interface BetaReaderFinding {
+  id: string
+  category: string
+  severity: BetaReaderSeverity
+  title: string
+  description: string
+  chapter_number: number | null
+  evidence: BetaReaderEvidence[]
+  recommendation: string
+  reader_question: string | null
+}
+
+export interface BetaReaderRevisionCandidate {
+  id: string
+  source_item_id: string
+  category: string
+  severity: BetaReaderSeverity
+  title: string
+  description: string
+  recommendation: string
+  chapter_number: number | null
+  evidence: BetaReaderEvidence[]
+}
+
+export interface BetaReaderReport {
+  report_id: string
+  scope: BetaReaderScope
+  request_hash: string
+  source_fingerprint: string
+  created_at: string
+  is_stale: boolean
+  checks: BetaReaderCheck[]
+  coverage: {
+    requested_chapters: number[]
+    analyzed_chapters: number[]
+    missing_chapters: number[]
+    word_count: number
+    character_count: number
+  }
+  overall_impression: string
+  reader_vibe?: string
+  story_understanding?: string
+  strengths: string[]
+  reader_questions: string[]
+  prioritized_revisions: string[]
+  overused_terms: BetaReaderOverusedTerm[]
+  character_voices: BetaReaderVoice[]
+  findings: BetaReaderFinding[]
+  revision_candidates: BetaReaderRevisionCandidate[]
+  warnings: string[]
+}
+
+export interface BetaReaderRunResponse {
+  status: "queued" | "complete"
+  task_id: string | null
+  cached: boolean
+  report: BetaReaderReport | null
+}
+
+export interface BetaReaderJobResponse {
+  task_id: string
+  status: "queued" | "running" | "complete" | "failed"
+  progress: {
+    stage: string
+    completed: number
+    total: number
+    message: string
+  } | null
+  report: BetaReaderReport | null
+  error: string | null
+}
+
+export interface BetaReaderReportsResponse {
+  reports: BetaReaderReport[]
+}
+
+export interface BetaReaderRevisionTaskResponse {
+  task_id: string
+  candidate_id: string
+  created: boolean
+}
+
+export interface FirstImpressionResponse {
+  status: "not_started" | "queued" | "running" | "complete" | "failed"
+  task_id: string | null
+  progress: {
+    stage: string
+    completed: number
+    total: number
+    message: string
+  } | null
+  report: BetaReaderReport | null
+  error: string | null
+  can_retry: boolean
+}
+
 export interface ProseTightenResponse {
   tightened_text: string
   rationale: string[]

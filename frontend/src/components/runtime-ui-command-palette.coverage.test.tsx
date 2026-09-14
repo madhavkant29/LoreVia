@@ -24,7 +24,7 @@ describe("runtime CommandPalette", () => {
       await flush()
     })
     expect(text()).toContain("Command palette")
-    expect(text()).toContain("Open Library")
+    expect(text()).toContain("Open Home")
     expect(text()).toContain("The Lantern Gate")
 
     setInputValue('input[aria-label="Search commands"]', "manuscript")

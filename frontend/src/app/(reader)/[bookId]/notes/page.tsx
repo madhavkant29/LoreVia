@@ -12,7 +12,7 @@ import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { renderRichTextHtml } from "@/lib/utils/richText"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book, BookNote, VaultGraph, VaultNote } from "@/types/book"
+import type { BookNote, VaultGraph, VaultNote } from "@/types/book"
 
 const VaultNotesEditor = dynamic(
   () => import("@/components/reader/VaultNotesEditor").then((module) => module.VaultNotesEditor),

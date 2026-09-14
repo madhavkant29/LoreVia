@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.feature_flags import require_cursor_page_apis_enabled
 from app.api.deps.rate_limit import rate_limit_recall
 from app.core.config import settings
 from app.core.database import get_db
@@ -14,10 +15,15 @@ from app.models.book import Book, Chapter
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.models.progress import ReadingProgress
-from app.schemas.reader import PlotThreadOut, UpdatePlotThreadBody
+from app.schemas.reader import PlotThreadOut, PlotThreadPageOut, UpdatePlotThreadBody
 from app.utils.billing_utils import require_author_access
 from app.utils.plot_thread_utils import derive_plot_thread_status
-from app.utils.reader_utils import list_plot_threads, update_plot_thread_note
+from app.utils.reader_utils import (
+    get_plot_thread,
+    list_plot_threads,
+    list_plot_threads_page,
+    update_plot_thread_note,
+)
 
 router = APIRouter()
 
@@ -34,6 +40,49 @@ async def get_plot_threads(
         raise HTTPException(404)
     require_author_access(current_user)
     return await list_plot_threads(db, book_id, chapter)
+
+
+@router.get(
+    "/{book_id}/plot-threads/page",
+    response_model=PlotThreadPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def get_plot_threads_page(
+    book_id: uuid.UUID,
+    chapter: int | None = Query(None),
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=1024),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    require_author_access(current_user)
+    return await list_plot_threads_page(
+        db,
+        book_id=book_id,
+        chapter=chapter,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+@router.get("/{book_id}/plot-threads/{thread_id}", response_model=PlotThreadOut)
+async def get_plot_thread_detail(
+    book_id: uuid.UUID,
+    thread_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    book = await db.get(Book, book_id)
+    if not book or book.user_id != current_user.id:
+        raise HTTPException(404)
+    require_author_access(current_user)
+    thread = await get_plot_thread(db, book_id=book_id, thread_id=thread_id)
+    if thread is None:
+        raise HTTPException(404, "Plot thread not found")
+    return thread
 
 
 @router.put("/{book_id}/plot-threads/{thread_id}", response_model=PlotThreadOut)

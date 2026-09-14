@@ -30,7 +30,7 @@ export default function PlotThreadsPage() {
           description="Track open arcs across the manuscript, identify unresolved pressure points, and keep private reminders beside the story structure."
           actions={(
             <>
-              <Link href={`/${bookId}`} className="app-button-secondary">Overview</Link>
+              <Link href={`/${bookId}`} className="app-button-secondary">Home</Link>
               <Link href={`/${bookId}/manuscript`} className="app-button-primary">Manuscript</Link>
             </>
           )}

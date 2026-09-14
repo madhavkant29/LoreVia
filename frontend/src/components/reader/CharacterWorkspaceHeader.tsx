@@ -1,10 +1,12 @@
 import type { ReactNode } from "react"
+import Link from "next/link"
 
 export function CharacterWorkspaceHeader({
   title,
   description,
   stats,
   actions,
+  homeHref,
   onBack,
   isDark,
 }: {
@@ -12,6 +14,7 @@ export function CharacterWorkspaceHeader({
   description: string
   stats: ReactNode
   actions: ReactNode
+  homeHref?: string
   onBack: () => void
   isDark: boolean
 }) {
@@ -21,16 +24,23 @@ export function CharacterWorkspaceHeader({
         <div className="flex min-w-0 items-center gap-4">
           <img src="/logoandtextlight.png" alt="LoreVia" className="h-10 w-auto shrink-0 object-contain dark:hidden" />
           <img src="/logoandtext.png" alt="LoreVia" className="hidden h-10 w-auto shrink-0 object-contain dark:block" />
-          <button
-            type="button"
-            onClick={onBack}
-            className={`inline-flex items-center gap-1 text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-950"}`}
-          >
-            Projects
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path fillRule="evenodd" d="M7.22 4.22a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.22 5.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-            </svg>
-          </button>
+          {homeHref ? (
+            <Link
+              href={homeHref}
+              data-testid="character-workspace-home-link"
+              className={`inline-flex items-center gap-1 text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-950"}`}
+            >
+              Home
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={onBack}
+              className={`inline-flex items-center gap-1 text-sm font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-stone-500 hover:text-stone-950"}`}
+            >
+              Home
+            </button>
+          )}
           <div className="min-w-0">
             <h1 className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-stone-800"}`}>{title}</h1>
             <p className={`truncate text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{description}</p>

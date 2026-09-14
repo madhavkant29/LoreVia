@@ -12,7 +12,7 @@ from app.models.intelligence import WorldGapAnalysis
 async def upsert_world_analysis(
     db: AsyncSession,
     *,
-    book_id: uuid.UUID,
+    book_id: uuid.UUID | None,
     series_id: uuid.UUID | None,
     mode: str,
     gap_categories: dict,

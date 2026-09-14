@@ -2,10 +2,11 @@
 
 import Link from "next/link"
 import Script from "next/script"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { capture } from "@/lib/analytics/posthog"
+import { billingApi } from "@/lib/api/billing"
 import {
   buildPaddleCheckoutSettings,
   getBillingConfirmationToken,
@@ -13,6 +14,8 @@ import {
   getPaddleEnvironment,
   getPaddleTransactionId,
   PADDLE_SCRIPT_SRC,
+  shouldAbandonClosedCheckout,
+  type PaddleCheckoutEvent,
 } from "@/lib/billing/paddle"
 
 export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
@@ -23,9 +26,16 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
   const confirmationToken = useMemo(() => getBillingConfirmationToken(searchParams), [searchParams])
   const [scriptReady, setScriptReady] = useState(false)
   const [openedTransactionId, setOpenedTransactionId] = useState<string | null>(null)
+  const [checkoutAbandoned, setCheckoutAbandoned] = useState(false)
   const [message, setMessage] = useState("Preparing secure checkout...")
+  const completedTransactionIdRef = useRef<string | null>(null)
 
-  const openCheckout = () => {
+  const openCheckout = useCallback(() => {
+    if (checkoutAbandoned) {
+      setMessage("This checkout was closed. Return to pricing to review current payment details and start a new checkout.")
+      return
+    }
+
     if (!transactionId) {
       capture("checkout_failed", { surface: "checkout_page", reason: "missing_transaction" })
       setMessage("This checkout link is missing its Paddle transaction reference.")
@@ -40,6 +50,7 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
     }
 
     try {
+      completedTransactionIdRef.current = null
       capture("checkout_started", {
         surface: "checkout_page",
         transaction_id: transactionId,
@@ -58,7 +69,7 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
       })
       setMessage("We could not open secure checkout right now. Refresh and try again.")
     }
-  }
+  }, [checkoutAbandoned, transactionId])
 
   useEffect(() => {
     if (!scriptReady) return
@@ -74,7 +85,61 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
       return
     }
 
-    if (!paddle.Initialized) {
+    const eventCallback = (event: PaddleCheckoutEvent) => {
+      if (event.name === "checkout.closed") {
+        const closedTransactionId =
+          typeof event.data?.transaction_id === "string" ? event.data.transaction_id : transactionId
+        capture("checkout_closed", {
+          surface: "checkout_page",
+          transaction_id: closedTransactionId,
+        })
+        setMessage("Checkout was closed. Use the button below to reopen it if you still want to continue.")
+        if (
+          confirmationToken &&
+          shouldAbandonClosedCheckout(closedTransactionId, completedTransactionIdRef.current)
+        ) {
+          void billingApi
+            .abandonCheckout(closedTransactionId)
+            .then(() => {
+              setCheckoutAbandoned(true)
+              setMessage(
+                "Checkout was closed and the pending payment was canceled. Return to pricing to review current payment details before starting again.",
+              )
+            })
+            .catch(() => {
+              capture("checkout_abandon_failed", {
+                surface: "checkout_page",
+                transaction_id: closedTransactionId,
+              })
+              setMessage(
+                "Checkout was closed, but we could not confirm that the pending payment was canceled. Wait a moment or return to pricing before trying again.",
+              )
+            })
+        }
+      }
+      if (event.name === "checkout.completed") {
+        const checkoutTransactionId =
+          typeof event.data?.transaction_id === "string" ? event.data.transaction_id : transactionId
+        capture("checkout_completed", {
+          surface: "checkout_page",
+          transaction_id: checkoutTransactionId,
+        })
+        if (checkoutTransactionId && typeof window !== "undefined") {
+          completedTransactionIdRef.current = checkoutTransactionId
+          const params = new URLSearchParams({ txn: checkoutTransactionId })
+          if (confirmationToken) {
+            params.set("confirmation_token", confirmationToken)
+          }
+          window.location.replace(`/checkout/success?${params.toString()}`)
+          return
+        }
+        setMessage("Payment complete. LoreVia will finish access updates after the Paddle webhook is processed.")
+      }
+    }
+
+    if (paddle.Initialized) {
+      paddle.Update?.({ eventCallback })
+    } else {
       if (paddleEnvironment === "sandbox") {
         paddle.Environment.set("sandbox")
       }
@@ -85,39 +150,23 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
         checkout: {
           settings: buildPaddleCheckoutSettings(),
         },
-        eventCallback: (event) => {
-          if (event.name === "checkout.closed") {
-            capture("checkout_closed", {
-              surface: "checkout_page",
-              transaction_id: transactionId,
-            })
-            setMessage("Checkout was closed. Use the button below to reopen it if you still want to continue.")
-          }
-          if (event.name === "checkout.completed") {
-            const checkoutTransactionId =
-              typeof event.data?.transaction_id === "string" ? event.data.transaction_id : transactionId
-            capture("checkout_completed", {
-              surface: "checkout_page",
-              transaction_id: checkoutTransactionId,
-            })
-            if (checkoutTransactionId && typeof window !== "undefined") {
-              const params = new URLSearchParams({ txn: checkoutTransactionId })
-              if (confirmationToken) {
-                params.set("confirmation_token", confirmationToken)
-              }
-              window.location.replace(`/checkout/success?${params.toString()}`)
-              return
-            }
-            setMessage("Payment complete. LoreVia will finish access updates after the Paddle webhook is processed.")
-          }
-        },
+        eventCallback,
       })
     }
 
     if (openedTransactionId !== transactionId) {
       openCheckout()
     }
-  }, [confirmationToken, openedTransactionId, paddleEnvironment, paddleToken, scriptReady, transactionId])
+  }, [
+    checkoutAbandoned,
+    confirmationToken,
+    openedTransactionId,
+    openCheckout,
+    paddleEnvironment,
+    paddleToken,
+    scriptReady,
+    transactionId,
+  ])
 
   return (
     <>
@@ -146,9 +195,10 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
             <button
               type="button"
               onClick={openCheckout}
+              disabled={checkoutAbandoned}
               className="inline-flex items-center justify-center rounded-lg border border-[#D2B47A] bg-[#D2B47A] px-5 py-3 text-sm font-semibold text-[#05070A] transition hover:bg-[#E5CA91]"
             >
-              Open checkout again
+              {checkoutAbandoned ? "Checkout closed" : "Open checkout again"}
             </button>
             <Link
               href="/pricing"

@@ -21,7 +21,7 @@ export function ManuscriptMobileFooter({
   onSave,
 }: ManuscriptMobileFooterProps) {
   return (
-    <div className={`fixed inset-x-0 bottom-0 z-40 border-t px-4 py-3 shadow-lg lg:hidden ${isDark ? "border-white/10 bg-[#111416]/95" : "border-stone-200 bg-white/95"}`}>
+    <div data-lorevia-bottom-floating className={`fixed inset-x-0 bottom-0 z-40 border-t px-4 py-3 shadow-lg lg:hidden ${isDark ? "border-white/10 bg-[#111416]/95" : "border-stone-200 bg-white/95"}`}>
       <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
         <div className="min-w-0">
           <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-stone-950"}`}>

@@ -1,5 +1,5 @@
 """
-Book utility helpers ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â DB query wrappers, cover management, progress
+Book utility helpers — DB query wrappers, cover management, progress
 computation, manuscript parsing, and chapter number utilities extracted
 from the books route.
 """
@@ -12,6 +12,7 @@ import binascii
 import json
 import mimetypes
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import bleach  # type: ignore[import-untyped]
@@ -32,7 +33,11 @@ from app.utils.books import (
     collaboration_access,
     normalization,
 )
-from app.utils.storage_utils import STORAGE_IO_EXCEPTIONS
+from app.utils.storage_utils import (
+    STORAGE_IO_EXCEPTIONS,
+    bounded_storage_map,
+    delete_storage_keys_best_effort,
+)
 
 if TYPE_CHECKING:
     pass
@@ -88,6 +93,34 @@ MANUSCRIPT_ALLOWED_STYLES = [
     "text-indent",
 ]
 MANUSCRIPT_ALLOWED_PROTOCOLS = ["http", "https", "mailto", "tel", "data"]
+
+
+@dataclass(frozen=True)
+class StagedEditorChapterContent:
+    text: str
+    html: str | None
+    storage_key: str
+    media: list[dict[str, Any]]
+    retained_media_markers: set[str]
+    should_sync_media: bool
+    uploaded_keys: tuple[str, ...]
+
+
+async def load_chapter_texts(chapters: list[Chapter]) -> dict[int, str]:
+    """Load normalized manuscript text for chapters without failing the whole batch."""
+    loaded: dict[int, str] = {}
+    for chapter in chapters:
+        if not chapter.s3_key:
+            loaded[chapter.number] = ""
+            continue
+        try:
+            raw = await asyncio.to_thread(download_book, chapter.s3_key)
+        except STORAGE_IO_EXCEPTIONS:
+            loaded[chapter.number] = ""
+            continue
+        payload = deserialize_manuscript_content(raw)
+        loaded[chapter.number] = str(payload.get("text") or "").strip()
+    return loaded
 
 
 def clean_markdown_asterisks_str(text: str) -> str:
@@ -361,12 +394,18 @@ async def load_novel_export_chapters(
             .scalars()
             .all()
         )
-        for media in media_rows:
-            if getattr(media, "asset_type", "image") != "image":
-                continue
+        image_media = [
+            media for media in media_rows if getattr(media, "asset_type", "image") == "image"
+        ]
+
+        async def load_media(media: ChapterMedia) -> tuple[ChapterMedia, bytes | None]:
             try:
-                raw = await asyncio.to_thread(download_book, media.storage_key)
+                return media, await asyncio.to_thread(download_book, media.storage_key)
             except STORAGE_IO_EXCEPTIONS:
+                return media, None
+
+        for media, raw in await bounded_storage_map(image_media, load_media):
+            if raw is None:
                 continue
             media_by_chapter_id.setdefault(media.chapter_id, []).append(
                 {
@@ -379,8 +418,8 @@ async def load_novel_export_chapters(
                 }
             )
 
-    chapters: list[dict[str, Any]] = []
-    for chapter_id, number, chapter_title, s3_key in chapter_rows:
+    async def load_chapter(row: Any) -> dict[str, Any]:
+        chapter_id, number, chapter_title, s3_key = row
         chapter_text = ""
         if s3_key:
             try:
@@ -390,15 +429,14 @@ async def load_novel_export_chapters(
             else:
                 stored = deserialize_manuscript_content(raw)
                 chapter_text = str(stored.get("text") or "")
-        chapters.append(
-            {
-                "number": number,
-                "title": chapter_title,
-                "text": chapter_text,
-                "media": media_by_chapter_id.get(chapter_id, []),
-            }
-        )
-    return chapters
+        return {
+            "number": number,
+            "title": chapter_title,
+            "text": chapter_text,
+            "media": media_by_chapter_id.get(chapter_id, []),
+        }
+
+    return await bounded_storage_map(chapter_rows, load_chapter)
 
 
 async def load_novel_cover_image(book: Book) -> dict[str, Any] | None:
@@ -453,6 +491,138 @@ async def sync_chapter_media_from_images(
         )
 
 
+async def stage_editor_chapter_content(
+    book: Book,
+    *,
+    chapter_number: int,
+    text: str,
+    html: str | None,
+    images: list[dict[str, Any]] | None = None,
+) -> StagedEditorChapterContent:
+    """Upload immutable chapter content before opening the final write transaction."""
+    extracted_images: list[dict[str, Any]] = []
+    retained_image_markers: set[str] = set()
+    if html and ("data:image/" in html or "<img" in html):
+        html, extracted_images, retained_image_markers = extract_inline_images_from_manuscript_html(
+            html
+        )
+        if extracted_images or retained_image_markers:
+            text = manuscript_html_to_text(html) or text
+
+    incoming_images = list(images or [])
+    retained_existing_images = [
+        dict(image)
+        for image in incoming_images
+        if image.get("storage_key") and str(image.get("marker") or "") in retained_image_markers
+    ]
+    fresh_images = [dict(image) for image in incoming_images if image.get("bytes")]
+    media = [*retained_existing_images, *extracted_images, *fresh_images]
+    should_sync_media = bool(media) or images is not None or bool(retained_image_markers)
+    uploaded_keys: list[str] = []
+
+    try:
+        for image in media:
+            raw = image.pop("bytes", None)
+            if not raw:
+                continue
+            filename = str(image.get("filename") or f"{uuid.uuid4().hex}.bin")
+            media_key = f"chapter-media/{book.id}/{chapter_number}/{uuid.uuid4().hex}-{filename}"
+            image["storage_key"] = await asyncio.to_thread(
+                upload_binary,
+                media_key,
+                raw,
+                image.get("content_type"),
+            )
+            uploaded_keys.append(str(image["storage_key"]))
+
+        content_key = f"chapters/{book.id}/{chapter_number}/{uuid.uuid4().hex}.txt"
+        stored_key = await asyncio.to_thread(
+            upload_text,
+            content_key,
+            serialize_manuscript_content(text, html),
+        )
+        uploaded_keys.append(stored_key)
+    except STORAGE_IO_EXCEPTIONS:
+        await delete_storage_keys_best_effort(
+            uploaded_keys,
+            context="chapter_save_staging",
+        )
+        raise
+
+    return StagedEditorChapterContent(
+        text=text,
+        html=html,
+        storage_key=stored_key,
+        media=media,
+        retained_media_markers=retained_image_markers,
+        should_sync_media=should_sync_media,
+        uploaded_keys=tuple(uploaded_keys),
+    )
+
+
+async def apply_staged_editor_chapter_content(
+    db: AsyncSession,
+    book: Book,
+    *,
+    chapter: Chapter | None,
+    chapter_number: int,
+    title: str | None,
+    staged: StagedEditorChapterContent,
+    description: str | None = None,
+    chapter_kind: str | None = None,
+    content_version: int = 1,
+) -> Chapter:
+    """Persist an already-uploaded chapter without performing remote storage I/O."""
+    word_count = len(staged.text.split()) if staged.text.strip() else 0
+    if chapter is None:
+        chapter = Chapter(
+            book_id=book.id,
+            number=chapter_number,
+            title=title,
+            description=description,
+            chapter_kind=normalization.normalize_chapter_kind(chapter_kind),
+            s3_key=staged.storage_key,
+            token_count=word_count,
+            word_count=word_count,
+            content_version=content_version,
+            processed=False,
+            analysis_state={},
+        )
+        db.add(chapter)
+        await db.flush()
+    else:
+        previous_content_version = chapter.content_version
+        chapter.title = title or chapter.title
+        chapter.description = description or chapter.description
+        chapter.chapter_kind = normalization.normalize_chapter_kind(chapter_kind)
+        chapter.s3_key = staged.storage_key
+        chapter.token_count = word_count
+        chapter.word_count = word_count
+        chapter.content_version = content_version
+        chapter.processed = False
+        chapter.analysis_state = {}
+        if previous_content_version != content_version:
+            from app.services.continuity.scan_service import mark_continuity_findings_stale
+
+            await mark_continuity_findings_stale(
+                db,
+                book_id=book.id,
+                chapter_number=chapter_number,
+                content_version=content_version,
+            )
+        await db.flush()
+
+    if staged.should_sync_media:
+        await sync_chapter_media_from_images(
+            db,
+            book=book,
+            chapter=chapter,
+            images=staged.media,
+            retain_markers=staged.retained_media_markers,
+        )
+    return chapter
+
+
 async def persist_editor_chapter_content(
     db: AsyncSession,
     book: Book,
@@ -466,85 +636,33 @@ async def persist_editor_chapter_content(
     content_version: int = 1,
     images: list[dict[str, Any]] | None = None,
 ) -> Chapter:
-    extracted_images: list[dict[str, Any]] = []
-    retained_image_markers: set[str] = set()
-    if html and ("data:image/" in html or "<img" in html):
-        html, extracted_images, retained_image_markers = extract_inline_images_from_manuscript_html(
-            html
-        )
-        if extracted_images or retained_image_markers:
-            text = manuscript_html_to_text(html) or text
-    incoming_images = list(images or [])
-    retained_existing_images = [
-        image
-        for image in incoming_images
-        if image.get("storage_key") and str(image.get("marker") or "") in retained_image_markers
-    ]
-    fresh_images = [image for image in incoming_images if image.get("bytes")]
-    images_to_sync = [*retained_existing_images, *extracted_images, *fresh_images]
-    should_sync_media = bool(images_to_sync) or images is not None or bool(retained_image_markers)
-    storage_key = f"chapters/{book.id}/{chapter_number}.txt"
-    payload = serialize_manuscript_content(text, html)
-    stored_key = await asyncio.to_thread(upload_text, storage_key, payload)
+    staged = await stage_editor_chapter_content(
+        book,
+        chapter_number=chapter_number,
+        text=text,
+        html=html,
+        images=images,
+    )
     chapter = (
         await db.execute(
             select(Chapter).where(Chapter.book_id == book.id, Chapter.number == chapter_number)
         )
     ).scalar_one_or_none()
-    word_count = len(str(text or "").split()) if str(text or "").strip() else 0
-    token_count = word_count
-    if chapter is None:
-        chapter = Chapter(
-            book_id=book.id,
-            number=chapter_number,
-            title=title,
-            description=description,
-            chapter_kind=normalization.normalize_chapter_kind(chapter_kind),
-            s3_key=stored_key,
-            token_count=token_count,
-            word_count=word_count,
-            content_version=content_version,
-            processed=False,
-            analysis_state={},
-        )
-        db.add(chapter)
-        await db.flush()
-        if should_sync_media:
-            await sync_chapter_media_from_images(
-                db,
-                book=book,
-                chapter=chapter,
-                images=images_to_sync,
-                retain_markers=retained_image_markers,
-            )
-        return chapter
-
-    previous_content_version = chapter.content_version
-    chapter.title = title or chapter.title
-    chapter.description = description or chapter.description
-    chapter.chapter_kind = normalization.normalize_chapter_kind(chapter_kind)
-    chapter.s3_key = stored_key
-    chapter.token_count = token_count
-    chapter.word_count = word_count
-    chapter.content_version = content_version
-    chapter.processed = False
-    chapter.analysis_state = {}
-    if previous_content_version != content_version:
-        from app.services.continuity.scan_service import mark_continuity_findings_stale
-
-        await mark_continuity_findings_stale(
+    try:
+        return await apply_staged_editor_chapter_content(
             db,
-            book_id=book.id,
-            chapter_number=chapter_number,
-            content_version=content_version,
-        )
-    await db.flush()
-    if should_sync_media:
-        await sync_chapter_media_from_images(
-            db,
-            book=book,
+            book,
             chapter=chapter,
-            images=images_to_sync,
-            retain_markers=retained_image_markers,
+            chapter_number=chapter_number,
+            title=title,
+            staged=staged,
+            description=description,
+            chapter_kind=chapter_kind,
+            content_version=content_version,
         )
-    return chapter
+    except Exception:
+        await delete_storage_keys_best_effort(
+            staged.uploaded_keys,
+            context="chapter_persist_rollback",
+        )
+        raise

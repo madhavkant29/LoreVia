@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, cast
+import shutil
+from typing import Any, BinaryIO, cast
 
 from app.utils.export_common_utils import (
     _apply_pdf_metadata,
@@ -46,7 +47,8 @@ def novel_docx(
     image_placement: str = "end",
     include_image_captions: bool = False,
     index_format: str = "arabic",
-) -> bytes:
+    output: BinaryIO | None = None,
+) -> bytes | None:
     from io import BytesIO
 
     from docx import Document
@@ -235,9 +237,11 @@ def novel_docx(
         heading.add_run(section_data["title"]).bold = True
         _add_body_text(section_data["text"])
 
-    buffer = BytesIO()
+    buffer = output or BytesIO()
     doc.save(buffer)
-    return buffer.getvalue()
+    if output is not None:
+        return None
+    return cast(Any, buffer).getvalue()
 
 
 def novel_pdf_compiled(
@@ -255,7 +259,8 @@ def novel_pdf_compiled(
     image_placement: str = "end",
     include_image_captions: bool = False,
     index_format: str = "arabic",
-) -> bytes:
+    output: BinaryIO | None = None,
+) -> bytes | None:
     from io import BytesIO
 
     from reportlab.lib.pagesizes import A5, LETTER
@@ -277,7 +282,7 @@ def novel_pdf_compiled(
     left_margin, right_margin, top_margin, bottom_margin = cast(
         tuple[float, float, float, float], export_preset["pdf_margins"]
     )
-    buffer = BytesIO()
+    buffer = output or BytesIO()
 
     class NovelPdfTemplate(SimpleDocTemplate):
         def afterFlowable(self, flowable) -> None:
@@ -467,7 +472,9 @@ def novel_pdf_compiled(
         canvas.restoreState()
 
     doc.multiBuild(story, onFirstPage=_draw_page, onLaterPages=_draw_page)
-    return buffer.getvalue()
+    if output is not None:
+        return None
+    return cast(Any, buffer).getvalue()
 
 
 def novel_epub_compiled(
@@ -485,7 +492,8 @@ def novel_epub_compiled(
     image_placement: str = "end",
     include_image_captions: bool = False,
     index_format: str = "arabic",
-) -> bytes:
+    output: BinaryIO | None = None,
+) -> bytes | None:
     import os
     import tempfile
     from html import escape
@@ -711,4 +719,7 @@ def novel_epub_compiled(
         target = os.path.join(tmpdir, "novel.epub")
         epub.write_epub(target, book, {})
         with open(target, "rb") as handle:
+            if output is not None:
+                shutil.copyfileobj(handle, output, length=1024 * 1024)
+                return None
             return handle.read()

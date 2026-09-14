@@ -3,6 +3,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -13,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -56,12 +59,138 @@ class BookProcessingRun(Base):
     )
 
 
+class ManuscriptImportJob(Base):
+    __tablename__ = "manuscript_import_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed', "
+            "'cancel_requested', 'cancelled')",
+            name="ck_manuscript_import_jobs_status",
+        ),
+        Index("ix_manuscript_import_jobs_user_updated", "user_id", "updated_at", "id"),
+        Index("ix_manuscript_import_jobs_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    celery_task_id: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="queued", server_default="queued"
+    )
+    request_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    source_files_json: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    result_json: Mapped[dict | None] = mapped_column(JSONB)
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    progress_completed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    progress_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ManuscriptExportJob(Base):
+    __tablename__ = "manuscript_export_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed', 'expired')",
+            name="ck_manuscript_export_jobs_status",
+        ),
+        CheckConstraint(
+            "export_kind IN ('manuscript', 'novel')",
+            name="ck_manuscript_export_jobs_kind",
+        ),
+        Index("ix_manuscript_export_jobs_user_updated", "user_id", "updated_at", "id"),
+        Index("ix_manuscript_export_jobs_status_created", "status", "created_at"),
+        Index("ix_manuscript_export_jobs_expires_at", "expires_at"),
+        Index(
+            "uq_manuscript_export_jobs_active_request",
+            "user_id",
+            "book_id",
+            "export_kind",
+            "export_format",
+            "options_json",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    celery_task_id: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="queued", server_default="queued"
+    )
+    export_kind: Mapped[str] = mapped_column(String, nullable=False)
+    export_format: Mapped[str] = mapped_column(String, nullable=False)
+    options_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    artifact_storage_key: Mapped[str | None] = mapped_column(String)
+    artifact_filename: Mapped[str | None] = mapped_column(String)
+    artifact_media_type: Mapped[str | None] = mapped_column(String)
+    artifact_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    progress_completed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    progress_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class TaskExecution(Base):
     __tablename__ = "task_executions"
     __table_args__ = (
         UniqueConstraint("identity_key", name="uq_task_executions_identity_key"),
         Index("ix_task_executions_status_created", "status", "created_at"),
         Index("ix_task_executions_user_status", "user_id", "status"),
+        Index(
+            "ix_task_executions_pending_task_created_chapter",
+            "task_name",
+            "created_at",
+            "chapter_number",
+            postgresql_where=text("status = 'pending_dispatch'"),
+        ),
+        Index(
+            "ix_task_executions_running_locked_until",
+            "locked_until",
+            postgresql_where=text("status = 'running'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

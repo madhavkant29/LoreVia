@@ -22,9 +22,26 @@ from app.utils.billing_utils import (
     recommended_paddle_default_checkout_url,
     record_book_upload_charge,
     summary_mode_allowed,
+    tier_from_plan_code,
     verify_billing_confirmation_token,
     worldbuilding_upload_cost_for_book,
 )
+
+
+@pytest.mark.parametrize(
+    ("plan_code", "expected_tier"),
+    [
+        ("author_monthly", "author"),
+        ("author_annual", "author"),
+        ("architect_monthly", "architect"),
+        ("architect_annual", "architect"),
+    ],
+)
+def test_monthly_and_annual_plan_codes_share_the_same_entitlement_tier(
+    plan_code,
+    expected_tier,
+):
+    assert tier_from_plan_code(plan_code) == expected_tier
 
 
 @pytest.mark.asyncio
@@ -387,7 +404,11 @@ def test_recommended_paddle_default_checkout_url_uses_app_url(monkeypatch):
 
 
 def test_billing_confirmation_token_round_trip(monkeypatch):
-    monkeypatch.setattr("app.utils.billing_utils.settings.JWT_SECRET", "jwt-secret", raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.JWT_SECRET",
+        "test-billing-jwt-secret-with-at-least-32-characters",
+        raising=False,
+    )
     monkeypatch.setattr("app.utils.billing_utils.settings.JWT_ALGORITHM", "HS256", raising=False)
 
     token = create_billing_confirmation_token("txn_123")
@@ -407,7 +428,11 @@ async def test_billing_confirmation_token_can_only_be_consumed_once(monkeypatch)
         consumed_token_ids.add(token_id)
         return True
 
-    monkeypatch.setattr("app.utils.billing_utils.settings.JWT_SECRET", "jwt-secret", raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.JWT_SECRET",
+        "test-billing-jwt-secret-with-at-least-32-characters",
+        raising=False,
+    )
     monkeypatch.setattr("app.utils.billing_utils.settings.JWT_ALGORITHM", "HS256", raising=False)
     monkeypatch.setattr("app.utils.billing_utils.consume_billing_confirmation_token", _consume)
     token = create_billing_confirmation_token("txn_123")

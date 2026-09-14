@@ -125,8 +125,9 @@ export default function CharactersPage() {
 
   const timeoutRef = useRef<Set<number>>(new Set())
   useEffect(() => {
+    const timeoutIds = timeoutRef.current
     return () => {
-      for (const id of timeoutRef.current) {
+      for (const id of timeoutIds) {
         window.clearTimeout(id)
       }
     }

@@ -59,7 +59,7 @@ async def semantic_search(
     *,
     candidate_limit: int | None = None,
     similarity_threshold: float | None = None,
-    usage_user_id: uuid.UUID | None = None,
+    usage_user_id: uuid.UUID,
     usage_feature: str = "semantic_search_query",
 ) -> list[dict]:
     """
@@ -85,20 +85,30 @@ async def semantic_search(
     try:
         rows = await db.execute(
             text("""
+                WITH nearest AS MATERIALIZED (
+                    SELECT
+                        bc.text,
+                        bc.chunk_index,
+                        ch.number AS chapter_num,
+                        ch.title AS chapter_title,
+                        bc.embedding <=> CAST(:emb AS vector) AS distance
+                    FROM book_chunks bc
+                    JOIN chapters ch ON ch.id = bc.chapter_id
+                    WHERE bc.book_id = :bid
+                      AND ch.number <= :max_ch
+                      AND bc.embedding IS NOT NULL
+                    ORDER BY bc.embedding <=> CAST(:emb AS vector) ASC
+                    LIMIT :lim
+                )
                 SELECT
-                    bc.text,
-                    bc.chunk_index,
-                    ch.number  AS chapter_num,
-                    ch.title   AS chapter_title,
-                    1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
-                FROM book_chunks bc
-                JOIN chapters ch ON ch.id = bc.chapter_id
-                WHERE bc.book_id = :bid
-                  AND ch.number <= :max_ch
-                  AND bc.embedding IS NOT NULL
-                  AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :thr
-                ORDER BY relevance DESC
-                LIMIT :lim
+                    text,
+                    chunk_index,
+                    chapter_num,
+                    chapter_title,
+                    1 - distance AS relevance
+                FROM nearest
+                WHERE 1 - distance > :thr
+                ORDER BY distance ASC
             """),
             {
                 "emb": str(query_embedding),
@@ -141,7 +151,7 @@ async def hybrid_story_search(
     *,
     candidate_limit: int | None = None,
     similarity_threshold: float | None = None,
-    usage_user_id: uuid.UUID | None = None,
+    usage_user_id: uuid.UUID,
     usage_feature: str = "hybrid_story_search",
 ) -> list[dict]:
     """Combine lexical and vector candidates, then rerank with chapter chronology."""
@@ -244,8 +254,16 @@ async def find_context_for_tap(
     book_id: uuid.UUID,
     query: str,
     max_chapter: int,
+    *,
+    usage_user_id: uuid.UUID,
 ) -> list[dict]:
     """Used for Smart Tap — returns top 3 most relevant context snippets."""
     return await semantic_search(
-        db, book_id, query, max_chapter, limit=settings.SEARCH_MAX_CONTEXT_CHUNKS
+        db,
+        book_id,
+        query,
+        max_chapter,
+        limit=settings.SEARCH_MAX_CONTEXT_CHUNKS,
+        usage_user_id=usage_user_id,
+        usage_feature="reader_smart_tap",
     )

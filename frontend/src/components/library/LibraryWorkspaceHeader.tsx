@@ -28,7 +28,7 @@ export function LibraryWorkspaceHeader({
         <Tooltip content="Open public beta reader discussions" className="w-full sm:w-auto">
           <Button variant="secondary" size="md" onClick={onOpenForum} className="min-h-11 w-full rounded-sm px-4 sm:w-auto">
             <ForumIcon className={isDark ? "text-[#d2cdc3]" : "text-stone-600"} />
-            Beta forum
+            Book discussions
           </Button>
         </Tooltip>
         <Button variant="primary" size="md" disabled={createDisabled} onClick={onCreate} className="min-h-11 w-full rounded-sm px-4 sm:w-auto">

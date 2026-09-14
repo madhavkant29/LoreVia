@@ -1,5 +1,6 @@
+import asyncio
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -9,7 +10,10 @@ from httpx import Request, Response
 from openai import APIConnectionError
 from sqlalchemy.exc import OperationalError
 
-from app.workers.tasks.analysis_tasks import _is_retryable_analysis_error, analyse_chapter_task
+from app.workers.tasks.analysis_tasks import (
+    _is_retryable_analysis_error,
+    analyse_chapter_task,
+)
 
 
 def _raise_after_closing_coro(exc: Exception):
@@ -70,7 +74,67 @@ class TestIsRetryableAnalysisError:
 
 
 class TestAnalyseChapterTaskRetryFilter:
-    def test_retryable_error_does_not_replay_started_analysis(self, monkeypatch):
+    def test_unresumable_token_request_fails_execution_instead_of_pausing(self, monkeypatch):
+        error = HTTPException(
+            429,
+            {
+                "kind": "llm_tokens",
+                "detail": "Request exceeds every token window.",
+                "auto_resume": False,
+                "permanent": True,
+                "next_resume_at": None,
+            },
+        )
+        calls = 0
+
+        def run(coro):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                coro.close()
+                return True
+            if calls == 2:
+                coro.close()
+                raise error
+            return asyncio.run(coro)
+
+        class Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        fail = AsyncMock()
+        monkeypatch.setattr("app.workers.tasks.analysis_tasks.run_worker_coro", run)
+        monkeypatch.setattr(
+            "app.workers.tasks.analysis_tasks.AsyncSessionLocal",
+            lambda: Session(),
+        )
+        monkeypatch.setattr("app.services.task_execution_service.fail_task_execution", fail)
+
+        task = analyse_chapter_task.__wrapped__.__func__
+        mock_self = MagicMock()
+        mock_self.request.id = "celery-1"
+        mock_self.request.retries = 0
+        mock_self.request.headers = None
+
+        result = task(
+            mock_self,
+            "chapter-1",
+            "book-1",
+            "Chapter 1",
+            is_reprocessing=True,
+            execution_id="11111111-1111-1111-1111-111111111111",
+        )
+
+        assert result == {"failed": "llm_token_limit"}
+        fail.assert_awaited_once()
+        assert fail.await_args.kwargs["terminal"] is True
+        assert fail.await_args.kwargs["category"] == "llm_token_limit"
+        mock_self.retry.assert_not_called()
+
+    def test_retryable_error_after_analysis_starts_uses_bounded_task_retry(self, monkeypatch):
         monkeypatch.setattr(
             "app.workers.tasks.analysis_tasks.run_worker_coro",
             MagicMock(side_effect=_raise_after_closing_coro(httpx.TimeoutException("timed out"))),
@@ -80,12 +144,14 @@ class TestAnalyseChapterTaskRetryFilter:
         mock_self = MagicMock()
         mock_self.request.retries = 1
         mock_self.request.headers = None
-        mock_self.retry.side_effect = CeleryRetry("should not be called")
+        mock_self.retry.side_effect = CeleryRetry("retry triggered")
 
-        with pytest.raises(httpx.TimeoutException):
+        with pytest.raises(CeleryRetry):
             task(mock_self, "ch-1", "text", "title")
 
-        mock_self.retry.assert_not_called()
+        mock_self.retry.assert_called_once_with(
+            exc=mock_self.retry.call_args.kwargs["exc"], countdown=4
+        )
 
     def test_retryable_error_before_analysis_starts_can_retry(self, monkeypatch):
         monkeypatch.setattr(

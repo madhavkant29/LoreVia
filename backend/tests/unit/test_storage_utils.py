@@ -1,55 +1,34 @@
+import asyncio
+
 import pytest
 
-from app.utils import storage_utils
+from app.utils.storage_utils import bounded_storage_map
 
 
 @pytest.mark.asyncio
-async def test_delete_storage_key_best_effort_deletes_key(monkeypatch):
-    deleted: list[str] = []
+async def test_bounded_storage_map_preserves_input_order_and_concurrency_limit():
+    active = 0
+    peak_active = 0
 
-    monkeypatch.setattr(storage_utils, "delete_object", lambda key: deleted.append(key))
+    async def read(value: int) -> int:
+        nonlocal active, peak_active
+        active += 1
+        peak_active = max(peak_active, active)
+        try:
+            await asyncio.sleep(0)
+            return value * 2
+        finally:
+            active -= 1
 
-    assert (
-        await storage_utils.delete_storage_key_best_effort("covers/old.png", context="cover")
-        is True
-    )
-    assert deleted == ["covers/old.png"]
+    values = await bounded_storage_map(range(8), read, concurrency=3)
 
-
-@pytest.mark.asyncio
-async def test_delete_storage_keys_best_effort_dedupes_and_skips_empty(monkeypatch):
-    deleted: list[str] = []
-
-    monkeypatch.setattr(storage_utils, "delete_object", lambda key: deleted.append(key))
-
-    result = await storage_utils.delete_storage_keys_best_effort(
-        ["world/one.txt", None, "world/one.txt", "", "world/two.txt"],
-        context="world",
-    )
-
-    assert result == ["world/one.txt", "world/two.txt"]
-    assert deleted == ["world/one.txt", "world/two.txt"]
+    assert values == [0, 2, 4, 6, 8, 10, 12, 14]
+    assert peak_active == 3
 
 
 @pytest.mark.asyncio
-async def test_delete_storage_key_best_effort_swallows_storage_errors(monkeypatch):
-    def _raise(_key):
-        raise OSError("storage unavailable")
+async def test_bounded_storage_map_returns_immediately_for_empty_inputs():
+    async def unexpected(_: object) -> object:
+        raise AssertionError("operation should not be invoked")
 
-    monkeypatch.setattr(storage_utils, "delete_object", _raise)
-
-    assert (
-        await storage_utils.delete_storage_key_best_effort("forum/old.png", context="forum")
-        is False
-    )
-
-
-@pytest.mark.asyncio
-async def test_delete_storage_key_best_effort_propagates_unexpected_errors(monkeypatch):
-    def _raise(_key):
-        raise RuntimeError("programming error")
-
-    monkeypatch.setattr(storage_utils, "delete_object", _raise)
-
-    with pytest.raises(RuntimeError, match="programming error"):
-        await storage_utils.delete_storage_key_best_effort("forum/old.png", context="forum")
+    assert await bounded_storage_map([], unexpected, concurrency=4) == []

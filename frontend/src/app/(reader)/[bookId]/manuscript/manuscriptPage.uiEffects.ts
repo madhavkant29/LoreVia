@@ -194,7 +194,7 @@ export function useManuscriptUiEffects({
 
     const handle = window.setTimeout(() => {
       setRecallLoading(true)
-      readerApi.search(bookId, trimmed, 9999)
+      readerApi.search(bookId, trimmed)
         .then((results) => setRecallResults(results.slice(0, 6)))
         .catch(() => setRecallResults([]))
         .finally(() => setRecallLoading(false))

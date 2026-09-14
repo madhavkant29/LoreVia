@@ -71,7 +71,7 @@ describe("ReaderToolbar", () => {
       )
     })
 
-    expect(container.textContent).toContain("Back to book")
+    expect(container.textContent).toContain("Project overview")
     expect(container.textContent).toContain("Summary")
     expect(container.textContent).toContain("Graph")
     expect(container.textContent).toContain("Ask with citations")
@@ -83,7 +83,11 @@ describe("ReaderToolbar", () => {
 
     const publishedButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Published")
     const serifButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Serif")
+    const homeLinks = Array.from(container.querySelectorAll("a"))
+      .filter((link) => link.textContent?.trim() === "Home")
     expect(publishedButton?.getAttribute("aria-pressed")).toBe("true")
     expect(serifButton?.getAttribute("aria-pressed")).toBe("true")
+    expect(homeLinks.length).toBeGreaterThan(0)
+    expect(homeLinks.every((link) => link.getAttribute("href") === "/book-1")).toBe(true)
   })
 })

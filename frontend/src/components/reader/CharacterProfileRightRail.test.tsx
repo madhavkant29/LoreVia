@@ -24,7 +24,7 @@ describe("CharacterProfileRightRail", () => {
     const view = renderRail({ onOpenRelationships })
 
     expect(view.textContent).toContain("Continuity alerts")
-    expect(view.textContent).toContain("Extraction confidence")
+    expect(view.textContent).toContain("Profile completeness")
     expect(view.textContent).toContain("Open questions")
     expect(view.textContent).toContain("Grounded profile")
     expect(view.textContent).toContain("1 connected ties")

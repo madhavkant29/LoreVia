@@ -18,6 +18,8 @@ import { formatChapterAppearanceText } from "./charactersPage.helpers"
 
 type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
+const EMPTY_CHARACTERS: Character[] = []
+
 type UseCharacterPageQueriesArgs = {
   book: Book | null
   bookId: string
@@ -51,7 +53,7 @@ export function useCharacterPageQueries({
     queryFn: () => readerApi.getChapterList(bookId).catch(() => null),
   })
   const {
-    data: charactersData = [],
+    data: charactersData = EMPTY_CHARACTERS,
     refetch: refetchCharacters,
     isLoading: charactersLoading,
   } = useQuery<Character[]>({

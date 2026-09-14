@@ -10,7 +10,6 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response, StreamingResponse
-from openai import AsyncOpenAI
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +17,7 @@ from app.api.deps.auth import get_current_user
 from app.api.deps.rate_limit import rate_limit_advisor
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.llm import get_openai_client
 from app.core.redis import get_advisor_response_cache
 from app.models.book import Book
 from app.models.character import Character
@@ -41,8 +41,8 @@ from app.utils.advisor_utils import (
     make_advisor_cache_key,
 )
 from app.utils.billing_utils import require_author_access
+from app.utils.llm_usage_utils import public_llm_http_error_message
 from app.utils.logging.errors import public_error_message
-from app.utils.retry_utils import LLM_MAX_RETRIES
 from app.utils.task_queue_errors import TASK_ENQUEUE_ERRORS
 from app.workers.tasks.intelligence_tasks import generate_advisor_reply_task
 
@@ -128,7 +128,7 @@ async def _enqueue_book_advisor_task(
                 "book_id": str(book.id),
                 "user_id": str(current_user_id),
                 "messages": [{"role": msg.role, "content": msg.content} for msg in body.messages],
-                "total_chapters": body.total_chapters,
+                "total_chapters": int(book.total_chapters or 0),
             },
         )
     except TASK_ENQUEUE_ERRORS:
@@ -193,9 +193,11 @@ async def advisor_message_stream(
                 book=book,
                 user_id=current_user.id,
                 messages=[{"role": msg.role, "content": msg.content} for msg in body.messages],
-                total_chapters=body.total_chapters,
+                total_chapters=int(book.total_chapters or 0),
             ):
                 yield _advisor_sse(item["event"], item["data"])
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS as exc:
             logging.getLogger(__name__).error(
                 "advisor_message_stream failed book_id=%s user_id=%s: %s\n%s",
@@ -257,11 +259,13 @@ async def whats_the_word(
         raise HTTPException(404)
     require_author_access(current_user)
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+    client = get_openai_client()
     try:
         payload = await generate_whats_the_word_result(
             client=client,
             model=settings.OPENAI_INTEL_MODEL,
+            user_id=current_user.id,
+            book_id=book.id,
             book_title=book.title,
             description=body.description,
             previous_word=body.previous_word,
@@ -285,12 +289,14 @@ async def whats_the_word_stream(
     require_author_access(current_user)
 
     async def event_stream():
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+        client = get_openai_client()
         try:
             yield _advisor_sse("stage", {"message": "Finding the closest fit..."})
             payload = await generate_whats_the_word_result(
                 client=client,
                 model=settings.OPENAI_INTEL_MODEL,
+                user_id=current_user.id,
+                book_id=book.id,
                 book_title=book.title,
                 description=body.description,
                 previous_word=body.previous_word,
@@ -298,6 +304,8 @@ async def whats_the_word_stream(
             yield _advisor_sse(
                 "done", cast(dict[str, Any], jsonable_encoder(WhatsTheWordResponse(**payload)))
             )
+        except HTTPException as exc:
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
         finally:

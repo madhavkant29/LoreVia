@@ -16,7 +16,7 @@ export function CreateFab({
   onNavigate: (href: string) => void
 }) {
   return (
-    <div className="fixed bottom-24 right-5 z-40 lg:bottom-8 lg:right-8">
+    <div data-lorevia-bottom-floating className="fixed bottom-24 right-5 z-40 lg:bottom-8 lg:right-8">
       <DisclosureMenu
         label="Create project item"
         side="top"

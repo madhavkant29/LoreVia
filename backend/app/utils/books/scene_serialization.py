@@ -13,7 +13,12 @@ from app.utils.books.scene_metadata import (
 )
 
 
-def _scene_out(scene: NovelScene, *, tags: list[str] | None = None) -> dict[str, Any]:
+def _scene_out(
+    scene: NovelScene,
+    *,
+    tags: list[str] | None = None,
+    include_body: bool = True,
+) -> dict[str, Any]:
     metadata = normalize_scene_metadata(
         cast(dict[str, Any] | None, scene.scene_metadata), description=scene.description
     )
@@ -30,8 +35,8 @@ def _scene_out(scene: NovelScene, *, tags: list[str] | None = None) -> dict[str,
         "chapter_number": scene.chapter_number,
         "title": scene.title,
         "description": scene.description,
-        "body": scene.body,
-        "html_body": scene.html_body,
+        "body": scene.body if include_body else None,
+        "html_body": scene.html_body if include_body else None,
         "metadata": metadata,
         "path": scene.path,
         "status": scene.status,

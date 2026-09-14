@@ -116,7 +116,7 @@ async def repair_chapter_payload_from_source(
 ) -> bool:
     inflight_key = key_chapter_recovery_inflight(str(chapter.id))
     try:
-        fallback = parse_chapter_from_source(book, chapter.number)
+        fallback = await asyncio.to_thread(parse_chapter_from_source, book, chapter.number)
         if not fallback:
             chapter.analysis_state = build_analysis_chapter_state(
                 chapter.analysis_state if isinstance(chapter.analysis_state, dict) else None,
@@ -129,7 +129,11 @@ async def repair_chapter_payload_from_source(
                     or "pending"
                 ),
                 source_integrity=build_source_integrity_state(
-                    text_present=bool(str(download_stored_text_or_empty(chapter) or "").strip()),
+                    text_present=bool(
+                        str(
+                            await asyncio.to_thread(download_stored_text_or_empty, chapter) or ""
+                        ).strip()
+                    ),
                     media_marker_count=0,
                     stored_media_count=0,
                     recovery_status="failed",
@@ -221,7 +225,7 @@ async def resolve_reader_chapter_payload(
     current_user=None,
 ) -> dict[str, Any] | None:
     if chapter is None:
-        fallback = parse_chapter_from_source(book, chapter_num)
+        fallback = await asyncio.to_thread(parse_chapter_from_source, book, chapter_num)
         if not fallback:
             return None
         fallback_media = serialize_inline_images(fallback.get("images", []))
@@ -240,7 +244,9 @@ async def resolve_reader_chapter_payload(
     stored_html_content: str | None = None
     if chapter.s3_key:
         try:
-            stored_payload = deserialize_manuscript_content(download_book(chapter.s3_key))
+            stored_payload = deserialize_manuscript_content(
+                await asyncio.to_thread(download_book, chapter.s3_key)
+            )
             stored_text_content = str(stored_payload.get("text") or "")
             stored_html_content = str(stored_payload.get("html") or "") or None
         except STORAGE_IO_EXCEPTIONS:
@@ -257,7 +263,7 @@ async def resolve_reader_chapter_payload(
         stored_media=stored_media,
     )
     if needs_source_recovery:
-        fallback_payload = parse_chapter_from_source(book, chapter_num)
+        fallback_payload = await asyncio.to_thread(parse_chapter_from_source, book, chapter_num)
         current_integrity = chapter_source_integrity(chapter) or {}
         await queue_chapter_repair_if_needed(
             db,
@@ -275,7 +281,7 @@ async def resolve_reader_chapter_payload(
         current_integrity["recovery_status"] = "queued"
         current_integrity["last_recovery_error"] = "source_integrity_mismatch"
     elif not stored_media and stored_text_content and extract_media_markers(stored_text_content):
-        fallback_payload = parse_chapter_from_source(book, chapter_num)
+        fallback_payload = await asyncio.to_thread(parse_chapter_from_source, book, chapter_num)
         stored_media = merge_media_items(
             stored_media,
             serialize_inline_images(list((fallback_payload or {}).get("images") or [])),

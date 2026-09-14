@@ -1,7 +1,7 @@
 import { HydrationBoundary, QueryClient, dehydrate } from "@tanstack/react-query"
 import { headers } from "next/headers"
 import { serverApi } from "@/lib/api/server"
-import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, booksPageCacheKey } from "@/lib/query/cacheKeys"
 import { LibraryClient } from "./LibraryClient"
 
 export default async function LibraryPage() {
@@ -11,13 +11,13 @@ export default async function LibraryPage() {
 
   try {
     await queryClient.prefetchQuery({
-      queryKey: asQueryKey(booksListCacheKey(true)),
+      queryKey: asQueryKey(booksPageCacheKey(true)),
       queryFn: async () => {
-        const books = await serverApi.listBooks(true, cookieHeader)
-        if (books === null) {
+        const page = await serverApi.listBooksPage(true, cookieHeader)
+        if (page === null) {
           throw new Error("Book prefetch unavailable")
         }
-        return books
+        return page
       },
       staleTime: 20_000,
     })

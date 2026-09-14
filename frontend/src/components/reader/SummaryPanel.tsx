@@ -27,7 +27,7 @@ export const SummaryPanel = memo(function SummaryPanel({ bookId, chapterNum, onC
   useEffect(() => {
     if (!summaryQuery.data) return
     capture("summary_viewed", { book_id: bookId, chapter: chapterNum, mode })
-  }, [bookId, chapterNum, mode, summaryQuery.dataUpdatedAt])
+  }, [bookId, chapterNum, mode, summaryQuery.data])
 
   const shellClass = theme === "dark" ? "bg-black text-white border border-white/10" : "bg-white text-black"
   const tabActiveClass = theme === "dark" ? "bg-white text-black font-medium" : "bg-black text-white font-medium"

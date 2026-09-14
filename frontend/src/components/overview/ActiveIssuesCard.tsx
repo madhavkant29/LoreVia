@@ -23,7 +23,7 @@ export function ActiveIssuesCard({
   bookId: string
 }) {
   const issues = [
-    { title: "Character Inconsistencies", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, color: "text-rose-400", href: `/${bookId}/reports` },
+    { title: "Continuity Flags", rawCount: continuityIssueCount, severity: "High", icon: "users" as IconName, color: "text-rose-400", href: `/${bookId}/reports` },
     { title: "World Gaps", rawCount: worldGapCount, severity: "Medium", icon: "gap" as IconName, color: "text-amber-400", href: `/${bookId}/world-gap` },
     { title: "Timeline Conflicts", rawCount: timelineIssueCount, severity: "Low", icon: "timeline" as IconName, color: "text-teal-700", href: `/${bookId}/timeline` },
   ].map((issue) => ({

@@ -151,8 +151,9 @@ export function VaultNotesEditor({
   }, [bookId, secondaryPanelsEnabled])
 
   useEffect(() => {
+    const saveTimers = saveTimersRef.current
     return () => {
-      for (const timer of Object.values(saveTimersRef.current)) {
+      for (const timer of Object.values(saveTimers)) {
         window.clearTimeout(timer)
       }
     }
@@ -228,7 +229,7 @@ export function VaultNotesEditor({
     return () => {
       cancelled = true
     }
-  }, [bookId, secondaryPanelsEnabled, selectedNote?.path])
+  }, [bookId, secondaryPanelsEnabled, selectedNote])
 
   useEffect(() => {
     if (!selectedNote) {
@@ -238,7 +239,7 @@ export function VaultNotesEditor({
     }
     setEditedFolder(noteFolder(selectedNote.path))
     setEditedTitle(noteTitle(selectedNote.path))
-  }, [selectedNote?.path])
+  }, [selectedNote])
 
   const {
     copyCurrentReference,
@@ -251,7 +252,6 @@ export function VaultNotesEditor({
     moveCurrent,
     moveNoteToFolder,
     openNote,
-    refreshGraph,
     saveNote,
     updateDraft,
   } = useVaultNotesEditorActions({
@@ -294,7 +294,7 @@ export function VaultNotesEditor({
       delete saveTimersRef.current[selectedNote.path]
       void saveNote(selectedNote.path, latestDraftRef.current[selectedNote.path] ?? nextValue)
     }, 700)
-  }, [drafts, selectedNote])
+  }, [drafts, saveNote, selectedNote])
 
   const toolbarButtons = useVaultNotesMarkdownToolbar({
     drafts,

@@ -15,8 +15,7 @@ import {
   STATUS_LABELS,
   clampProgress,
   countWarnings,
-  estimateTargetWordCount,
-  estimateWordCount,
+  getBookWordCount,
   formatNumber,
   formatRelativeTime,
   getAccentClass,
@@ -137,8 +136,7 @@ export function ProjectCard({
 }: ProjectDisplayProps) {
   const accentClass = getAccentClass(book)
   const progress = clampProgress(book.progress_pct)
-  const currentWords = estimateWordCount(book)
-  const targetWords = estimateTargetWordCount(book, currentWords)
+  const currentWords = getBookWordCount(book)
   const warningCount = countWarnings(book)
   const processingStatus = normalizeProcessingStatus(book.processing, book)
   const isArchived = !!book.archived_at
@@ -168,7 +166,7 @@ export function ProjectCard({
                   {book.title}
                 </h3>
                 <Tooltip content={`Status: ${STATUS_LABELS[book.status]} - ${getStatusTooltip(book.status)}`}>
-                  <span className={`h-2 w-2 rounded-full ${DOT_CLASSES[book.status]}`} aria-label={`Status: ${STATUS_LABELS[book.status]}`} />
+                  <span className={`h-2 w-2 rounded-full ${DOT_CLASSES[book.status]}`} role="img" aria-label={`Status: ${STATUS_LABELS[book.status]}`} />
                 </Tooltip>
                 {isPinned ? (
                   <Tooltip content="Pinned project">
@@ -245,7 +243,7 @@ export function ProjectCard({
           </div>
 
           <div className={`flex items-center justify-between gap-4 text-sm ${subtextClass}`}>
-            <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
+            <span>{formatNumber(currentWords)} words</span>
             <span>{progress}% complete</span>
           </div>
 
@@ -254,7 +252,7 @@ export function ProjectCard({
 
         <div className={`mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-4 text-sm ${isDark ? "border-white/[0.08] text-[#b7b2aa]" : "border-stone-200 text-stone-600"}`}>
           <MetaBadge icon={<GroupIcon />} value={`${book.total_chapters ?? 0} ${unitLabel}`} />
-          <MetaBadge icon={<PageIcon />} value={`${Math.max(1, Math.round(currentWords / 1000))}k words`} />
+          <MetaBadge icon={<PageIcon />} value={`${formatNumber(currentWords)} words`} />
           <MetaBadge icon={<AlertIcon />} value={`${warningCount} warnings`} />
         </div>
       </div>
@@ -283,8 +281,7 @@ export function ProjectRow({
 }: ProjectDisplayProps) {
   const accentClass = getAccentClass(book)
   const progress = clampProgress(book.progress_pct)
-  const currentWords = estimateWordCount(book)
-  const targetWords = estimateTargetWordCount(book, currentWords)
+  const currentWords = getBookWordCount(book)
   const isArchived = !!book.archived_at
   const processingStatus = normalizeProcessingStatus(book.processing, book)
   const publicSampleStatus = getPublicSampleStatus(book)
@@ -306,7 +303,7 @@ export function ProjectRow({
             <div className="flex items-center gap-2.5">
               <h3 className={`truncate text-lg font-semibold tracking-[-0.02em] ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>{book.title}</h3>
               <Tooltip content={`Status: ${STATUS_LABELS[book.status]} - ${getStatusTooltip(book.status)}`}>
-                <span className={`h-2 w-2 rounded-full ${DOT_CLASSES[book.status]}`} aria-label={`Status: ${STATUS_LABELS[book.status]}`} />
+                <span className={`h-2 w-2 rounded-full ${DOT_CLASSES[book.status]}`} role="img" aria-label={`Status: ${STATUS_LABELS[book.status]}`} />
               </Tooltip>
               {isPinned ? (
                 <Tooltip content="Pinned project">
@@ -335,7 +332,7 @@ export function ProjectRow({
             <div className="h-full rounded-full bg-[#1f615d]" style={{ width: `${progress}%` }} />
           </div>
           <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 text-sm ${subtextClass}`}>
-            <span>{formatNumber(currentWords)} / {formatNumber(targetWords)} words</span>
+            <span>{formatNumber(currentWords)} words</span>
             <span>{progress}% complete</span>
             <span>{formatRelativeTime(getBookUpdatedAt(book))}</span>
           </div>

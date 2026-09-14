@@ -19,6 +19,7 @@ from app.services.processing_allowance_service import (
     ensure_project_writable,
     ensure_source_storage_capacity,
 )
+from app.services.world_analysis_refresh_service import enqueue_world_analysis_refresh
 from app.services.world_building_access_service import get_owned_world_building_book
 from app.utils.billing_utils import require_author_access
 from app.utils.books.manuscript import serialize_manuscript_content
@@ -130,6 +131,7 @@ async def upload_world_documents(
         replace_existing=replace_flag,
     )
     await db.commit()
+    await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
     await delete_storage_keys_best_effort(replaced_document_keys, context="world_building_document")
     for document in documents:
         await db.refresh(document)
@@ -179,6 +181,7 @@ async def patch_world_document(
         html=body.html,
     )
     await db.commit()
+    await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
     if previous_s3_key and previous_s3_key != updated.s3_key:
         await delete_storage_keys_best_effort([previous_s3_key], context="world_building_document")
     await db.refresh(updated)
@@ -199,5 +202,6 @@ async def remove_world_document(
     previous_s3_key = document.s3_key
     await delete_world_building_document(db, book=book, document=document)
     await db.commit()
+    await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
     await delete_storage_keys_best_effort([previous_s3_key], context="world_building_document")
     return Response(status_code=204)

@@ -18,13 +18,6 @@ export function resolveApiBase() {
     return "/api/v1"
   }
 
-  // During local Next dev, auth responses proxied through rewrites can lose
-  // the backend's HttpOnly auth cookies. Calling the backend directly avoids
-  // that cookie-stripping path while still remaining same-site on localhost.
-  if (isLocalDevBrowser()) {
-    return "http://127.0.0.1:8000/api/v1"
-  }
-
   if (typeof window !== "undefined") {
     return "/api/v1"
   }
@@ -46,10 +39,6 @@ export function resolveApiOrigin() {
     window.location?.origin
   ) {
     return window.location.origin
-  }
-
-  if (isLocalDevBrowser()) {
-    return "http://127.0.0.1:8000"
   }
 
   if (typeof window !== "undefined" && window.location?.origin) {

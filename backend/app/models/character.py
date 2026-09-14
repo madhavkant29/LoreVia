@@ -19,18 +19,32 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.generation import GenerationScopedMixin
 
 
-class Character(Base):
+class Character(GenerationScopedMixin, Base):
     __tablename__ = "characters"
     __table_args__ = (
         Index(
-            "uq_characters_book_normalized_active",
+            "uq_characters_book_generation_normalized_active",
+            "book_id",
+            "generation_id",
+            "normalized_name",
+            unique=True,
+            postgresql_where=text(
+                "generation_id is not null and normalized_name is not null "
+                "and merged_into_character_id is null "
+                "and visibility_state in ('visible', 'quarantined') "
+                "and approval_state not in ('rejected')"
+            ),
+        ),
+        Index(
+            "uq_characters_book_normalized_curated",
             "book_id",
             "normalized_name",
             unique=True,
             postgresql_where=text(
-                "normalized_name is not null "
+                "generation_id is null and normalized_name is not null "
                 "and merged_into_character_id is null "
                 "and visibility_state in ('visible', 'quarantined') "
                 "and approval_state not in ('rejected')"
@@ -187,7 +201,7 @@ class Character(Base):
     )
 
 
-class CharacterState(Base):
+class CharacterState(GenerationScopedMixin, Base):
     """Spoiler-free snapshot at a given chapter."""
 
     __tablename__ = "character_states"
@@ -212,10 +226,20 @@ class CharacterState(Base):
     character = relationship("Character", back_populates="states")
 
 
-class CharacterVoiceProfile(Base):
+class CharacterVoiceProfile(GenerationScopedMixin, Base):
     __tablename__ = "character_voice_profiles"
     __table_args__ = (
-        UniqueConstraint("character_id", name="uq_character_voice_profiles_character_id"),
+        UniqueConstraint(
+            "character_id",
+            "generation_id",
+            name="uq_character_voice_profiles_character_generation",
+        ),
+        Index(
+            "uq_character_voice_profiles_unversioned_character",
+            "character_id",
+            unique=True,
+            postgresql_where=text("generation_id is null"),
+        ),
     )
     __mapper_args__ = {"confirm_deleted_rows": False}
 
@@ -253,7 +277,7 @@ class CharacterVoiceProfile(Base):
     character = relationship("Character", back_populates="voice_profile")
 
 
-class CharacterCandidate(Base):
+class CharacterCandidate(GenerationScopedMixin, Base):
     __tablename__ = "character_candidates"
     __table_args__ = (
         Index("ix_character_candidates_book_status", "book_id", "status"),
@@ -317,7 +341,7 @@ class CharacterCandidate(Base):
     matched_character = relationship("Character", back_populates="matched_candidates")
 
 
-class CharacterMention(Base):
+class CharacterMention(GenerationScopedMixin, Base):
     __tablename__ = "character_mentions"
     __table_args__ = (
         Index("ix_character_mentions_book_chapter", "book_id", "chapter_number"),
@@ -359,14 +383,23 @@ class CharacterMention(Base):
     matched_character = relationship("Character", back_populates="mention_records")
 
 
-class CharacterAlias(Base):
+class CharacterAlias(GenerationScopedMixin, Base):
     __tablename__ = "character_aliases"
     __table_args__ = (
         UniqueConstraint(
             "book_id",
             "character_id",
+            "generation_id",
             "normalized_alias",
-            name="uq_character_aliases_book_char_alias",
+            name="uq_character_aliases_book_char_generation_alias",
+        ),
+        Index(
+            "uq_character_aliases_unversioned_book_char_alias",
+            "book_id",
+            "character_id",
+            "normalized_alias",
+            unique=True,
+            postgresql_where=text("generation_id is null"),
         ),
         Index("ix_character_aliases_book_norm_alias", "book_id", "normalized_alias"),
     )
@@ -529,14 +562,15 @@ class CharacterDecisionEvent(Base):
     character = relationship("Character", back_populates="decision_events")
 
 
-class CharacterDuplicateSuggestion(Base):
+class CharacterDuplicateSuggestion(GenerationScopedMixin, Base):
     __tablename__ = "character_duplicate_suggestions"
     __table_args__ = (
         UniqueConstraint(
             "book_id",
+            "generation_id",
             "primary_character_id",
             "secondary_character_id",
-            name="uq_character_duplicate_suggestions_pair",
+            name="uq_character_duplicate_suggestions_generation_pair",
         ),
         Index("ix_character_duplicate_suggestions_book_status", "book_id", "status"),
     )
@@ -587,7 +621,7 @@ class CharacterDuplicateSuggestion(Base):
     )
 
 
-class CharacterRelationshipCandidate(Base):
+class CharacterRelationshipCandidate(GenerationScopedMixin, Base):
     __tablename__ = "character_relationship_candidates"
     __table_args__ = (
         Index("ix_character_relationship_candidates_book_status", "book_id", "status"),

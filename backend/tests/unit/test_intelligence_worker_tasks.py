@@ -5,6 +5,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from app.workers.tasks import embedding_tasks, intelligence_tasks
 
@@ -39,6 +40,15 @@ class _Db:
 
     async def commit(self):
         self.commits += 1
+
+
+class _DbByModel(_Db):
+    def __init__(self, values_by_model_name):
+        super().__init__()
+        self.values_by_model_name = values_by_model_name
+
+    async def get(self, model, requested_id):
+        return self.values_by_model_name.get(model.__name__)
 
 
 def test_generate_wiki_task_loads_book_generates_and_commits(monkeypatch):
@@ -103,8 +113,9 @@ def test_generate_advisor_reply_task_marks_running_and_complete(monkeypatch):
     calls = []
     payload = {"reply": "Use the gate earlier."}
 
-    async def mark_running(session, *, job_id):
+    async def mark_running(session, *, job_id, execution_id):
         calls.append(("running", session, job_id))
+        return SimpleNamespace(scope="book")
 
     async def mark_failed(session, **kwargs):
         calls.append(("failed", kwargs))
@@ -140,13 +151,49 @@ def test_generate_advisor_reply_task_marks_running_and_complete(monkeypatch):
     assert calls[2][1]["result_payload"] == payload
 
 
+def test_generate_advisor_reply_task_skips_work_when_execution_claim_is_held(monkeypatch):
+    job_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    db = _Db(value=SimpleNamespace(id=book_id, user_id=user_id))
+
+    async def deny_claim(*_args, **_kwargs):
+        return None
+
+    async def should_not_build(**_kwargs):
+        raise AssertionError("a duplicate worker must not call the AI provider")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr(
+        "app.services.advisor_jobs_service.mark_advisor_job_running",
+        deny_claim,
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_chat_utils.build_advisor_reply_payload",
+        should_not_build,
+    )
+
+    assert (
+        intelligence_tasks.generate_advisor_reply_task.run(
+            job_id=str(job_id),
+            book_id=str(book_id),
+            user_id=str(user_id),
+            messages=[{"role": "user", "content": "Question"}],
+            total_chapters=1,
+        )
+        is None
+    )
+
+
 def test_generate_advisor_reply_task_marks_failed_for_inaccessible_book(monkeypatch):
     job_id = uuid.uuid4()
     db = _Db(value=SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4()))
     calls = []
 
-    async def mark_running(session, *, job_id):
+    async def mark_running(session, *, job_id, execution_id):
         calls.append(("running", job_id))
+        return SimpleNamespace(scope="book")
 
     async def mark_failed(session, **kwargs):
         calls.append(("failed", kwargs))
@@ -177,7 +224,7 @@ def test_generate_advisor_reply_task_does_not_replay_after_provider_work_starts(
     calls = []
 
     async def mark_running(*_args, **_kwargs):
-        return None
+        return SimpleNamespace(scope="book")
 
     async def mark_failed(*_args, **kwargs):
         calls.append(("failed", kwargs))
@@ -207,6 +254,54 @@ def test_generate_advisor_reply_task_does_not_replay_after_provider_work_starts(
 
     assert calls[-1][0] == "failed"
     assert calls[-1][1]["error_code"] == "advisor_generation_failed"
+
+
+def test_generate_advisor_reply_task_surfaces_budget_limit_without_task_retry(monkeypatch):
+    job_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    db = _Db(value=SimpleNamespace(id=book_id, user_id=user_id))
+    failed = []
+
+    async def noop(*_args, **_kwargs):
+        return SimpleNamespace(scope="book")
+
+    async def mark_failed(*_args, **kwargs):
+        failed.append(kwargs)
+
+    async def build_payload(**_kwargs):
+        raise HTTPException(
+            429,
+            detail={
+                "kind": "llm_budget",
+                "detail": "AI capacity resets on September 1.",
+                "next_resume_at": "2026-09-01T00:00:00+00:00",
+            },
+        )
+
+    def retry(**_kwargs):
+        raise AssertionError("budget limits must not trigger a task retry")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_running", noop)
+    monkeypatch.setattr("app.services.advisor_jobs_service.mark_advisor_job_failed", mark_failed)
+    monkeypatch.setattr("app.utils.advisor_chat_utils.build_advisor_reply_payload", build_payload)
+    monkeypatch.setattr(intelligence_tasks.generate_advisor_reply_task, "retry", retry)
+    intelligence_tasks.generate_advisor_reply_task.request.retries = 0
+
+    assert (
+        intelligence_tasks.generate_advisor_reply_task.run(
+            job_id=str(job_id),
+            book_id=str(book_id),
+            user_id=str(user_id),
+            messages=[{"role": "user", "content": "Question"}],
+            total_chapters=1,
+        )
+        is None
+    )
+    assert failed[-1]["error_code"] == "llm_budget"
+    assert failed[-1]["error_detail"] == "AI capacity resets on September 1."
 
 
 def test_generate_advisor_reply_task_retries_failure_before_paid_work(monkeypatch):
@@ -258,8 +353,9 @@ def test_generate_series_advisor_reply_task_marks_complete(monkeypatch):
     db = _Db(value=series)
     calls = []
 
-    async def mark_running(session, *, job_id):
+    async def mark_running(session, *, job_id, execution_id):
         calls.append(("running", job_id))
+        return SimpleNamespace(scope="series")
 
     async def mark_failed(session, **kwargs):
         calls.append(("failed", kwargs))
@@ -298,7 +394,7 @@ def test_generate_series_advisor_reply_task_does_not_replay_paid_work(monkeypatc
     failed = []
 
     async def noop(*_args, **_kwargs):
-        return None
+        return SimpleNamespace(scope="series")
 
     async def mark_failed(*_args, **kwargs):
         failed.append(kwargs)
@@ -347,8 +443,9 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
         }
     }
 
-    async def mark_running(session, *, job_id):
+    async def mark_running(session, *, job_id, execution_id):
         calls.append(("running", job_id))
+        return SimpleNamespace()
 
     async def mark_failed(session, **kwargs):
         calls.append(("failed", kwargs))
@@ -359,7 +456,10 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
     async def build_payload(**kwargs):
         return dict(payload)
 
-    async def set_cache(book_id, cache_key, payload):
+    async def cache_version(*_args, **_kwargs):
+        return 0
+
+    async def set_cache(book_id, cache_key, payload, **_kwargs):
         calls.append(("cache", book_id, cache_key, payload["cached"]))
 
     monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
@@ -383,6 +483,7 @@ def test_generate_advisor_suggestions_task_builds_cache_key_and_payload(monkeypa
         "app.utils.advisor_utils.make_advisor_suggestions_cache_key",
         lambda **kwargs: f"scan:{kwargs['total_chapters']}:{kwargs['character_count']}",
     )
+    monkeypatch.setattr("app.core.redis.get_book_cache_version", cache_version)
     monkeypatch.setattr("app.core.redis.set_suggestion_scan_cache", set_cache)
 
     result = intelligence_tasks.generate_advisor_suggestions_task.run(
@@ -406,7 +507,7 @@ def test_generate_advisor_suggestions_task_does_not_replay_paid_scan(monkeypatch
     failed = []
 
     async def noop(*_args, **_kwargs):
-        return None
+        return SimpleNamespace()
 
     async def mark_failed(*_args, **kwargs):
         failed.append(kwargs)
@@ -443,10 +544,63 @@ def test_generate_advisor_suggestions_task_does_not_replay_paid_scan(monkeypatch
     assert failed[-1]["error_code"] == "advisor_suggestions_failed"
 
 
+def test_generate_advisor_suggestions_task_surfaces_budget_limit_without_retry(monkeypatch):
+    job_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    db = _Db(value=SimpleNamespace(id=book_id, user_id=user_id))
+    failed = []
+
+    async def noop(*_args, **_kwargs):
+        return SimpleNamespace()
+
+    async def mark_failed(*_args, **kwargs):
+        failed.append(kwargs)
+
+    async def build_payload(**_kwargs):
+        raise HTTPException(
+            429,
+            detail={"kind": "llm_budget", "detail": "Monthly AI capacity is exhausted."},
+        )
+
+    def retry(**_kwargs):
+        raise AssertionError("budget limits must not trigger a task retry")
+
+    monkeypatch.setattr(intelligence_tasks, "run_worker_coro", _run_coro)
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _SessionFactory(db))
+    monkeypatch.setattr(
+        "app.services.advisor_suggestion_jobs_service.mark_advisor_suggestion_job_running", noop
+    )
+    monkeypatch.setattr(
+        "app.services.advisor_suggestion_jobs_service.mark_advisor_suggestion_job_failed",
+        mark_failed,
+    )
+    monkeypatch.setattr(
+        "app.utils.advisor_scan_utils.build_advisor_suggestions_payload", build_payload
+    )
+    monkeypatch.setattr(intelligence_tasks.generate_advisor_suggestions_task, "retry", retry)
+    intelligence_tasks.generate_advisor_suggestions_task.request.retries = 0
+
+    assert (
+        intelligence_tasks.generate_advisor_suggestions_task.run(
+            job_id=str(job_id),
+            book_id=str(book_id),
+            user_id=str(user_id),
+            total_chapters=12,
+        )
+        is None
+    )
+    assert failed[-1]["error_code"] == "llm_budget"
+    assert failed[-1]["error_detail"] == "Monthly AI capacity is exhausted."
+
+
 def test_update_character_embedding_task_filters_low_confidence_traits(monkeypatch):
     character_id = uuid.uuid4()
+    book_id = uuid.uuid4()
+    user_id = uuid.uuid4()
     character = SimpleNamespace(
         id=character_id,
+        book_id=book_id,
         name="Mira",
         trait_state={
             "eyes": {"value": "green", "confidence": 0.8},
@@ -454,11 +608,12 @@ def test_update_character_embedding_task_filters_low_confidence_traits(monkeypat
             "note": "ignored",
         },
     )
-    db = _Db(value=character)
+    book = SimpleNamespace(id=book_id, user_id=user_id)
+    db = _DbByModel({"Character": character, "Book": book})
     embedded = []
 
-    async def embed_character(name, traits):
-        embedded.append((name, traits))
+    async def embed_character(name, traits, **kwargs):
+        embedded.append((name, traits, kwargs))
         return [0.1, 0.2]
 
     monkeypatch.setattr(embedding_tasks, "run_worker_coro", _run_coro)
@@ -466,19 +621,30 @@ def test_update_character_embedding_task_filters_low_confidence_traits(monkeypat
     monkeypatch.setattr("app.engine.embeddings.embedder.embed_character", embed_character)
 
     assert embedding_tasks.update_character_embedding_task.run(str(character_id)) is None
-    assert embedded == [("Mira", {"eyes": {"value": "green", "confidence": 0.8}})]
+    assert embedded == [
+        (
+            "Mira",
+            {"eyes": {"value": "green", "confidence": 0.8}},
+            {"user_id": user_id, "book_id": book_id},
+        )
+    ]
     assert len(db.executed) == 1
     assert db.commits == 1
 
 
 def test_update_character_embedding_task_does_not_replay_paid_embedding(monkeypatch):
     character_id = uuid.uuid4()
-    db = _Db(
-        value=SimpleNamespace(
-            id=character_id,
-            name="Mira",
-            trait_state={},
-        )
+    book_id = uuid.uuid4()
+    db = _DbByModel(
+        {
+            "Character": SimpleNamespace(
+                id=character_id,
+                book_id=book_id,
+                name="Mira",
+                trait_state={},
+            ),
+            "Book": SimpleNamespace(id=book_id, user_id=uuid.uuid4()),
+        }
     )
 
     async def embed_character(*_args, **_kwargs):

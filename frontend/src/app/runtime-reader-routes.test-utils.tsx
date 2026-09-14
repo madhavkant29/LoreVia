@@ -2,7 +2,7 @@
 
 import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, vi } from "vitest"
 
 const routerMock = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn() }))
 const searchParamsState = vi.hoisted(() => ({ value: new URLSearchParams() }))
@@ -15,6 +15,7 @@ const booksApiMock = vi.hoisted(() => ({
   getBookNotes: vi.fn(),
   getVaultGraph: vi.fn(),
   list: vi.fn(),
+  listSelector: vi.fn(),
   listNotes: vi.fn(),
   listQuotes: vi.fn(),
   listSeries: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
   bookCacheKey: (...parts: string[]) => parts.join(":"),
   booksListCacheKey: () => "books:list",
+  booksSelectorCacheKey: () => "books:selector",
   booksNotesCacheKey: () => "dashboard:notes",
   booksQuotesCacheKey: () => "dashboard:quotes",
   booksSeriesCacheKey: () => "dashboard:series",
@@ -222,6 +224,10 @@ beforeEach(() => {
     { id: "book-1", title: "The Lantern Gate", mode: "author", work_type: "novel", total_chapters: 3 },
     { id: "book-2", title: "The Ash Door", mode: "author", work_type: "novel", total_chapters: 4 },
   ])
+  booksApiMock.listSelector.mockResolvedValue([
+    { id: "book-1", title: "The Lantern Gate", mode: "author", work_type: "novel", total_chapters: 3 },
+    { id: "book-2", title: "The Ash Door", mode: "author", work_type: "novel", total_chapters: 4 },
+  ])
   booksApiMock.listNotes.mockResolvedValue([])
   booksApiMock.listQuotes.mockResolvedValue([])
   booksApiMock.getBookNotes.mockResolvedValue([])
@@ -292,7 +298,7 @@ beforeEach(() => {
         isLoading: false,
       }
     }
-    if (key === "books:list") {
+    if (key === "books:list" || key === "books:selector") {
       return {
         data: [
           { id: "book-1", title: "The Lantern Gate", mode: "author", work_type: "novel", total_chapters: 3 },

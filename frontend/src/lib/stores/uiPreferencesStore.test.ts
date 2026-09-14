@@ -102,6 +102,25 @@ describe("ui preferences store isolation and replay", () => {
     expect(useUiPreferencesStore.getState().bookPreferences["draft--11111111-1111-4111-8111-111111111111"]).toBeUndefined()
   })
 
+  it("falls back to focused book preferences when uncached preference hydration fails", async () => {
+    const global = deferred<ReturnType<typeof defaultUserUiPreference>>()
+    api.getGlobal.mockReturnValueOnce(global.promise)
+    api.getBook.mockRejectedValueOnce(new Error("offline"))
+
+    const userHydration = useUiPreferencesStore.getState().hydrateForUser("user-a")
+    await useUiPreferencesStore.getState().hydrateBook("book-1")
+
+    expect(useUiPreferencesStore.getState().bookPreferences["book-1"]?.book_preset).toBe("draft")
+
+    global.reject(new Error("offline"))
+    await userHydration
+
+    expect(useUiPreferencesStore.getState().preferences.complexity_mode).toBe("focused")
+    expect(useUiPreferencesStore.getState().bookPreferences["book-1"]?.book_preset).toBe("draft")
+    expect(useUiPreferencesStore.getState().syncState).toBe("api_unavailable")
+    expect(useUiPreferencesStore.getState().syncMessage).toBe("Using the focused layout until preferences load.")
+  })
+
   it("retains failed offline operations and clears them only after retry succeeds", async () => {
     api.getGlobal.mockResolvedValue(defaultUserUiPreference("standard"))
     api.patchGlobal.mockRejectedValueOnce(new Error("offline"))

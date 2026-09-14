@@ -34,6 +34,13 @@ describe("pricing catalog", () => {
     expect(paidTiers.every((tier) => pricingTierGuestCtaLabel(tier) === "Create account for free trial")).toBe(true)
   })
 
+  it("advertises the Architect plan's 2.5x daily AI limits", () => {
+    const architectTier = pricingTiers.find((tier) => tier.name === "Architect")
+
+    expect(architectTier?.bullets).toContain("Up to 75 Story Advisor turns per day")
+    expect(architectTier?.bullets).toContain("Up to 75 continuity and editorial scans per day; AI-intensive features share monthly capacity")
+  })
+
   it("returns cadence-aware prices and suffixes", () => {
     const authorTier = pricingTiers.find((tier) => tier.name === "Author")
     const architectTier = pricingTiers.find((tier) => tier.name === "Architect")

@@ -78,6 +78,7 @@ vi.mock("next/dynamic", () => ({
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
     list: vi.fn(),
+    listPage: vi.fn(),
     archive: (...args: unknown[]) => mockArchive(...args),
     hide: (...args: unknown[]) => mockHide(...args),
     publishPublicly: (...args: unknown[]) => mockPublishPublicly(...args),
@@ -94,12 +95,12 @@ vi.mock("@/components/ui/ConfirmDialog", () => ({
 
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (key: string) => key,
-  booksListCacheKey: () => "books-list",
+  booksPageCacheKey: () => "books-page",
 }))
 
 vi.mock("@/lib/stores/authStore", () => ({
-  useAuthStore: (selector?: ((s: { user: { id: string }; hydrated: boolean }) => unknown) | undefined) => {
-    const state = { user: { id: "test-user" }, hydrated: true }
+  useAuthStore: (selector?: ((s: { user: { id: string; tier: string; trial_active: boolean }; hydrated: boolean }) => unknown) | undefined) => {
+    const state = { user: { id: "test-user", tier: "author", trial_active: false }, hydrated: true }
     return typeof selector === "function" ? selector(state) : state
   },
 }))
@@ -281,6 +282,23 @@ describe("LibraryPage error state", () => {
 })
 
 describe("LibraryPage shared-book filtering", () => {
+  it("shows the first-manuscript hero for eligible zero-project users and opens author upload", async () => {
+    mockIsError = false
+    mockBooks = []
+
+    render()
+    await flushUi()
+
+    expect(container?.textContent).toContain("Upload your manuscript for a first read")
+    expect(container?.textContent).toContain("LoreVia begins with what is working")
+    expect(container?.textContent).not.toContain("Total projects")
+
+    clickExactButton("Upload manuscript")
+
+    expect(container?.textContent).toContain("Upload modal inline")
+    expect(container?.textContent).toContain("Mode author")
+  })
+
   it("hides reader-collaborator beta shares from the library list", () => {
     mockIsError = false
     mockBooks = [

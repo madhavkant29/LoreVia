@@ -1,5 +1,5 @@
 """
-Character utility helpers â€” shared across route modules.
+Character utility helpers — shared across route modules.
 Covers display filtering, status derivation, relationship summaries,
 and text-sanitization helpers used on character data.
 """
@@ -303,7 +303,7 @@ def is_cast_visible_character(char: Character) -> bool:
     }
 
 
-# â”€â”€â”€ Display filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Display filter ───────────────────────────────────────────────────────────
 
 
 def is_displayable_character(char: Character) -> bool:
@@ -319,7 +319,7 @@ def is_displayable_character(char: Character) -> bool:
     return True
 
 
-# â”€â”€â”€ Status derivation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Status derivation ────────────────────────────────────────────────────────
 
 
 def character_status(char: Character) -> str:
@@ -348,4 +348,4 @@ def character_status(char: Character) -> str:
     return "deceased" if any(marker in text for marker in deceased_markers) else "alive"
 
 
-# â”€â”€â”€ Relationship summary helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Relationship summary helpers ─────────────────────────────────────────────

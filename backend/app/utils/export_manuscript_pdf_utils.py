@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, BinaryIO, cast
 
 from app.utils.books.manuscript import clean_manuscript_html
 from app.utils.export_common_utils import (
@@ -130,7 +130,8 @@ def manuscript_pdf_compiled(
     font_family: str | None = None,
     include_toc: bool = False,
     index_format: str = "arabic",
-) -> bytes:
+    output: BinaryIO | None = None,
+) -> bytes | None:
     from io import BytesIO
 
     from reportlab.lib.pagesizes import A4, A5, LETTER
@@ -148,7 +149,7 @@ def manuscript_pdf_compiled(
     left_margin, right_margin, top_margin, bottom_margin = cast(
         tuple[float, float, float, float], export_preset["pdf_margins"]
     )
-    buffer = BytesIO()
+    buffer = output or BytesIO()
 
     class ManuscriptPdfTemplate(SimpleDocTemplate):
         def afterFlowable(self, flowable) -> None:
@@ -327,4 +328,6 @@ def manuscript_pdf_compiled(
         doc.multiBuild(story, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages)
     else:
         doc.build(story, onFirstPage=_draw_first_page, onLaterPages=_draw_later_pages)
-    return buffer.getvalue()
+    if output is not None:
+        return None
+    return cast(Any, buffer).getvalue()

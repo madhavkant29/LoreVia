@@ -24,7 +24,7 @@ export function PublicContextChrome() {
           </Link>
           <Link href="/public/forum" className="inline-flex min-h-11 items-center gap-2 px-3 text-sm font-semibold text-[rgb(var(--muted-foreground))] hover:text-[rgb(var(--foreground))]">
             <MessageCircle className="h-4 w-4" aria-hidden="true" />
-            Forum
+            Book discussions
           </Link>
         </div>
         <button

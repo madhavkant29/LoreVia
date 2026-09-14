@@ -32,7 +32,6 @@ interface Props {
 }
 
 export function ChapterText({
-  bookId,
   chapterNum,
   chapterTitle,
   totalChapters,

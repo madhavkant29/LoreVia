@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,7 +60,7 @@ async def retrieve_series_continuity_passages(
     similarity_threshold: float | None = None,
     candidate_limit: int | None = None,
     return_limit: int | None = None,
-    user_id: uuid.UUID | None = None,
+    user_id: uuid.UUID,
     book_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
     if not prior_book_ids:
@@ -88,24 +88,25 @@ async def retrieve_series_continuity_passages(
         if return_limit is None
         else int(return_limit)
     )
-    prior_book_id_strs = ", ".join(f"'{bid}'" for bid in prior_book_ids)
+    retrieval_statement = text("""
+        SELECT bc.text, ch.number AS chapter_num, ch.title AS chapter_title,
+               b.title AS book_title,
+               1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
+        FROM book_chunks bc
+        JOIN chapters ch ON ch.id = bc.chapter_id
+        JOIN books b ON b.id = bc.book_id
+        WHERE bc.book_id IN :prior_book_ids
+          AND bc.embedding IS NOT NULL
+          AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :threshold
+        ORDER BY relevance DESC
+        LIMIT :lim
+    """).bindparams(bindparam("prior_book_ids", expanding=True))
     try:
         rows = await db.execute(
-            text(f"""
-                SELECT bc.text, ch.number AS chapter_num, ch.title AS chapter_title,
-                       b.title AS book_title,
-                       1 - (bc.embedding <=> CAST(:emb AS vector)) AS relevance
-                FROM book_chunks bc
-                JOIN chapters ch ON ch.id = bc.chapter_id
-                JOIN books b ON b.id = bc.book_id
-                WHERE bc.book_id IN ({prior_book_id_strs})
-                  AND bc.embedding IS NOT NULL
-                  AND 1 - (bc.embedding <=> CAST(:emb AS vector)) > :threshold
-                ORDER BY relevance DESC
-                LIMIT :lim
-            """),
+            retrieval_statement,
             {
                 "emb": str(query_emb),
+                "prior_book_ids": prior_book_ids,
                 "threshold": threshold,
                 "lim": retrieval_limit,
             },

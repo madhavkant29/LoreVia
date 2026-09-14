@@ -12,6 +12,15 @@ def test_worker_arguments_use_role_specific_config(monkeypatch):
     assert "extraction,extraction_priority" in arguments
 
 
+def test_maintenance_worker_consumes_only_the_maintenance_queue(monkeypatch):
+    monkeypatch.setattr(settings, "MAINTENANCE_WORKER_CONCURRENCY", 1)
+
+    arguments = worker_arguments("maintenance")
+
+    assert arguments[-1] == "1"
+    assert arguments[arguments.index("--queues") + 1] == "maintenance"
+
+
 def test_worker_arguments_reject_unknown_role():
     with pytest.raises(ValueError, match="Unknown worker role"):
         worker_arguments("unknown")

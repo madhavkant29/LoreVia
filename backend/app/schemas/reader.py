@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,29 @@ class PlotThreadOut(BaseModel):
     risk: str | None = None
     suggested_action: str | None = None
     tags: list[str] = Field(default_factory=list)
+
+
+class PlotThreadListItemOut(BaseModel):
+    """Compact plot-thread card for cursor pages."""
+
+    id: str
+    title: str
+    type: str | None = None
+    status: str
+    description: str | None = None
+    introduced_at: int | None = None
+    resolved_at: int | None = None
+    first_mentioned: int | None = None
+    last_mentioned: int | None = None
+    mention_count: int = 0
+    importance: int
+    tags: list[str] = Field(default_factory=list)
+
+
+class PlotThreadPageOut(BaseModel):
+    items: list[PlotThreadListItemOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class UpdatePlotThreadBody(BaseModel):
@@ -139,3 +162,30 @@ class SummaryCollectionItemOut(BaseModel):
 class SummaryCollectionResponseOut(BaseModel):
     read_upto: int
     summaries: list[SummaryCollectionItemOut] = Field(default_factory=list)
+
+
+class ReaderEventOut(BaseModel):
+    id: str
+    type: Literal["major", "character"]
+    chapter_number: int
+    chapter_title: str | None = None
+    event_title: str
+    description: str = ""
+    importance: int | None = None
+    involved_characters: list[str] | None = None
+    involved_character_names: list[str] | None = None
+    event_type: str | None = None
+    character_id: str | None = None
+    character_name: str | None = None
+    impact_score: int | None = None
+    role: str | None = None
+    accomplishments: list[str] = Field(default_factory=list)
+    growth_direction: str | None = None
+    growth_magnitude: int | None = None
+    is_major: bool | None = None
+
+
+class ReaderEventPageOut(BaseModel):
+    items: list[ReaderEventOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False

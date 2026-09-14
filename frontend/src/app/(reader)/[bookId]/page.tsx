@@ -15,7 +15,7 @@ import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
 import { DashboardSkeleton, SidebarSkeleton } from "@/components/ui/Skeleton"
 import { VisibilityBadge } from "@/components/ui/VisibilityBadge"
-import { capture, captureTiming } from "@/lib/analytics/posthog"
+import { captureTiming } from "@/lib/analytics/posthog"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey, booksQuotesCacheKey, booksStatsCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
@@ -24,8 +24,7 @@ import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookRouteSegment, normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
-import type { Book, BookOverviewPayload, GoalCalendarItem, PreWritingCheck, ReaderBootstrapPayload, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
-import type { ReadingProgress } from "@/types/reader"
+import type { Book, BookOverviewPayload, GoalCalendarItem, ReaderBootstrapPayload, UserStats, WriterWorkspace } from "@/types/book"
 import type { RecentActivityItem } from "@/types/ux"
 
 const AuthorWorkspaceDashboard = dynamic(
@@ -112,19 +111,6 @@ function getProcessingSummary(book: Book | null) {
   ].filter(Boolean)
 
   return parts.length > 0 ? parts.join(" / ") : null
-}
-
-function estimateWordCount(book: Book | null, progress: ReadingProgress | null, targetWords: number) {
-  if (typeof book?.total_tokens === "number" && book.total_tokens > 0) {
-    return Math.round(book.total_tokens * 0.75)
-  }
-
-  const percent = progress?.percent_complete ?? book?.progress_pct
-  if (typeof percent === "number" && percent > 0) {
-    return Math.round(targetWords * (percent / 100))
-  }
-
-  return null
 }
 
 function formatDateKey(date: Date) {
@@ -219,7 +205,6 @@ export default function BookOverviewPage() {
   }, [overviewQuery.isError, router])
 
   const resolvedBookMode = overviewQuery.data?.book.workspace_shell ?? overviewQuery.data?.book.mode ?? bookMode
-  const resolvedCollaborationRole = overviewQuery.data?.book.collaboration_role ?? null
   const resolvedCollaborationPermissions = overviewQuery.data?.book.collaboration_permissions ?? null
   const resolvedCanSwitchWorkspaceMode = overviewQuery.data?.book.can_switch_workspace_mode ?? true
   const hasOwnAuthorAccess = canUseAuthorFeatures(userTier)
@@ -243,8 +228,8 @@ export default function BookOverviewPage() {
     enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
   const charactersQuery = useQuery({
-    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
-    queryFn: () => booksApi.getCharacters(bookId),
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters:count")),
+    queryFn: () => booksApi.getCharacters(bookId, { fields: ["id"] }),
     staleTime: 45_000,
     enabled: secondaryDataEnabled && resolvedBookMode === "author" && canUsePaidAuthorTools,
   })
@@ -416,15 +401,20 @@ export default function BookOverviewPage() {
   const unitPrefix = storyUnitPrefix(book?.work_type)
   const chapters = chapterList?.chapters ?? []
   const chapterCount = chapters.length || book?.total_chapters || null
-  const targetWords = Math.max(1, writerWorkspace?.word_count_goals.book_target ?? 100000)
-  const currentWords = typeof book?.total_words === "number" && book.total_words > 0 ? book.total_words : estimateWordCount(book, progress, targetWords)
+  const configuredTargetWords = writerWorkspace?.word_count_goals.book_target
+  const currentWords = typeof book?.total_words === "number" && book.total_words >= 0 ? book.total_words : null
+  const targetWords = typeof configuredTargetWords === "number" && configuredTargetWords > 0 ? configuredTargetWords : null
   const dailyTarget = Math.max(1, user?.daily_word_goal ?? 1000)
   const dailyWords = Math.max(0, user?.today_word_count ?? 0)
   const loginStreakDays = Math.max(0, user?.login_streak_days ?? 0)
   const weeklyLoginActivity = getCurrentWeekActivity(user?.login_activity_dates ?? [])
   const continuityIssueCount = chapterReports.reduce((sum, report) => sum + report.continuity_flags.length, 0)
   const worldGapCount = preWritingCheck?.alerts.length ?? 0
-  const timelineIssueCount = Math.max(0, chaptersLeft > 0 ? Math.min(3, Math.ceil(chaptersLeft / 8)) : 0)
+  const worldItemCount = Math.max(0, overviewQuery.data?.world_stats?.total_items ?? 0)
+  const timelineIssueCount = (revisionIntelligence?.priority_findings ?? []).filter((finding) => {
+    if (finding.is_stale || ["fixed", "ignored"].includes(finding.status)) return false
+    return /timeline|temporal|chronolog|sequence|date|time/.test(finding.category.toLowerCase())
+  }).length
   const greetingName = authHydrated ? user?.username?.trim() || "there" : "there"
   const overviewActivityItems = useMemo<RecentActivityItem[]>(() => {
     const items: RecentActivityItem[] = []
@@ -688,9 +678,11 @@ export default function BookOverviewPage() {
               bookId={bookId}
               bookCreatedAt={book?.created_at}
               bookTitle={book?.title ?? "your manuscript"}
+              bookWorkType={book?.work_type}
               chapterCount={chapterCount ?? 0}
               isDark={isDark}
               revision={revisionIntelligence}
+              enableFirstImpression={book?.access_class === "owner" && ["novel", "screenplay"].includes(book?.work_type ?? "novel")}
               onNavigate={navigateWithMemory}
               onRevisionChange={(nextRevision) => {
                 queryClient.setQueryData(asQueryKey(bookCacheKey(bookId, "revision-intelligence")), nextRevision)
@@ -722,7 +714,7 @@ export default function BookOverviewPage() {
               processingSummary={processingSummary}
               chapterCount={chapterCount}
               characterCount={characters.length}
-              worldArticleCount={(writerWorkspace?.templates.length ?? 0) + (writerWorkspace?.corkboard_cards.length ?? 0)}
+              worldArticleCount={worldItemCount}
               loginStreakDays={loginStreakDays}
               weeklyLoginActivity={weeklyLoginActivity}
               dailyWords={dailyWords}
@@ -759,7 +751,7 @@ export default function BookOverviewPage() {
         <CreateFab bookId={bookId} isDark={isDark} onAddScene={openAddSceneFlow} onNavigate={navigateWithMemory} />
       ) : null}
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-card px-4 py-3 dark:border-white/10 dark:bg-background lg:hidden">
+      <nav data-lorevia-bottom-floating className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-card px-4 py-3 dark:border-white/10 dark:bg-background lg:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-6 gap-2 text-center text-3xs font-medium text-muted-foreground">
           <Link href={`/${bookId}`} className="rounded-xl px-2 py-2 text-teal-800">Overview</Link>
           <button onClick={continueReading} className="rounded-xl px-2 py-2">Read</button>

@@ -12,6 +12,7 @@ from app.core.storage import download_book
 from app.models.book import Book
 from app.models.user import User
 from app.schemas.public import PublicBookCreateOut, PublicBookShareBody
+from app.services.public_asset_service import publish_public_book_assets, revoke_public_book_assets
 from app.utils.books.writer_workspace import (
     touch_public_book_updated_at,
 )
@@ -143,7 +144,12 @@ async def submit_public_share(
             "copyright_check_available": copyright_check_available,
         },
     )
-    await db.commit()
+    if can_publish_automatically:
+        await db.commit()
+        await publish_public_book_assets(db, book=book)
+    else:
+        await revoke_public_book_assets(book.id, db=db, strict=True)
+        await db.commit()
     await invalidate_public_book_caches(book)
     return PublicBookCreateOut(
         book_id=str(book.id),

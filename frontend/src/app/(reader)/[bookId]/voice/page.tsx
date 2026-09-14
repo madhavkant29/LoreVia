@@ -61,9 +61,14 @@ export default function VoiceConsistencyPage() {
     queryKey: asQueryKey(readerCacheKey(bookId, "chapters")),
     queryFn: () => readerApi.getChapterList(bookId),
   })
-  const { data: characters = [], isLoading: charactersLoading } = useQuery<Character[]>({
-    queryKey: asQueryKey(bookCacheKey(bookId, "characters")),
-    queryFn: () => booksApi.getCharacters(bookId),
+  const { data: characters = [], isLoading: charactersLoading } = useQuery<
+    Pick<Character, "id" | "name">[]
+  >({
+    queryKey: asQueryKey(bookCacheKey(bookId, "characters:navigation")),
+    queryFn: () =>
+      booksApi.getCharacters<Pick<Character, "id" | "name">>(bookId, {
+        fields: ["id", "name"],
+      }),
   })
   const {
     data: workspaceTree = null,
@@ -252,7 +257,7 @@ export default function VoiceConsistencyPage() {
             railSize="compact"
           />
 
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-6">
             <WorkspaceFamilyHeader
               active="voice"
               bookId={bookId}
@@ -261,6 +266,9 @@ export default function VoiceConsistencyPage() {
               description="Review one chapter or passage at a time, save issues into your vault notes, and push snapshots into the scenes tree so the rest of the workspace can reuse them."
               actions={
                 <>
+                  <Link href={`/${bookId}/ai-beta-reader`} className="app-button app-button--secondary">
+                    Open AI Beta Reader
+                  </Link>
                   <Link href={`/${bookId}/notes`} className="app-button app-button--secondary">
                     Open notes
                   </Link>

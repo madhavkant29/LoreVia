@@ -1,7 +1,17 @@
 import uuid
-from typing import Any, cast
+from typing import Any
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
@@ -11,6 +21,7 @@ from app.core.database import get_db
 from app.schemas.books import (
     EmptyProjectBody,
     EmptyProjectOut,
+    ManuscriptImportJobOut,
     ManuscriptImportResult,
     ManuscriptReprocessBody,
     ManuscriptReprocessOut,
@@ -19,7 +30,13 @@ from app.schemas.books import (
 )
 from app.services.book_service import create_empty_editor_project_with_series
 from app.services.book_upload_service import create_uploaded_book_from_raw
-from app.services.manuscript_import_service import persist_manuscript_import
+from app.services.manuscript_import_job_service import (
+    cancel_manuscript_import_job,
+    get_manuscript_import_job,
+    manuscript_import_job_out,
+    retry_manuscript_import_job,
+)
+from app.services.manuscript_import_request_service import execute_manuscript_import_request
 from app.services.manuscript_reprocess_service import (
     start_manual_chapter_reprocess,
     start_manual_manuscript_reprocess,
@@ -32,24 +49,13 @@ from app.services.processing_allowance_service import (
 )
 from app.services.upload_preview_service import load_or_build_upload_preview
 from app.utils.billing_utils import require_author_access
-from app.utils.books.chapter_titles import normalize_chapter_title
 from app.utils.books.collaboration_access import (
     assert_editor_project_not_rebuilding,
 )
 from app.utils.books.continuity import as_bool
-from app.utils.books.imports import (
-    next_chapter_number,
-    normalize_imported_chapters,
-    parse_book_upload_for_ingestion,
-    parse_screenplay_upload,
-)
-from app.utils.books.manuscript import (
-    clean_manuscript_html,
-)
 from app.utils.books.normalization import (
     normalize_book_work_type,
     resolve_upload_format_and_work_type,
-    story_unit_name,
 )
 from app.utils.books.notes import (
     get_owned_book,
@@ -250,7 +256,10 @@ async def create_empty_project(
     )
 
 
-@router.post("/{book_id}/manuscript/import", response_model=ManuscriptImportResult)
+@router.post(
+    "/{book_id}/manuscript/import",
+    response_model=ManuscriptImportResult | ManuscriptImportJobOut,
+)
 async def import_manuscript_content(
     book_id: uuid.UUID,
     files: list[UploadFile] | None = File(None),
@@ -266,188 +275,93 @@ async def import_manuscript_content(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _: Any = None,
+    response: Response = None,
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
     ensure_project_writable(book)
     assert_editor_project_not_rebuilding(book)
-    if not text and not files:
-        raise HTTPException(400, "Provide text or one or more files")
-
-    import_jobs: list[dict[str, object]] = []
-    screenplay_batches: list[dict[str, object]] = []
-    normalized_title = normalize_chapter_title(title) if title is not None else None
-    next_number = await next_chapter_number(db, book.id)
-    replace_flag = as_bool(replace_existing)
-    chunk_flag = as_bool(chunk_long_documents)
-    split_flag = as_bool(split_into_chapters)
-    preserve_exact_structure = bool(book.preserve_chapter_numbers or book.preserve_source_chapters)
-    resolved_book_work_type = normalize_book_work_type(work_type, default=book.work_type or "novel")
-    resolved_import_format: str | None = None
-    first_pdf_raw_for_cover: bytes | None = None
-    from app.services.editor_project_service import (
-        auto_reprocess_enabled,
-        update_reprocess_metadata,
-    )
-
-    should_auto_reprocess = auto_reprocess_enabled(book)
-
-    cleaned_html = clean_manuscript_html(html) if html else None
-
-    total_file_size = 0
-
-    if text and text.strip():
-        if resolved_book_work_type == "screenplay":
-            screenplay_payload = await parse_screenplay_upload(
-                "inline.fountain", text.encode("utf-8")
-            )
-            new_jobs = normalize_imported_chapters(
-                screenplay_payload["chapters"],
-                chapter_number=chapter_number,
-                start_number=chapter_number or next_number,
-                replace_existing=replace_flag,
-                chunk_long_documents=False,
-                preserve_exact_structure=False,
-            )
-            import_jobs.extend(new_jobs)
-            screenplay_batches.append(
-                {
-                    "parsed_scenes": screenplay_payload["scenes"],
-                    "starting_number": min(int(cast(Any, job["number"])) for job in new_jobs),
-                    "scene_numbers": {int(cast(Any, job["number"])) for job in new_jobs},
-                }
-            )
-        else:
-            import_jobs.extend(
-                normalize_imported_chapters(
-                    [
-                        {
-                            "title": normalized_title
-                            or f"{story_unit_name(book)} {chapter_number or next_number}",
-                            "text": text,
-                            "html": cleaned_html,
-                            "number": chapter_number or next_number,
-                        }
-                    ],
-                    chapter_number=chapter_number,
-                    start_number=chapter_number or next_number,
-                    replace_existing=replace_flag,
-                    chunk_long_documents=chunk_flag,
-                    preserve_exact_structure=preserve_exact_structure,
-                )
-            )
-
     manuscript_files = [upload for upload in (files or []) if upload.filename]
-    if len(manuscript_files) > settings.MANUSCRIPT_IMPORT_MAX_FILES:
-        raise HTTPException(
-            413,
-            f"Manuscript import accepts at most {settings.MANUSCRIPT_IMPORT_MAX_FILES} files at once.",
-        )
-
     if manuscript_files:
         await enforce_manuscript_import_rate_limit(db, current_user.id)
-
-    for upload in manuscript_files:
-        if not upload.filename:
-            continue
-        raw = await _read_upload_bounded(
-            upload, settings.MANUSCRIPT_IMPORT_MAX_BYTES, "Manuscript file"
-        )
-        if not raw:
-            continue
-        total_file_size += len(raw)
-        if total_file_size > settings.MANUSCRIPT_IMPORT_MAX_TOTAL_BYTES:
-            raise HTTPException(413, "Manuscript import exceeds the maximum aggregate upload size.")
-        fmt, upload_work_type = resolve_upload_format_and_work_type(
-            upload.filename,
-            work_type if work_type is not None else book.work_type,
-        )
-        validate_document_upload_bytes(upload.filename, raw, fmt)
-        resolved_import_format = resolved_import_format or fmt
-        if fmt == "pdf" and first_pdf_raw_for_cover is None:
-            first_pdf_raw_for_cover = raw
-        parsed_payload = await parse_book_upload_for_ingestion(
-            format_name=fmt,
-            work_type=upload_work_type,
-            raw=raw,
-            preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
-            preserve_source_chapters=bool(book.preserve_source_chapters),
-        )
-        screenplay_payload = (
-            parsed_payload.get("screenplay_payload") if upload_work_type == "screenplay" else None
-        )
-        parsed = list(cast(list[dict[str, object]], parsed_payload["chapters"]))
-        if upload_work_type != "screenplay" and not split_flag:
-            merged_text = "\n\n".join(
-                str(chapter.get("text") or "").strip() for chapter in parsed if chapter.get("text")
-            )
-            merged_html_parts = [
-                str(chapter.get("html") or "").strip() for chapter in parsed if chapter.get("html")
-            ]
-            merged_images = [
-                image for chapter in parsed for image in list(chapter.get("images") or [])
-            ]
-            parsed = [
-                {
-                    "title": normalized_title
-                    or (
-                        upload.filename.rsplit(".", 1)[0]
-                        if "." in upload.filename
-                        else upload.filename
-                    ),
-                    "text": merged_text,
-                    "html": clean_manuscript_html(
-                        "\n".join(part for part in merged_html_parts if part)
-                    )
-                    if merged_html_parts
-                    else None,
-                    "images": merged_images,
-                    "number": 1,
-                }
-            ]
-        base_number = chapter_number if replace_flag and chapter_number else next_number
-        new_jobs = normalize_imported_chapters(
-            parsed,
-            chapter_number=chapter_number,
-            start_number=base_number,
-            replace_existing=replace_flag and len(parsed) == 1,
-            chunk_long_documents=False if upload_work_type == "screenplay" else chunk_flag,
-            preserve_exact_structure=preserve_exact_structure,
-        )
-        import_jobs.extend(new_jobs)
-        if upload_work_type == "screenplay":
-            screenplay_batches.append(
-                {
-                    "parsed_scenes": screenplay_payload["scenes"],
-                    "starting_number": min(int(cast(Any, job["number"])) for job in new_jobs),
-                    "scene_numbers": {int(cast(Any, job["number"])) for job in new_jobs},
-                }
-            )
-            resolved_book_work_type = "screenplay"
-        next_number = max(
-            next_number,
-            max((int(cast(Any, job["number"])) for job in import_jobs), default=next_number) + 1,
-        )
-
-    if not import_jobs:
-        raise HTTPException(400, "No importable manuscript content was found")
-
-    return await persist_manuscript_import(
+    result, accepted = await execute_manuscript_import_request(
         db,
         book=book,
         current_user=current_user,
-        import_jobs=import_jobs,
-        screenplay_batches=screenplay_batches,
-        replace_existing=replace_flag,
+        files=manuscript_files,
+        text=text,
+        html=html,
+        title=title,
+        work_type=work_type,
         chapter_number=chapter_number,
+        replace_existing=replace_existing,
         expected_content_version=expected_content_version,
-        should_auto_reprocess=should_auto_reprocess,
-        resolved_book_work_type=resolved_book_work_type,
-        resolved_import_format=resolved_import_format,
-        first_pdf_raw_for_cover=first_pdf_raw_for_cover,
-        total_file_size=total_file_size,
-        files_were_uploaded=bool(manuscript_files),
+        chunk_long_documents=chunk_long_documents,
+        split_into_chapters=split_into_chapters,
     )
+    if accepted and response is not None:
+        response.status_code = 202
+    return result
+
+
+@router.get(
+    "/{book_id}/manuscript/import/{job_id}",
+    response_model=ManuscriptImportJobOut,
+)
+async def manuscript_import_job_status(
+    book_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    await get_owned_book(db, book_id, current_user.id)
+    job = await get_manuscript_import_job(
+        db,
+        job_id=job_id,
+        book_id=book_id,
+        user_id=current_user.id,
+    )
+    return manuscript_import_job_out(job)
+
+
+@router.post(
+    "/{book_id}/manuscript/import/{job_id}/cancel",
+    response_model=ManuscriptImportJobOut,
+)
+async def cancel_queued_manuscript_import(
+    book_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    await get_owned_book(db, book_id, current_user.id)
+    job = await get_manuscript_import_job(
+        db,
+        job_id=job_id,
+        book_id=book_id,
+        user_id=current_user.id,
+    )
+    return await cancel_manuscript_import_job(db, job=job)
+
+
+@router.post(
+    "/{book_id}/manuscript/import/{job_id}/retry",
+    response_model=ManuscriptImportJobOut,
+)
+async def retry_queued_manuscript_import(
+    book_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    await get_owned_book(db, book_id, current_user.id)
+    job = await get_manuscript_import_job(
+        db,
+        job_id=job_id,
+        book_id=book_id,
+        user_id=current_user.id,
+    )
+    return await retry_manuscript_import_job(db, job=job)
 
 
 @router.post("/{book_id}/manuscript/readability", response_model=ReadabilityMetricsOut)

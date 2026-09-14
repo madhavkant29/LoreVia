@@ -6,6 +6,8 @@ import uuid
 import zipfile
 from xml.etree import ElementTree
 
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import fromstring as safe_xml_fromstring
 from fastapi import HTTPException
 
 SCRIVENER_MAX_ARCHIVE_ENTRIES = 5000
@@ -90,7 +92,7 @@ def parse_scrivener_archive(raw: bytes) -> list[dict]:
             project_member = next(
                 member for name, member in members.items() if name.lower().endswith(".scrivx")
             )
-            root = ElementTree.fromstring(archive.read(project_member))
+            root = safe_xml_fromstring(archive.read(project_member))
             draft = next(
                 (
                     item
@@ -138,7 +140,7 @@ def parse_scrivener_archive(raw: bytes) -> list[dict]:
             return chapters
     except zipfile.BadZipFile as exc:
         raise HTTPException(400, "Invalid Scrivener archive.") from exc
-    except ElementTree.ParseError as exc:
+    except (ElementTree.ParseError, DefusedXmlException) as exc:
         raise HTTPException(400, "Scrivener project metadata is invalid.") from exc
 
 

@@ -12,7 +12,11 @@ import { useManuscriptSaveActions } from "./manuscriptPage.saveActions"
 import { useManuscriptVersionActions } from "./manuscriptPage.versionActions"
 import { useManuscriptWorkspaceActions } from "./manuscriptPage.workspaceActions"
 
-type ManuscriptActionBindingsArgs = Record<string, any>
+type ManuscriptActionBindingsArgs = ReturnType<
+  (typeof import("./manuscriptPage.setup"))["useManuscriptPageSetup"]
+> & ReturnType<
+  (typeof import("./manuscriptPage.documentBindings"))["useManuscriptDocumentBindings"]
+>
 
 export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) {
   const {
@@ -36,7 +40,6 @@ export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) 
     clearDraftDirty,
     compileFormat,
     completeFindingEdit,
-    confirm,
     contentVersionByChapter,
     draftSurfaceMode,
     editNoteBody,
@@ -59,7 +62,6 @@ export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) 
     openRightPane,
     parseChapterHeading,
     pendingAnnotationJumpIdRef,
-    prefetchManuscriptChapter,
     queryClient,
     recallResults,
     refetchWorkspaceTree,
@@ -72,13 +74,11 @@ export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) 
     replaceValue,
     runAutomaticChecks,
     saveWorkspace,
-    searchParams,
     selectedChapter,
     selectionMenu,
     selectionMenuAnchorRef,
     setActiveEditorKey,
     setActiveFindIndex,
-    setActiveRightPane,
     setAddCharacterOpen,
     setAddCharacterText,
     setAnnotationActionId,
@@ -87,7 +87,6 @@ export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) 
     setAnnotationDraft,
     setAnnotationVisibility,
     setAnnotations,
-    setAutosaveState,
     setBook,
     setBookDrafts,
     setChapterTitle,
@@ -97,8 +96,6 @@ export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) 
     setCharacters,
     setCollapsedSceneGroups,
     setContentVersionByChapter,
-    setDeletingChapterNumber,
-    setDirtyDrafts,
     setDraftChapterNumber,
     setDraftSurfaceMode,
     setDraggedScene,
@@ -112,7 +109,6 @@ export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) 
     setNewCorkboardTitle,
     setNoteBody,
     setNoteBodyText,
-    setNoteScope,
     setNoteTitle,
     setNotes,
     setProcessingRetrying,
@@ -128,7 +124,6 @@ export function useManuscriptActionBindings(args: ManuscriptActionBindingsArgs) 
     setSceneDescriptionDraft,
     setSceneDropTarget,
     setSceneHtmlDraft,
-    setSceneOrderSaveState,
     setSceneTitleDraft,
     setSceneVersionDetail,
     setSceneVersionNameDraft,

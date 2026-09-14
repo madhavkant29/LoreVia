@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -12,8 +13,41 @@ PaidPlanCode = Literal[
 ]
 
 
-class CheckoutBody(BaseModel):
+class CheckoutPreviewBody(BaseModel):
     plan: PaidPlanCode
+
+
+class CheckoutBody(CheckoutPreviewBody):
+    confirmed_immediate_charge: bool = False
+    quote_token: str | None = None
+
+
+class CheckoutAbandonBody(BaseModel):
+    transaction_id: str = Field(min_length=1, max_length=100)
+
+
+class CheckoutPreviewOut(BaseModel):
+    plan: PaidPlanCode
+    display_name: str
+    billing_interval: Literal["monthly", "annual"]
+    trial_status: Literal["active", "expired"]
+    trial_active: bool
+    trial_ends_at: datetime | None = None
+    charge_today: str
+    recurring_price: str
+    confirmation_required: bool
+    confirmation_text: str | None = None
+    checkout_button_label: str
+    default_action_label: str | None = None
+    quote_token: str | None = None
+    billing_enabled: bool = True
+    message: str | None = None
+
+
+class CheckoutAbandonOut(BaseModel):
+    abandoned: bool
+    transaction_id: str
+    status: str
 
 
 class BillingConfirmationOut(BaseModel):

@@ -1,16 +1,19 @@
+import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
+from app.api.deps.feature_flags import require_cursor_page_apis_enabled
 from app.api.v1.routes.public_catalog import _public_book_payload
 from app.core.database import get_db
 from app.core.redis import (
     cache_del,
     key_public_book_detail,
     key_public_books,
+    mark_public_catalog_cache_dirty,
     mark_public_profile_cache_dirty,
 )
 from app.core.storage import download_book, get_presigned_url
@@ -20,9 +23,12 @@ from app.schemas.public import (
     PublicBookCreateOut,
     PublicBookDetailOut,
     PublicBookOut,
+    PublicBookPageOut,
     PublicBookShareBody,
     PublicChapterOut,
 )
+from app.services.public_asset_service import revoke_public_book_assets
+from app.services.public_catalog_service import list_public_books_page
 from app.services.public_publish_service import submit_public_share
 from app.utils.books.manuscript import (
     deserialize_manuscript_content,
@@ -74,6 +80,26 @@ async def list_user_shared_books(db: AsyncSession = Depends(get_db)):
         )
         for book, username in visible_rows
     ]
+
+
+@router.get(
+    "/shared-books/page",
+    response_model=PublicBookPageOut,
+    dependencies=[Depends(require_cursor_page_apis_enabled)],
+)
+async def list_user_shared_books_page(
+    limit: int = Query(default=24, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=1024),
+    db: AsyncSession = Depends(get_db),
+):
+    """Additive keyset page for approved creator-public shares."""
+    ensure_public_mode_enabled()
+    return await list_public_books_page(
+        db,
+        catalog="creator_uploads",
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @router.get("/shared-books/{book_id}", response_model=PublicBookDetailOut)
@@ -131,7 +157,7 @@ async def get_user_shared_chapter(
     if not chapter:
         raise HTTPException(404, "Chapter not found")
     stored_payload = (
-        deserialize_manuscript_content(download_book(chapter.s3_key))
+        deserialize_manuscript_content(await asyncio.to_thread(download_book, chapter.s3_key))
         if chapter.s3_key
         else {"text": None, "html": None}
     )
@@ -203,8 +229,10 @@ async def unpublish_user_shared_book(
     book.public_share_requested_at = None
     book.public_share_approved_at = None
     book.public_share_approved_by_user_id = None
+    await revoke_public_book_assets(book.id, db=db, strict=True)
     await db.commit()
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
     await cache_del(key_public_book_detail(str(book.id)))
     await mark_public_profile_cache_dirty(str(book.user_id))
     return {

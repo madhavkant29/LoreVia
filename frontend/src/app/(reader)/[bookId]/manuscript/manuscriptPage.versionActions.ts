@@ -1,6 +1,7 @@
-import type { Dispatch, SetStateAction } from "react"
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
+import { useAdaptivePolling } from "@/lib/hooks/useAdaptivePolling"
 import type {
   ChapterVersion,
   ChapterVersionDetail,
@@ -83,6 +84,40 @@ export function useManuscriptVersionActions({
   setText,
   syncLocalChapterFromServer,
 }: UseManuscriptVersionActionsArgs) {
+  const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null)
+
+  const pollRestoreStatus = useCallback(async ({ signal }: { signal: AbortSignal }) => {
+    if (!restoreVersionId) throw new Error("Missing chapter restore version")
+    const status = await booksApi.getRestoreStatus(bookId, restoreVersionId, signal)
+    if (status.restore_status === "restored" || status.restore_status === "done") {
+      setRestoreVersionId(null)
+      setRestoringVersionId(null)
+    } else if (status.restore_status === "failed") {
+      setRestoreVersionId(null)
+      setRestoringVersionId(null)
+      setStatusMessage(status.restore_error ?? "Restore failed.")
+    }
+    return status
+  }, [bookId, restoreVersionId, setRestoringVersionId, setStatusMessage])
+
+  const restorePolling = useAdaptivePolling({
+    enabled: Boolean(restoreVersionId),
+    poll: pollRestoreStatus,
+    getProgress: (status) => status.restore_status,
+    isTerminal: (status) => ["restored", "done", "failed"].includes(status.restore_status ?? ""),
+    initialDelayMs: 1_500,
+    maxDelayMs: 15_000,
+    timeoutMs: 30 * 60 * 1_000,
+    resetKey: restoreVersionId,
+  })
+
+  useEffect(() => {
+    if (!restorePolling.timedOut) return
+    setRestoreVersionId(null)
+    setRestoringVersionId(null)
+    setStatusMessage("Restore status timed out. Refresh the manuscript to check its latest state.")
+  }, [restorePolling.timedOut, setRestoringVersionId, setStatusMessage])
+
   async function createSnapshot() {
     if (selectedChapter === null) return
     try {
@@ -98,7 +133,6 @@ export function useManuscriptVersionActions({
 
   async function restoreSnapshot(versionId: string) {
     setRestoringVersionId(versionId)
-    let pollTimer: ReturnType<typeof setInterval> | null = null
     try {
       const restored = await booksApi.restoreChapterVersion(bookId, versionId)
       setSelectedChapter(restored.chapter_number)
@@ -119,24 +153,11 @@ export function useManuscriptVersionActions({
       await runAutomaticChecks(restored.chapter_number, restored.text)
       await loadWorkspaceTree()
       setStatusMessage(`Restored chapter ${restored.chapter_number} from snapshot.`)
-      pollTimer = setInterval(async () => {
-        try {
-          const status = await booksApi.getRestoreStatus(bookId, versionId)
-          if (status.restore_status === "done" || status.restore_status === "failed") {
-            if (pollTimer) clearInterval(pollTimer)
-            setRestoringVersionId(null)
-            if (status.restore_status === "failed") {
-              setStatusMessage(status.restore_error ?? "Restore failed.")
-            }
-          }
-        } catch {
-          if (pollTimer) clearInterval(pollTimer)
-          setRestoringVersionId(null)
-        }
-      }, 1500)
+      setRestoreVersionId(versionId)
     } catch {
+      setRestoreVersionId(null)
       setRestoringVersionId(null)
-      if (pollTimer) clearInterval(pollTimer)
+      setStatusMessage("Restore failed. Please try again.")
     }
   }
 

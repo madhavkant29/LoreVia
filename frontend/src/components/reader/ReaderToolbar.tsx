@@ -104,8 +104,8 @@ export const ReaderToolbar = memo(function ReaderToolbar({
                 <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-10 w-[154px] object-contain object-left" priority />
               </Link>
               <nav className="hidden items-center gap-6 lg:flex" style={{ fontFamily: "var(--reader-label)" }}>
-                <Link prefetch={false} href="/library" className={`text-base font-medium transition ${toneClass.navLink}`}>
-                  Library
+                <Link prefetch={false} href={`/${bookId}`} className={`text-base font-medium transition ${toneClass.navLink}`}>
+                  Home
                 </Link>
                 <Link prefetch={false} href="/settings" className={`text-base font-medium transition ${toneClass.navLink}`}>
                   Settings
@@ -126,7 +126,7 @@ export const ReaderToolbar = memo(function ReaderToolbar({
                 href={`/${bookId}`}
                 className={`inline-flex min-h-11 items-center rounded-md border px-4 py-2 text-base font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.primary}`}
               >
-                Back to book
+                Project overview
               </Link>
               <button
                 type="button"
@@ -188,8 +188,8 @@ export const ReaderToolbar = memo(function ReaderToolbar({
           {mobileToolsOpen ? (
             <div className={`grid gap-3 rounded-lg border p-3 md:hidden ${toneClass.card}`} style={{ fontFamily: "var(--reader-label)" }}>
               <div className="flex flex-wrap gap-2">
-                <Link prefetch={false} href="/library" className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
-                  Library
+                <Link prefetch={false} href={`/${bookId}`} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
+                  Home
                 </Link>
                 <Link prefetch={false} href="/settings" className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                   Settings
@@ -201,7 +201,7 @@ export const ReaderToolbar = memo(function ReaderToolbar({
               <div className={`grid gap-2 border-t pt-3 ${toneClass.border}`}>
                 <div className="flex flex-wrap gap-2">
                   <Link prefetch={false} href={`/${bookId}`} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.primary}`}>
-                    Back to book
+                    Project overview
                   </Link>
                   <button type="button" onClick={onSummary} className={`rounded-md border px-4 py-2 text-sm font-medium transition ${toneClass.ghost}`}>
                     Summary
@@ -227,9 +227,13 @@ export const ReaderToolbar = memo(function ReaderToolbar({
       <div className={`border-b ${toneClass.subShell}`}>
         <div className="mx-auto flex w-full max-w-[1620px] flex-col gap-3 px-4 py-3 sm:px-6 lg:px-8 xl:px-10" style={{ fontFamily: "var(--reader-label)" }}>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${theme === "dark" ? "text-[#9ba4ff]" : "text-violet-700"}`}>
-              Overview
-            </p>
+            <Link prefetch={false} href={`/${bookId}`} className={`text-3xs font-semibold uppercase tracking-[0.28em] ${toneClass.navLink}`}>
+              Home
+            </Link>
+            <span className={toneClass.subtle}>&gt;</span>
+            <Link prefetch={false} href={`/${bookId}`} className={`text-3xs font-semibold uppercase tracking-[0.28em] ${toneClass.navLink}`}>
+              Project overview
+            </Link>
             <span className={toneClass.subtle}>&gt;</span>
             <p className={`text-3xs uppercase tracking-[0.28em] ${toneClass.ui}`}>
               {breadcrumbLabel}
@@ -330,9 +334,9 @@ function SegmentGroup({
   children: ReactNode
 }) {
   return (
-    <div role="group" aria-label={label} className={`flex min-h-11 items-center gap-1 rounded-md border px-1.5 py-1 ${toneClass.card}`}>
-      <span className={`px-2 text-3xs uppercase tracking-[0.22em] ${toneClass.subtle}`}>{label}</span>
-      <div className={`mx-1 h-4 w-px ${toneClass.divider}`} />
+    <div role="group" aria-label={label} className={`flex min-h-11 min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-md border px-1.5 py-1 ${toneClass.card}`}>
+      <span className={`shrink-0 px-2 text-3xs uppercase tracking-[0.22em] ${toneClass.subtle}`}>{label}</span>
+      <div className={`mx-1 h-4 w-px shrink-0 ${toneClass.divider}`} />
       {children}
     </div>
   )
@@ -356,7 +360,7 @@ function SegmentButton({
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-      className={`rounded-md border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
+      className={`shrink-0 rounded-md border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${toneClass.ghost}`}
     >
       {label}
     </button>
@@ -386,7 +390,7 @@ function SegmentToggle({
       aria-label={ariaLabel}
       aria-pressed={selected}
       onClick={onClick}
-      className={`rounded-md border px-3 py-2 text-sm font-medium capitalize transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${selected ? toneClass.active : toneClass.ghost}`}
+      className={`shrink-0 rounded-md border px-3 py-2 text-sm font-medium capitalize transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${selected ? toneClass.active : toneClass.ghost}`}
     >
       {label}
     </button>

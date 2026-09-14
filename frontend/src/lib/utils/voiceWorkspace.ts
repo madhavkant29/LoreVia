@@ -1,4 +1,4 @@
-import type { VoiceConsistencyIssue, VoiceConsistencyMatch, VoiceConsistencyReview } from "@/types/intelligence"
+import type { VoiceConsistencyIssue, VoiceConsistencyMatch } from "@/types/intelligence"
 
 import { buildUniqueWorkspacePathFromCandidate, sanitizeWorkspaceTitle } from "./workspacePaths"
 

@@ -236,8 +236,8 @@ describe("VaultNotesEditor runtime behavior", () => {
       <VaultNotesEditor
         bookId="book-1"
         bookTitle="The Ember Gate"
-        initialNotes={initialNotes as any}
-        initialGraph={graph as any}
+        initialNotes={initialNotes as never}
+        initialGraph={graph as never}
         isDark={false}
       />,
     )

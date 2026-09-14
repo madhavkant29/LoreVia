@@ -110,6 +110,28 @@ services:
       - default
       - redis_internal
 
+  worker-maintenance:
+    build: { context: ., dockerfile: backend/Dockerfile.worker }
+    command: python -m app.workers.worker_launcher maintenance
+    env_file: ./backend/.env.local
+    environment:
+      NORMALIZE_LOCAL_STORAGE_PERMISSIONS: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-local-dev-redis-password}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - local_storage:/app/storage
+    networks:
+      - default
+      - redis_internal
+
   migrate:
     build: { context: ., dockerfile: backend/Dockerfile.api }
     env_file: ./backend/.env.local
@@ -142,17 +164,18 @@ services:
 
   redis:
     image: redis:7-alpine
+    user: "999:1000"
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-local-dev-redis-password}
     command:
       [
         "sh",
-        "-c",
-        "exec redis-server --appendonly yes --appendfsync everysec --requirepass \"$${REDIS_PASSWORD}\"",
+        "-ec",
+        "umask 077; printf 'appendonly yes\\nappendfsync everysec\\nrequirepass %s\\n' \"$${REDIS_PASSWORD}\" > /tmp/redis.conf; exec redis-server /tmp/redis.conf",
       ]
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG || exit 1"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

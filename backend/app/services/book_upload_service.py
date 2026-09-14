@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Any
 
@@ -10,7 +11,13 @@ from app.services.task_execution_service import (
     ensure_task_execution,
     get_or_create_processing_run,
 )
+from app.services.upload_intent_service import (
+    build_book_upload_intent,
+    clear_upload_intent,
+    persist_upload_intent,
+)
 from app.utils.notification_utils import build_upload_processing_notification
+from app.utils.storage_utils import delete_storage_keys_best_effort
 
 
 async def create_uploaded_book_from_raw(
@@ -35,57 +42,83 @@ async def create_uploaded_book_from_raw(
     preserve_source_chapters: bool,
     force_single_manuscript: bool,
 ) -> dict[str, str | bool]:
-    s3_key = storage.upload_book_bytes(raw, str(current_user.id), filename)
-    cover_s3_key = None
-    if cover_raw:
-        cover_s3_key = storage.upload_binary(
-            f"covers/{current_user.id}/{uuid.uuid4()}.{cover_suffix or 'png'}",
-            cover_raw,
-            cover_content_type,
+    book_id = uuid.uuid4()
+    intent = build_book_upload_intent(
+        book_id=book_id,
+        user_id=current_user.id,
+        filename=filename,
+        has_cover=bool(cover_raw),
+        cover_suffix=cover_suffix if cover_raw else None,
+    )
+    uploaded_keys: list[str] = []
+    try:
+        await persist_upload_intent(intent)
+        s3_key = await asyncio.to_thread(
+            storage.upload_binary,
+            intent.source_key,
+            raw,
+        )
+        uploaded_keys.append(s3_key)
+        cover_s3_key = None
+        if cover_raw:
+            cover_s3_key = await asyncio.to_thread(
+                storage.upload_binary,
+                intent.cover_key,
+                cover_raw,
+                cover_content_type,
+            )
+            uploaded_keys.append(cover_s3_key)
+
+        book = Book(
+            id=book_id,
+            user_id=current_user.id,
+            title=title,
+            genre=genre,
+            author=author,
+            format=fmt,
+            work_type=resolved_work_type,
+            s3_key=s3_key,
+            source_size_bytes=len(raw),
+            cover_s3_key=cover_s3_key,
+            status="pending",
+            is_public=False,
+            public_description=description,
+            mode=mode,
+            source_kind="single_upload",
+            preserve_chapter_numbers=preserve_chapter_numbers,
+            preserve_source_chapters=preserve_source_chapters,
+            force_single_manuscript=force_single_manuscript,
+        )
+        db.add(book)
+        await db.flush()
+
+        processing_run = await get_or_create_processing_run(
+            db, user_id=current_user.id, book_id=book.id, chapters_total=0
+        )
+        await ensure_task_execution(
+            db,
+            task_name="extraction_tasks.process_book",
+            processing_run=processing_run,
+            arguments={"book_id": str(book.id), "processing_run_id": str(processing_run.id)},
         )
 
-    book = Book(
-        id=uuid.uuid4(),
-        user_id=current_user.id,
-        title=title,
-        genre=genre,
-        author=author,
-        format=fmt,
-        work_type=resolved_work_type,
-        s3_key=s3_key,
-        source_size_bytes=len(raw),
-        cover_s3_key=cover_s3_key,
-        status="pending",
-        is_public=False,
-        public_description=description,
-        mode=mode,
-        source_kind="single_upload",
-        preserve_chapter_numbers=preserve_chapter_numbers,
-        preserve_source_chapters=preserve_source_chapters,
-        force_single_manuscript=force_single_manuscript,
-    )
-    db.add(book)
-    await db.flush()
+        for index, series in enumerate(selected_series):
+            membership = SeriesBook(series_id=series.id, book_id=book.id)
+            db.add(membership)
+            if index == 0:
+                book.primary_series_id = series.id
+                book.series_name = series.name
+                book.series_order = None
 
-    processing_run = await get_or_create_processing_run(
-        db, user_id=current_user.id, book_id=book.id, chapters_total=0
-    )
-    await ensure_task_execution(
-        db,
-        task_name="extraction_tasks.process_book",
-        processing_run=processing_run,
-        arguments={"book_id": str(book.id), "processing_run_id": str(processing_run.id)},
-    )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        await delete_storage_keys_best_effort(uploaded_keys, context="book_upload")
+        await clear_upload_intent(intent.intent_key)
+        raise
 
-    for index, series in enumerate(selected_series):
-        membership = SeriesBook(series_id=series.id, book_id=book.id)
-        db.add(membership)
-        if index == 0:
-            book.primary_series_id = series.id
-            book.series_name = series.name
-            book.series_order = None
+    await clear_upload_intent(intent.intent_key)
 
-    await db.commit()
     await db.refresh(book)
 
     notification = build_upload_processing_notification(book, mode, len(raw))

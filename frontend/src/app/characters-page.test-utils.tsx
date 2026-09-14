@@ -2,7 +2,7 @@
 
 import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, expect, vi } from "vitest"
+import { afterEach, beforeEach, vi } from "vitest"
 
 const useQueryMock = vi.hoisted(() => vi.fn())
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }))

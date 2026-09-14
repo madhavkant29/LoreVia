@@ -9,6 +9,7 @@ import {
   getPublicUploadsAnalyticsServer,
   getPublicUserProfileServer,
   listCreatorPublicUploadsServer,
+  listPublicBooksPageServer,
   listPublicBooksServer,
   listPublicForumCommentsServer,
   listPublicForumPostsServer,
@@ -27,9 +28,10 @@ beforeEach(() => {
 describe("server API wrappers", () => {
   it("builds every public server endpoint and query variant", async () => {
     fetchMock
-      .mockResolvedValueOnce(response([]))
-      .mockResolvedValueOnce(response([]))
-      .mockResolvedValueOnce(response([]))
+      .mockResolvedValueOnce(response({ items: [], next_cursor: null, has_more: false }))
+      .mockResolvedValueOnce(response({ items: [], next_cursor: null, has_more: false }))
+      .mockResolvedValueOnce(response({ items: [], next_cursor: null, has_more: false }))
+      .mockResolvedValueOnce(response({ items: [], next_cursor: null, has_more: false }))
       .mockResolvedValueOnce(response({ items: [] }))
       .mockResolvedValueOnce(response({ id: "book-1" }))
       .mockResolvedValueOnce(response({ total_public_books: 1 }))
@@ -41,6 +43,7 @@ describe("server API wrappers", () => {
       .mockResolvedValueOnce(response({ username: "mara" }))
 
     await listPublicBooksServer()
+    await listPublicBooksPageServer({ catalog: "creator_uploads", search: " gate ", cursor: "next-page", limit: 24 })
     await listCreatorPublicUploadsServer()
     await listCreatorPublicUploadsServer(" gate draft ")
     await listRankedCreatorPublicUploadsServer({ ranking: "newest", timeWindow: "weekly", query: " gate ", page: 2, limit: 10 })
@@ -50,21 +53,24 @@ describe("server API wrappers", () => {
     await listPublicForumPostsServer(" beta read ")
     await listRankedBetaNovelsServer({ ranking: "newest", timeWindow: "weekly", query: " gate ", page: 3, pageSize: 5 })
     await getPublicForumPostServer("post/1")
-    expect(await listPublicForumCommentsServer("post/1")).toEqual([{ id: "comment-1" }])
+    expect(await listPublicForumCommentsServer("post/1")).toEqual([
+      { id: "comment-1", replies: [] },
+    ])
     await getPublicUserProfileServer("mara vale")
 
     const urls = fetchMock.mock.calls.map(([url]) => String(url))
-    expect(urls[0]).toContain("/api/v1/public/books")
-    expect(urls[1]).toMatch(/\/uploads$/)
-    expect(urls[2]).toContain("/uploads?search=gate+draft")
-    expect(urls[3]).toContain("ranking=newest")
-    expect(urls[3]).toContain("page=2")
-    expect(urls[4]).toContain("/books/gate%2Fdraft")
-    expect(urls[7]).toContain("q=beta+read")
-    expect(urls[8]).toContain("page_size=5")
-    expect(urls[9]).toContain("post%2F1")
-    expect(urls[11]).toContain("mara%20vale")
-    expect(fetchMock.mock.calls[3]?.[1]).toEqual({ next: { revalidate: 120 } })
+    expect(urls[0]).toContain("/api/v1/public/books/page?limit=100")
+    expect(urls[1]).toContain("/books/page?catalog=creator_uploads&search=gate&cursor=next-page&limit=24")
+    expect(urls[2]).toContain("/books/page?catalog=creator_uploads&limit=100")
+    expect(urls[3]).toContain("/books/page?search=gate+draft&catalog=creator_uploads&limit=100")
+    expect(urls[4]).toContain("ranking=newest")
+    expect(urls[4]).toContain("page=2")
+    expect(urls[5]).toContain("/books/gate%2Fdraft")
+    expect(urls[8]).toContain("q=beta+read")
+    expect(urls[9]).toContain("page_size=5")
+    expect(urls[10]).toContain("post%2F1")
+    expect(urls[12]).toContain("mara%20vale")
+    expect(fetchMock.mock.calls[4]?.[1]).toEqual({ next: { revalidate: 120 } })
   })
 
   it("handles public not-found and provider errors", async () => {
@@ -78,7 +84,7 @@ describe("server API wrappers", () => {
   it("builds authenticated reader and books requests and returns null for auth and network failures", async () => {
     fetchMock
       .mockResolvedValueOnce(response({ chapter_num: 4 }))
-      .mockResolvedValueOnce(response([{ id: "book-1" }]))
+      .mockResolvedValueOnce(response({ items: [{ id: "book-1" }], next_cursor: null }))
       .mockResolvedValueOnce(response({}, 401))
       .mockResolvedValueOnce(response({}, 403))
       .mockResolvedValueOnce(response({}, 500))

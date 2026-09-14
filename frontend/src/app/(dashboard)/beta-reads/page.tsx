@@ -179,7 +179,7 @@ export default function BetaReadsPage() {
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-[rgba(var(--border),0.65)]">
                 <div
                   className={`h-full rounded-full ${urgent ? "bg-rose-500" : "bg-[rgb(var(--accent))]"}`}
-                  style={{ width: `${Math.max(4, Math.round(assignment.progress_pct))}%` }}
+                  style={{ width: `${Math.max(0, Math.min(100, Math.round(assignment.progress_pct)))}%` }}
                 />
               </div>
               <p className="mt-2 text-sm text-[rgb(var(--muted-foreground))]">{betaReadProgressLabel(assignment)}</p>

@@ -62,7 +62,6 @@ type ManuscriptNonWriteWorkspaceProps = {
 export function ManuscriptNonWriteWorkspace({
   isDark,
   bookId,
-  activeChapterNumber,
   preWritingCheck,
   editorMode,
   draftSurfaceMode,

@@ -213,11 +213,12 @@ describe("zero-coverage client runtime components", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
       await Promise.resolve()
     })
-    expect(document.body.textContent).toContain("Keyboard shortcuts")
-    expect(document.body.textContent).toContain("Open command palette")
+    const shortcutsDialog = Array.from(document.body.querySelectorAll('[role="dialog"]'))
+      .find((dialog) => dialog.textContent?.includes("Open command palette"))
+    expect(shortcutsDialog?.textContent).toContain("Open command palette")
 
     await act(async () => {
-      document.querySelector('[role="dialog"]')?.dispatchEvent(
+      shortcutsDialog?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       )
       await Promise.resolve()
@@ -234,6 +235,7 @@ describe("zero-coverage client runtime components", () => {
   })
 
   it("unregisters service workers in local development", async () => {
+    vi.stubEnv("NODE_ENV", "development")
     const unregister = vi.fn().mockResolvedValue(true)
     const getRegistrations = vi.fn().mockResolvedValue([{ unregister }])
     Object.defineProperty(navigator, "serviceWorker", {

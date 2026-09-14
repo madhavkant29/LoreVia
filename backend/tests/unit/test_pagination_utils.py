@@ -1,6 +1,30 @@
+import uuid
+from datetime import UTC, datetime
+
 import pytest
 
-from app.utils.pagination_utils import build_paginated_response, validate_pagination
+from app.utils.pagination_utils import (
+    build_paginated_response,
+    decode_datetime_uuid_cursor,
+    encode_datetime_uuid_cursor,
+    validate_pagination,
+)
+
+
+def test_datetime_uuid_cursor_round_trip_preserves_tie_breaker():
+    timestamp = datetime(2026, 9, 12, 12, 30, tzinfo=UTC)
+    row_id = uuid.uuid4()
+
+    assert decode_datetime_uuid_cursor(encode_datetime_uuid_cursor(timestamp, row_id)) == (
+        timestamp,
+        row_id,
+    )
+
+
+@pytest.mark.parametrize("cursor", ["not-base64", "e30", "eyJ0aW1lc3RhbXAiOiIyMDI2LTA5LTEyIn0"])
+def test_datetime_uuid_cursor_rejects_malformed_payloads(cursor):
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        decode_datetime_uuid_cursor(cursor)
 
 
 class TestBuildPaginatedResponse:

@@ -74,7 +74,7 @@ export const GraphViewer = memo(function GraphViewer({
   const focusPath = hoveredPath || selectedPath
   const focusNode = renderedGraph.nodes.find((node) => node.path === focusPath) ?? null
 
-  const graphStylesheet = useMemo<any>(
+  const graphStylesheet = useMemo<cytoscape.StylesheetJson>(
     () => [
       {
         selector: "node",
@@ -260,7 +260,7 @@ export const GraphViewer = memo(function GraphViewer({
       cy.destroy()
       cyRef.current = null
     }
-  }, [isDark, onOpenNote, renderedGraph, selectedPath])
+  }, [graphStylesheet, isDark, onOpenNote, renderedGraph, selectedPath])
 
   const runAction = (fn: (cy: Core) => void) => {
     const cy = cyRef.current

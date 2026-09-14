@@ -1,5 +1,5 @@
 """
-Character utility helpers â€” shared across route modules.
+Character utility helpers — shared across route modules.
 Covers display filtering, status derivation, relationship summaries,
 and text-sanitization helpers used on character data.
 """
@@ -82,7 +82,7 @@ def append_unique_summary(
     rel_summaries.setdefault(char_id, []).append(summary)
 
 
-# â”€â”€â”€ List / string deduplication helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── List / string deduplication helpers ─────────────────────────────────────
 
 
 def dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -155,7 +155,7 @@ def compose_character_description(
     return composed or None
 
 
-# â”€â”€â”€ Text-cleaning helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Text-cleaning helpers ────────────────────────────────────────────────────
 
 
 def _clean_int_list(values: Sequence[object] | None) -> list[int]:

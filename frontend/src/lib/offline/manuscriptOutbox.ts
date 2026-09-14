@@ -285,13 +285,12 @@ async function performManuscriptOutboxSync(userId: string): Promise<ManuscriptSy
     if (getActiveUserId() !== userId) break
     if (entry.status === "conflict") continue
     try {
-      await booksApi.importManuscript(entry.bookId, {
+      await booksApi.saveChapterContent(entry.bookId, entry.chapterNumber, {
         text: entry.text,
-        html: entry.html,
+        sanitizedHtml: entry.html,
         title: entry.title,
-        chapterNumber: entry.chapterNumber,
-        expectedContentVersion: entry.expectedContentVersion,
-        replaceExisting: true,
+        expectedContentVersion: entry.expectedContentVersion ?? 0,
+        clientMutationId: entry.id,
       })
       if (await replaceEntryIfUnchanged(userId, entry, null)) synced += 1
     } catch (error) {

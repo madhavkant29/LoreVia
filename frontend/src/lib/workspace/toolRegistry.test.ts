@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import { toolsForPlacement, workspaceToolRegistry } from "./toolRegistry"
+import { helpMetadataForTool, toolsForPlacement, workspaceToolRegistry } from "./toolRegistry"
 
 function pageCandidates(route: string) {
   const routePath = route
@@ -33,5 +33,15 @@ describe("workspaceToolRegistry", () => {
       expect(workspaceToolRegistry.find((tool) => tool.id === id)?.nonHideable).toBe(true)
     }
     expect(toolsForPlacement("command")).toHaveLength(workspaceToolRegistry.length)
+  })
+
+  it("derives help metadata for every registered tool", () => {
+    for (const tool of workspaceToolRegistry) {
+      const metadata = helpMetadataForTool(tool)
+      expect(metadata.purpose.length, tool.id).toBeGreaterThan(10)
+      expect(metadata.whenToUse.length, tool.id).toBeGreaterThan(10)
+      expect(metadata.requirements.length, tool.id).toBeGreaterThan(0)
+      expect(metadata.helpArticleId.length, tool.id).toBeGreaterThan(0)
+    }
   })
 })

@@ -101,7 +101,7 @@ Workers parse books, generate chunks, compute embeddings, extract characters and
 
 ## Running Locally
 
-This project is intended to run locally with Docker only. Production deployment is on a Hetzner VPS, with Nginx in front of a Gunicorn-managed FastAPI backend and Cloudflare-origin TLS for the current edge setup.
+This project is intended to run locally with Docker only. Production uses a split topology: Vercel serves the frontend at `www.getlorevia.com`, while a Hetzner VPS runs Nginx, the Gunicorn-managed FastAPI backend, Redis, and workers behind Cloudflare at `api.getlorevia.com`.
 
 ### Prerequisites
 
@@ -125,6 +125,7 @@ API_V1_PREFIX=/api/v1
 
 DATABASE_URL=postgresql://postgres:postgres@postgres:5432/lorevia
 REDIS_PASSWORD=replace_local_redis_password
+EDGE_PROXY_SECRET=replace_with_64_character_random_edge_secret
 
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_EXTRACT_MODEL=gpt-4o-mini
@@ -157,6 +158,9 @@ FREE_MAX_BOOKS=999
 Notes:
 
 - Do not paste any real secret values into this README.
+- For production, generate `EDGE_PROXY_SECRET` independently (for example,
+  `openssl rand -hex 32`). It authenticates the private Nginx-to-API hop and
+  must not be reused as the JWT, Redis, or any provider credential.
 - Keep `backend/.env.local` out of version control.
 - Local Docker Compose reads `REDIS_URL` and `CELERY_BROKER_URL` from `backend/.env.local`; `CELERY_RESULT_BACKEND` can stay empty now that advisor async polling persists state in Postgres.
 - For local development, file storage is mounted to a Docker volume instead of cloud storage.
@@ -191,7 +195,10 @@ This starts:
 - `api`
 - `worker-extraction`
 - `worker-analysis`
+- `worker-embedding`
 - `worker-intelligence`
+- `worker-maintenance`
+- `celery-beat`
 - `postgres`
 - `redis`
 - `flower`

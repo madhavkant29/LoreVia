@@ -840,7 +840,7 @@ export default function ExportStudioPage() {
  isDark ? "border-white/10 bg-black/30 text-slate-100 placeholder:text-slate-500" : "border-stone-200 bg-white text-stone-800 placeholder:text-stone-400"
  }`}
  />
- <input
+ <input aria-label="Series number"
  value={novelEpubMetadata.series_number}
  onChange={(event) => setNovelEpubMetadata((current) => ({ ...current, series_number: event.target.value }))}
  className={`min-h-11 w-full border px-3 text-sm outline-none transition focus:ring-2 focus:ring-teal-500/30 ${

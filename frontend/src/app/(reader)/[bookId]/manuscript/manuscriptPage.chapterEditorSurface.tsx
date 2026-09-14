@@ -70,7 +70,6 @@ export function ManuscriptChapterEditorSurface({
   sheetStyle,
   showEditorSettings,
   showPageGuides,
-  text,
   onAddComment,
   onChapterHeadingBlur,
   onCharacterClick,
@@ -99,16 +98,17 @@ export function ManuscriptChapterEditorSurface({
         <div className={`border-b px-5 py-5 sm:px-7 ${isDark ? "border-white/10 bg-[#111721]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{bookTitle || "Manuscript"}</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>{bookTitle || "Manuscript"}</p>
               <input
                 key={`chapter-heading-${activeChapterNumber}-${chapterHeading}`}
                 type="text"
+                aria-label="Chapter title"
                 defaultValue={chapterHeading}
                 onBlur={(event) => onChapterHeadingBlur(event.target.value)}
                 className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}
               />
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterReadingTime} · {chapterSceneCount} scene{chapterSceneCount === 1 ? "" : "s"}</p>
-              <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{chapterReadingTime} · {chapterSceneCount} scene{chapterSceneCount === 1 ? "" : "s"}</p>
+              <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
             </div>
             <div className="flex items-center gap-2">
               <span className={`rounded-sm px-3 py-1.5 text-3xs font-semibold ${saveStateTone}`}>
@@ -170,7 +170,7 @@ export function ManuscriptChapterEditorSurface({
               </select>
             </div>
           ) : null}
-          {autosaveMetaLabel ? <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{autosaveMetaLabel}</p> : null}
+          {autosaveMetaLabel ? <p className={`mt-3 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{autosaveMetaLabel}</p> : null}
         </div>
         <div className={`sticky top-[8.25rem] z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
           <EditorToolbar editorKey={editorKey} isDark={isDark} compact characters={characters} onAddComment={onAddComment} onOpenNotes={onNotesShortcut} />
@@ -189,7 +189,7 @@ export function ManuscriptChapterEditorSurface({
           className={`relative min-h-[58vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100" : "text-stone-900"}`}
           contentClassName="mx-auto w-full max-w-[780px]"
         />
-        <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-400" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-300" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>
           <span>{chapterWordCount.toLocaleString()} words</span>
           <span>{saveStateLabel}</span>
         </div>

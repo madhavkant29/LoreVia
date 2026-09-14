@@ -17,6 +17,20 @@ type ParseChapterHeading = (rawValue: string, fallbackNumber: number, fallbackTi
   title: string
 }
 
+function newChapterMutationId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `chapter-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function chapterSaveError(error: unknown) {
+  if (!axios.isAxiosError(error)) return null
+  const detail = error.response?.data?.detail
+  return typeof detail === "object" && detail !== null
+    ? detail as { code?: string; message?: string; current_content_version?: number }
+    : null
+}
+
 type UseManuscriptSaveActionsArgs = {
   activeChapterNumber: number
   autoReprocessEnabled: boolean
@@ -80,7 +94,6 @@ export function useManuscriptSaveActions({
   refreshChapterVersionToken,
   reprocessing,
   reprocessingChapterNumber,
-  replaceExisting,
   runAutomaticChecks,
   saveWorkspace,
   selectedChapter,
@@ -102,21 +115,35 @@ export function useManuscriptSaveActions({
   text,
   writerWorkspace,
 }: UseManuscriptSaveActionsArgs) {
+  function markPendingManualReprocess(chapterNumber: number) {
+    setWriterWorkspace((current) => {
+      const base = current ?? writerWorkspace
+      if (!base) return current
+      const reprocess = base.reprocess ?? { auto_reprocess_enabled: false, pending_chapters: [] }
+      return {
+        ...base,
+        reprocess: {
+          ...reprocess,
+          pending_chapters: Array.from(new Set([...(reprocess.pending_chapters ?? []), chapterNumber])),
+        },
+      }
+    })
+  }
+
   async function saveChapterDraft(chapterNumber: number, draft?: BookDraft) {
     const currentDraft = draft ?? bookDrafts[chapterNumber] ?? { title: chapterTitle, text, html }
     if (!currentDraft.text.trim()) return
 
     try {
-      const result = await booksApi.importManuscript(bookId, {
+      const result = await booksApi.saveChapterContent(bookId, chapterNumber, {
         text: currentDraft.text,
-        html: currentDraft.html,
+        sanitizedHtml: currentDraft.html,
         title: currentDraft.title.trim() || undefined,
-        chapterNumber,
-        expectedContentVersion: contentVersionByChapter[chapterNumber],
-        replaceExisting: true,
+        expectedContentVersion: contentVersionByChapter[chapterNumber] ?? 0,
+        clientMutationId: newChapterMutationId(),
       })
-      const importedChapter = result.imported_chapters[0] ?? chapterNumber
-      const nextContentVersion = result.chapter_content_versions[importedChapter]
+      const importedChapter = result.chapter_number
+      const nextContentVersion = result.content_version
       await clearQueuedManuscriptSave(bookId, chapterNumber, {
         title: currentDraft.title.trim() || `Chapter ${chapterNumber}`,
         text: currentDraft.text,
@@ -133,18 +160,21 @@ export function useManuscriptSaveActions({
       clearDraftDirty(chapterNumber)
       clearDraftDirty(importedChapter)
       await loadWorkspaceTree()
-      if (!autoReprocessEnabled) await refetchWriterWorkspace()
-      if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, currentDraft.text)
+      const shouldAutoRefresh = autoReprocessEnabled && result.story_memory_status !== "not_required"
+      if (result.story_memory_status === "not_required") markPendingManualReprocess(importedChapter)
+      if (!shouldAutoRefresh) await refetchWriterWorkspace()
+      if (shouldAutoRefresh) await runAutomaticChecks(importedChapter, currentDraft.text)
       await completeFindingEdit()
       setStatusMessage(
-        autoReprocessEnabled
+        shouldAutoRefresh
           ? `Saved chapter ${importedChapter}. Story memory and Canon Guard refresh are queued.`
           : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
       )
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 409) {
+      const safeError = chapterSaveError(error)
+      if (safeError?.code === "version_conflict" || (axios.isAxiosError(error) && error.response?.status === 409)) {
         await refreshChapterVersionToken(chapterNumber).catch(() => undefined)
-        setStatusMessage(`Chapter ${chapterNumber} changed in another session. Your local draft is still here. Reload the latest version or save again to intentionally overwrite it.`)
+        setStatusMessage(`Conflict - review needed. Chapter ${chapterNumber} changed in another session. Your local draft is still here.`)
         return
       }
       if (isOfflineSaveError(error)) {
@@ -173,17 +203,16 @@ export function useManuscriptSaveActions({
     setSaving(true)
     setStatusMessage(null)
     try {
-      const result = await booksApi.importManuscript(bookId, {
+      const result = await booksApi.saveChapterContent(bookId, activeChapterNumber, {
         text,
-        html,
+        sanitizedHtml: html,
         title: chapterTitle.trim() || undefined,
-        chapterNumber: activeChapterNumber,
-        expectedContentVersion: selectedChapter !== null ? contentVersionByChapter[activeChapterNumber] : undefined,
-        replaceExisting: replaceExisting || selectedChapter !== null,
+        expectedContentVersion: selectedChapter !== null ? contentVersionByChapter[activeChapterNumber] ?? 1 : 0,
+        clientMutationId: newChapterMutationId(),
       })
       await loadBase()
-      const importedChapter = result.imported_chapters[0] ?? activeChapterNumber
-      const nextContentVersion = result.chapter_content_versions[importedChapter]
+      const importedChapter = result.chapter_number
+      const nextContentVersion = result.content_version
       await clearQueuedManuscriptSave(bookId, activeChapterNumber, {
         title: chapterTitle.trim() || `Chapter ${activeChapterNumber}`,
         text,
@@ -205,18 +234,21 @@ export function useManuscriptSaveActions({
         }))
       }
       await loadWorkspaceTree()
-      if (!autoReprocessEnabled) await refetchWriterWorkspace()
-      if (autoReprocessEnabled) await runAutomaticChecks(importedChapter, text)
+      const shouldAutoRefresh = autoReprocessEnabled && result.story_memory_status !== "not_required"
+      if (result.story_memory_status === "not_required") markPendingManualReprocess(importedChapter)
+      if (!shouldAutoRefresh) await refetchWriterWorkspace()
+      if (shouldAutoRefresh) await runAutomaticChecks(importedChapter, text)
       await completeFindingEdit()
       setStatusMessage(
-        autoReprocessEnabled
+        shouldAutoRefresh
           ? `Saved chapter ${importedChapter}. Story memory and Canon Guard refresh are queued.`
           : `Saved chapter ${importedChapter}. It needs manual reprocess to update story memory.`,
       )
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 409 && selectedChapter !== null) {
+      const safeError = chapterSaveError(error)
+      if ((safeError?.code === "version_conflict" || (axios.isAxiosError(error) && error.response?.status === 409)) && selectedChapter !== null) {
         await refreshChapterVersionToken(activeChapterNumber).catch(() => undefined)
-        setStatusMessage(`Chapter ${activeChapterNumber} changed in another session. Your local draft is still here. Reload the latest version or save again to intentionally overwrite it.`)
+        setStatusMessage(`Conflict - review needed. Chapter ${activeChapterNumber} changed in another session. Your local draft is still here.`)
       } else if (isOfflineSaveError(error)) {
         const queued = await enqueueManuscriptSave({
           bookId,
@@ -233,7 +265,7 @@ export function useManuscriptSaveActions({
             : "Connection lost. This browser cannot store an offline copy, so keep this tab open and retry the save when you are online.",
         )
       } else {
-        setStatusMessage("Save failed. Please check the chapter number and try again.")
+        setStatusMessage(safeError?.message ? `${safeError.message} Your local draft is still here.` : "Save failed - action required. Your local draft is still here; retry or ask Support.")
       }
     } finally {
       setSaving(false)
@@ -247,10 +279,10 @@ export function useManuscriptSaveActions({
     try {
       const result = await booksApi.reprocessManuscript(book.id)
       setShowReprocessConfirm(false)
-      setStatusMessage(`Reprocessing started for ${result.chapters_queued} chapter${result.chapters_queued === 1 ? "" : "s"}. This consumed 1 book upload.`)
+      setStatusMessage(`Reprocessing started for ${result.chapters_queued} chapter${result.chapters_queued === 1 ? "" : "s"}. ${result.processed_words_reserved.toLocaleString()} processed words are reserved and will settle chapter by chapter.`)
       await loadBase()
     } catch {
-      setStatusMessage("Reprocess failed. Check your upload quota and try again.")
+      setStatusMessage("Reprocess failed. Check your processed-word allowance and try again.")
     } finally {
       setReprocessing(false)
     }

@@ -17,14 +17,18 @@ export function PublicForumPostPageClient({
   postId,
   initialPost = null,
   initialComments = [],
+  initialCommentCursor = null,
 }: {
   postId: string
   initialPost?: PublicForumPost | null
   initialComments?: PublicForumComment[]
+  initialCommentCursor?: string | null
 }) {
   const [post, setPost] = useState<PublicForumPost | null>(initialPost)
   const [comments, setComments] = useState<PublicForumComment[]>(initialComments)
   const [interests, setInterests] = useState<PublicForumInterest[]>([])
+  const [commentCursor, setCommentCursor] = useState<string | null>(initialCommentCursor)
+  const [interestCursor, setInterestCursor] = useState<string | null>(null)
   const [viewer, setViewer] = useState<User | null>(null)
   const [draft, setDraft] = useState("")
   const [commentImageFile, setCommentImageFile] = useState<File | null>(null)
@@ -43,6 +47,8 @@ export function PublicForumPostPageClient({
   const [submitting, setSubmitting] = useState(false)
   const [replySubmittingId, setReplySubmittingId] = useState<string | null>(null)
   const [interestSubmitting, setInterestSubmitting] = useState(false)
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false)
+  const [interestsLoadingMore, setInterestsLoadingMore] = useState(false)
   const [interestLoadFailed, setInterestLoadFailed] = useState(false)
   const [editing, setEditing] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
@@ -93,13 +99,14 @@ export function PublicForumPostPageClient({
       setLoading(true)
       setStatus(null)
       try {
-        const [postPayload, commentsPayload] = await Promise.all([
+        const [postPayload, commentsPage] = await Promise.all([
           publicApi.getForumPost(postId),
-          publicApi.listForumComments(postId),
+          publicApi.listForumCommentsPage(postId),
         ])
         if (!active) return
         setPost(postPayload)
-        setComments(commentsPayload)
+        setComments(nestFlatComments(commentsPage.items))
+        setCommentCursor(commentsPage.next_cursor)
         resetEditorFromPost(postPayload)
       } catch {
         if (!active) return
@@ -131,9 +138,10 @@ export function PublicForumPostPageClient({
 
       if (viewerPayload?.id === post.author_user_id) {
         try {
-          const interestPayload = await publicApi.listForumInterests(postId)
+          const interestPage = await publicApi.listForumInterestsPage(postId)
           if (!active) return
-          setInterests(interestPayload)
+          setInterests(interestPage.items)
+          setInterestCursor(interestPage.next_cursor)
         } catch {
           if (!active) return
           setInterests([])
@@ -143,6 +151,7 @@ export function PublicForumPostPageClient({
       }
 
       setInterests([])
+      setInterestCursor(null)
     }
 
     void loadViewerContext()
@@ -157,9 +166,39 @@ export function PublicForumPostPageClient({
   const isNovelThread = (post?.thread_type || "novel") === "novel"
 
   const refreshComments = async () => {
-    const items = await publicApi.listForumComments(postId)
+    const page = await publicApi.listForumCommentsPage(postId)
+    const items = nestFlatComments(page.items)
     setComments(items)
+    setCommentCursor(page.next_cursor)
     setPost((current) => current ? { ...current, comment_count: countComments(items) } : current)
+  }
+
+  const loadMoreComments = async () => {
+    if (!commentCursor || commentsLoadingMore) return
+    setCommentsLoadingMore(true)
+    try {
+      const page = await publicApi.listForumCommentsPage(postId, commentCursor)
+      setComments((current) => page.items.reduce(appendCommentToTree, current))
+      setCommentCursor(page.next_cursor)
+    } catch {
+      setStatus("Could not load more comments.")
+    } finally {
+      setCommentsLoadingMore(false)
+    }
+  }
+
+  const loadMoreInterests = async () => {
+    if (!interestCursor || interestsLoadingMore) return
+    setInterestsLoadingMore(true)
+    try {
+      const page = await publicApi.listForumInterestsPage(postId, interestCursor)
+      setInterests((current) => [...current, ...page.items])
+      setInterestCursor(page.next_cursor)
+    } catch {
+      setInterestLoadFailed(true)
+    } finally {
+      setInterestsLoadingMore(false)
+    }
   }
 
   const submitComment = async () => {
@@ -354,7 +393,7 @@ export function PublicForumPostPageClient({
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link href="/public" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Public library</Link>
             <MetaDivider isDark={isDark} />
-            <Link href="/public/forum" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Forum</Link>
+            <Link href="/public/forum" className={`${isDark ? "text-slate-400 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>Book discussions</Link>
             <MetaDivider isDark={isDark} />
             {post.author_username ? (
               <Link href={`/public/writers/${post.author_username}` as Route} className={`${isDark ? "text-slate-400 hover:text-amber-300" : "text-slate-500 hover:text-orange-700"}`}>
@@ -664,6 +703,18 @@ export function PublicForumPostPageClient({
                 />
               ))}
             </div>
+            {commentCursor ? (
+              <div className={`border-t px-4 py-4 text-center sm:px-5 ${isDark ? "border-white/10" : "border-slate-200"}`}>
+                <button
+                  type="button"
+                  disabled={commentsLoadingMore}
+                  onClick={() => void loadMoreComments()}
+                  className={`rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/[0.06] text-slate-200 hover:bg-white/10" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+                >
+                  {commentsLoadingMore ? "Loading comments..." : "Load more comments"}
+                </button>
+              </div>
+            ) : null}
           </section>
         </main>
 
@@ -772,6 +823,16 @@ export function PublicForumPostPageClient({
                       <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-700"}`}>{interest.message}</p>
                     </article>
                   ))}
+                  {interestCursor ? (
+                    <button
+                      type="button"
+                      disabled={interestsLoadingMore}
+                      onClick={() => void loadMoreInterests()}
+                      className={`w-full rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/[0.06] text-slate-200 hover:bg-white/10" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+                    >
+                      {interestsLoadingMore ? "Loading requests..." : "Load more requests"}
+                    </button>
+                  ) : null}
                 </div>
               )}
             </section>
@@ -991,6 +1052,10 @@ function replaceCommentInTree(comments: PublicForumComment[], updated: PublicFor
 
 function countComments(comments: PublicForumComment[]): number {
   return comments.reduce((total, comment) => total + 1 + countComments(comment.replies), 0)
+}
+
+function nestFlatComments(comments: PublicForumComment[]): PublicForumComment[] {
+  return comments.reduce(appendCommentToTree, [])
 }
 
 function ForumImage({

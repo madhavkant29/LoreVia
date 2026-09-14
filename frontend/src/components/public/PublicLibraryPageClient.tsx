@@ -2,22 +2,49 @@
 
 import Link from "next/link"
 import type { Route } from "next"
-import { useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery } from "@tanstack/react-query"
 
 import { publicApi } from "@/lib/api/public"
 import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { PublicBook } from "@/types/book"
+import type { PublicBook, PublicBookPage } from "@/types/book"
 
-export function PublicLibraryPageClient({ initialBooks = [] }: { initialBooks?: PublicBook[] }) {
+const PUBLIC_BOOK_PAGE_LIMIT = 24
+
+type PublicLibraryPageClientProps = {
+  /**
+   * The cursor page rendered on the server. Keeping initialBooks temporarily
+   * supports callers that have not moved to the paged contract yet.
+   */
+  initialPage?: PublicBookPage
+  initialBooks?: PublicBook[]
+}
+
+export function PublicLibraryPageClient({ initialPage, initialBooks = [] }: PublicLibraryPageClientProps) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const { data: books = initialBooks, isLoading: loading } = useQuery<PublicBook[]>({
-    queryKey: asQueryKey("public:books"),
-    queryFn: () => publicApi.listBooks(),
+  const legacyInitialPage = initialBooks.length > 0
+    ? { items: initialBooks, next_cursor: null, has_more: false }
+    : undefined
+  const seedPage = initialPage ?? legacyInitialPage
+  const {
+    data,
+    isLoading: loading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: asQueryKey("public:books:page"),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => publicApi.listBooksPage({
+      cursor: pageParam,
+      limit: PUBLIC_BOOK_PAGE_LIMIT,
+    }),
+    getNextPageParam: (page) => page.has_more ? page.next_cursor ?? undefined : undefined,
     staleTime: 60_000,
-    initialData: initialBooks.length > 0 ? initialBooks : undefined,
+    ...(seedPage ? { initialData: { pages: [seedPage], pageParams: [null] } } : {}),
   })
+  const books = data?.pages.flatMap((page) => page.items) ?? []
 
   return (
     <main className={`min-h-screen ${isDark ? "bg-[#0a0f14] text-slate-100" : "bg-[#f4f5f2] text-stone-950"}`}>
@@ -32,7 +59,7 @@ export function PublicLibraryPageClient({ initialBooks = [] }: { initialBooks?: 
           </div>
           <nav className="flex flex-wrap gap-2 text-sm font-semibold">
             <Link href="/public/forum" className={`rounded-md border px-4 py-2 transition ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"}`}>
-              Reader forum
+              Book discussions
             </Link>
             <Link href="/register" className={`rounded-md px-4 py-2 transition ${isDark ? "bg-teal-400 text-slate-950 hover:bg-teal-300" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}>
               Create author account
@@ -40,7 +67,7 @@ export function PublicLibraryPageClient({ initialBooks = [] }: { initialBooks?: 
           </nav>
         </div>
 
-        {loading ? (
+        {loading && books.length === 0 ? (
           <div className={`mt-8 rounded-lg border px-6 py-12 text-center ${isDark ? "border-white/10 bg-white/5 text-slate-400" : "border-stone-200 bg-white text-stone-500"}`}>
             Loading public books...
           </div>
@@ -95,6 +122,18 @@ export function PublicLibraryPageClient({ initialBooks = [] }: { initialBooks?: 
                 </div>
               </article>
             ))}
+            {hasNextPage ? (
+              <div className="pt-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => void fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className={`rounded-md border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${isDark ? "border-white/10 bg-white/[0.04] text-slate-100 hover:bg-white/[0.08]" : "border-stone-200 bg-white text-stone-800 hover:bg-stone-50"}`}
+                >
+                  {isFetchingNextPage ? "Loading more…" : "Load more books"}
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </div>

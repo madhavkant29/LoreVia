@@ -29,19 +29,24 @@ import {
   SunIcon,
   SummaryCard,
   ThemeIcon,
+  useActiveSettingsSection,
 } from "./settingsPage.components"
 
 import { authApi } from "@/lib/api/auth"
 import { clearAuthCookies } from "@/lib/api/client"
 import { billingApi } from "@/lib/api/billing"
+import { supportApi } from "@/lib/api/support"
 import { ANALYTICS_CONSENT_COOKIE, getAnalyticsConsentValue } from "@/lib/analytics/posthogConsent"
 import { emailApi } from "@/lib/api/email"
 import { tierLabel } from "@/lib/billing/plans"
+import { SUPPORT_EMAIL } from "@/lib/constants/contact"
+import { getTrialCountdown } from "@/lib/billing/trialCountdown"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
 import { toolsForPlacement } from "@/lib/workspace/toolRegistry"
 import type { EmailPreferences } from "@/types/email"
+import type { SupportConfig } from "@/types/support"
 
 const DELETION_REQUEST_EMAIL = "support@mail.getlorevia.com"
 const DASHBOARD_VISIBILITY_TOOLS = toolsForPlacement("dashboard").filter((tool) => !tool.nonHideable)
@@ -53,6 +58,7 @@ export default function SettingsPage() {
   const uiPreferences = useUiPreferencesStore((state) => state.preferences)
   const setComplexityMode = useUiPreferencesStore((state) => state.setComplexityMode)
   const setDashboardToolVisibility = useUiPreferencesStore((state) => state.setDashboardToolVisibility)
+  const restartGuidance = useUiPreferencesStore((state) => state.restartGuidance)
   const retryUiPreferenceSync = useUiPreferencesStore((state) => state.retrySync)
   const uiPreferenceSyncState = useUiPreferencesStore((state) => state.syncState)
   const uiPreferenceSyncMessage = useUiPreferencesStore((state) => state.syncMessage)
@@ -63,11 +69,15 @@ export default function SettingsPage() {
   const [goalSaving, setGoalSaving] = useState(false)
   const [goalMessage, setGoalMessage] = useState<string | null>(null)
   const [usernameDraft, setUsernameDraft] = useState("")
+  const [confirmedUsername, setConfirmedUsername] = useState("")
   const [usernameSaving, setUsernameSaving] = useState(false)
   const [usernameMessage, setUsernameMessage] = useState<string | null>(null)
   const [permissionSaving, setPermissionSaving] = useState(false)
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null)
   const [emailPreferences, setEmailPreferences] = useState<EmailPreferences | null>(null)
+  const [supportConfig, setSupportConfig] = useState<SupportConfig | null>(null)
+  const [communityMessage, setCommunityMessage] = useState<string | null>(null)
+  const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null)
   const [emailPreferencesLoading, setEmailPreferencesLoading] = useState(false)
   const [emailPreferencesSaving, setEmailPreferencesSaving] = useState(false)
   const [emailPreferencesMessage, setEmailPreferencesMessage] = useState<string | null>(null)
@@ -78,6 +88,7 @@ export default function SettingsPage() {
   const [accountDeleteBusy, setAccountDeleteBusy] = useState(false)
   const [accountDeleteMessage, setAccountDeleteMessage] = useState<string | null>(null)
   const [analyticsConsent, setAnalyticsConsent] = useState<string | undefined>(undefined)
+  const [trialCountdownNow, setTrialCountdownNow] = useState(() => Date.now())
   const [settingsQuery, setSettingsQuery] = useState("")
   const router = useRouter()
   const stableUser = authHydrated ? user : null
@@ -87,14 +98,25 @@ export default function SettingsPage() {
   const trialEndsLabel = stableUser?.trial_ends_at
     ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(stableUser.trial_ends_at))
     : null
+  const trialCountdown = getTrialCountdown(stableUser?.trial_ends_at, trialCountdownNow)
+  const refundRequestHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("LoreVia refund request")}`
 
   useEffect(() => {
     setGoalDraft(String(stableUser?.daily_word_goal ?? 1000))
   }, [stableUser?.daily_word_goal])
 
   useEffect(() => {
-    setUsernameDraft(stableUser?.username ?? "")
+    const nextUsername = stableUser?.username ?? ""
+    setUsernameDraft(nextUsername)
+    setConfirmedUsername(nextUsername)
   }, [stableUser?.username])
+
+  useEffect(() => {
+    if (!stableUser?.trial_active) return
+    setTrialCountdownNow(Date.now())
+    const timer = window.setInterval(() => setTrialCountdownNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [stableUser?.trial_active])
 
   useEffect(() => {
     setAnalyticsConsent(getAnalyticsConsentValue(document.cookie))
@@ -127,6 +149,22 @@ export default function SettingsPage() {
     }
   }, [stableUser?.email])
 
+  useEffect(() => {
+    if (!stableUser?.email) return
+    let cancelled = false
+    void supportApi.config()
+      .then((config) => {
+        if (cancelled) return
+        setSupportConfig(config)
+      })
+      .catch(() => {
+        if (!cancelled) setCommunityMessage("Community settings could not load right now.")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [stableUser?.email])
+
   const changeMode = async (mode: string) => {
     await authApi.setReadingMode(mode)
     if (user) setUser({ ...user, reading_mode: mode as "casual" | "analyst" | "speed" })
@@ -139,7 +177,23 @@ export default function SettingsPage() {
 
   const changeDashboardToolVisibility = (toolId: string, hidden: boolean) => {
     if (toolId === "dashboard.pricing" && !paidUser) return
+    setWorkspaceMessage(null)
     void setDashboardToolVisibility(toolId, hidden ? "user_hidden" : "visible")
+  }
+
+  const hiddenDashboardToolCount = DASHBOARD_VISIBILITY_TOOLS.filter((tool) => dashboardToolHidden(tool.id)).length
+
+  const showAllHiddenDashboardTools = async () => {
+    setWorkspaceMessage(null)
+    const hiddenTools = DASHBOARD_VISIBILITY_TOOLS.filter((tool) => dashboardToolHidden(tool.id))
+    await Promise.all(hiddenTools.map((tool) => setDashboardToolVisibility(tool.id, "visible")))
+    setWorkspaceMessage("All hidden workspace tools are visible again.")
+  }
+
+  const handleRestartGuidance = async () => {
+    setWorkspaceMessage(null)
+    await restartGuidance()
+    setWorkspaceMessage("Onboarding tips and guidance will appear again where available.")
   }
 
   const handleLogout = async () => {
@@ -255,8 +309,10 @@ export default function SettingsPage() {
     try {
       const updated = await authApi.setUsername(trimmedUsername)
       setUser(updated)
-      setUsernameDraft(updated.username ?? "")
-      setUsernameMessage(user?.username ? "Public username updated." : "Public username saved.")
+      const nextUsername = updated.username ?? trimmedUsername
+      setUsernameDraft(nextUsername)
+      setConfirmedUsername(nextUsername)
+      setUsernameMessage(confirmedUsername ? "Public username updated." : "Public username saved.")
     } catch {
       setUsernameMessage("We could not save that username. Try a different handle with letters, numbers, hyphens, or underscores.")
     } finally {
@@ -320,7 +376,7 @@ export default function SettingsPage() {
   const goalProgress = Math.max(0, Math.min(100, Math.round((todayWords / Math.max(dailyGoal, 1)) * 100)))
   const currentReadingMode = stableUser?.reading_mode ?? "casual"
   const currentPermission = stableUser?.messaging_permission ?? "anyone"
-  const [activeSectionId, setActiveSectionId] = useState(SETTINGS_NAV[0].id)
+  const { activeSectionId, setActiveSectionId } = useActiveSettingsSection()
   const matchingSectionIds = useMemo(() => {
     const query = settingsQuery.trim().toLowerCase()
     if (!query) return new Set(SETTINGS_NAV.map((item) => item.id))
@@ -343,59 +399,6 @@ export default function SettingsPage() {
     ],
     [currentReadingMode, displayTier, isDark, theme],
   )
-
-  useEffect(() => {
-    let frameId: number | null = null
-
-    const updateActiveSection = () => {
-      const anchorY = Math.min(window.innerHeight * 0.34, 260)
-      const sections = SETTINGS_NAV
-        .map((item) => {
-          const element = document.getElementById(item.id)
-          return element ? { id: item.id, rect: element.getBoundingClientRect() } : null
-        })
-        .filter((item): item is { id: string; rect: DOMRect } => Boolean(item))
-
-      if (!sections.length) return
-
-      const documentHeight = document.documentElement.scrollHeight
-      const nearDocumentEnd =
-        documentHeight > window.innerHeight &&
-        window.innerHeight + window.scrollY >= documentHeight - 80
-      if (nearDocumentEnd) {
-        setActiveSectionId(sections.at(-1)?.id ?? SETTINGS_NAV[0].id)
-        return
-      }
-
-      const visibleSections = sections.filter((section) => section.rect.bottom > 0 && section.rect.top < window.innerHeight)
-      const candidates = visibleSections.length ? visibleSections : sections
-      const activeSection = candidates.sort(
-        (first, second) => Math.abs(first.rect.top - anchorY) - Math.abs(second.rect.top - anchorY),
-      )[0]
-
-      setActiveSectionId(activeSection.id)
-    }
-
-    const scheduleUpdate = () => {
-      if (frameId !== null) return
-      frameId = window.requestAnimationFrame(() => {
-        frameId = null
-        updateActiveSection()
-      })
-    }
-
-    updateActiveSection()
-    window.addEventListener("scroll", scheduleUpdate, { passive: true })
-    window.addEventListener("resize", scheduleUpdate)
-
-    return () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId)
-      }
-      window.removeEventListener("scroll", scheduleUpdate)
-      window.removeEventListener("resize", scheduleUpdate)
-    }
-  }, [])
 
   return (
     <div className={`settings-surface ${isDark ? "settings-surface--dark" : "settings-surface--light"}`}>
@@ -454,20 +457,39 @@ export default function SettingsPage() {
               <div className="settings-info-grid">
                 {stableUser?.email ? <InfoItem label="Email" value={stableUser.email} /> : null}
                 <InfoItem label="Plan status" value={displayTier} />
+                {stableUser?.trial_active && trialCountdown ? (
+                  <InfoItem label="Free trial countdown" value={trialCountdown.label} />
+                ) : null}
               </div>
               {stableUser?.trial_active ? (
-                <p className="settings-copy mt-5">
-                  You are currently seeing Author free trial access. Your purchased plan is {purchasedTier}, so access will revert when the trial ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""} unless you upgrade.
-                </p>
+                <div className="mt-5 rounded-md border border-[#2b7a73]/30 bg-[#2b7a73]/5 p-4">
+                  <p className="settings-copy font-semibold">Your free trial is already active.</p>
+                  <p className="settings-copy mt-2">
+                    You have Author trial access{trialCountdown ? ` with ${trialCountdown.label}` : ""}. It ends{trialEndsLabel ? ` on ${trialEndsLabel}` : ""}, then your account returns to Free.
+                  </p>
+                  <p className="settings-copy mt-2">No payment is required, and no charge is scheduled when the trial ends.</p>
+                </div>
               ) : (
                 <p className="settings-copy mt-5">
-                  Purchased plan: {purchasedTier}. cancel renewal, payment method changes, and invoice access live in the billing portal.
+                  Purchased plan: {purchasedTier}. Cancel renewal, payment method changes, and invoice access live in the billing portal.
                 </p>
               )}
-              <p className="settings-copy mt-3">Manage your payment details, invoices, and subscription access in the billing portal.</p>
-              <button onClick={openBillingPortal} disabled={billingBusy} className="settings-primary-button mt-5">
-                {billingBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
-              </button>
+              {paidUser ? (
+                <>
+                  <p className="settings-copy mt-3">Manage your payment details, invoices, and subscription access in the billing portal.</p>
+                  <button onClick={openBillingPortal} disabled={billingBusy} className="settings-primary-button mt-5">
+                    {billingBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
+                  </button>
+                  <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-[#1f615d]">
+                    <a href="/refund" className="underline underline-offset-4">Refund policy</a>
+                    <a href={refundRequestHref} className="underline underline-offset-4">Request a refund</a>
+                  </div>
+                </>
+              ) : (
+                <button onClick={() => router.push("/upgrade")} className="settings-primary-button mt-5">
+                  View paid plans
+                </button>
+              )}
               {billingMessage ? <InlineMessage message={billingMessage} tone="warning" className="mt-4" /> : null}
             </SettingsPanel>
 
@@ -501,7 +523,7 @@ export default function SettingsPage() {
 
                 <div>
                   <p className="settings-label">Current public handle</p>
-                  {stableUser?.username ? <p className="settings-handle">@{stableUser.username}</p> : null}
+                  {confirmedUsername ? <p className="settings-handle">@{confirmedUsername}</p> : null}
                   <p className="settings-copy mt-3">
                     New author uploads default to this username, but you can change the manuscript author or pen name for any individual book.
                   </p>
@@ -553,6 +575,30 @@ export default function SettingsPage() {
                   ) : null}
                 </div>
               ) : null}
+              {workspaceMessage ? (
+                <div className="mt-4">
+                  <InlineMessage message={workspaceMessage} tone="neutral" />
+                </div>
+              ) : null}
+              <div className="settings-session-row mt-4">
+                <div>
+                  <p className="settings-tool-title">Reset workspace help</p>
+                  <p className="settings-tool-state">Restart onboarding tips or restore tools you previously hid.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void handleRestartGuidance()} className="settings-secondary-button">
+                    Restart onboarding
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void showAllHiddenDashboardTools()}
+                    disabled={hiddenDashboardToolCount === 0}
+                    className="settings-secondary-button"
+                  >
+                    Show all hidden tools
+                  </button>
+                </div>
+              </div>
               <div className="settings-tool-list mt-5">
                 {DASHBOARD_VISIBILITY_TOOLS.map((tool) => {
                   const hidden = dashboardToolHidden(tool.id)
@@ -631,6 +677,23 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
+            </SettingsPanel>
+
+            <SettingsPanel id="community" title="Community">
+              <div className="settings-session-row">
+                <div>
+                  <p className="settings-label">LoreVia Discord</p>
+                  <p className="settings-copy mt-2">Join the general user community. Do not post private manuscript text or account details there.</p>
+                </div>
+                {supportConfig?.community_url ? (
+                  <a href={supportConfig.community_url} target="_blank" rel="noreferrer" className="settings-primary-button">
+                    Join Discord
+                  </a>
+                ) : (
+                  <span className="settings-copy">Community link unavailable</span>
+                )}
+              </div>
+              {communityMessage ? <InlineMessage message={communityMessage} tone="neutral" className="mt-4" /> : null}
             </SettingsPanel>
 
             <SettingsPanel id="emails" title="LoreVia emails">

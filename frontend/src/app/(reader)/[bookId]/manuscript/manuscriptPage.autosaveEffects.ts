@@ -1,5 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react"
 
+import { getAuthCsrfHeaders } from "@/lib/api/client"
+import { API_BASE } from "@/lib/constants"
 import {
   buildManuscriptAutosaveKey,
   serializeAutosaveDraft,
@@ -28,6 +30,40 @@ type UseManuscriptAutosaveEffectsArgs = {
   sceneTitleDraft: string
   setAutosaveState: Dispatch<SetStateAction<AutosaveState>>
   setStatusMessage: Dispatch<SetStateAction<string | null>>
+}
+
+type PageHideDraft = {
+  html?: string | null
+  text?: string | null
+  title?: string | null
+}
+
+export function persistManuscriptDraftOnPageHide({
+  activeChapterNumber,
+  bookId,
+  draft,
+}: {
+  activeChapterNumber: number
+  bookId: string
+  draft: PageHideDraft | undefined
+}): boolean {
+  if (!draft?.text?.trim()) return false
+
+  const formData = new FormData()
+  formData.append("text", draft.text)
+  formData.append("html", draft.html ?? "")
+  formData.append("title", (draft.title ?? "").trim())
+  formData.append("chapter_number", String(activeChapterNumber))
+  formData.append("replace_existing", "true")
+
+  void fetch(`${API_BASE}/books/${bookId}/manuscript/import`, {
+    method: "POST",
+    body: formData,
+    credentials: "include",
+    headers: getAuthCsrfHeaders(),
+    keepalive: true,
+  }).catch(() => undefined)
+  return true
 }
 
 export function useManuscriptAutosaveEffects({
@@ -146,18 +182,11 @@ export function useManuscriptAutosaveEffects({
     }
 
     const handlePageHide = () => {
-      const draft = bookDrafts[activeChapterNumber]
-      if (!draft?.text?.trim()) return
-      const formData = new FormData()
-      formData.append("text", draft.text)
-      formData.append("html", draft.html ?? "")
-      formData.append("title", (draft.title ?? "").trim() || "")
-      formData.append("chapter_number", String(activeChapterNumber))
-      formData.append("replace_existing", "true")
-      navigator.sendBeacon(
-        `/api/v1/books/${bookId}/manuscript/import`,
-        formData,
-      )
+      persistManuscriptDraftOnPageHide({
+        activeChapterNumber,
+        bookId,
+        draft: bookDrafts[activeChapterNumber],
+      })
     }
 
     window.addEventListener("beforeunload", handleBeforeUnload)

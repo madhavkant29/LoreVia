@@ -6,6 +6,7 @@ const pathnameMock = vi.hoisted(() => vi.fn(() => "/library"))
 const initMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/navigation", () => ({ usePathname: pathnameMock }))
+vi.mock("next/web-vitals", () => ({ useReportWebVitals: vi.fn() }))
 vi.mock("posthog-js", () => ({ default: { init: initMock } }))
 vi.mock("next/dynamic", () => ({
   default: () => function ConsentMock(props: {
@@ -14,9 +15,19 @@ vi.mock("next/dynamic", () => ({
     onDecline: () => void
     buttonStyle: { borderRadius: string }
     declineButtonStyle: { borderRadius: string }
+    containerClasses: string
+    style: { maxWidth: string; width: string; zIndex: string }
   }) {
     return (
-      <div data-testid="consent" data-accept-radius={props.buttonStyle.borderRadius} data-decline-radius={props.declineButtonStyle.borderRadius}>
+      <div
+        data-testid="consent"
+        data-accept-radius={props.buttonStyle.borderRadius}
+        data-decline-radius={props.declineButtonStyle.borderRadius}
+        data-container-class={props.containerClasses}
+        data-max-width={props.style.maxWidth}
+        data-width={props.style.width}
+        data-z-index={props.style.zIndex}
+      >
         {props.children}
         <button onClick={props.onAccept}>Accept analytics</button>
         <button onClick={props.onDecline}>Decline analytics</button>
@@ -55,6 +66,12 @@ describe("PostHogClient", () => {
     })
     expect(container.textContent).toContain("Application body")
     expect(container.textContent).toContain("Want to allow cookies")
+    expect(container.querySelector<HTMLElement>('[data-testid="consent"]')?.dataset).toMatchObject({
+      containerClass: "lorevia-cookie-consent",
+      maxWidth: "34rem",
+      width: "calc(100% - 2rem)",
+      zIndex: "60",
+    })
 
     await act(async () => {
       findButton(container, "Accept analytics").click()

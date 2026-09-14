@@ -7,7 +7,7 @@ import pytest
 
 from app.core.redis import get_redis, key_admin_step_up
 from app.core.security import create_access_token
-from app.models.book import Book, Chapter
+from app.models.book import Book, BookForumPost, Chapter
 from app.models.progress import ReadingProgress
 from app.models.user import AdminPrincipal, User
 
@@ -87,6 +87,107 @@ async def _create_book(
 def _enable_public_forum(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.PUBLIC_MODE_ENABLED", True, raising=False)
     monkeypatch.setattr("app.core.config.settings.PUBLIC_FORUM_STATUS", "public", raising=False)
+
+
+@pytest.mark.asyncio
+async def test_secondary_forum_collections_support_gapless_cursor_pages(client, db):
+    author = await _create_user(db, email="forum-page-author@lorevia.test", tier="author")
+    first_reader = await _create_user(db, email="forum-page-reader-1@lorevia.test", tier="reader")
+    second_reader = await _create_user(db, email="forum-page-reader-2@lorevia.test", tier="reader")
+    first_book = await _create_book(db, author_id=author.id, title="Cursor Harbor")
+    second_book = await _create_book(db, author_id=author.id, title="Cursor Lantern")
+
+    post_ids: list[str] = []
+    for book, headline in (
+        (first_book, "A cursor-safe discussion for the harbor draft"),
+        (second_book, "A cursor-safe discussion for the lantern draft"),
+    ):
+        response = await client.post(
+            "/api/v1/public/forum/posts",
+            headers=_auth_headers(author.id),
+            json={
+                "book_id": str(book.id),
+                "headline": headline,
+                "body": "Seeking focused feedback on continuity, pacing, and the clarity of the opening chapters.",
+                "allow_contact_requests": True,
+            },
+        )
+        assert response.status_code == 201
+        post_ids.append(response.json()["id"])
+
+    first_posts_page = await client.get(
+        "/api/v1/public/forum/my-posts/page?limit=1",
+        headers=_auth_headers(author.id),
+    )
+    assert first_posts_page.status_code == 200
+    first_posts_payload = first_posts_page.json()
+    assert first_posts_payload["has_more"] is True
+    assert first_posts_payload["next_cursor"]
+    second_posts_page = await client.get(
+        "/api/v1/public/forum/my-posts/page",
+        params={"limit": 1, "cursor": first_posts_payload["next_cursor"]},
+        headers=_auth_headers(author.id),
+    )
+    assert second_posts_page.status_code == 200
+    assert second_posts_page.json()["items"][0]["id"] != first_posts_payload["items"][0]["id"]
+
+    target_post_id = post_ids[0]
+    for reader in (first_reader, second_reader):
+        interest = await client.post(
+            f"/api/v1/public/forum/posts/{target_post_id}/interests",
+            headers=_auth_headers(reader.id),
+            json={"message": f"I can provide a careful continuity pass as {reader.username}."},
+        )
+        assert interest.status_code == 201
+
+    first_interests_page = await client.get(
+        f"/api/v1/public/forum/posts/{target_post_id}/interests/page?limit=1",
+        headers=_auth_headers(author.id),
+    )
+    assert first_interests_page.status_code == 200
+    first_interests_payload = first_interests_page.json()
+    second_interests_page = await client.get(
+        f"/api/v1/public/forum/posts/{target_post_id}/interests/page",
+        params={"limit": 1, "cursor": first_interests_payload["next_cursor"]},
+        headers=_auth_headers(author.id),
+    )
+    assert second_interests_page.status_code == 200
+    assert (
+        second_interests_page.json()["items"][0]["id"]
+        != first_interests_payload["items"][0]["id"]
+    )
+
+    for reader in (first_reader, second_reader):
+        comment = await client.post(
+            f"/api/v1/public/forum/posts/{target_post_id}/comments",
+            headers=_auth_headers(reader.id),
+            json={"body": f"A bounded page comment from {reader.username}."},
+        )
+        assert comment.status_code == 201
+
+    first_comments_page = await client.get(
+        f"/api/v1/public/forum/posts/{target_post_id}/comments/page?limit=1"
+    )
+    assert first_comments_page.status_code == 200
+    first_comments_payload = first_comments_page.json()
+    assert first_comments_payload["items"][0]["replies"] == []
+    second_comments_page = await client.get(
+        f"/api/v1/public/forum/posts/{target_post_id}/comments/page",
+        params={"limit": 1, "cursor": first_comments_payload["next_cursor"]},
+    )
+    assert second_comments_page.status_code == 200
+    assert second_comments_page.json()["items"][0]["id"] != first_comments_payload["items"][0]["id"]
+
+    invalid_cursor = await client.get(
+        f"/api/v1/public/forum/posts/{target_post_id}/comments/page?cursor=invalid"
+    )
+    assert invalid_cursor.status_code == 400
+
+    for post_id in post_ids:
+        stored_post = await db.get(BookForumPost, uuid.UUID(post_id))
+        assert stored_post is not None
+        stored_post.status = "closed"
+    await db.commit()
 
 
 @pytest.mark.asyncio

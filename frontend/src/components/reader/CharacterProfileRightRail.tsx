@@ -61,19 +61,15 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
     ...(character.arc_tracker?.diagnostics ?? []),
     ...health.issues,
   ].slice(0, 3)
-  const confidence = Math.max(
-    0,
-    Math.min(
-      100,
-      Math.round(
-        (character.analysis_metadata?.canonical_confidence ?? character.analysis_metadata?.grounding_coverage ?? health.score / 100) * 100,
-      ),
-    ),
-  )
-  const confidenceBands = confidenceBreakdown(confidence)
+  const storedConfidence = character.analysis_metadata?.canonical_confidence
+    ?? character.analysis_metadata?.grounding_coverage
+  const hasStoredConfidence = typeof storedConfidence === "number" && Number.isFinite(storedConfidence)
+  const confidence = hasStoredConfidence
+    ? Math.max(0, Math.min(100, Math.round(storedConfidence <= 1 ? storedConfidence * 100 : storedConfidence)))
+    : health.score
   const openQuestions = buildOpenQuestions(character, connections, evidence)
   const revisionNotes = buildRevisionNotes(character, health, mergeSuggestionCount)
-  const evidenceBars = buildEvidenceBars(character, evidence)
+  const evidenceBars = buildEvidenceBars(evidence)
 
   return (
     <div className="p-4">
@@ -110,26 +106,17 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
             </div>
           </SidebarSurface>
 
-          <SidebarSurface isDark={isDark} title="Extraction confidence">
+          <SidebarSurface isDark={isDark} title={hasStoredConfidence ? "Extraction confidence" : "Profile completeness"}>
             <div className="flex items-center gap-4">
               <HealthRing score={confidence} tone={health.tone} isDark={isDark} />
               <div>
                 <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
-                  {confidence >= 80 ? "High confidence" : confidence >= 55 ? "Medium confidence" : "Low confidence"}
+                  {hasStoredConfidence
+                    ? confidence >= 80 ? "High confidence" : confidence >= 55 ? "Medium confidence" : "Low confidence"
+                    : `${confidence}% complete`}
                 </p>
                 <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{health.summary}</p>
               </div>
-            </div>
-            <div className="mt-4 space-y-2">
-              {confidenceBands.map(([label, value, color]) => (
-                <div key={label} className="grid grid-cols-[70px_minmax(0,1fr)_42px] items-center gap-3 text-xs">
-                  <span className={isDark ? "text-slate-400" : "text-stone-500"}>{label}</span>
-                  <span className={`h-2 rounded-full ${isDark ? "bg-white/10" : "bg-stone-100"}`}>
-                    <span className="block h-2 rounded-full" style={{ width: `${value}%`, backgroundColor: color }} />
-                  </span>
-                  <span className={`text-right font-semibold ${isDark ? "text-slate-200" : "text-stone-700"}`}>{value}%</span>
-                </div>
-              ))}
             </div>
             <button type="button" onClick={onFindEvidence} className={`mt-4 ${linkButtonClasses(isDark)}`}>View details</button>
           </SidebarSurface>
@@ -155,17 +142,23 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
           </SidebarSurface>
 
           <SidebarSurface isDark={isDark} title="Evidence by chapter">
-            <div className="flex h-24 items-end gap-1">
-              {evidenceBars.map((bar) => (
-                <span key={bar.chapter} className="flex min-w-0 flex-1 items-end" title={`Chapter ${bar.chapter}: ${bar.value}`}>
-                  <span className={`w-full rounded-sm ${isDark ? "bg-teal-300/80" : "bg-teal-600/75"}`} style={{ height: `${Math.max(8, bar.height)}%` }} />
-                </span>
-              ))}
-            </div>
-            <div className={`mt-2 flex justify-between text-3xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
-              <span>1</span>
-              <span>{Math.max(...evidenceBars.map((bar) => bar.chapter), 1)}</span>
-            </div>
+            {evidenceBars.length > 0 ? (
+              <>
+                <div className="flex h-24 items-end gap-1">
+                  {evidenceBars.map((bar) => (
+                    <span key={bar.chapter} className="flex min-w-0 flex-1 items-end" title={`Chapter ${bar.chapter}: ${bar.value}`}>
+                      <span className={`w-full rounded-sm ${isDark ? "bg-teal-300/80" : "bg-teal-600/75"}`} style={{ height: `${bar.height}%` }} />
+                    </span>
+                  ))}
+                </div>
+                <div className={`mt-2 flex justify-between text-3xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                  <span>{evidenceBars[0].chapter}</span>
+                  <span>{evidenceBars[evidenceBars.length - 1].chapter}</span>
+                </div>
+              </>
+            ) : (
+              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No chapter evidence is loaded yet.</p>
+            )}
             <button type="button" onClick={onFindEvidence} className={`mt-3 ${linkButtonClasses(isDark)}`}>View all mentions</button>
           </SidebarSurface>
 
@@ -204,17 +197,6 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
   )
 })
 
-function confidenceBreakdown(confidence: number): Array<[string, number, string]> {
-  const high = confidence
-  const medium = Math.max(8, Math.min(100, Math.round(confidence * 0.72)))
-  const low = Math.max(4, 100 - high)
-  return [
-    ["High", high, "#0f8f83"],
-    ["Medium", medium, "#f59e0b"],
-    ["Low", low, "#ef4444"],
-  ]
-}
-
 function buildOpenQuestions(character: Character, connections: ConnectedRelationship[], evidence: SearchResult[]) {
   const questions: string[] = []
   if (!character.goal && !character.arc_tracker?.goal) questions.push(`What does ${character.name} want by the midpoint?`)
@@ -234,27 +216,16 @@ function buildRevisionNotes(character: Character, health: CharacterHealth, merge
   return notes.length > 0 ? notes.slice(0, 3) : ["No revision notes have been attached to this character yet."]
 }
 
-function buildEvidenceBars(character: Character, evidence: SearchResult[]) {
-  const maxChapter = Math.max(
-    character.last_seen_chapter ?? character.first_chapter ?? 1,
-    ...evidence.map((item) => item.chapter_num ?? 1),
-    12,
-  )
+function buildEvidenceBars(evidence: SearchResult[]) {
   const buckets = new Map<number, number>()
   for (const item of evidence) {
     buckets.set(item.chapter_num, (buckets.get(item.chapter_num) ?? 0) + 1)
   }
-  if (buckets.size === 0) {
-    buckets.set(character.first_chapter || 1, 1)
-    if (character.last_seen_chapter && character.last_seen_chapter !== character.first_chapter) {
-      buckets.set(character.last_seen_chapter, 1)
-    }
-  }
-  const chapters = Array.from({ length: Math.min(maxChapter, 24) }, (_, index) => index + 1)
+  const chapters = Array.from(buckets.keys()).sort((left, right) => left - right)
   const maxValue = Math.max(...Array.from(buckets.values()), 1)
   return chapters.map((chapter) => {
     const value = buckets.get(chapter) ?? 0
-    return { chapter, value, height: value > 0 ? Math.round((value / maxValue) * 100) : 8 }
+    return { chapter, value, height: Math.round((value / maxValue) * 100) }
   })
 }
 
@@ -277,15 +248,6 @@ function SidebarSurface({ children, isDark, title }: { children: ReactNode; isDa
       <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
       <div className="mt-4">{children}</div>
     </section>
-  )
-}
-
-function QuickAction({ description, isDark, onClick, title }: { description: string; isDark: boolean; onClick: () => void; title: string }) {
-  return (
-    <button type="button" onClick={onClick} className={`rounded-md border p-3 text-left transition ${isDark ? "border-[#202a38] bg-[#0d121a] hover:border-[#2b3747] hover:bg-[#131c29]" : "border-stone-200 bg-white hover:bg-stone-50"}`}>
-      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{title}</p>
-      <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{description}</p>
-    </button>
   )
 }
 

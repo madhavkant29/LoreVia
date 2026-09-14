@@ -10,9 +10,21 @@ from app.utils.notification_utils import (
     _book_ready_diagnostic_totals,
     build_book_ready_notification,
     build_revision_digest_notification,
+    build_upload_processing_notification,
     collect_book_ready_stats,
     sync_revision_digest_notifications,
 )
+
+
+def test_upload_processing_notification_uses_measured_size_without_invented_eta():
+    book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Signal Fire")
+
+    notification = build_upload_processing_notification(book, "author", 6 * 1024 * 1024)
+
+    assert notification.title == "Your novel is being processed"
+    assert "approximately" not in notification.body
+    assert notification.data["file_size_mb"] == 6.0
+    assert "estimated_minutes" not in notification.data
 
 
 def test_build_revision_digest_notification_includes_revision_summary():

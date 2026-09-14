@@ -89,6 +89,25 @@ body {
   outline-offset: 2px;
 }
 
+.dark select,
+html.dark select {
+  color-scheme: dark;
+}
+
+.dark select option,
+.dark select optgroup,
+html.dark select option,
+html.dark select optgroup {
+  background-color: #050505;
+  color: #ffffff;
+}
+
+.dark select option:checked,
+html.dark select option:checked {
+  background-color: #1f615d;
+  color: #ffffff;
+}
+
 @layer components {
   .app-shell {
     position: relative;
@@ -1279,6 +1298,13 @@ body {
   .editorial-answer-group__heading { display: block; }
   .editorial-answer-group__heading > a { display: inline-flex; margin-top: 0.8rem; }
   .editorial-answer-list article, .editorial-answer-list article:nth-child(even) { border-left: 0; padding-inline: 0; }
+}
+
+@media (max-width: 1366px) {
+  body:has(.lorevia-cookie-consent) [data-lorevia-bottom-floating] {
+    visibility: hidden;
+    pointer-events: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

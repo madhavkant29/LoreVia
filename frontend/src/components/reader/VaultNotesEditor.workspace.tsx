@@ -159,6 +159,7 @@ export function VaultNoteWorkspace({
                 {mode !== "preview" ? (
                   <textarea
                     ref={textareaRef}
+                    aria-label="Note content"
                     value={selectedContent}
                     onChange={(event) => onUpdateDraft(selectedNote.path, event.target.value)}
                     onMouseUp={(event) => onSyncSelectionMenu(event)}

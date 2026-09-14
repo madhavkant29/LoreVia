@@ -41,7 +41,10 @@ export function GoalCalendarCard({
   const [draftQuotaValue, setDraftQuotaValue] = useState("")
   const [draftQuotaUnit, setDraftQuotaUnit] = useState("words")
   const today = todayDateValue()
-  const goalCalendar = writerWorkspace?.goal_calendar ?? []
+  const goalCalendar = useMemo(
+    () => writerWorkspace?.goal_calendar ?? [],
+    [writerWorkspace?.goal_calendar],
+  )
   const calendarDays = useMemo(() => buildCalendarDays(visibleMonth), [visibleMonth])
   const itemsByDate = useMemo(() => {
     const map = new Map<string, GoalCalendarItem[]>()

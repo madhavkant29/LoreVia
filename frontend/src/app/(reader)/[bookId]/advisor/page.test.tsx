@@ -217,7 +217,7 @@ beforeEach(() => {
   })
   advisorSuggestionsScanMock.mockResolvedValue({ job_id: "scan-job-1", cached: true })
   advisorSuggestionsJobStatusMock.mockResolvedValue({ status: "complete", result: null })
-  advisorMessageStreamMock.mockImplementation(async (_bookId, _messages, _limit, callbacks) => {
+  advisorMessageStreamMock.mockImplementation(async (_bookId, _messages, callbacks) => {
     callbacks?.onDelta?.("Opportunity: ")
     callbacks?.onDelta?.("seed the lantern earlier.")
     return {

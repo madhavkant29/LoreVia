@@ -412,6 +412,8 @@ async def test_request_account_deletion_anonymizes_user_books_and_tracks_provide
             ]
 
         async def execute(self, _statement):
+            if getattr(_statement, "is_update", False):
+                return FakeScalarResult()
             return FakeScalarResult(self.results.pop(0))
 
     async def fake_cancel(subscription_id):

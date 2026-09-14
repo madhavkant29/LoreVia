@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { zipSync, strToU8 } from "fflate"
 import { booksApi } from "@/lib/api/books"
 import type { VaultPreview, VaultPreviewFile } from "@/types/book"
@@ -100,13 +100,35 @@ export function VaultPreview({
   const noteCount = files.length
 
   useEffect(() => {
+    const saveTimers = saveTimersRef.current
     return () => {
-      for (const timer of Object.values(saveTimersRef.current)) {
+      for (const timer of Object.values(saveTimers)) {
         window.clearTimeout(timer)
       }
       saveTimersRef.current = {}
     }
   }, [])
+
+  const saveDraft = useCallback(async (path: string, content: string) => {
+    latestDraftRef.current[path] = content
+    const pending = saveTimersRef.current[path]
+    if (pending) {
+      window.clearTimeout(pending)
+      delete saveTimersRef.current[path]
+    }
+    const relative = path.replace(`${preview.root_folder}/`, "")
+    setStatus(`Saving ${relative}...`)
+    try {
+      const result = await booksApi.saveCharacterBibleVaultNote(bookId, { path, content })
+      if (latestDraftRef.current[path] !== result.content) {
+        return
+      }
+      setDrafts((current) => ({ ...current, [path]: result.content }))
+      setStatus(result.persisted ? `Saved ${relative}` : `Reset ${relative} to the generated version`)
+    } catch {
+      setStatus(`Could not save ${relative}`)
+    }
+  }, [bookId, preview.root_folder])
 
   useEffect(() => {
     if (!selectedFile) return
@@ -126,28 +148,7 @@ export function VaultPreview({
       delete saveTimersRef.current[path]
       void saveDraft(path, selectedContent)
     }, 700)
-  }, [selectedContent, selectedFile, selectedHasChanges])
-
-  const saveDraft = async (path: string, content: string) => {
-    latestDraftRef.current[path] = content
-    const pending = saveTimersRef.current[path]
-    if (pending) {
-      window.clearTimeout(pending)
-      delete saveTimersRef.current[path]
-    }
-    const relative = path.replace(`${preview.root_folder}/`, "")
-    setStatus(`Saving ${relative}...`)
-    try {
-      const result = await booksApi.saveCharacterBibleVaultNote(bookId, { path, content })
-      if (latestDraftRef.current[path] !== result.content) {
-        return
-      }
-      setDrafts((current) => ({ ...current, [path]: result.content }))
-      setStatus(result.persisted ? `Saved ${relative}` : `Reset ${relative} to the generated version`)
-    } catch {
-      setStatus(`Could not save ${relative}`)
-    }
-  }
+  }, [saveDraft, selectedContent, selectedFile, selectedHasChanges])
 
   const handleSelect = (path: string) => {
     setSelectedPath(path)

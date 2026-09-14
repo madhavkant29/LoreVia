@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from app.core.redis import (
     key_public_book_detail,
     key_public_books,
     key_public_chapter,
+    mark_public_catalog_cache_dirty,
     mark_public_profile_cache_dirty,
 )
 from app.core.storage import upload_text
@@ -28,6 +30,7 @@ from app.schemas.public import (
     PublicChapterAppendOut,
     PublicChapterIn,
 )
+from app.services.public_asset_service import publish_public_book_assets
 from app.utils.public.serialization import ensure_public_mode_enabled, is_public_demo_book
 
 FORUM_POST_OPEN = "open"
@@ -209,7 +212,7 @@ async def create_public_demo_book(
     for index, chapter_in in enumerate(body.chapters, start=1):
         chapter_token_count = count_tokens(chapter_in.text)
         chapter_key = f"public_chapters/{book.id}/{index}.txt"
-        upload_text(chapter_key, chapter_in.text)
+        await asyncio.to_thread(upload_text, chapter_key, chapter_in.text)
         total_tokens += chapter_token_count
         db.add(
             Chapter(
@@ -225,7 +228,10 @@ async def create_public_demo_book(
 
     book.total_chapters = len(body.chapters)
     book.total_tokens = total_tokens
+    await db.flush()
+    await publish_public_book_assets(db, book=book)
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
     await mark_public_profile_cache_dirty(str(book.user_id))
     return book, PublicBookCreateOut(
         book_id=str(book.id),
@@ -256,7 +262,7 @@ async def append_public_demo_book_chapter(
     ).scalar_one()
     token_count = count_tokens(body.text)
     chapter_key = f"public_chapters/{book.id}/{next_number}.txt"
-    upload_text(chapter_key, body.text)
+    await asyncio.to_thread(upload_text, chapter_key, body.text)
     db.add(
         Chapter(
             book_id=book.id,
@@ -270,9 +276,12 @@ async def append_public_demo_book_chapter(
     )
     book.total_chapters = next_number
     book.total_tokens = (book.total_tokens or 0) + token_count
+    await db.flush()
+    await publish_public_book_assets(db, book=book)
     await cache_del(key_public_book_detail(str(book.id)))
     await cache_del(key_public_chapter(str(book.id), next_number))
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
     await mark_public_profile_cache_dirty(str(book.user_id))
     return book, PublicChapterAppendOut(
         book_id=str(book.id),
@@ -327,7 +336,7 @@ async def create_public_book_manual(
     for index, chapter_in in enumerate(body.chapters, start=1):
         chapter_token_count = count_tokens(chapter_in.text)
         chapter_key = f"public_chapters/{book.id}/{index}.txt"
-        upload_text(chapter_key, chapter_in.text)
+        await asyncio.to_thread(upload_text, chapter_key, chapter_in.text)
         total_tokens += chapter_token_count
         db.add(
             Chapter(
@@ -343,7 +352,10 @@ async def create_public_book_manual(
 
     book.total_chapters = len(body.chapters)
     book.total_tokens = total_tokens
+    await db.flush()
+    await publish_public_book_assets(db, book=book)
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
     await mark_public_profile_cache_dirty(str(book.user_id))
     return {
         "book_id": str(book.id),
@@ -377,7 +389,7 @@ async def append_public_chapter(
     ).scalar_one()
     token_count = count_tokens(body.text)
     chapter_key = f"public_chapters/{book.id}/{next_number}.txt"
-    upload_text(chapter_key, body.text)
+    await asyncio.to_thread(upload_text, chapter_key, body.text)
     db.add(
         Chapter(
             book_id=book.id,
@@ -391,9 +403,12 @@ async def append_public_chapter(
     )
     book.total_chapters = next_number
     book.total_tokens = (book.total_tokens or 0) + token_count
+    await db.flush()
+    await publish_public_book_assets(db, book=book)
     await cache_del(key_public_book_detail(str(book.id)))
     await cache_del(key_public_chapter(str(book.id), next_number))
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
     await mark_public_profile_cache_dirty(str(book.user_id))
     return {
         "book_id": str(book.id),

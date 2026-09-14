@@ -68,9 +68,7 @@ export default async function PricingPage() {
                   <br className="hidden sm:block" />
                   {" "}matches your work
                 </h1>
-                <p className="mt-5 max-w-2xl text-[1.05rem] leading-8 text-muted-foreground">
-                  Free stays included with your account. Compare Free, Author, and Architect, switch billing cadence, and start checkout without leaving the app.
-                </p>
+
               </div>
 
               <div className="hidden lg:block" />

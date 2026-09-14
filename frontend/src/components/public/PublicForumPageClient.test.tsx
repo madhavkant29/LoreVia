@@ -5,20 +5,20 @@ import type { ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRoot } from "react-dom/client"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import type { Book } from "@/types/book"
+import type { BookSelector } from "@/types/book"
 import type { PublicForumPost } from "@/types/public"
 
 import { PublicForumPageClient } from "./PublicForumPageClient"
 
 const pushMock = vi.hoisted(() => vi.fn())
 const meMock = vi.hoisted(() => vi.fn())
-const listBooksMock = vi.hoisted(() => vi.fn())
+const listBookSelectorMock = vi.hoisted(() => vi.fn())
 const updateForumMetadataMock = vi.hoisted(() => vi.fn())
 const listRankedBetaNovelsMock = vi.hoisted(() => vi.fn())
 const listForumPostsMock = vi.hoisted(() => vi.fn())
 const listMyForumPostsMock = vi.hoisted(() => vi.fn())
 const createForumPostMock = vi.hoisted(() => vi.fn())
-const eligibleBooksMock = vi.hoisted(() => vi.fn((_books: Book[], _posts: PublicForumPost[]) => [] as Book[]))
+const eligibleBooksMock = vi.hoisted(() => vi.fn((_books: BookSelector[], _posts: PublicForumPost[]) => [] as BookSelector[]))
 
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
@@ -38,7 +38,7 @@ vi.mock("@/lib/billing/plans", () => ({
 
 vi.mock("@/lib/utils/publicForum", () => ({
   formatReputationScore: (score: number) => String(score),
-  getEligibleForumAuthorBooks: (books: Book[], posts: PublicForumPost[]) => eligibleBooksMock(books, posts),
+  getEligibleForumAuthorBooks: (books: BookSelector[], posts: PublicForumPost[]) => eligibleBooksMock(books, posts),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
@@ -49,7 +49,7 @@ vi.mock("@/lib/api/auth", () => ({
 
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
-    list: (...args: unknown[]) => listBooksMock(...args),
+    listSelector: (...args: unknown[]) => listBookSelectorMock(...args),
     updateForumMetadata: (...args: unknown[]) => updateForumMetadataMock(...args),
   },
 }))
@@ -104,7 +104,7 @@ describe("PublicForumPageClient", () => {
   afterEach(() => {
     pushMock.mockReset()
     meMock.mockReset()
-    listBooksMock.mockReset()
+    listBookSelectorMock.mockReset()
     updateForumMetadataMock.mockReset()
     listRankedBetaNovelsMock.mockReset()
     listForumPostsMock.mockReset()
@@ -116,7 +116,7 @@ describe("PublicForumPageClient", () => {
 
   it("renders ranked beta novel badges and supporting notes", async () => {
     meMock.mockResolvedValue(null)
-    listBooksMock.mockResolvedValue([])
+    listBookSelectorMock.mockResolvedValue([])
     listMyForumPostsMock.mockResolvedValue([])
     listRankedBetaNovelsMock.mockResolvedValue({
       items: [],
@@ -204,7 +204,7 @@ describe("PublicForumPageClient", () => {
 
   it("requests ranked beta novels with the selected ranking window and resets paging", async () => {
     meMock.mockResolvedValue(null)
-    listBooksMock.mockResolvedValue([])
+    listBookSelectorMock.mockResolvedValue([])
     listMyForumPostsMock.mockResolvedValue([])
     listRankedBetaNovelsMock.mockResolvedValue({
       items: [],
@@ -280,15 +280,16 @@ describe("PublicForumPageClient", () => {
 
   it("loads signed-in viewer context, validates, and creates a general thread", async () => {
     meMock.mockResolvedValue({ id: "user-1", username: "mira", tier: "author" })
-    listBooksMock.mockResolvedValue([{ id: "book-1", title: "Atlas", mode: "author" }])
+    listBookSelectorMock.mockResolvedValue([{ id: "book-1", title: "Atlas", mode: "author" }])
     listMyForumPostsMock.mockResolvedValue([])
-    eligibleBooksMock.mockReturnValue([{ id: "book-1", title: "Atlas", genre: "Fantasy", public_description: "A gate story." }] as unknown as Book[])
+    eligibleBooksMock.mockReturnValue([{ id: "book-1", title: "Atlas", genre: "Fantasy", public_description: "A gate story." }] as unknown as BookSelector[])
     listRankedBetaNovelsMock.mockResolvedValue(emptyFeed("most_popular", "monthly"))
     listForumPostsMock.mockResolvedValue(emptyFeed("most_popular", "monthly"))
     createForumPostMock.mockResolvedValue({ id: "created-general" })
     const { container, unmount } = renderWithQuery(<PublicForumPageClient initialData={emptyFeed("most_popular", "monthly")} />)
     await flushUi()
     await flushUi()
+    expect(listBookSelectorMock).toHaveBeenCalledWith(true)
     expect(container.textContent).toContain("Open a new thread")
     expect(container.textContent).toContain("@mira")
 

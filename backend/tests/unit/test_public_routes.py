@@ -59,7 +59,9 @@ class _FakeDB:
     async def get(self, *_args, **_kwargs):
         return self._get_values.pop(0)
 
-    async def execute(self, *_args, **_kwargs):
+    async def execute(self, *args, **_kwargs):
+        if args and getattr(args[0], "is_update", False):
+            return _Result()
         return self._execute_values.pop(0)
 
     def add(self, value):
@@ -389,6 +391,39 @@ async def test_public_uploads_analytics_route_returns_overview(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_public_uploads_analytics_route_uses_catalog_versioned_cache(monkeypatch):
+    cache: dict[str, dict] = {}
+    build_calls = 0
+
+    async def _fake_version():
+        return 7
+
+    async def _fake_cache_get(key):
+        return cache.get(key)
+
+    async def _fake_cache_set(key, value, ttl):
+        assert ttl == 300
+        cache[key] = value
+
+    async def _fake_build_overview(_db):
+        nonlocal build_calls
+        build_calls += 1
+        return {"total_public_books": 3}
+
+    patch_route_dependency(monkeypatch, public, "get_public_catalog_cache_version", _fake_version)
+    patch_route_dependency(monkeypatch, public, "cache_get", _fake_cache_get)
+    patch_route_dependency(monkeypatch, public, "cache_set", _fake_cache_set)
+    patch_route_dependency(
+        monkeypatch, public, "build_public_uploads_overview", _fake_build_overview
+    )
+
+    assert await public.get_public_uploads_analytics(db=_FakeDB()) == {"total_public_books": 3}
+    assert await public.get_public_uploads_analytics(db=_FakeDB()) == {"total_public_books": 3}
+    assert build_calls == 1
+    assert cache == {"public:uploads_overview:v7": {"total_public_books": 3}}
+
+
+@pytest.mark.asyncio
 async def test_list_public_books_builds_and_caches_rows(monkeypatch):
     captured = {}
 
@@ -502,7 +537,7 @@ async def test_list_public_books_includes_approved_user_shared_books(monkeypatch
 @pytest.mark.asyncio
 async def test_get_public_book_returns_cached_payload(monkeypatch):
     patch_route_dependency(
-        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+        monkeypatch, public, "get_public_book_display_analytics", _async_empty_book_analytics
     )
 
     async def _fake_cache_get(_key):
@@ -539,7 +574,7 @@ async def test_get_public_book_skips_cache_for_user_shared_samples(monkeypatch):
         monkeypatch, public, "_active_forum_post_map", _fake_active_forum_post_map
     )
     patch_route_dependency(
-        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+        monkeypatch, public, "get_public_book_display_analytics", _async_empty_book_analytics
     )
     book_id = uuid.uuid4()
     book = SimpleNamespace(
@@ -617,7 +652,7 @@ async def test_get_public_book_raises_for_missing_or_hidden_book(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_public_book_builds_payload(monkeypatch):
     patch_route_dependency(
-        monkeypatch, public, "build_public_book_analytics", _async_empty_book_analytics
+        monkeypatch, public, "get_public_book_display_analytics", _async_empty_book_analytics
     )
 
     async def _fake_cache_get(_key):
@@ -824,6 +859,91 @@ async def test_get_public_chapter_builds_payload(monkeypatch):
     assert payload["text_url"] == "https://signed/chapters/2.txt"
     assert payload["text_content"] == "chapter text"
     assert cached["args"][2] == 3600
+
+
+@pytest.mark.asyncio
+async def test_get_public_chapter_prefers_direct_asset_without_source_download(monkeypatch):
+    async def _cache_miss(_key):
+        return None
+
+    async def _cache_set(*_args):
+        return None
+
+    patch_route_dependency(monkeypatch, public, "cache_get", _cache_miss)
+    patch_route_dependency(monkeypatch, public, "cache_set", _cache_set)
+    patch_route_dependency(
+        monkeypatch,
+        public,
+        "public_chapter_content_url",
+        lambda _book, _chapter: "https://assets.getlorevia.com/public-assets/chapter/v2.txt",
+    )
+    patch_route_dependency(
+        monkeypatch,
+        public,
+        "download_book",
+        lambda _key: (_ for _ in ()).throw(AssertionError("source must not be downloaded")),
+    )
+    book_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=book_id,
+        is_public=True,
+        source_kind="public_demo",
+        hidden_at=None,
+        archived_at=None,
+        title="Book",
+        total_chapters=2,
+    )
+    chapter = SimpleNamespace(number=2, title="Two", description=None, s3_key="private/source")
+    db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=chapter)])
+
+    payload = await public.get_public_chapter(book_id, 2, db=db)
+
+    assert payload["content_url"].startswith("https://assets.getlorevia.com/")
+    assert payload["text_url"] == payload["content_url"]
+    assert payload["text_content"] is None
+    assert payload["html_content"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_public_chapter_inline_compatibility_bypasses_url_only_cache(monkeypatch):
+    async def _unexpected_cache_get(_key):
+        raise AssertionError("inline compatibility reads must bypass the URL-only cache")
+
+    async def _unexpected_cache_set(*_args):
+        raise AssertionError("inline compatibility responses must not poison the URL-only cache")
+
+    patch_route_dependency(monkeypatch, public, "cache_get", _unexpected_cache_get)
+    patch_route_dependency(monkeypatch, public, "cache_set", _unexpected_cache_set)
+    patch_route_dependency(
+        monkeypatch,
+        public,
+        "public_chapter_content_url",
+        lambda _book, _chapter: "https://assets.getlorevia.com/public-assets/chapter/v2.txt",
+    )
+    patch_route_dependency(monkeypatch, public, "download_book", lambda _key: b"chapter")
+    monkeypatch.setattr(
+        public,
+        "deserialize_manuscript_content",
+        lambda _raw: {"text": "inline text", "html": "<p>inline</p>"},
+    )
+    book_id = uuid.uuid4()
+    book = SimpleNamespace(
+        id=book_id,
+        is_public=True,
+        source_kind="public_demo",
+        hidden_at=None,
+        archived_at=None,
+        title="Book",
+        total_chapters=2,
+    )
+    chapter = SimpleNamespace(number=2, title="Two", description=None, s3_key="private/source")
+    db = _FakeDB(get_values=[book], execute_values=[_Result(scalar=chapter)])
+
+    payload = await public.get_public_chapter(book_id, 2, include_content=True, db=db)
+
+    assert payload["content_url"].startswith("https://assets.getlorevia.com/")
+    assert payload["text_content"] == "inline text"
+    assert payload["html_content"] == "<p>inline</p>"
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@ from app.models.character import (
     CharacterRelationshipCandidate,
     CharacterState,
 )
-from app.models.intelligence import CharacterRelationship, Notification
+from app.models.intelligence import BookChunk, CharacterRelationship, Notification
 from app.models.operations import TaskExecution
 from app.models.user import User
 from app.services.extraction_processing_flow_service import _claim_book_completion
@@ -250,6 +250,16 @@ async def test_process_chapter_remains_incomplete_when_embedding_provider_discon
         processed=True,
     )
     db.add(chapter)
+    await db.flush()
+    old_chunk = BookChunk(
+        book_id=book.id,
+        chapter_id=chapter.id,
+        chunk_index=0,
+        text="Last known good chunk",
+        embedding=_embedding_for(1)[0],
+        token_count=4,
+    )
+    db.add(old_chunk)
     await db.commit()
 
     async def _raise_connection_error(*args, **kwargs):
@@ -270,6 +280,14 @@ async def test_process_chapter_remains_incomplete_when_embedding_provider_discon
 
     await db.refresh(chapter)
     assert chapter.processed is False
+    persisted_chunks = (
+        (await db.execute(select(BookChunk).where(BookChunk.chapter_id == chapter.id)))
+        .scalars()
+        .all()
+    )
+    assert [(chunk.id, chunk.text) for chunk in persisted_chunks] == [
+        (old_chunk.id, "Last known good chunk")
+    ]
 
 
 @pytest.mark.asyncio
@@ -1522,7 +1540,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
     async def _fake_embed(texts: list[str], **_kwargs) -> list[list[float]]:
         return _embedding_for(len(texts))
 
-    async def _fake_embed_for_dedup(_name: str, _traits: dict) -> list[float]:
+    async def _fake_embed_for_dedup(_name: str, _traits: dict, **_kwargs) -> list[float]:
         return [0.01] * 1536
 
     async def _never_find_similar(*_args, **_kwargs):

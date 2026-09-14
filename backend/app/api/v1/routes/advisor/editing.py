@@ -5,7 +5,6 @@ from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
-from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
@@ -18,7 +17,9 @@ from app.api.v1.routes.advisor.chat import (
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.llm import get_openai_client
 from app.core.redis import (
+    get_book_cache_version,
     get_editorial_review_cache,
     get_prose_tighten_cache,
     set_editorial_review_cache,
@@ -47,9 +48,11 @@ from app.utils.advisor_utils import (
     normalize_prose_tighten_result,
 )
 from app.utils.books.continuity import detect_chapter_continuity_flags
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.llm_usage_utils import (
+    create_tracked_chat_completion,
+    public_llm_http_error_message,
+)
 from app.utils.logging.errors import public_error_message
-from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
 
@@ -75,12 +78,13 @@ async def editorial_review(
         raise HTTPException(400, detail="Passage text is required.")
 
     cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
-    cached = await get_editorial_review_cache(str(book.id), cache_key)
+    cache_version = await get_book_cache_version(str(book.id))
+    cached = await get_editorial_review_cache(str(book.id), cache_key, version=cache_version)
     if cached is not None:
         return {**cached, "cached": True}
 
-    total_ch = book.total_chapters or 9999
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+    total_ch = int(book.total_chapters or 0)
+    client = get_openai_client()
 
     try:
         hits = await hybrid_story_search(
@@ -159,7 +163,12 @@ async def editorial_review(
             ],
             "cached": False,
         }
-        await set_editorial_review_cache(str(book.id), cache_key, response_payload)
+        await set_editorial_review_cache(
+            str(book.id),
+            cache_key,
+            response_payload,
+            expected_version=cache_version,
+        )
         return response_payload
     finally:
         await client.close()
@@ -185,7 +194,7 @@ async def editorial_review_stream(
             )
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
-            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 
@@ -207,11 +216,12 @@ async def prose_tighten(
         raise HTTPException(400, detail="Selected text is required.")
 
     cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num)
-    cached = await get_prose_tighten_cache(str(book.id), cache_key)
+    cache_version = await get_book_cache_version(str(book.id))
+    cached = await get_prose_tighten_cache(str(book.id), cache_key, version=cache_version)
     if cached is not None:
         return ProseTightenResponse(**{**cached, "cached": True})
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+    client = get_openai_client()
     try:
         chapter_hint = (
             f"This selection is from Chapter {body.chapter_num}."
@@ -245,7 +255,12 @@ async def prose_tighten(
             response.choices[0].message.content or "{}", body.text
         )
         response_payload = {**normalized, "cached": False}
-        await set_prose_tighten_cache(str(book.id), cache_key, response_payload)
+        await set_prose_tighten_cache(
+            str(book.id),
+            cache_key,
+            response_payload,
+            expected_version=cache_version,
+        )
         return ProseTightenResponse(**response_payload)
     finally:
         await client.close()
@@ -271,7 +286,7 @@ async def prose_tighten_stream(
             )
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
-            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 
@@ -363,7 +378,7 @@ async def inline_continuity_check_stream(
             )
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
-            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 

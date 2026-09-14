@@ -220,7 +220,7 @@ async def test_save_vault_notes_syncs_links_backlinks_and_tags(db):
 
 
 @pytest.mark.asyncio
-async def test_import_and_export_vault_user_notes_zip(db):
+async def test_import_and_export_vault_user_notes_zip(db, monkeypatch):
     user = User(email="vault-note-zip@lorevia.app", username="vault-note-zip", password_hash="hash")
     book = Book(
         user=user,
@@ -231,6 +231,16 @@ async def test_import_and_export_vault_user_notes_zip(db):
     )
     db.add_all([user, book])
     await db.commit()
+
+    original_commit = db.commit
+    commit_count = 0
+
+    async def count_commit():
+        nonlocal commit_count
+        commit_count += 1
+        await original_commit()
+
+    monkeypatch.setattr(db, "commit", count_commit)
 
     archive_buffer = BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -245,12 +255,43 @@ async def test_import_and_export_vault_user_notes_zip(db):
         source="user_notes",
     )
     assert len(imported) == 2
+    assert commit_count == 1
 
     notes = await list_vault_notes(db, book=book, user_id=user.id, source="user_notes")
     exported = export_vault_notes_zip(notes=notes)
     with zipfile.ZipFile(BytesIO(exported)) as archive:
         assert sorted(archive.namelist()) == ["Characters/Aria.md", "World/Capital.md"]
         assert archive.read("Characters/Aria.md").decode("utf-8").startswith("# Aria")
+
+
+@pytest.mark.asyncio
+async def test_import_vault_notes_zip_validates_every_entry_before_writing(db):
+    user = User(email="vault-note-atomic@lorevia.app", password_hash="hash")
+    book = Book(
+        user=user,
+        title="Atomic Vault Story",
+        format="pdf",
+        s3_key="books/atomic-vault-story.pdf",
+        status="ready",
+    )
+    db.add_all([user, book])
+    await db.commit()
+
+    archive_buffer = BytesIO()
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Characters/Valid.md", "# Valid")
+        archive.writestr("Characters/Invalid.md", b"\xff\xfe")
+
+    with pytest.raises(HTTPException, match="non-UTF-8"):
+        await import_vault_notes_zip(
+            db,
+            book=book,
+            user_id=user.id,
+            archive_bytes=archive_buffer.getvalue(),
+            source="user_notes",
+        )
+
+    assert await list_vault_notes(db, book=book, user_id=user.id, source="user_notes") == []
 
 
 @pytest.mark.asyncio

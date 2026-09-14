@@ -43,6 +43,25 @@ def test_non_llm_maintenance_tasks_allow_six_retries(task):
     assert task.max_retries == 6
 
 
+@pytest.mark.parametrize(
+    "task",
+    [
+        maintain_task_executions_task,
+        release_stale_processing_reservations_task,
+        repair_processing_books_task,
+        send_due_trial_emails_task,
+        process_beta_reads_task,
+        process_data_deletion_requests_task,
+        cleanup_expired_advisor_jobs_task,
+        cleanup_expired_webhook_events_task,
+        cleanup_expired_subscription_events_task,
+        refresh_public_rankings_task,
+    ],
+)
+def test_maintenance_tasks_never_share_the_interactive_intelligence_queue(task):
+    assert task.queue == "maintenance"
+
+
 def _fake_run_worker_coro(coro):
     result = None
     exc = None
@@ -77,6 +96,22 @@ def _mock_async_session_local(monkeypatch, db):
     monkeypatch.setattr(
         "app.workers.tasks.maintenance_tasks.run_worker_coro", _fake_run_worker_coro
     )
+
+
+def test_maintain_task_executions_skips_when_cron_lock_is_held(monkeypatch):
+    async def lock_held(*_args, **_kwargs):
+        return False
+
+    async def release_lock(*_args, **_kwargs):
+        raise AssertionError("held lock should not be released by this task")
+
+    monkeypatch.setattr("app.core.redis.cache_set_if_absent", lock_held)
+    monkeypatch.setattr("app.core.redis.cache_delete_if_owner", release_lock)
+    monkeypatch.setattr(
+        "app.workers.tasks.maintenance_tasks.run_worker_coro", _fake_run_worker_coro
+    )
+
+    assert maintain_task_executions_task.run(limit=10) == {"skipped": "maintenance_already_running"}
 
 
 @pytest.mark.asyncio

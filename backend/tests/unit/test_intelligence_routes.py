@@ -21,6 +21,7 @@ def _stub_llm_reservation_lifecycle(monkeypatch):
         return None
 
     monkeypatch.setattr(intelligence, "reserve_llm_call", reserve)
+    monkeypatch.setattr(intelligence, "finish_llm_reservation", finish)
     monkeypatch.setattr(intelligence, "finish_llm_reservation_counts", finish)
     monkeypatch.setattr(intelligence, "fail_llm_reservation", finish)
     monkeypatch.setattr("app.services.llm_control_service.reserve_llm_call", reserve)
@@ -224,7 +225,7 @@ async def test_qa_endpoint_builds_answer_and_caches(monkeypatch):
 
     monkeypatch.setattr(intelligence, "build_grounded_qa_context", _fake_build_grounded_qa_context)
     client = _FakeClient("Grounded answer")
-    monkeypatch.setattr(intelligence, "get_client", lambda: client)
+    monkeypatch.setattr(intelligence, "get_openai_client", lambda: client)
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
     user = SimpleNamespace(id=book.user_id)
     db = _FakeDB(
@@ -243,7 +244,7 @@ async def test_qa_endpoint_builds_answer_and_caches(monkeypatch):
     assert payload.answer == "Grounded answer"
     assert payload.citations[0].chapter_num == 2
     assert cached["args"][1]["answer"] == "Grounded answer"
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -274,7 +275,7 @@ async def test_qa_stream_endpoint_streams_and_caches(monkeypatch):
     monkeypatch.setattr(intelligence, "cache_set", _fake_cache_set)
     monkeypatch.setattr(intelligence, "build_grounded_qa_context", _fake_build_grounded_qa_context)
     client = _FakeStreamingClient(["Grounded", " answer"])
-    monkeypatch.setattr(intelligence, "get_client", lambda: client)
+    monkeypatch.setattr(intelligence, "get_openai_client", lambda: client)
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
     user = SimpleNamespace(id=book.user_id)
     db = _FakeDB(
@@ -294,7 +295,7 @@ async def test_qa_stream_endpoint_streams_and_caches(monkeypatch):
     assert "event: delta" in body
     assert "Grounded answer" in body
     assert cached["args"][1]["answer"] == "Grounded answer"
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio
@@ -308,7 +309,7 @@ async def test_qa_stream_endpoint_hides_internal_errors(monkeypatch):
     monkeypatch.setattr(intelligence, "cache_get", _fake_cache_get)
     monkeypatch.setattr(intelligence, "build_grounded_qa_context", _fake_build_grounded_qa_context)
     client = _ExplodingStreamingClient()
-    monkeypatch.setattr(intelligence, "get_client", lambda: client)
+    monkeypatch.setattr(intelligence, "get_openai_client", lambda: client)
     book = SimpleNamespace(id=uuid.uuid4(), user_id=uuid.uuid4(), title="Lore Book")
     user = SimpleNamespace(id=book.user_id)
     db = _FakeDB(
@@ -326,7 +327,7 @@ async def test_qa_stream_endpoint_hides_internal_errors(monkeypatch):
 
     assert "Something went wrong. Please try again." in body
     assert "secret@example.com" not in body
-    assert client.closed is True
+    assert client.closed is False
 
 
 @pytest.mark.asyncio

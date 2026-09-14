@@ -63,4 +63,12 @@ const nextConfig = {
     ]
   },
 }
+
+if (process.env.E2E_NEXT_DIST_DIR) {
+  if (!/^\.next-e2e-\d+$/.test(process.env.E2E_NEXT_DIST_DIR)) {
+    throw new Error("Refusing to use an unexpected E2E build directory.")
+  }
+  nextConfig.distDir = process.env.E2E_NEXT_DIST_DIR
+}
+
 module.exports = nextConfig

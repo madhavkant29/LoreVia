@@ -2,9 +2,23 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
+from app.models.book import Book, Chapter
+from app.models.character import (
+    Character,
+    CharacterCandidate,
+    CharacterMention,
+    CharacterRelationshipCandidate,
+    CharacterState,
+)
+from app.models.intelligence import CharacterRelationship
+from app.models.user import User
 from app.services import extraction_chapter_record_service
-from app.services.extraction_chapter_record_service import stage_chapter_for_extraction
+from app.services.extraction_chapter_record_service import (
+    replace_chapter_extraction_records,
+    stage_chapter_for_extraction,
+)
 
 
 class _ScalarResult:
@@ -36,7 +50,7 @@ class _FakeDb:
 
 
 @pytest.mark.asyncio
-async def test_stage_chapter_for_extraction_updates_existing_chapter_and_resets_generated_rows(
+async def test_stage_chapter_for_extraction_updates_existing_chapter_without_purging_generated_rows(
     monkeypatch,
 ):
     synced = []
@@ -92,5 +106,136 @@ async def test_stage_chapter_for_extraction_updates_existing_chapter_and_resets_
     assert chapter.analysis_state["source_integrity"]["media_marker_count"] == 1
     assert chapter.analysis_state["source_integrity"]["stored_media_count"] == 1
     assert db.flush_calls == 2
-    assert db.execute_calls == 5
+    assert db.execute_calls == 1
     assert synced and synced[0][2] is chapter
+
+
+@pytest.mark.asyncio
+async def test_replace_chapter_extraction_records_preserves_curated_rows(db):
+    user = User(email="chapter-replace@example.com", password_hash="hash")
+    db.add(user)
+    await db.flush()
+    book = Book(
+        user_id=user.id,
+        title="Safe replacement",
+        format="pdf",
+        s3_key="books/safe-replacement.pdf",
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(
+        book_id=book.id,
+        number=2,
+        title="Two",
+        s3_key="chapters/safe-replacement/2.txt",
+    )
+    left = Character(book_id=book.id, name="Mara", first_chapter=1, mention_count=2)
+    right = Character(book_id=book.id, name="Sol", first_chapter=1, mention_count=2)
+    db.add_all([chapter, left, right])
+    await db.flush()
+    db.add_all(
+        [
+            CharacterMention(
+                book_id=book.id,
+                chapter_number=2,
+                raw_name="Mara",
+                normalized_name="mara",
+            ),
+            CharacterCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_name="Mara",
+                proposed_name="Mara",
+                normalized_name="mara",
+                status="accepted",
+                confidence=95,
+            ),
+            CharacterCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_name="Noise",
+                proposed_name="Noise",
+                normalized_name="noise",
+                status="pending",
+                confidence=10,
+            ),
+            CharacterRelationshipCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_character_a="Mara",
+                raw_character_b="Sol",
+                status="accepted",
+            ),
+            CharacterRelationshipCandidate(
+                book_id=book.id,
+                chapter_number=2,
+                raw_character_a="Mara",
+                raw_character_b="Noise",
+                status="suppressed",
+            ),
+            CharacterRelationship(
+                book_id=book.id,
+                character_a_id=left.id,
+                character_b_id=right.id,
+                rel_type="friend",
+                from_chapter=2,
+                edited_by_author=True,
+            ),
+            CharacterRelationship(
+                book_id=book.id,
+                character_a_id=left.id,
+                character_b_id=right.id,
+                rel_type="ally",
+                from_chapter=2,
+                edited_by_author=False,
+            ),
+            CharacterState(character_id=left.id, at_chapter=2, trait_snapshot={"calm": True}),
+        ]
+    )
+    await db.commit()
+
+    await replace_chapter_extraction_records(
+        db,
+        book_id=book.id,
+        chapter_number=2,
+        replace_generated_intelligence=True,
+    )
+    await db.commit()
+
+    assert (
+        await db.scalar(select(CharacterMention).where(CharacterMention.book_id == book.id)) is None
+    )
+    candidates = (
+        (await db.execute(select(CharacterCandidate).where(CharacterCandidate.book_id == book.id)))
+        .scalars()
+        .all()
+    )
+    relationship_candidates = (
+        (
+            await db.execute(
+                select(CharacterRelationshipCandidate).where(
+                    CharacterRelationshipCandidate.book_id == book.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    relationships = (
+        (
+            await db.execute(
+                select(CharacterRelationship).where(CharacterRelationship.book_id == book.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(row.proposed_name, row.status) for row in candidates] == [("Mara", "accepted")]
+    assert [(row.raw_character_b, row.status) for row in relationship_candidates] == [
+        ("Sol", "accepted")
+    ]
+    assert [(row.rel_type, row.edited_by_author) for row in relationships] == [("friend", True)]
+    assert (
+        await db.scalar(select(CharacterState).where(CharacterState.character_id == left.id))
+        is None
+    )

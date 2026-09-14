@@ -61,7 +61,7 @@ afterEach(() => {
 describe("reader zero-coverage pages", () => {
   it("renders compliance, world gap, and plot thread workspace wrappers", async () => {
     expect(complianceMetadata.title).toBe("Compliance Notice")
-    await render(<CompliancePage />)
+    await render(await CompliancePage({ params: Promise.resolve({ bookId: "book-1" }) }))
     expect(container?.textContent).toContain("Compliance Notice")
     expect(container?.querySelector('a[href^="mailto:"]')).not.toBeNull()
 
@@ -74,15 +74,13 @@ describe("reader zero-coverage pages", () => {
     expect(captureMock).toHaveBeenCalledWith("plot_threads_opened", { book_id: "book-1" })
   })
 
-  it("renders relationship evolution data, chapter updates, back action, and unavailable state", async () => {
+  it("renders relationship evolution data, chapter updates, home action, and unavailable state", async () => {
     await render(<RelationshipEvolutionPage />)
     await act(async () => { await Promise.resolve() })
     expect(container?.textContent).toContain("Showing relationship events through chapter 4")
     expect(container?.textContent).toContain("Mara")
     expect(container?.textContent).toContain("They share the key.")
-    const back = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent?.includes("Back"))
-    act(() => back?.click())
-    expect(backMock).toHaveBeenCalled()
+    expect(container?.querySelector('a[href="/book-1"]')?.textContent).toContain("Home")
 
     useQueryMock.mockImplementation(({ queryKey }: { queryKey: string }) => String(queryKey).includes("progress") ? { data: null } : { data: null })
     await rerender(<RelationshipEvolutionPage />)

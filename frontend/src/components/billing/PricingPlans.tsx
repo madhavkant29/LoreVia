@@ -4,7 +4,8 @@ import Script from "next/script"
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
-import { billingApi } from "@/lib/api/billing"
+import { Dialog } from "@/components/ui/Dialog"
+import { billingApi, type BillingCheckoutPreview } from "@/lib/api/billing"
 import { capture } from "@/lib/analytics/posthog"
 import {
   getBillingConfirmationTokenFromCheckoutUrl,
@@ -13,6 +14,8 @@ import {
   getPaddleEnvironment,
   getTransactionIdFromCheckoutUrl,
   PADDLE_SCRIPT_SRC,
+  shouldAbandonClosedCheckout,
+  type PaddleCheckoutEvent,
 } from "@/lib/billing/paddle"
 import {
   pricingTierAccessLabel,
@@ -24,8 +27,11 @@ import {
   type BillingCycle,
   type PricingTier,
 } from "@/lib/billing/catalog"
+import { SUPPORT_EMAIL } from "@/lib/constants/contact"
+import { tierLabel } from "@/lib/billing/plans"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
+import { getApiErrorDetail } from "@/lib/utils/apiErrors"
 
 type PricingPlansProps = {
   nonce?: string
@@ -41,10 +47,17 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
   const paddleEnvironment = getPaddleEnvironment(paddleToken)
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly")
   const [busyPlan, setBusyPlan] = useState<string | null>(null)
+  const [billingPortalBusy, setBillingPortalBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [paddleReady, setPaddleReady] = useState(false)
+  const [checkoutPreview, setCheckoutPreview] = useState<BillingCheckoutPreview | null>(null)
+  const [chargeConfirmed, setChargeConfirmed] = useState(false)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const pendingConfirmationTokenRef = useRef<string | null>(null)
+  const pendingTransactionIdRef = useRef<string | null>(null)
+  const completedTransactionIdRef = useRef<string | null>(null)
   const promptViewedRef = useRef(false)
+  const checkoutCancelRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (promptViewedRef.current) return
@@ -60,13 +73,53 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
     window.location.replace(`/checkout/success?${params.toString()}`)
   }
 
+  function closeCheckoutPreview() {
+    const returnToLibrary = Boolean(checkoutPreview?.trial_active)
+    setCheckoutPreview(null)
+    setChargeConfirmed(false)
+    setCheckoutError(null)
+    if (returnToLibrary) router.push("/library")
+  }
+
   useEffect(() => {
     if (!paddleReady || !paddleToken || !paddleEnvironment || typeof window === "undefined") {
       return
     }
 
     const paddle = window.Paddle
-    if (!paddle || paddle.Initialized) {
+    if (!paddle) return
+
+    const eventCallback = (event: PaddleCheckoutEvent) => {
+      if (event.name === "checkout.closed") {
+        capture("checkout_closed", { surface, billing_cycle: billingCycle })
+        const transactionId =
+          typeof event.data?.transaction_id === "string"
+            ? event.data.transaction_id
+            : pendingTransactionIdRef.current
+        if (shouldAbandonClosedCheckout(transactionId, completedTransactionIdRef.current)) {
+          void billingApi.abandonCheckout(transactionId).catch(() => {
+            capture("checkout_abandon_failed", { surface, transaction_id: transactionId })
+          })
+        }
+        pendingTransactionIdRef.current = null
+        pendingConfirmationTokenRef.current = null
+      }
+      if (event.name === "checkout.completed") {
+        const transactionId = typeof event.data?.transaction_id === "string" ? event.data.transaction_id : null
+        capture("checkout_completed", {
+          surface,
+          billing_cycle: billingCycle,
+          transaction_id: transactionId,
+        })
+        if (transactionId) {
+          completedTransactionIdRef.current = transactionId
+          redirectToSuccess(transactionId, pendingConfirmationTokenRef.current)
+        }
+      }
+    }
+
+    if (paddle.Initialized) {
+      paddle.Update?.({ eventCallback })
       return
     }
 
@@ -80,22 +133,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
       checkout: {
         settings: buildPaddleCheckoutSettings(),
       },
-      eventCallback: (event) => {
-        if (event.name === "checkout.closed") {
-          capture("checkout_closed", { surface, billing_cycle: billingCycle })
-        }
-        if (event.name === "checkout.completed") {
-          const transactionId = typeof event.data?.transaction_id === "string" ? event.data.transaction_id : null
-          capture("checkout_completed", {
-            surface,
-            billing_cycle: billingCycle,
-            transaction_id: transactionId,
-          })
-          if (transactionId) {
-            redirectToSuccess(transactionId, pendingConfirmationTokenRef.current)
-          }
-        }
-      },
+      eventCallback,
     })
   }, [billingCycle, paddleEnvironment, paddleReady, paddleToken, surface])
 
@@ -121,6 +159,11 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
       return
     }
 
+    if (isPaidSubscriber) {
+      await openBillingPortal()
+      return
+    }
+
     capture("upgrade_prompt_clicked", {
       surface,
       plan: tier.key,
@@ -141,55 +184,127 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
 
     setBusyPlan(selectedPlanCode)
     setMessage(null)
-    capture("checkout_started", {
-      surface,
-      plan: tier.key,
-      billing_cycle: billingCycle,
-      plan_code: selectedPlanCode,
-    })
+    setCheckoutError(null)
     try {
-      const result = await billingApi.checkout(selectedPlanCode)
-      if (!result.billing_enabled || !result.checkout_url) {
+      const preview = await billingApi.checkoutPreview(selectedPlanCode)
+      if (!preview.billing_enabled) {
         capture("checkout_failed", {
           surface,
           plan: tier.key,
           billing_cycle: billingCycle,
           reason: "billing_unavailable",
         })
+        setMessage(preview.message ?? "Billing is not configured in this environment yet.")
+        return
+      }
+      setChargeConfirmed(false)
+      setCheckoutError(null)
+      setCheckoutPreview(preview)
+    } catch (error) {
+      capture("checkout_failed", {
+        surface,
+        plan: tier.key,
+        billing_cycle: billingCycle,
+        reason: "checkout_preview_failed",
+      })
+      setMessage(getApiErrorDetail(error) ?? "We could not verify your billing status right now. Please try again in a moment.")
+    } finally {
+      setBusyPlan(null)
+    }
+  }
+
+  async function openBillingPortal() {
+    setBillingPortalBusy(true)
+    setMessage(null)
+    try {
+      const result = await billingApi.portal()
+      if (!result.billing_enabled || !result.portal_url) {
         setMessage(result.message ?? "Billing is not configured in this environment yet.")
+        return
+      }
+      window.location.href = result.portal_url
+    } catch (error) {
+      setMessage(getApiErrorDetail(error) ?? "We could not open the billing portal right now. Please try again in a moment.")
+    } finally {
+      setBillingPortalBusy(false)
+    }
+  }
+
+  async function confirmPaidCheckout() {
+    if (!checkoutPreview) return
+    if (checkoutPreview.confirmation_required && !chargeConfirmed) return
+
+    setBusyPlan(checkoutPreview.plan)
+    setCheckoutError(null)
+    capture("checkout_started", {
+      surface,
+      plan: checkoutPreview.display_name.toLowerCase(),
+      billing_cycle: checkoutPreview.billing_interval,
+      plan_code: checkoutPreview.plan,
+      immediate_charge_confirmed: chargeConfirmed,
+    })
+    try {
+      const result = await billingApi.checkout(
+        checkoutPreview.plan,
+        chargeConfirmed,
+        checkoutPreview.quote_token,
+      )
+      if (!result.billing_enabled || !result.checkout_url) {
+        capture("checkout_failed", {
+          surface,
+          plan: checkoutPreview.display_name.toLowerCase(),
+          billing_cycle: checkoutPreview.billing_interval,
+          reason: "billing_unavailable",
+        })
+        setCheckoutError(result.message ?? "Billing is not configured in this environment yet.")
         return
       }
       const transactionId = getTransactionIdFromCheckoutUrl(result.checkout_url)
       const confirmationToken = getBillingConfirmationTokenFromCheckoutUrl(result.checkout_url)
       pendingConfirmationTokenRef.current = confirmationToken
+      pendingTransactionIdRef.current = transactionId
+      completedTransactionIdRef.current = null
       if (paddleReady && paddleToken && paddleEnvironment && transactionId && window.Paddle?.Initialized) {
         window.Paddle.Checkout.open({
           settings: buildPaddleCheckoutSettings(),
           transactionId,
         })
+        setCheckoutPreview(null)
         return
       }
+      setCheckoutPreview(null)
       window.location.href = result.checkout_url
-    } catch {
+    } catch (error) {
       capture("checkout_failed", {
         surface,
-        plan: tier.key,
-        billing_cycle: billingCycle,
+        plan: checkoutPreview.display_name.toLowerCase(),
+        billing_cycle: checkoutPreview.billing_interval,
         reason: "checkout_request_failed",
       })
-      setMessage("We could not start checkout right now. Please try again in a moment.")
+      setCheckoutError(getApiErrorDetail(error) ?? "We could not start checkout right now. Please try again in a moment.")
     } finally {
       setBusyPlan(null)
     }
   }
 
   const helperCopy = user
-    ? "Free is already included in your account. Only Author and Architect start paid checkout from this screen."
+    ? user.trial_active
+      ? "Your free trial is already active. It does not require payment and will not turn into a paid subscription automatically."
+      : "Free is included with your account. Upgrade to Author or Architect to unlock more."
     : surface === "public"
       ? "Free is included with every account. Sign in to upgrade to a paid plan."
       : "Free is included with every account. Sign in to upgrade to a paid plan."
 
-  const sectionTitleClass = isDark ? "text-[#73b1a7]" : "text-[#1f615d]"
+  const isPaidSubscriber = Boolean(
+    user && !user.trial_active && (user.plan_tier === "author" || user.plan_tier === "architect"),
+  )
+  const activePlanLabel = user?.trial_active
+    ? "Author — temporary trial access"
+    : user
+      ? tierLabel(user.plan_tier)
+      : null
+  const refundRequestHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("LoreVia refund request")}`
+
   const bodyCopyClass = isDark ? "text-slate-300" : "text-stone-600"
   const shellCardClass = isDark ? "border-white/[0.08] bg-[#151c23]" : "border-[#d9e1e6] bg-white"
   const noticeClass = isDark ? "border-white/[0.12] bg-white/[0.02] text-slate-200" : "border-[#d9e1e6] bg-white text-stone-800"
@@ -208,9 +323,6 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
       <section className={surface === "public" ? "" : undefined}>
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
-            <h2 className={`font-display text-[2rem] tracking-[-0.03em] ${sectionTitleClass}`}>
-              Plans for fiction authors and complex story worlds
-            </h2>
             <p className={`mt-2 text-[1rem] leading-7 ${bodyCopyClass}`}>{helperCopy}</p>
           </div>
 
@@ -236,7 +348,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                         : "bg-[#1f615d] text-white"
                       : isDark
                         ? "text-slate-300 hover:text-white"
-                        : "text-stone-500 hover:text-stone-950"
+                        : "text-stone-600 hover:text-stone-950"
                   }`}
                 >
                   {cycle === "annual" ? "Yearly" : "Monthly"}
@@ -244,9 +356,9 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
               ))}
             </div>
             {billingCycle === "annual" ? (
-              <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Get two months free with yearly billing.</p>
+              <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>Get two months free with yearly billing.</p>
             ) : (
-              <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Cancel anytime.</p>
+              <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>Cancel anytime.</p>
             )}
           </div>
         </div>
@@ -265,6 +377,74 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           </div>
         </div>
 
+        {user?.trial_active ? (
+          <div className={`mt-4 rounded-md border px-5 py-4 ${messageClass}`} role="status">
+            <p className="text-sm font-semibold">Your free trial is already active.</p>
+            <p className="mt-1 text-sm leading-7">
+              {user.trial_ends_at
+                ? `It ends on ${formatTrialEndDate(user.trial_ends_at)}. No payment is scheduled when it ends.`
+                : "No payment is scheduled when it ends."}
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/library")}
+              className="mt-3 rounded-sm bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#174c49]"
+            >
+              Continue free trial
+            </button>
+          </div>
+        ) : null}
+
+        {user && activePlanLabel ? (
+          <section
+            aria-labelledby="current-plan-heading"
+            className={`mt-4 rounded-md border px-5 py-4 ${noticeClass}`}
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>
+                  Your current plan
+                </p>
+                <h3 id="current-plan-heading" className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>
+                  {activePlanLabel}
+                </h3>
+                {user.trial_active ? (
+                  <p className={`mt-1 text-sm leading-6 ${bodyCopyClass}`}>
+                    This is temporary Author access. A payment method is not required for the trial, and there is no subscription to cancel or refund.
+                  </p>
+                ) : isPaidSubscriber ? (
+                  <p className={`mt-1 text-sm leading-6 ${bodyCopyClass}`}>
+                    Manage cancellation, payment details, invoices, and plan changes in the billing portal. Refund requests are reviewed by support.
+                  </p>
+                ) : (
+                  <p className={`mt-1 text-sm leading-6 ${bodyCopyClass}`}>
+                    Free is included with your account. Choose a paid plan only when you are ready to subscribe.
+                  </p>
+                )}
+              </div>
+
+              {isPaidSubscriber ? (
+                <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void openBillingPortal()}
+                    disabled={billingPortalBusy}
+                    className="rounded-sm bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#174c49] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {billingPortalBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
+                  </button>
+                  <a href="/refund" className={`text-sm font-semibold underline underline-offset-4 ${isDark ? "text-[#9ed9cf]" : "text-[#1f615d]"}`}>
+                    Refund policy
+                  </a>
+                  <a href={refundRequestHref} className={`text-sm font-semibold underline underline-offset-4 ${isDark ? "text-[#9ed9cf]" : "text-[#1f615d]"}`}>
+                    Request a refund
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
         {message ? (
           <div className={`mt-6 rounded-md border px-4 py-3 text-sm leading-6 ${messageClass}`}>
             {message}
@@ -278,7 +458,15 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
             const savings = billingCycle === "annual" ? pricingTierAnnualSavings(tier) : 0
             const selectedPlanCode = billingCycle === "annual" ? tier.annualCode : tier.monthlyCode
             const isBusy = selectedPlanCode ? busyPlan === selectedPlanCode : false
-            const buttonLabel = user ? tier.cta : pricingTierGuestCtaLabel(tier)
+            const buttonLabel = user
+              ? isPaidSubscriber && tier.access === "paid"
+                ? tier.key === user.plan_tier
+                  ? "Current plan — manage"
+                  : "Manage subscription"
+                : user.trial_active && tier.access === "paid"
+                ? "View payment details"
+                : tier.cta
+              : pricingTierGuestCtaLabel(tier)
 
             const cardClass = isDark ? "border-white/[0.12] bg-[#131920]" : "border-[#d9e1e6] bg-white"
             const highlightClass = tier.highlight
@@ -306,6 +494,12 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                       Recommended
                     </span>
                   </div>
+                ) : null}
+
+                {isPaidSubscriber && tier.key === user?.plan_tier ? (
+                  <span className={`absolute right-5 ${tier.highlight ? "top-14" : "top-5"} rounded-full px-3 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-[#24544d] text-[#d3f2ec]" : "bg-[#e5f4f0] text-[#1f615d]"}`}>
+                    Current plan
+                  </span>
                 ) : null}
 
                 <div className={`flex items-start justify-between gap-4 ${tier.highlight ? "pt-4" : ""}`}>
@@ -357,14 +551,16 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                   <button
                     type="button"
                     onClick={() => void handlePlanClick(tier)}
-                    disabled={isBusy}
+                    disabled={isBusy || billingPortalBusy}
                     className={`inline-flex w-full items-center justify-center rounded-sm border px-4 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass}`}
                   >
-                    {isBusy ? "Opening checkout..." : buttonLabel}
+                    {isBusy ? "Opening checkout..." : billingPortalBusy && isPaidSubscriber && tier.access === "paid" ? "Opening billing..." : buttonLabel}
                   </button>
                   {tier.access === "paid" ? (
                     <p className={`mt-3 text-center text-sm ${subCopyClass}`}>
-                      {billingCycle === "annual" ? `Billed yearly at $${price}/year` : `10 days free, then $${price}/mo`}
+                      {user?.trial_active
+                        ? `Choosing this paid plan charges $${price} now. Your free trial does not auto-convert.`
+                        : `Paid checkout charges $${price} now, then ${billingCycle === "annual" ? `$${price}/year` : `$${price}/mo`} until canceled.`}
                     </p>
                   ) : null}
                 </div>
@@ -377,13 +573,97 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           <p className={`text-[0.98rem] leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             Only Author and Architect are paid subscriptions. Free stays available without checkout.
           </p>
-          <p className={`mt-2 text-[0.98rem] leading-7 ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+          <p className={`mt-2 text-[0.98rem] leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             Worldbuilding manuscripts count as uploads on every tier. On Author, a series-linked worldbuilding manuscript counts once per book in that series. Architect remains unlimited.
           </p>
         </div>
       </section>
+
+      {checkoutPreview ? (
+        <Dialog
+          open
+          onClose={closeCheckoutPreview}
+          title="Review today's charge"
+          eyebrow="Before Paddle checkout"
+          initialFocusRef={checkoutCancelRef}
+          className={shellCardClass}
+          titleClassName={`font-display text-3xl ${isDark ? "text-white" : "text-stone-950"}`}
+          footer={(
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                ref={checkoutCancelRef}
+                type="button"
+                onClick={closeCheckoutPreview}
+                className={`rounded-sm border px-4 py-3 text-sm font-semibold ${checkoutPreview.trial_active ? "border-transparent bg-[#1f615d] text-white" : noticeClass}`}
+              >
+                {checkoutPreview.default_action_label ?? "Cancel"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmPaidCheckout()}
+                disabled={
+                  Boolean(busyPlan)
+                  || !checkoutPreview.quote_token
+                  || (checkoutPreview.confirmation_required && !chargeConfirmed)
+                }
+                className="rounded-sm border border-[#2b7a73] px-4 py-3 text-sm font-semibold text-[#1f615d] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busyPlan ? "Opening checkout..." : checkoutPreview.checkout_button_label}
+              </button>
+            </div>
+          )}
+        >
+            <div className={`mt-5 space-y-3 rounded-md border p-4 text-sm ${noticeClass}`}>
+              <DisclosureRow label="Trial status" value={checkoutPreview.trial_active ? "Active — already started" : "Expired"} />
+              <DisclosureRow
+                label="Trial end date"
+                value={checkoutPreview.trial_ends_at ? formatTrialEndDate(checkoutPreview.trial_ends_at) : "Unavailable"}
+              />
+              <DisclosureRow label="Amount charged today" value={checkoutPreview.charge_today} />
+              <DisclosureRow label="Recurring price" value={`${checkoutPreview.recurring_price} until canceled`} />
+            </div>
+
+            {checkoutPreview.trial_active ? (
+              <p className={`mt-4 text-sm leading-6 ${bodyCopyClass}`}>
+                Your LoreVia trial is separate from Paddle. Paying now starts the selected paid subscription immediately; waiting keeps the free trial active with no scheduled charge.
+              </p>
+            ) : null}
+
+            {checkoutPreview.confirmation_required && checkoutPreview.confirmation_text ? (
+              <label className={`mt-5 flex cursor-pointer items-start gap-3 rounded-md border p-4 text-sm leading-6 ${noticeClass}`}>
+                <input
+                  type="checkbox"
+                  checked={chargeConfirmed}
+                  onChange={(event) => setChargeConfirmed(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>{checkoutPreview.confirmation_text}</span>
+              </label>
+            ) : null}
+
+            {checkoutError ? (
+              <div className="mt-4 rounded-md border border-red-700/30 bg-red-700/10 px-4 py-3 text-sm leading-6 text-red-700" role="alert">
+                {checkoutError}
+              </div>
+            ) : null}
+
+        </Dialog>
+      ) : null}
     </>
   )
+}
+
+function DisclosureRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <span className="text-left opacity-75">{label}</span>
+      <strong className="text-right font-semibold">{value}</strong>
+    </div>
+  )
+}
+
+function formatTrialEndDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short" }).format(new Date(value))
 }
 
 function InfoIcon() {

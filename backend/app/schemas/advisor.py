@@ -4,7 +4,7 @@ import re
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Maximum characters accepted for any single LLM input field.
 # Prevents cost-amplification: a bad actor sending 100k-char messages
@@ -25,7 +25,7 @@ class AdvisorMessage(BaseModel):
 
 class AdvisorRequest(BaseModel):
     messages: list[AdvisorMessage] = Field(..., max_length=20)
-    total_chapters: int = Field(default=9999, ge=1, le=9999)
+    total_chapters: int | None = Field(default=None, ge=0)
 
 
 class AdvisorAsyncAccepted(BaseModel):
@@ -103,6 +103,195 @@ class VoiceConsistencyRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_PASSAGE_CHARS)
     chapter_num: int | None = Field(default=None, ge=1)
     character_id: uuid.UUID | None = None
+
+
+BetaReaderScope = Literal["passage", "chapter", "chapter_range", "full_book"]
+BetaReaderCheck = Literal["repetition", "voice", "reader_feedback"]
+
+
+class BetaReaderAnalysisRequest(BaseModel):
+    scope: BetaReaderScope
+    text: str | None = Field(default=None, max_length=MAX_PASSAGE_CHARS)
+    chapter_number: int | None = Field(default=None, ge=1)
+    chapter_start: int | None = Field(default=None, ge=1)
+    chapter_end: int | None = Field(default=None, ge=1)
+    character_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    checks: list[BetaReaderCheck] = Field(
+        default_factory=lambda: ["repetition", "voice", "reader_feedback"],
+        min_length=1,
+        max_length=3,
+    )
+
+    @field_validator("checks")
+    @classmethod
+    def validate_checks(cls, value: list[BetaReaderCheck]) -> list[BetaReaderCheck]:
+        if len(set(value)) != len(value):
+            raise ValueError("Checks must be unique.")
+        return value
+
+    @field_validator("character_ids")
+    @classmethod
+    def validate_character_ids(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def validate_scope_fields(self) -> BetaReaderAnalysisRequest:
+        cleaned_text = (self.text or "").strip()
+        if self.scope == "passage":
+            if not cleaned_text:
+                raise ValueError("Passage text is required for passage scope.")
+            if self.chapter_start is not None or self.chapter_end is not None:
+                raise ValueError("Passage scope does not accept a chapter range.")
+            self.text = cleaned_text
+        elif self.scope == "chapter":
+            if self.chapter_number is None:
+                raise ValueError("Chapter number is required for chapter scope.")
+            if cleaned_text or self.chapter_start is not None or self.chapter_end is not None:
+                raise ValueError("Chapter scope accepts only chapter_number.")
+        elif self.scope == "chapter_range":
+            if self.chapter_start is None or self.chapter_end is None:
+                raise ValueError("Chapter start and end are required for chapter-range scope.")
+            if self.chapter_start > self.chapter_end:
+                raise ValueError("Chapter start cannot be greater than chapter end.")
+            if cleaned_text or self.chapter_number is not None:
+                raise ValueError("Chapter-range scope accepts only chapter_start and chapter_end.")
+        elif cleaned_text or any(
+            value is not None
+            for value in (self.chapter_number, self.chapter_start, self.chapter_end)
+        ):
+            raise ValueError("Full-book scope does not accept passage or chapter fields.")
+        return self
+
+
+class BetaReaderProgressOut(BaseModel):
+    stage: str = Field(max_length=80)
+    completed: int = Field(default=0, ge=0)
+    total: int = Field(default=0, ge=0)
+    message: str = Field(max_length=500)
+
+
+class BetaReaderEvidenceOut(BaseModel):
+    chapter_number: int | None = None
+    excerpt: str = Field(min_length=1, max_length=240)
+
+
+class BetaReaderOverusedTermOut(BaseModel):
+    id: str = Field(max_length=100)
+    term: str = Field(min_length=1, max_length=240)
+    kind: Literal["word", "phrase"]
+    count: int = Field(ge=0)
+    rate_per_1000: float = Field(ge=0)
+    narration_count: int = Field(default=0, ge=0)
+    dialogue_count: int = Field(default=0, ge=0)
+    burst_detected: bool = False
+    chapter_counts: dict[str, int] = Field(default_factory=dict)
+    evidence: list[BetaReaderEvidenceOut] = Field(default_factory=list, max_length=3)
+
+
+class BetaReaderVoiceOut(BaseModel):
+    id: str = Field(max_length=100)
+    character_id: str = Field(max_length=100)
+    character_name: str = Field(min_length=1, max_length=160)
+    distinctness_score: int | None = Field(default=None, ge=0, le=100)
+    confidence: Literal["high", "medium", "low", "insufficient"]
+    sample_dialogue_count: int = Field(default=0, ge=0)
+    sample_word_count: int = Field(default=0, ge=0)
+    closest_character_id: str | None = Field(default=None, max_length=100)
+    closest_character_name: str | None = Field(default=None, max_length=160)
+    similarity_score: int | None = Field(default=None, ge=0, le=100)
+    signals: dict[str, int] = Field(default_factory=dict)
+    shared_signals: list[str] = Field(default_factory=list, max_length=9)
+    shared_phrases: list[str] = Field(default_factory=list, max_length=6)
+
+
+class BetaReaderFindingOut(BaseModel):
+    id: str = Field(max_length=100)
+    category: str = Field(min_length=1, max_length=64)
+    severity: Literal["high", "medium", "low"]
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=1000)
+    chapter_number: int | None = None
+    evidence: list[BetaReaderEvidenceOut] = Field(default_factory=list, max_length=3)
+    recommendation: str = Field(min_length=1, max_length=800)
+    reader_question: str | None = Field(default=None, max_length=500)
+
+
+class BetaReaderRevisionCandidateOut(BaseModel):
+    id: str = Field(max_length=100)
+    source_item_id: str = Field(max_length=100)
+    category: str = Field(min_length=1, max_length=64)
+    severity: Literal["high", "medium", "low"]
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=1000)
+    recommendation: str = Field(min_length=1, max_length=800)
+    chapter_number: int | None = None
+    evidence: list[BetaReaderEvidenceOut] = Field(default_factory=list, max_length=3)
+
+
+class BetaReaderCoverageOut(BaseModel):
+    requested_chapters: list[int] = Field(default_factory=list)
+    analyzed_chapters: list[int] = Field(default_factory=list)
+    missing_chapters: list[int] = Field(default_factory=list)
+    word_count: int = Field(default=0, ge=0)
+    character_count: int = Field(default=0, ge=0)
+
+
+class BetaReaderReportOut(BaseModel):
+    report_id: str = Field(max_length=100)
+    scope: BetaReaderScope
+    request_hash: str = Field(max_length=128)
+    source_fingerprint: str = Field(max_length=128)
+    created_at: str = Field(max_length=64)
+    is_stale: bool = False
+    checks: list[BetaReaderCheck] = Field(default_factory=list, max_length=3)
+    coverage: BetaReaderCoverageOut = Field(default_factory=BetaReaderCoverageOut)
+    overall_impression: str = Field(min_length=1, max_length=1200)
+    reader_vibe: str = Field(default="", max_length=1200)
+    story_understanding: str = Field(default="", max_length=1200)
+    strengths: list[str] = Field(default_factory=list, max_length=8)
+    reader_questions: list[str] = Field(default_factory=list, max_length=8)
+    prioritized_revisions: list[str] = Field(default_factory=list, max_length=8)
+    overused_terms: list[BetaReaderOverusedTermOut] = Field(default_factory=list, max_length=30)
+    character_voices: list[BetaReaderVoiceOut] = Field(default_factory=list, max_length=20)
+    findings: list[BetaReaderFindingOut] = Field(default_factory=list, max_length=20)
+    revision_candidates: list[BetaReaderRevisionCandidateOut] = Field(
+        default_factory=list, max_length=20
+    )
+    warnings: list[str] = Field(default_factory=list, max_length=30)
+
+
+class BetaReaderRunOut(BaseModel):
+    status: Literal["queued", "complete"]
+    task_id: str | None = None
+    cached: bool = False
+    report: BetaReaderReportOut | None = None
+
+
+class BetaReaderJobOut(BaseModel):
+    task_id: str
+    status: Literal["queued", "running", "complete", "failed"]
+    progress: BetaReaderProgressOut | None = None
+    report: BetaReaderReportOut | None = None
+    error: str | None = None
+
+
+class BetaReaderReportsOut(BaseModel):
+    reports: list[BetaReaderReportOut] = Field(default_factory=list)
+
+
+class BetaReaderRevisionTaskOut(BaseModel):
+    task_id: str
+    candidate_id: str
+    created: bool
+
+
+class FirstImpressionOut(BaseModel):
+    status: Literal["not_started", "queued", "running", "complete", "failed"]
+    task_id: str | None = None
+    progress: BetaReaderProgressOut | None = None
+    report: BetaReaderReportOut | None = None
+    error: str | None = None
+    can_retry: bool = False
 
 
 class ProseTightenRequest(BaseModel):

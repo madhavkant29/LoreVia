@@ -3,13 +3,22 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import type { CollaborationPermissions } from "@/types/book"
+import type { BookPreset, UiPreferenceOperation, UserBookUiPreference, UserUiPreference } from "@/types/uiPreferences"
+
+type MockUiPreferencesState = {
+  preferences: UserUiPreference
+  bookPreferences: Record<string, UserBookUiPreference>
+  hydrateBook: ReturnType<typeof vi.fn>
+  setBookPreset: ReturnType<typeof vi.fn>
+  patchBook: ReturnType<typeof vi.fn>
+}
 
 const useQueryMock = vi.hoisted(() => vi.fn())
 const useQueryClientMock = vi.hoisted(() => vi.fn())
 const useAuthStoreMock = vi.hoisted(() => vi.fn())
 const canUseAuthorFeaturesMock = vi.hoisted(() => vi.fn())
 const uiPreferencesStoreMock = vi.hoisted(() => {
-  const makeGlobalPreference = () => ({
+  const makeGlobalPreference = (): UserUiPreference => ({
     schema_version: 1,
     revision: 1,
     complexity_mode: "standard",
@@ -25,7 +34,7 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
     recommendation_snoozes: {},
     updated_at: null,
   })
-  const makeBookPreference = (bookId = "book-1", preset = "all", advancedToolOverride: "show" | "hide" | null = null) => ({
+  const makeBookPreference = (bookId = "book-1", preset: BookPreset = "all", advancedToolOverride: "show" | "hide" | null = null): UserBookUiPreference => ({
     book_id: bookId,
     schema_version: 1,
     revision: 1,
@@ -40,14 +49,14 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
     updated_at: null,
   })
   const listeners = new Set<() => void>()
-  let state: any
+  let state: MockUiPreferencesState
   const notify = () => listeners.forEach((listener) => listener())
   const reset = () => {
     state = {
       preferences: makeGlobalPreference(),
       bookPreferences: { "book-1": makeBookPreference() },
       hydrateBook: vi.fn(),
-      setBookPreset: vi.fn(async (bookId: string, preset: string) => {
+      setBookPreset: vi.fn(async (bookId: string, preset: BookPreset) => {
         const current = state.bookPreferences[bookId] ?? makeBookPreference(bookId)
         state = {
           ...state,
@@ -58,18 +67,18 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
         }
         notify()
       }),
-      patchBook: vi.fn(async (bookId: string, operations: Array<{ path: string; value?: unknown }>) => {
+      patchBook: vi.fn(async (bookId: string, operations: UiPreferenceOperation[]) => {
         const current = state.bookPreferences[bookId] ?? makeBookPreference(bookId)
         const next = { ...current }
         for (const operation of operations) {
           if (operation.path === "/advanced_tool_override") {
-            next.advanced_tool_override = operation.value
+            next.advanced_tool_override = operation.value as UserBookUiPreference["advanced_tool_override"]
           }
           if (operation.path === "/book_preset") {
-            next.book_preset = operation.value
+            next.book_preset = operation.value as BookPreset
           }
           if (operation.path === "/hidden_book_tools" && Array.isArray(operation.value)) {
-            next.hidden_book_tools = operation.value
+            next.hidden_book_tools = operation.value.filter((value): value is string => typeof value === "string")
           }
         }
         state = {
@@ -127,7 +136,7 @@ vi.mock("@/lib/stores/uiPreferencesStore", async () => {
   const ReactModule = await vi.importActual<typeof import("react")>("react")
   return {
     defaultBookUiPreference: (bookId: string) => uiPreferencesStoreMock.makeBookPreference(bookId, "draft"),
-    useUiPreferencesStore: (selector: (state: any) => unknown) =>
+    useUiPreferencesStore: (selector: (state: MockUiPreferencesState) => unknown) =>
       ReactModule.useSyncExternalStore(
         uiPreferencesStoreMock.subscribe,
         () => selector(uiPreferencesStoreMock.getState()),
@@ -337,9 +346,33 @@ describe("AuthorToolsNav", () => {
 
     expect(view.querySelector('[data-testid="author-nav-rail-toggle"]')).not.toBeNull()
   })
+
+  it("links overview home back to the library", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ active: "overview" })
+
+    expect(view.querySelector('[data-testid="author-nav-home-link"]')?.getAttribute("href")).toBe("/library")
+  })
+
+  it("links child-route home back to the book overview", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ active: "characters" })
+
+    expect(view.querySelector('[data-testid="author-nav-home-link"]')?.getAttribute("href")).toBe("/book-1")
+  })
 })
 
-function renderAuthorToolsNav({ railSize, mode = "author" }: { railSize?: "default" | "compact"; mode?: "reader" | "author" } = {}) {
+function renderAuthorToolsNav({
+  active = "overview",
+  railSize,
+  mode = "author",
+}: {
+  active?: string
+  railSize?: "default" | "compact"
+  mode?: "reader" | "author"
+} = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -348,7 +381,7 @@ function renderAuthorToolsNav({ railSize, mode = "author" }: { railSize?: "defau
     root?.render(
       <AuthorToolsNav
         bookId="book-1"
-        active="overview"
+        active={active}
         isDark={false}
         currentChapter={2}
         mode={mode}

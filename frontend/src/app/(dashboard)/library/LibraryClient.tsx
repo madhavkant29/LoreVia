@@ -12,13 +12,15 @@ import { MobileActionBar } from "@/components/ui/MobileActionBar"
 import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { LibraryWorkspaceHeader } from "@/components/library/LibraryWorkspaceHeader"
 import { booksApi } from "@/lib/api/books"
-import { asQueryKey, bookCacheKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { asQueryKey, bookCacheKey, booksPageCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
 import type { Book } from "@/types/book"
+import type { BookPage } from "@/lib/api/books"
 import {
   EMPTY_BOOKS,
   buildLibraryNextBestActions,
@@ -39,7 +41,7 @@ import {
   FolderIcon,
   PinIcon,
 } from "./LibraryClient.icons"
-import { MetricStrip, NextActionPanel } from "./LibraryClient.panels"
+import { FirstManuscriptHero, MetricStrip, NextActionPanel } from "./LibraryClient.panels"
 import { LibraryProjectSection } from "./LibraryClient.sections"
 import { LibraryAuthLoadingState, LibraryErrorState } from "./LibraryClient.states"
 
@@ -81,6 +83,8 @@ export function LibraryClient() {
   const [filterOpen, setFilterOpen] = useState(false)
   const [menuBookId, setMenuBookId] = useState<string | null>(null)
   const [pinnedIds, setPinnedIds] = usePinnedLibraryProjects()
+  const [additionalBookPages, setAdditionalBookPages] = useState<BookPage[]>([])
+  const [loadingMoreBooks, setLoadingMoreBooks] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const {
@@ -88,20 +92,48 @@ export function LibraryClient() {
     isLoading: loading,
     isError: booksError,
     refetch,
-  } = useQuery<Book[]>({
-    queryKey: asQueryKey(booksListCacheKey(true)),
-    queryFn: () => booksApi.list(true),
+  } = useQuery<BookPage | Book[]>({
+    queryKey: asQueryKey(booksPageCacheKey(true)),
+    queryFn: () => booksApi.listPage(true),
     staleTime: 20_000,
     enabled: authReady && !!authUser,
     refetchInterval: (query) => {
-      const items = (query.state.data as Book[] | undefined) ?? []
+      const page = query.state.data as BookPage | Book[] | undefined
+      const items = Array.isArray(page) ? page : page?.items ?? []
       const hasProcessingBook = items.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
       const canPoll = typeof document === "undefined" || document.visibilityState === "visible"
       return canPoll && hasProcessingBook ? 5_000 : false
     },
     refetchIntervalInBackground: false,
   })
-  const books = booksData ?? EMPTY_BOOKS
+  const firstBookPage = useMemo<BookPage>(
+    () =>
+      Array.isArray(booksData)
+        ? { items: booksData, next_cursor: null }
+        : booksData ?? { items: EMPTY_BOOKS, next_cursor: null },
+    [booksData],
+  )
+  const books = useMemo(
+    () => [firstBookPage, ...additionalBookPages].flatMap((page) => page.items),
+    [firstBookPage, additionalBookPages],
+  )
+  const nextBookCursor = additionalBookPages.at(-1)?.next_cursor ?? firstBookPage.next_cursor
+
+  async function loadMoreBooks() {
+    if (!nextBookCursor || loadingMoreBooks) return
+    setLoadingMoreBooks(true)
+    try {
+      const page = await booksApi.listPage(true, nextBookCursor)
+      setAdditionalBookPages((current) => [...current, page])
+    } finally {
+      setLoadingMoreBooks(false)
+    }
+  }
+
+  async function refreshLibrary() {
+    setAdditionalBookPages([])
+    await refetch()
+  }
 
   useLibrarySearchShortcut(searchInputRef)
 
@@ -129,6 +161,8 @@ export function LibraryClient() {
     [visibleBooks],
   )
   const hasAnyProjects = visibleBooks.length > 0
+  const canStartAuthorProject = canUseAuthorFeatures(authUser?.tier) || Boolean(authUser?.trial_active)
+  const showFirstManuscriptHero = !loading && !hasAnyProjects && canStartAuthorProject
   const recentActivityItems = useMemo(
     () => buildRecentLibraryActivityItems(visibleBooks),
     [visibleBooks],
@@ -145,7 +179,7 @@ export function LibraryClient() {
     setBusyBookId(bookId)
     try {
       await booksApi.archive(bookId, archived)
-      await refetch()
+      await refreshLibrary()
       setMenuBookId(null)
     } finally {
       setBusyBookId(null)
@@ -164,7 +198,7 @@ export function LibraryClient() {
     setBusyBookId(bookId)
     try {
       await booksApi.hide(bookId, true)
-      await refetch()
+      await refreshLibrary()
       setMenuBookId(null)
     } finally {
       setBusyBookId(null)
@@ -187,7 +221,7 @@ export function LibraryClient() {
     setBusyBookId(deleteBook.id)
     try {
       await booksApi.deletePermanently(deleteBook.id, deleteConfirmation)
-      await refetch()
+      await refreshLibrary()
       setMenuBookId(null)
       setDeleteBook(null)
       setDeleteConfirmation("")
@@ -234,7 +268,7 @@ export function LibraryClient() {
       setPublishConfirmed(false)
       setPublishSlug("")
       setPublishDescription("")
-      await refetch()
+      await refreshLibrary()
     } finally {
       setBusyBookId(null)
     }
@@ -244,7 +278,7 @@ export function LibraryClient() {
     setBusyBookId(bookId)
     try {
       await booksApi.unpublishPublicly(bookId)
-      await refetch()
+      await refreshLibrary()
       setMenuBookId(null)
     } finally {
       setBusyBookId(null)
@@ -261,14 +295,14 @@ export function LibraryClient() {
       } else {
         await booksApi.retryProcessing(bookId)
       }
-      await refetch()
+      await refreshLibrary()
     } finally {
       setBusyBookId(null)
     }
   }
 
   function startCreateProject() {
-    setUploadPreset({})
+    setUploadPreset({ mode: canStartAuthorProject ? "author" : "reader" })
     setShowUpload(true)
   }
 
@@ -317,7 +351,13 @@ export function LibraryClient() {
   }
 
   if (booksError) {
-    return <LibraryErrorState isDark={isDark} pageBackground={pageBackground} onRetry={() => refetch()} />
+    return (
+      <LibraryErrorState
+        isDark={isDark}
+        pageBackground={pageBackground}
+        onRetry={() => refreshLibrary()}
+      />
+    )
   }
 
   return (
@@ -328,12 +368,13 @@ export function LibraryClient() {
             createDisabled={!interactiveReady}
             isDark={isDark}
             onOpenForum={() => router.push("/public/forum" as Route)}
-            onCreate={() => {
-              setUploadPreset({})
-              setShowUpload(true)
-            }}
+            onCreate={startCreateProject}
           />
 
+          {showFirstManuscriptHero ? (
+            <FirstManuscriptHero isDark={isDark} onUpload={startCreateProject} />
+          ) : (
+          <>
           <MetricStrip
             isDark={isDark}
             loading={loading}
@@ -420,6 +461,20 @@ export function LibraryClient() {
             onCreateProject={startCreateProject}
             handlers={projectSectionHandlers}
           />
+          {nextBookCursor ? (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                className={`rounded-md border px-4 py-2 text-sm font-semibold ${controlClass}`}
+                disabled={loadingMoreBooks}
+                onClick={() => void loadMoreBooks()}
+              >
+                {loadingMoreBooks ? "Loading projects..." : "Load more projects"}
+              </button>
+            </div>
+          ) : null}
+          </>
+          )}
         </section>
       </div>
 
@@ -432,7 +487,7 @@ export function LibraryClient() {
           onClose={() => {
             setShowUpload(false)
             setUploadPreset({})
-            void refetch()
+            void refreshLibrary()
           }}
         />
       ) : null}

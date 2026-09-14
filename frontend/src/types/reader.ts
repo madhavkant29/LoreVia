@@ -54,12 +54,14 @@ export interface ChapterCharacter {
   first_chapter: number
   description?: string | null
   personality_tags: string[]
+  motivations?: string[]
+  fears?: string[]
 }
 
 export interface ContextResult {
   type: "character" | "search"
-  character?: any
-  relationships?: any[]
+  character?: ChapterCharacter
+  relationships?: unknown[]
   results?: SearchResult[]
 }
 
@@ -227,6 +229,27 @@ export interface PlotThread {
   risk: string | null
   suggested_action: string | null
   tags?: string[]
+}
+
+export interface PlotThreadPageItem {
+  id: string
+  title: string
+  type: string | null
+  status: string
+  description: string | null
+  introduced_at: number | null
+  resolved_at: number | null
+  first_mentioned: number | null
+  last_mentioned: number | null
+  mention_count: number
+  importance: number
+  tags: string[]
+}
+
+export interface PlotThreadPage {
+  items: PlotThreadPageItem[]
+  next_cursor: string | null
+  has_more: boolean
 }
 
 export interface ForeshadowingItem {

@@ -12,7 +12,6 @@ import { useUploadModalController } from "@/components/modals/upload/useUploadMo
 import { UploadWizardSteps } from "@/components/modals/upload/UploadWizardPanels"
 import { Dialog } from "@/components/ui/Dialog"
 import { ProcessingStatusPanel } from "@/components/ui/ResponsivenessStatus"
-import { Skeleton } from "@/components/ui/Skeleton"
 import type { BookMode } from "@/lib/stores/bookModeStore"
 
 export const UploadModal = memo(function UploadModal({
@@ -49,11 +48,13 @@ export const UploadModal = memo(function UploadModal({
       <div className={shellClassName} onClick={(e) => e.stopPropagation()}>
         <div className={`relative border-b px-6 py-5 ${isDark ? "border-white/10" : "border-slate-200/80"}`}>
           <div>
-            <TitleElement className="text-xl font-semibold tracking-normal">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}</TitleElement>
+            <TitleElement className="text-xl font-semibold tracking-normal">{isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload manuscript"}</TitleElement>
             <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               {isManagingExisting
                 ? "Paste or upload one scene, chapter, or script segment, process it incrementally, and review what changed before moving on."
-                : "Bring in one manuscript, choose how it should be processed, and keep setup lightweight."}
+                : wizard.mode === "author"
+                  ? "After extraction, LoreVia starts with a supportive full-manuscript read—what is working first, then evidence-backed revision opportunities."
+                  : "Bring in one manuscript, choose how it should be processed, and keep setup lightweight."}
             </p>
           </div>
           {!isManagingExisting ? (
@@ -85,6 +86,11 @@ export const UploadModal = memo(function UploadModal({
               retrying={processingRetrying}
               onRetry={processingSummary?.retryAvailable ? () => void retryProcessing() : undefined}
             />
+            {!isManagingExisting && wizard.mode === "author" ? (
+              <p className={`rounded-lg border px-4 py-3 text-sm leading-6 ${isDark ? "border-teal-300/15 bg-teal-300/5 text-slate-300" : "border-teal-900/10 bg-teal-50 text-stone-700"}`}>
+                When extraction finishes, LoreVia will read the whole manuscript for its voice, characters, scenes, and emotional core before leading you into detailed critique.
+              </p>
+            ) : null}
             <div className="flex justify-end">
               <button
                 type="button"
@@ -220,7 +226,9 @@ export const UploadModal = memo(function UploadModal({
                   ? "Large PDFs can take a bit depending on your network speed."
                   : isManagingExisting
                     ? "Your chapter is in LoreVia. Incremental extraction and continuity review are being refreshed now."
-                    : "Your book upload finished. Parsing and AI extraction continue in the background."}
+                    : wizard.mode === "author"
+                      ? "Your manuscript upload finished. Extraction continues in the background, followed by its supportive first read."
+                      : "Your book upload finished. Parsing and AI extraction continue in the background."}
               </p>
             </div>
           ) : null}
@@ -304,10 +312,10 @@ export const UploadModal = memo(function UploadModal({
     <Dialog
       open
       onClose={onClose}
-      title={isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload book"}
+      title={isManagingExisting ? `Add New ${storyUnitLabelTitle}` : "Upload manuscript"}
       description={isManagingExisting
         ? "Add and process the next story unit in this project."
-        : "Import a manuscript into a private workspace."}
+        : "Import a manuscript into a private workspace and begin its first read."}
       size="xl"
       className="!max-w-5xl border-0 bg-transparent shadow-none"
       contentClassName="p-0"

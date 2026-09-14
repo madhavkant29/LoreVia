@@ -448,7 +448,12 @@ async def _build_public_book_craft_profile(
     visible_character_count: int,
 ) -> dict[str, Any]:
     story_health = await build_story_health_payload(db, book)
-    metrics_by_label = {str(metric.label): int(metric.score) for metric in story_health.metrics}
+    metrics_by_label = {
+        str(metric.label): int(metric.score)
+        for metric in story_health.metrics
+        if metric.available
+    }
+    story_health_score = float(story_health.score) if story_health.available else None
     sampled_text = await _sample_public_book_text(db, book=book)
     readability = estimate_readability(sampled_text)
     grade_level = float(readability.get("grade_level") or 0.0)
@@ -456,21 +461,33 @@ async def _build_public_book_craft_profile(
     average_sentence_length = float(readability.get("average_sentence_length") or 0.0)
     complexity_score = _safe_average(
         [
-            float(metrics_by_label.get("Timeline clarity", 0)),
-            float(metrics_by_label.get("Worldbuilding consistency", 0)),
-            float(metrics_by_label.get("Plot thread closure", 0)),
-            float(metrics_by_label.get("Dialogue/voice consistency", 0)),
+            *[
+                float(metrics_by_label[label])
+                for label in (
+                    "Timeline clarity",
+                    "Worldbuilding consistency",
+                    "Plot thread closure",
+                    "Dialogue/voice consistency",
+                )
+                if label in metrics_by_label
+            ],
             min(max((grade_level / 14.0) * 100.0, 0.0), 100.0),
             min(float(visible_character_count) * 4.5, 100.0),
         ]
     )
     well_written_score = _safe_average(
         [
-            float(story_health.score),
-            float(metrics_by_label.get("Continuity", 0)),
-            float(metrics_by_label.get("Dialogue/voice consistency", 0)),
-            float(metrics_by_label.get("Plot thread closure", 0)),
-            float(metrics_by_label.get("Worldbuilding consistency", 0)),
+            *([story_health_score] if story_health_score is not None else []),
+            *[
+                float(metrics_by_label[label])
+                for label in (
+                    "Continuity",
+                    "Dialogue/voice consistency",
+                    "Plot thread closure",
+                    "Worldbuilding consistency",
+                )
+                if label in metrics_by_label
+            ],
         ]
     )
     beginner_friendly_score = _safe_average(
@@ -478,11 +495,11 @@ async def _build_public_book_craft_profile(
             min(max(reading_ease, 0.0), 100.0),
             max(0.0, 100.0 - (grade_level * 6.0)),
             max(0.0, 100.0 - (average_sentence_length * 2.5)),
-            float(story_health.score),
+            *([story_health_score] if story_health_score is not None else []),
         ]
     )
     return {
-        "story_health_score": float(story_health.score),
+        "story_health_score": story_health_score,
         "story_health_status": story_health.status,
         "complexity_score": complexity_score,
         "well_written_score": well_written_score,

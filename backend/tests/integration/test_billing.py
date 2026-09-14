@@ -1,11 +1,80 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.security import create_access_token
 from app.models.user import AdminPrincipal, Subscription, User
+from app.services.billing_checkout_service import (
+    build_checkout_disclosure,
+    create_checkout_session,
+)
+from app.services.paddle_service import (
+    PaddlePriceChangedError,
+    PaddlePriceQuote,
+    PaddleTransactionState,
+)
 from app.utils.billing_utils import create_billing_confirmation_token
+
+
+def _paddle_quote(plan: str) -> PaddlePriceQuote:
+    amounts = {
+        "author_monthly": ("1900", "$19.00 USD"),
+        "author_annual": ("19000", "$190.00 USD"),
+        "architect_monthly": ("3900", "$39.00 USD"),
+        "architect_annual": ("39000", "$390.00 USD"),
+    }
+    amount_minor, formatted_total = amounts[plan]
+    return PaddlePriceQuote(
+        plan=plan,
+        price_id=f"pri_{plan}",
+        amount_minor=amount_minor,
+        currency_code="USD",
+        formatted_total=formatted_total,
+        country_code="US",
+    )
+
+
+def _mock_paddle_quote(monkeypatch) -> None:
+    async def get_quote(
+        plan,
+        *,
+        customer_ip_address=None,
+        existing_customer_id=None,
+    ):
+        return _paddle_quote(plan)
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_price_quote",
+        get_quote,
+    )
+
+
+def _pending_transaction_state(
+    *,
+    user_id: uuid.UUID,
+    plan: str = "author_monthly",
+    customer_id: str = "ctm_123",
+    transaction_id: str = "txn_123",
+    checkout_intent_id: str = "",
+) -> PaddleTransactionState:
+    return PaddleTransactionState(
+        transaction_id=transaction_id,
+        status="draft",
+        total_minor=_paddle_quote(plan).amount_minor,
+        currency_code="USD",
+        customer_id=customer_id,
+        price_ids=(f"pri_{plan}",),
+        quantities=(1,),
+        custom_user_id=str(user_id),
+        custom_plan=plan,
+        custom_checkout_intent_id=checkout_intent_id,
+        collection_mode="automatic",
+        discount_id="",
+        checkout_url=f"https://getlorevia.com/checkout?_ptxn={transaction_id}",
+    )
 
 
 async def _admin_headers(client, db) -> dict[str, str]:
@@ -347,7 +416,11 @@ async def test_billing_confirmation_allows_public_success_page_lookup(client, db
     monkeypatch.setattr(
         "app.api.v1.routes.billing.get_transaction_summary", fake_get_transaction_summary
     )
-    monkeypatch.setattr("app.utils.billing_utils.settings.JWT_SECRET", "jwt-secret", raising=False)
+    monkeypatch.setattr(
+        "app.utils.billing_utils.settings.JWT_SECRET",
+        "test-billing-jwt-secret-with-at-least-32-characters",
+        raising=False,
+    )
     monkeypatch.setattr("app.utils.billing_utils.settings.JWT_ALGORITHM", "HS256", raising=False)
     confirmation_token = create_billing_confirmation_token("txn_public_123")
 
@@ -408,22 +481,63 @@ async def test_checkout_creates_pending_subscription_and_portal_session(
 
     monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
     monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+    _mock_paddle_quote(monkeypatch)
     monkeypatch.setattr(
         "app.api.v1.routes.billing.create_billing_confirmation_token",
         lambda transaction_id: f"confirm-{transaction_id}",
     )
 
-    async def create_checkout(user_id_value, email, plan, *, existing_customer_id=None):
+    provider_call_count = 0
+
+    async def create_checkout(
+        user_id_value,
+        email,
+        plan,
+        *,
+        existing_customer_id=None,
+        checkout_intent_id,
+        expected_total_minor,
+        currency_code,
+    ):
+        nonlocal provider_call_count
+        provider_call_count += 1
         assert user_id_value == str(user_id)
         assert plan == "author_monthly"
         assert existing_customer_id is None
+        assert checkout_intent_id
+        assert expected_total_minor == "1900"
+        assert currency_code == "USD"
         return "https://checkout.example/session", "ctm_123", "txn_123"
 
-    monkeypatch.setattr("app.api.v1.routes.billing.create_checkout_url", create_checkout)
+    async def get_transaction_state(transaction_id):
+        assert transaction_id == "txn_123"
+        return _pending_transaction_state(
+            user_id=user_id,
+            transaction_id=transaction_id,
+        )
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.create_checkout_url", create_checkout
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_transaction_state",
+        get_transaction_state,
+    )
+    preview = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "author_monthly"},
+    )
+    assert preview.status_code == 200
+    quote_token = preview.json()["quote_token"]
     checkout = await client.post(
         "/api/v1/billing/checkout",
         headers=auth_headers,
-        json={"plan": "author_monthly"},
+        json={
+            "plan": "author_monthly",
+            "confirmed_immediate_charge": True,
+            "quote_token": quote_token,
+        },
     )
     assert checkout.status_code == 200
     assert checkout.json()["billing_enabled"] is True
@@ -433,6 +547,26 @@ async def test_checkout_creates_pending_subscription_and_portal_session(
     assert subscription is not None
     assert subscription.status == "pending"
     assert subscription.paddle_customer_id == "ctm_123"
+
+    repeated_checkout = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "plan": "author_monthly",
+            "confirmed_immediate_charge": True,
+            "quote_token": quote_token,
+        },
+    )
+    conflicting_preview = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "architect_monthly"},
+    )
+    assert repeated_checkout.status_code == 200
+    assert "txn_123" in repeated_checkout.json()["checkout_url"]
+    assert provider_call_count == 1
+    assert conflicting_preview.status_code == 409
+    assert "checkout is already pending" in conflicting_preview.json()["detail"]
 
     async def create_portal(customer_id, subscription_ids):
         assert customer_id == "ctm_123"
@@ -449,8 +583,384 @@ async def test_checkout_creates_pending_subscription_and_portal_session(
 
 
 @pytest.mark.asyncio
+async def test_checkout_recovers_provider_transaction_from_durable_intent(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user = await db.get(User, uuid.UUID(me.json()["id"]))
+    assert user is not None
+    intent = Subscription(
+        user_id=user.id,
+        plan="author_monthly",
+        status="creating",
+    )
+    db.add(intent)
+    await db.commit()
+    await db.refresh(intent)
+    quote = _paddle_quote("author_monthly")
+    quote_token = build_checkout_disclosure(
+        user,
+        "author_monthly",
+        price_quote=quote,
+    ).quote_token
+    recovered_state = _pending_transaction_state(
+        user_id=user.id,
+        transaction_id="txn_recovered",
+        checkout_intent_id=str(intent.id),
+    )
+
+    async def find_transaction(checkout_intent_id, *, customer_id, created_after):
+        assert checkout_intent_id == str(intent.id)
+        assert customer_id is None
+        assert created_after < intent.created_at
+        return recovered_state
+
+    async def should_not_create_checkout(*_args, **_kwargs):
+        raise AssertionError("recovered checkout must be reused")
+
+    _mock_paddle_quote(monkeypatch)
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.find_paddle_transaction_by_checkout_intent",
+        find_transaction,
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.create_checkout_url",
+        should_not_create_checkout,
+    )
+
+    checkout = await create_checkout_session(
+        db,
+        user,
+        "author_monthly",
+        confirmed_immediate_charge=True,
+        quote_token=quote_token,
+        client_ip="203.0.113.10",
+    )
+
+    assert checkout.transaction_id == "txn_recovered"
+    await db.refresh(intent)
+    assert intent.status == "pending"
+    assert intent.paddle_customer_id == "ctm_123"
+    assert intent.paddle_transaction_id == "txn_recovered"
+
+
+@pytest.mark.asyncio
+async def test_checkout_rejects_a_changed_signed_paddle_quote(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+    current_quote = _paddle_quote("author_monthly")
+
+    async def get_quote(
+        plan,
+        *,
+        customer_ip_address=None,
+        existing_customer_id=None,
+    ):
+        return current_quote
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_price_quote",
+        get_quote,
+    )
+    preview = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "author_monthly"},
+    )
+    assert preview.status_code == 200
+    current_quote = PaddlePriceQuote(
+        plan="author_monthly",
+        price_id="pri_author_monthly",
+        amount_minor="2000",
+        currency_code="USD",
+        formatted_total="$20.00 USD",
+        country_code="US",
+    )
+
+    checkout = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "plan": "author_monthly",
+            "confirmed_immediate_charge": True,
+            "quote_token": preview.json()["quote_token"],
+        },
+    )
+
+    assert checkout.status_code == 409
+    assert "changed or expired" in checkout.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_checkout_cancels_provider_transaction_when_local_persistence_fails(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user = await db.get(User, uuid.UUID(me.json()["id"]))
+    assert user is not None
+    quote = _paddle_quote("author_monthly")
+    quote_token = build_checkout_disclosure(
+        user,
+        "author_monthly",
+        price_quote=quote,
+    ).quote_token
+    canceled: list[str] = []
+
+    async def get_quote(*_args, **_kwargs):
+        return quote
+
+    async def create_checkout(*_args, **_kwargs):
+        return (
+            "https://getlorevia.com/checkout?_ptxn=txn_orphan",
+            "ctm_orphan",
+            "txn_orphan",
+        )
+
+    real_commit = db.commit
+    commit_calls = 0
+
+    async def fail_second_commit():
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 2:
+            raise SQLAlchemyError("forced local persistence failure")
+        await real_commit()
+
+    async def cancel_transaction(transaction_id):
+        canceled.append(transaction_id)
+        return "canceled"
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_price_quote",
+        get_quote,
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.create_checkout_url",
+        create_checkout,
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.cancel_paddle_transaction",
+        cancel_transaction,
+    )
+    monkeypatch.setattr(db, "commit", fail_second_commit)
+
+    with pytest.raises(SQLAlchemyError, match="forced local persistence"):
+        await create_checkout_session(
+            db,
+            user,
+            "author_monthly",
+            confirmed_immediate_charge=True,
+            quote_token=quote_token,
+            client_ip="203.0.113.10",
+        )
+
+    assert canceled == ["txn_orphan"]
+    assert commit_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_checkout_does_not_replace_pending_transaction_with_unknown_provider_state(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    db.add(
+        Subscription(
+            user_id=user_id,
+            plan="author_monthly",
+            status="pending",
+            paddle_customer_id="ctm_unknown",
+            paddle_transaction_id="txn_unknown",
+        )
+    )
+    await db.commit()
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.api.v1.routes.billing.paddle_plan_is_configured",
+        lambda _plan: True,
+    )
+    _mock_paddle_quote(monkeypatch)
+
+    async def get_transaction_state(_transaction_id):
+        state = _pending_transaction_state(
+            user_id=user_id,
+            customer_id="ctm_unknown",
+            transaction_id="txn_unknown",
+        )
+        return PaddleTransactionState(**{**state.__dict__, "status": "unknown"})
+
+    async def should_not_create(*_args, **_kwargs):
+        raise AssertionError("An unknown provider transaction must not be replaced")
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_transaction_state",
+        get_transaction_state,
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.create_checkout_url",
+        should_not_create,
+    )
+    preview = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "author_monthly"},
+    )
+    assert preview.status_code == 200
+
+    checkout = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "plan": "author_monthly",
+            "confirmed_immediate_charge": True,
+            "quote_token": preview.json()["quote_token"],
+        },
+    )
+
+    assert checkout.status_code == 409
+    assert "cannot be safely replaced" in checkout.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_checkout_close_cancels_only_the_users_pending_transaction(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    pending = Subscription(
+        user_id=user_id,
+        plan="author_monthly",
+        status="pending",
+        paddle_customer_id="ctm_pending",
+        paddle_transaction_id="txn_pending",
+    )
+    db.add(pending)
+    await db.commit()
+
+    async def get_transaction_state(transaction_id):
+        assert transaction_id == "txn_pending"
+        return PaddleTransactionState("draft", "1900", "USD")
+
+    async def cancel_transaction(transaction_id):
+        assert transaction_id == "txn_pending"
+        return "canceled"
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_transaction_state",
+        get_transaction_state,
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.cancel_paddle_transaction",
+        cancel_transaction,
+    )
+
+    response = await client.post(
+        "/api/v1/billing/checkout/abandon",
+        headers=auth_headers,
+        json={"transaction_id": "txn_pending"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["abandoned"] is True
+    await db.refresh(pending)
+    assert pending.status == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_checkout_close_never_cancels_a_completed_transaction(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    pending = Subscription(
+        user_id=user_id,
+        plan="author_monthly",
+        status="pending",
+        paddle_customer_id="ctm_paid",
+        paddle_transaction_id="txn_paid",
+    )
+    db.add(pending)
+    await db.commit()
+
+    async def get_transaction_state(transaction_id):
+        assert transaction_id == "txn_paid"
+        return PaddleTransactionState("completed", "1900", "USD")
+
+    async def cancel_transaction(_transaction_id):
+        raise AssertionError("A completed transaction must never be canceled")
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_transaction_state",
+        get_transaction_state,
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.cancel_paddle_transaction",
+        cancel_transaction,
+    )
+
+    response = await client.post(
+        "/api/v1/billing/checkout/abandon",
+        headers=auth_headers,
+        json={"transaction_id": "txn_paid"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["abandoned"] is False
+    await db.refresh(pending)
+    assert pending.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_stale_pending_checkout_is_canceled_before_plan_switch(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    pending = Subscription(
+        user_id=user_id,
+        plan="author_monthly",
+        status="pending",
+        paddle_customer_id="ctm_stale",
+        paddle_transaction_id="txn_stale",
+        created_at=datetime.now(UTC) - timedelta(minutes=31),
+    )
+    db.add(pending)
+    await db.commit()
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+    _mock_paddle_quote(monkeypatch)
+
+    async def get_transaction_state(transaction_id):
+        assert transaction_id == "txn_stale"
+        return PaddleTransactionState("ready", "1900", "USD")
+
+    async def cancel_transaction(transaction_id):
+        assert transaction_id == "txn_stale"
+        return "canceled"
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.get_paddle_transaction_state",
+        get_transaction_state,
+    )
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.cancel_paddle_transaction",
+        cancel_transaction,
+    )
+
+    response = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "architect_monthly"},
+    )
+
+    assert response.status_code == 200
+    await db.refresh(pending)
+    assert pending.status == "canceled"
+
+
+@pytest.mark.asyncio
 async def test_checkout_and_portal_cover_disabled_invalid_and_provider_failures(
-    client, auth_headers, monkeypatch
+    client, db, auth_headers, monkeypatch
 ):
     invalid = await client.post(
         "/api/v1/billing/checkout",
@@ -474,13 +984,196 @@ async def test_checkout_and_portal_cover_disabled_invalid_and_provider_failures(
     monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
     monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
 
+    _mock_paddle_quote(monkeypatch)
+
     async def fail_checkout(*_args, **_kwargs):
         raise RuntimeError("provider unavailable")
 
-    monkeypatch.setattr("app.api.v1.routes.billing.create_checkout_url", fail_checkout)
-    failed = await client.post(
-        "/api/v1/billing/checkout",
+    monkeypatch.setattr("app.services.billing_checkout_service.create_checkout_url", fail_checkout)
+    preview = await client.post(
+        "/api/v1/billing/checkout/preview",
         headers=auth_headers,
         json={"plan": "architect_monthly"},
     )
+    assert preview.status_code == 200
+    failed = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "plan": "architect_monthly",
+            "confirmed_immediate_charge": True,
+            "quote_token": preview.json()["quote_token"],
+        },
+    )
     assert failed.status_code == 502
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    durable_intent = await db.scalar(select(Subscription).where(Subscription.user_id == user_id))
+    assert durable_intent is not None
+    assert durable_intent.status == "creating"
+    assert durable_intent.paddle_transaction_id is None
+
+
+@pytest.mark.asyncio
+async def test_checkout_requires_fresh_review_when_paddle_transaction_details_change(
+    client, auth_headers, monkeypatch
+):
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.api.v1.routes.billing.paddle_plan_is_configured",
+        lambda _plan: True,
+    )
+    _mock_paddle_quote(monkeypatch)
+
+    async def changed_checkout(*_args, **_kwargs):
+        raise PaddlePriceChangedError("provider details changed")
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.create_checkout_url",
+        changed_checkout,
+    )
+    preview = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "author_monthly"},
+    )
+    checkout = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={
+            "plan": "author_monthly",
+            "confirmed_immediate_charge": True,
+            "quote_token": preview.json()["quote_token"],
+        },
+    )
+
+    assert checkout.status_code == 409
+    assert checkout.json()["detail"] == (
+        "Paddle checkout details changed. Close this dialog and review the current "
+        "payment details again."
+    )
+
+
+@pytest.mark.asyncio
+async def test_checkout_preview_discloses_active_trial_and_immediate_charge(
+    client, auth_headers, monkeypatch
+):
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+    _mock_paddle_quote(monkeypatch)
+
+    response = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "author_monthly"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trial_status"] == "active"
+    assert payload["trial_active"] is True
+    assert payload["trial_ends_at"] is not None
+    assert payload["charge_today"] == "$19.00 USD"
+    assert payload["recurring_price"] == "$19.00 USD every month"
+    assert payload["confirmation_required"] is True
+    assert payload["confirmation_text"] == (
+        "I understand my trial is already active and I will be charged $19.00 USD now."
+    )
+    assert payload["checkout_button_label"] == "Pay $19.00 USD now"
+    assert payload["default_action_label"] == "Continue free trial"
+    assert payload["quote_token"]
+
+
+@pytest.mark.asyncio
+async def test_checkout_preview_discloses_expired_trial(client, db, auth_headers, monkeypatch):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user = await db.get(User, uuid.UUID(me.json()["id"]))
+    assert user is not None
+    user.created_at = datetime.now(UTC) - timedelta(days=11)
+    await db.commit()
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+    _mock_paddle_quote(monkeypatch)
+
+    response = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "architect_annual"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trial_status"] == "expired"
+    assert payload["trial_active"] is False
+    assert payload["trial_ends_at"] is not None
+    assert payload["charge_today"] == "$390.00 USD"
+    assert payload["recurring_price"] == "$390.00 USD every year"
+    assert payload["confirmation_required"] is False
+    assert payload["confirmation_text"] is None
+    assert payload["default_action_label"] is None
+
+
+@pytest.mark.asyncio
+async def test_active_trial_checkout_requires_explicit_immediate_charge_confirmation(
+    client, auth_headers, monkeypatch
+):
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+    _mock_paddle_quote(monkeypatch)
+    provider_call_count = 0
+
+    async def should_not_create_checkout(*_args, **_kwargs):
+        nonlocal provider_call_count
+        provider_call_count += 1
+        raise AssertionError("Paddle must not be called without confirmation")
+
+    monkeypatch.setattr(
+        "app.services.billing_checkout_service.create_checkout_url",
+        should_not_create_checkout,
+    )
+
+    response = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"plan": "author_monthly", "confirmed_immediate_charge": False},
+    )
+
+    assert response.status_code == 409
+    assert "I understand my trial is already active" in response.json()["detail"]
+    assert provider_call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_checkout_rejects_duplicate_paddle_subscription(
+    client, db, auth_headers, monkeypatch
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    db.add(
+        Subscription(
+            user_id=user_id,
+            plan="author_monthly",
+            status="active",
+            paddle_customer_id="ctm_existing",
+            paddle_sub_id="sub_existing",
+            paddle_transaction_id="txn_existing",
+        )
+    )
+    await db.commit()
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_is_configured", lambda: True)
+    monkeypatch.setattr("app.api.v1.routes.billing.paddle_plan_is_configured", lambda _plan: True)
+
+    preview = await client.post(
+        "/api/v1/billing/checkout/preview",
+        headers=auth_headers,
+        json={"plan": "architect_monthly"},
+    )
+    checkout = await client.post(
+        "/api/v1/billing/checkout",
+        headers=auth_headers,
+        json={"plan": "architect_monthly", "confirmed_immediate_charge": True},
+    )
+
+    assert preview.status_code == 409
+    assert checkout.status_code == 409
+    assert "already has a Paddle subscription" in checkout.json()["detail"]

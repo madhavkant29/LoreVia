@@ -47,6 +47,7 @@ export function SavedCleanupBacklogCard({
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="number"
+            aria-label="Chapter number filter"
             className={`w-20 rounded-md border px-2 py-1.5 text-xs ${isDark ? "border-white/10 bg-black/20 text-white" : "border-stone-200 bg-white text-stone-900"}`}
             placeholder="Ch."
             value={chapterFilter}

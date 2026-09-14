@@ -7,7 +7,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react"
 
 import { findWorkspaceStructurePath } from "@/lib/utils/sceneWorkspace"
 import type { WorkspaceFolderNode } from "@/lib/utils/workspacePaths"
-import type { Book, ManuscriptWorkspaceTree, NovelScene, SceneMetadata } from "@/types/book"
+import type { Book, ManuscriptWorkspaceTree, SceneMetadata, WorkspaceScene } from "@/types/book"
 
 import { metadataTextToList, parseSceneDragItem } from "./scenesPage.helpers"
 
@@ -63,6 +63,7 @@ export function WorkspaceHeader({
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2 xl:w-[31rem] xl:grid-cols-2">
+          <ActionLink href={`/${bookId}` as Route} variant="secondary" isDark={isDark} className={`sm:col-span-2 ${headerSecondaryClass ?? ""}`}><IconBook />Home</ActionLink>
           <ActionButton type="button" isDark={isDark} onClick={onNewScene}><IconSparkPlus />New scene</ActionButton>
           <ActionButton type="button" variant="secondary" isDark={isDark} onClick={onNewFolder} className={headerSecondaryClass}><IconFolderPlus />New folder</ActionButton>
           <ActionLink href={`/${bookId}/notes`} isDark={isDark} className={headerSecondaryClass}><IconNote />Open notes</ActionLink>
@@ -125,8 +126,8 @@ export function SceneBrowserPanel({
   onBrowserViewChange: (value: BrowserView) => void
   search: string
   onSearchChange: (value: string) => void
-  scenes: NovelScene[]
-  filteredScenes: NovelScene[]
+  scenes: WorkspaceScene[]
+  filteredScenes: WorkspaceScene[]
   selectedFolder: string | null
   selectedSceneId: string | null
   folderTree: FolderNode
@@ -137,7 +138,7 @@ export function SceneBrowserPanel({
   onDropScene: (sceneId: string, folderPath: string | null) => void
   dropTargetFolder: string | null
   onDropTargetChange: (path: string | null) => void
-  onSelectScene: (scene: NovelScene) => void
+  onSelectScene: (scene: WorkspaceScene) => void
   onCreateScene: () => void
 }) {
   const folderPanelClass = browserView === "scenes" ? "hidden xl:block" : "block"

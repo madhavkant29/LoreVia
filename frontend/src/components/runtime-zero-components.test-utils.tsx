@@ -2,7 +2,7 @@
 
 import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, vi } from "vitest"
 
 const booksApiMock = vi.hoisted(() => ({
   createCharacter: vi.fn(),
@@ -20,7 +20,9 @@ const intelligenceApiMock = vi.hoisted(() => ({
 }))
 const socialApiMock = vi.hoisted(() => ({
   listConversations: vi.fn(),
+  listConversationsPage: vi.fn(),
   listMessages: vi.fn(),
+  listMessagesPage: vi.fn(),
   listRelationships: vi.fn(),
   markConversationRead: vi.fn(),
   openDirectConversation: vi.fn(),
@@ -217,8 +219,12 @@ beforeEach(() => {
   })
   confirmMock.mockResolvedValue(true)
 
-  socialApiMock.listConversations.mockResolvedValue({ items: [conversationFixture] })
-  socialApiMock.listMessages.mockResolvedValue({
+  socialApiMock.listConversationsPage.mockResolvedValue({
+    items: [conversationFixture],
+    next_cursor: null,
+    has_more: false,
+  })
+  socialApiMock.listMessagesPage.mockResolvedValue({
     items: [
       {
         id: "message-1",
@@ -230,6 +236,8 @@ beforeEach(() => {
         recipient_read_at: null,
       },
     ],
+    next_cursor: null,
+    has_more: false,
   })
   socialApiMock.listRelationships.mockResolvedValue({
     incoming_requests: [{ id: "rel-1", requester_username: "lina" }],

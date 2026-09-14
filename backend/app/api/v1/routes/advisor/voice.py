@@ -5,12 +5,11 @@ from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_current_user
-from app.api.deps.rate_limit import rate_limit_continuity_checker
+from app.api.deps.rate_limit import enforce_continuity_rate_limit
 from app.api.v1.routes.advisor.chat import (
     _advisor_sse,
     _advisor_stream_response,
@@ -18,10 +17,15 @@ from app.api.v1.routes.advisor.chat import (
 )
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.redis import get_voice_consistency_cache, set_voice_consistency_cache
+from app.core.llm import get_openai_client
+from app.core.redis import (
+    get_book_cache_version,
+    get_voice_consistency_cache,
+    set_voice_consistency_cache,
+)
 from app.engine.search.semantic import semantic_search
-from app.models.book import Book
 from app.models.character import Character, CharacterVoiceProfile
+from app.models.user import User
 from app.schemas.advisor import VoiceConsistencyRequest
 from app.utils.advisor_route_errors import ADVISOR_STREAM_ERRORS
 from app.utils.advisor_utils import (
@@ -33,14 +37,17 @@ from app.utils.advisor_utils import (
     make_editorial_cache_key,
     normalize_voice_consistency_result,
 )
+from app.utils.books.collaboration_access import get_book_with_ai_scan_access
 from app.utils.intelligence_utils import (
     compute_voice_metrics,
     extract_dialogue_samples_by_character,
     score_voice_match,
 )
-from app.utils.llm_usage_utils import create_tracked_chat_completion
+from app.utils.llm_usage_utils import (
+    create_tracked_chat_completion,
+    public_llm_http_error_message,
+)
 from app.utils.logging.errors import public_error_message
-from app.utils.retry_utils import LLM_MAX_RETRIES
 
 router = APIRouter()
 
@@ -51,17 +58,23 @@ async def voice_consistency_review(
     body: VoiceConsistencyRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-    _=Depends(rate_limit_continuity_checker),
+    _=Depends(get_current_user),
 ):
-    book = await db.get(Book, book_id)
-    if not book or book.user_id != current_user.id:
-        raise HTTPException(404)
+    book, collaborator, _access = await get_book_with_ai_scan_access(
+        db, book_id, current_user, require_owner_plan=False
+    )
+    billing_user = current_user if collaborator is None else await db.get(User, book.user_id)
+    if billing_user is None:
+        raise HTTPException(404, "Book owner not found.")
+    if _ is not None:
+        await enforce_continuity_rate_limit(db, billing_user)
 
     if not body.text.strip():
         raise HTTPException(400, detail="Passage text is required.")
 
     cache_key = make_editorial_cache_key(book_id, body.text, body.chapter_num, body.character_id)
-    cached = await get_voice_consistency_cache(str(book.id), cache_key)
+    cache_version = await get_book_cache_version(str(book.id))
+    cached = await get_voice_consistency_cache(str(book.id), cache_key, version=cache_version)
     if cached is not None:
         return {
             **cached,
@@ -69,8 +82,8 @@ async def voice_consistency_review(
             "cached": True,
         }
 
-    total_ch = book.total_chapters or 9999
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=LLM_MAX_RETRIES)
+    total_ch = int(book.total_chapters or 0)
+    client = get_openai_client()
 
     try:
         hits = await semantic_search(
@@ -274,7 +287,12 @@ async def voice_consistency_review(
             "warnings": warnings,
         }
         response_payload["cached"] = False
-        await set_voice_consistency_cache(str(book.id), cache_key, response_payload)
+        await set_voice_consistency_cache(
+            str(book.id),
+            cache_key,
+            response_payload,
+            expected_version=cache_version,
+        )
         return response_payload
     finally:
         await client.close()
@@ -286,7 +304,7 @@ async def voice_consistency_review_stream(
     body: VoiceConsistencyRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-    _=Depends(rate_limit_continuity_checker),
+    _=Depends(get_current_user),
 ):
     async def event_stream():
         try:
@@ -300,7 +318,7 @@ async def voice_consistency_review_stream(
             )
             yield _advisor_sse("done", cast(dict[str, Any], jsonable_encoder(payload)))
         except HTTPException as exc:
-            yield _advisor_sse("error", {"error": public_error_message(exc.status_code)})
+            yield _advisor_sse("error", {"error": public_llm_http_error_message(exc)})
         except ADVISOR_STREAM_ERRORS:
             yield _advisor_sse("error", {"error": public_error_message(500)})
 

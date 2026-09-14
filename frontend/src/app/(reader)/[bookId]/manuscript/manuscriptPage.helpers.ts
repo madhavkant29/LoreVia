@@ -263,7 +263,7 @@ export function filterWorkspaceSceneGroups(
     .map((group) => ({
       ...group,
       scenes: group.scenes.filter((scene) =>
-        [scene.title, scene.description ?? "", scene.body, scene.path].some((value) =>
+        [scene.title, scene.description ?? "", scene.body ?? "", scene.path].some((value) =>
           value.toLowerCase().includes(query)
         )
       ),

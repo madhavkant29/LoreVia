@@ -8,7 +8,13 @@ import { buildManuscriptRailOverlayProps } from "./manuscriptPage.railOverlayPro
 import { buildManuscriptRightRailProps } from "./manuscriptPage.rightRailProps"
 import { buildManuscriptTopProps } from "./manuscriptPage.topProps"
 
-type ManuscriptRenderPropsArgs = Record<string, any>
+type ManuscriptRenderPropsArgs = ReturnType<
+  (typeof import("./manuscriptPage.setup"))["useManuscriptPageSetup"]
+> & ReturnType<
+  (typeof import("./manuscriptPage.documentBindings"))["useManuscriptDocumentBindings"]
+> & ReturnType<
+  (typeof import("./manuscriptPage.actionBindings"))["useManuscriptActionBindings"]
+>
 
 export function buildManuscriptRenderProps(args: ManuscriptRenderPropsArgs) {
   const {
@@ -42,13 +48,13 @@ export function buildManuscriptRenderProps(args: ManuscriptRenderPropsArgs) {
     sceneTitleDraft, sceneVersionDetail, sceneVersionNameDraft, sceneVersions, searchInputRef,
     selectedChapter, selectedCharCard, selectionMenu, setActiveRightPane, setAddCharacterOpen,
     setAnnotationCategory, setAnnotationDraft, setAnnotationVisibility, setChapterPreviewPageCount,
-    setChapterSearch, setChapterVersionNameDraft, setCharCardEditing, setDraftSurfaceMode,
-    setEditNoteBody, setEditNoteTitle, setEditorMode, setFirstLineIndent, setFocusMode,
+    setChapterSearch, setChapterVersionNameDraft, setDraftSurfaceMode,
+    setEditorMode, setFirstLineIndent, setFocusMode,
     setFontFamily, setFontSize, setFontSizeLocked, setFullBookPreviewPageCount, setGotoPageInput,
-    setIncludeTableOfContentsOnExport, setJumpTarget, setLineHeight, setNewCorkboardTitle,
+    setIncludeTableOfContentsOnExport, setLineHeight, setNewCorkboardTitle,
     setNoteScope, setNoteTitle, setNotes, setRecallQuery, setReplaceQuery, setReplaceValue,
     setSceneBodyDraft, setSceneChapterDraft, setSceneDescriptionDraft, setSceneDropTarget,
-    setSceneHtmlDraft, setSceneTitleDraft, setSceneVersionNameDraft, setSelectedCharCard,
+    setSceneHtmlDraft, setSceneTitleDraft, setSceneVersionNameDraft,
     setShowCompileDialog, setShowEditorSettings, setShowExportMenu, setShowLeftRail,
     setShowPageGuides, setShowPageSetup, setShowReprocessConfirm, setShowSearchTools,
     setWorkspaceTab, setWriterWorkspace, sheetStyle, showCompileDialog, showEditorSettings,

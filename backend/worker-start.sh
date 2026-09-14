@@ -10,7 +10,7 @@ if [ "${NORMALIZE_LOCAL_STORAGE_PERMISSIONS:-}" = "1" ]; then
 fi
 
 if [ "$(id -u)" = "0" ]; then
-  exec su -s /bin/bash app -c "$*"
+  exec su -s /bin/bash app -c 'exec "$@"' -- lorevia-entrypoint "$@"
 fi
 
 exec "$@"

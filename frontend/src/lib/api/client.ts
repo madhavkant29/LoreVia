@@ -1,10 +1,16 @@
 import axios from "axios"
+import { captureApiFailure } from "@/lib/analytics/browserTelemetry"
 import { API_BASE } from "@/lib/constants"
 import { buildDailyCapEventDetail, dispatchDailyCapEvent } from "@/lib/limits/dailyCap"
+
+export const DEFAULT_API_TIMEOUT_MS = 60_000
+export const AUTH_REFRESH_TIMEOUT_MS = 15_000
+export const LARGE_TRANSFER_TIMEOUT_MS = 10 * 60_000
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
   headers: { "Content-Type": "application/json" },
+  timeout: DEFAULT_API_TIMEOUT_MS,
   withCredentials: true,
 })
 
@@ -44,13 +50,19 @@ function readCookie(name: string) {
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null
 }
 
-async function refreshAccessToken(): Promise<boolean> {
+export function getAuthCsrfHeaders(): Record<string, string> {
   const csrfToken = readCookie(AUTH_CSRF_COOKIE_NAME)
+  return csrfToken ? { [AUTH_CSRF_HEADER_NAME]: csrfToken } : {}
+}
+
+async function refreshAccessToken(): Promise<boolean> {
+  const csrfHeaders = getAuthCsrfHeaders()
   if (!refreshPromise) {
     refreshPromise = axios
       .post(`${API_BASE}/auth/refresh`, null, {
         withCredentials: true,
-        headers: csrfToken ? { [AUTH_CSRF_HEADER_NAME]: csrfToken } : undefined,
+        headers: Object.keys(csrfHeaders).length > 0 ? csrfHeaders : undefined,
+        timeout: AUTH_REFRESH_TIMEOUT_MS,
       })
       .then(() => {
         if (typeof document !== "undefined") {
@@ -68,19 +80,26 @@ async function refreshAccessToken(): Promise<boolean> {
 }
 
 apiClient.interceptors.request.use((config) => {
+  const isFormData = typeof FormData !== "undefined" && config.data instanceof FormData
   // Let the browser set the multipart boundary for FormData requests.
   // Keeping a JSON default header here can make multipart bodies invalid and
   // trigger FastAPI 422 validation/parsing errors.
-  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+  if (isFormData) {
     if (config.headers) {
       delete config.headers["Content-Type"]
       delete config.headers["content-type"]
     }
   }
+  if (
+    (isFormData || config.responseType === "blob") &&
+    (config.timeout === undefined || config.timeout === DEFAULT_API_TIMEOUT_MS)
+  ) {
+    config.timeout = LARGE_TRANSFER_TIMEOUT_MS
+  }
   const method = String(config.method ?? "get").toLowerCase()
   const url = String(config.url ?? "")
   if (!SAFE_HTTP_METHODS.has(method)) {
-    const csrfToken = readCookie(AUTH_CSRF_COOKIE_NAME)
+    const csrfToken = getAuthCsrfHeaders()[AUTH_CSRF_HEADER_NAME]
     if (csrfToken) {
       config.headers.set?.(AUTH_CSRF_HEADER_NAME, csrfToken)
       if (!config.headers.set) {
@@ -131,6 +150,7 @@ apiClient.interceptors.response.use(
         window.location.replace("/login")
       }
     }
+    captureApiFailure(error)
     return Promise.reject(error)
   }
 )

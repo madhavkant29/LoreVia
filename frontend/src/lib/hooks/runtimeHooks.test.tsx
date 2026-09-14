@@ -51,7 +51,9 @@ describe("runtime notification hooks", () => {
       await vi.advanceTimersByTimeAsync(1000)
     })
     expect(container.textContent).toContain("7|ready")
-    expect(socialApiMock.getConversationUnreadCount.mock.calls.length).toBeGreaterThan(3)
+    // Visibility and focus signals are coalesced while the prior request is
+    // in flight, so a busy tab does not fan out duplicate requests.
+    expect(socialApiMock.getConversationUnreadCount.mock.calls.length).toBeGreaterThanOrEqual(2)
 
     socialApiMock.getConversationUnreadCount.mockRejectedValue(new Error("offline"))
     await act(async () => {
@@ -70,6 +72,20 @@ describe("runtime notification hooks", () => {
     expect(socialApiMock.getConversationUnreadCount).not.toHaveBeenCalled()
     act(() => emitChatsChanged())
     expect(container.textContent).toContain("0|pending")
+  })
+
+  it("does not retry a failed one-shot unread refresh", async () => {
+    vi.useFakeTimers()
+    socialApiMock.getConversationUnreadCount.mockRejectedValue(new Error("offline"))
+
+    await render(<ChatOneShotProbe />)
+    await flushTimers()
+    expect(socialApiMock.getConversationUnreadCount).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000)
+    })
+    expect(socialApiMock.getConversationUnreadCount).toHaveBeenCalledTimes(1)
   })
 
   it("loads and dismisses recall while tolerating empty and failed responses", async () => {
@@ -111,6 +127,11 @@ describe("runtime notification hooks", () => {
 
 function ChatProbe({ disabled = false }: { disabled?: boolean }) {
   const state = useChatUnreadCount({ enabled: !disabled, pollMs: 1000, refreshOnFocus: true })
+  return <span>{state.unreadCount}|{state.hydrated ? "ready" : "pending"}</span>
+}
+
+function ChatOneShotProbe() {
+  const state = useChatUnreadCount({ pollMs: false })
   return <span>{state.unreadCount}|{state.hydrated ? "ready" : "pending"}</span>
 }
 

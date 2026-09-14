@@ -6,9 +6,7 @@ import {
   RELATIONSHIP_TYPE_OPTIONS,
   formatRelationshipType,
   graphVisibilityReasonCopy,
-  relationshipStrengthColor,
   sentimentLabel,
-  strengthValue,
   type RelationshipComposerDraft,
 } from "./charactersPage.helpers"
 import { SurfaceCard } from "./charactersPage.components"
@@ -159,26 +157,20 @@ export function CharacterRelationshipsTab({
       <SurfaceCard title="Relationship table" isDark={isDark}>
         {connections.length > 0 ? (
           <div className="space-y-3">
-            <div className={`hidden grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_120px_96px] gap-2 px-3 text-xs font-semibold uppercase tracking-wide md:grid ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+            <div className={`hidden grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_96px] gap-2 px-3 text-xs font-semibold uppercase tracking-wide md:grid ${isDark ? "text-slate-500" : "text-stone-400"}`}>
               <span>Character</span>
               <span>Relationship</span>
               <span>Dynamics</span>
-              <span>Strength</span>
               <span>Evidence</span>
             </div>
             {connections.map((edge, index) => (
-              <div key={`${edge.source}-${edge.target}-${edge.type}-${index}`} className={`grid gap-2 rounded-xl border px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_120px_96px] ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
+              <div key={`${edge.source}-${edge.target}-${edge.type}-${index}`} className={`grid gap-2 rounded-xl border px-3 py-3 md:grid-cols-[minmax(0,1fr)_120px_minmax(120px,1fr)_96px] ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
                 <div className="min-w-0">
                   <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{edge.counterpartName}</p>
-                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{typeof edge.from_chapter === "number" ? `Chapter ${edge.from_chapter}` : "Chapter evidence pending"} / {Math.max(1, Math.round(strengthValue(edge.sentiment) / 10))} mentions</p>
+                  <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{typeof edge.from_chapter === "number" ? `Chapter ${edge.from_chapter}` : "Chapter evidence pending"}</p>
                 </div>
                 <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{formatRelationshipType(edge.type)}</div>
                 <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{edge.description || sentimentLabel(edge.sentiment)}</div>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 flex-1 rounded-full ${isDark ? "bg-white/10" : "bg-stone-100"}`}>
-                    <span className={`block h-2 rounded-full ${relationshipStrengthColor(edge.sentiment, isDark)}`} style={{ width: `${strengthValue(edge.sentiment)}%` }} />
-                  </span>
-                </div>
                 <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{typeof edge.from_chapter === "number" ? `Ch. ${edge.from_chapter}` : "No ch."}{edge.status === "ended" ? " • ended" : ""}</div>
               </div>
             ))}

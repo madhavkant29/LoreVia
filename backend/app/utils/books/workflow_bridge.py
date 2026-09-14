@@ -14,6 +14,7 @@ from app.models.book import Book, Chapter
 from app.services.chapter_recovery_service import download_stored_text_or_empty
 from app.utils.books.imports import normalize_imported_chapters, parse_import_upload
 from app.utils.scrivener_utils import build_scrivener_archive
+from app.utils.storage_utils import bounded_storage_map
 
 WORKFLOW_PREVIEW_RESOURCE_PREFIX = "workflow-preview:"
 
@@ -124,11 +125,18 @@ async def preview_workflow_import(
         .scalars()
         .all()
     )
-    current_texts = await asyncio.gather(
-        *(asyncio.to_thread(download_stored_text_or_empty, chapter) for chapter in current)
+    incoming_numbers = {
+        int(chapter.get("number") or index)
+        for index, chapter in enumerate(incoming, start=1)
+    }
+    matched_current = [chapter for chapter in current if int(chapter.number) in incoming_numbers]
+    current_texts = await bounded_storage_map(
+        matched_current,
+        lambda chapter: asyncio.to_thread(download_stored_text_or_empty, chapter),
     )
     current_by_number = {
-        int(chapter.number): (chapter, text) for chapter, text in zip(current, current_texts)
+        int(chapter.number): (chapter, text)
+        for chapter, text in zip(matched_current, current_texts)
     }
     matched_numbers: set[int] = set()
     previews = []
@@ -173,7 +181,9 @@ async def preview_workflow_import(
         "changed_count": counts["changed"],
         "unchanged_count": counts["unchanged"],
         "chapters": previews,
-        "preserved_chapter_numbers": sorted(set(current_by_number) - matched_numbers),
+        "preserved_chapter_numbers": sorted(
+            {int(chapter.number) for chapter in current} - matched_numbers
+        ),
     }
 
 
@@ -187,8 +197,9 @@ async def export_book_to_scrivener(db: AsyncSession, *, book: Book) -> bytes:
         .scalars()
         .all()
     )
-    texts = await asyncio.gather(
-        *(asyncio.to_thread(download_stored_text_or_empty, chapter) for chapter in chapters)
+    texts = await bounded_storage_map(
+        chapters,
+        lambda chapter: asyncio.to_thread(download_stored_text_or_empty, chapter),
     )
     return await asyncio.to_thread(
         build_scrivener_archive,

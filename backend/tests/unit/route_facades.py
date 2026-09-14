@@ -64,6 +64,7 @@ books = RouteFacade(
         "app.core.redis",
         "app.core.security",
         "app.services.editor_project_service",
+        "app.services.manuscript_import_request_service",
         "app.services.pipeline_state_service",
         "app.utils.advisor_utils",
         "app.utils.billing_utils",

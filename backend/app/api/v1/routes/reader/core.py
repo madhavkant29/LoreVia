@@ -13,11 +13,12 @@ from app.core.database import get_db
 from app.core.redis import cache_get, cache_set, key_chapter_summary
 from app.core.security import decode_token
 from app.core.storage import download_book
-from app.engine.search.semantic import build_search_result, find_context_for_tap
+from app.engine.search.semantic import find_context_for_tap
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.character import Character, CharacterState
-from app.models.intelligence import BookChunk, ChapterSummary, CharacterRelationship
+from app.models.intelligence import BookChunk, CharacterRelationship
 from app.services.chapter_recovery_service import resolve_reader_chapter_payload
+from app.services.reader_search_service import lexical_reader_chunk_search
 from app.services.summary_service import get_or_generate_summary
 from app.utils.beta_read_feedback_utils import list_chapter_beta_feedback
 from app.utils.billing_utils import require_author_access, summary_mode_allowed
@@ -426,31 +427,21 @@ async def smart_tap(
             ],
         }
 
-    results = await find_context_for_tap(db, book_id, q, chapter)
+    results = await find_context_for_tap(
+        db,
+        book_id,
+        q,
+        chapter,
+        usage_user_id=current_user.id,
+    )
     if not results:
-        lowered = q.strip().lower()
-        lexical_rows = (
-            await db.execute(
-                select(BookChunk.text, BookChunk.chunk_index, Chapter.number, Chapter.title)
-                .join(Chapter, Chapter.id == BookChunk.chapter_id)
-                .where(
-                    BookChunk.book_id == book_id,
-                    Chapter.number <= chapter,
-                    BookChunk.text.ilike(f"%{lowered}%"),
-                )
-                .limit(settings.SEARCH_MAX_CONTEXT_CHUNKS)
-            )
-        ).all()
-        results = [
-            build_search_result(
-                text=row[0],
-                chunk_index=row[1],
-                chapter_num=row[2],
-                chapter_title=row[3],
-                relevance=0.5,
-            )
-            for row in lexical_rows
-        ]
+        results = await lexical_reader_chunk_search(
+            db,
+            book_id=book_id,
+            query=q,
+            max_chapter=chapter,
+            limit=settings.SEARCH_MAX_CONTEXT_CHUNKS,
+        )
     return {"type": "search", "results": results}
 
 

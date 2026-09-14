@@ -16,8 +16,6 @@ const navItems: Array<{ label: string; href: Route | UrlObject }> = [
 ]
 
 export function MarketingHeader() {
-  const ctaHref: Route = "/register"
-
   return (
     <header className="sticky top-0 z-50 border-b border-white/[0.08] bg-[#08110f]">
       <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between gap-3 px-4 sm:px-5 md:px-8">

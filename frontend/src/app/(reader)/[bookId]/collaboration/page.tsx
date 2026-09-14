@@ -14,7 +14,7 @@ import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { parseQuestionLines } from "@/lib/utils/betaRead"
 import type { BetaReadAssignment } from "@/types/betaRead"
-import type { Book, BookCollaborator, CollaboratorActivity, CollaboratorActivityItem, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
+import type { Book, BookCollaborator, CollaboratorActivityItem, CollaborationPermissions, CollaborationRole, CollaborationScope } from "@/types/book"
 import type { BetaReadAssignmentCreateInput } from "@/types/reader"
 
 const AuthorToolsNav = dynamic(
@@ -119,8 +119,8 @@ const BETA_SCOPE_OPTIONS: Array<{ value: "full_book" | "chapter_range" | "sectio
 ]
 
 const DEFAULT_SCOPE: CollaborationScope = {
-  chapter_start: 1,
-  chapter_end: 10,
+  chapter_start: null,
+  chapter_end: null,
   character_bible: true,
   continuity_report: true,
   reader_confusion_report: true,

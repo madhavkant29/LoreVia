@@ -1,11 +1,14 @@
 """
-Book utility helpers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â DB query wrappers, cover management, progress
+Book utility helpers — DB query wrappers, cover management, progress
 computation, manuscript parsing, and chapter number utilities extracted
 from the books route.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import re
 import uuid
 from datetime import UTC, datetime
@@ -13,8 +16,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import bleach  # type: ignore[import-untyped]
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.models.book import (
     Book,
@@ -26,6 +30,7 @@ from app.models.book import (
 )
 from app.models.user import User
 from app.utils.books import collaboration_access
+from app.utils.books.collaboration_access import collaboration_is_chapter_restricted
 from app.utils.tag_utils import (
     ENTITY_TYPE_NOTE,
     get_custom_tags_for_entity,
@@ -135,6 +140,195 @@ async def list_book_notes(
             collaborator, int(note["chapter_number"])
         )
     ]
+
+
+def _encode_book_note_page_cursor(updated_at: datetime, note_id: uuid.UUID) -> str:
+    payload = json.dumps(
+        {"updated_at": updated_at.isoformat(), "id": str(note_id)}, separators=(",", ":")
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_book_note_page_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        updated_at = datetime.fromisoformat(str(payload["updated_at"]))
+        if updated_at.tzinfo is None:
+            raise ValueError("Cursor timestamp must include a timezone")
+        return updated_at, uuid.UUID(str(payload["id"]))
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        binascii.Error,
+        json.JSONDecodeError,
+    ) as exc:
+        raise HTTPException(400, "Invalid book note page cursor") from exc
+
+
+def _book_note_payload(
+    note: BookNote,
+    *,
+    book: Book,
+    chapter_title: str | None,
+    tags: list[str],
+    include_body: bool,
+) -> dict[str, Any]:
+    return {
+        "id": str(note.id),
+        "book_id": str(book.id),
+        "book_title": book.title,
+        "chapter_number": note.chapter_number,
+        "chapter_title": chapter_title,
+        "title": note.title,
+        "body": note.body if include_body else None,
+        "tags": tags,
+        "created_at": note.created_at,
+        "updated_at": note.updated_at,
+    }
+
+
+def _note_collaboration_visibility_clause(collaborator: BookCollaborator | None):
+    if collaborator is None or not collaboration_is_chapter_restricted(collaborator):
+        return None
+    scope = collaboration_access.collaboration_scope_payload(collaborator)
+    clauses = [BookNote.chapter_number.is_(None)]
+    chapter_clause = []
+    chapter_start = scope.get("chapter_start")
+    chapter_end = scope.get("chapter_end")
+    if chapter_start is not None:
+        chapter_clause.append(BookNote.chapter_number >= int(chapter_start))
+    if chapter_end is not None:
+        chapter_clause.append(BookNote.chapter_number <= int(chapter_end))
+    if chapter_clause:
+        clauses.append(and_(*chapter_clause))
+    else:
+        clauses.append(BookNote.chapter_number.is_not(None))
+    return or_(*clauses)
+
+
+async def list_book_notes_page(
+    db: AsyncSession,
+    *,
+    book: Book,
+    collaborator: BookCollaborator | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+    include_body: bool = False,
+) -> dict[str, Any]:
+    """Read a bounded note page without selecting every note body by default."""
+    bounded_limit = max(1, min(int(limit), 100))
+    statement = (
+        select(BookNote, Chapter.title)
+        .outerjoin(
+            Chapter,
+            (Chapter.book_id == BookNote.book_id) & (Chapter.number == BookNote.chapter_number),
+        )
+        .where(BookNote.book_id == book.id)
+    )
+    if not include_body:
+        statement = statement.options(
+            load_only(
+                BookNote.id,
+                BookNote.book_id,
+                BookNote.chapter_number,
+                BookNote.title,
+                BookNote.created_at,
+                BookNote.updated_at,
+            )
+        )
+    collaboration_clause = _note_collaboration_visibility_clause(collaborator)
+    if collaboration_clause is not None:
+        statement = statement.where(collaboration_clause)
+    if cursor:
+        cursor_updated_at, cursor_id = _decode_book_note_page_cursor(cursor)
+        statement = statement.where(
+            or_(
+                BookNote.updated_at < cursor_updated_at,
+                and_(BookNote.updated_at == cursor_updated_at, BookNote.id < cursor_id),
+            )
+        )
+    rows = list(
+        (
+            await db.execute(
+                statement.order_by(BookNote.updated_at.desc(), BookNote.id.desc()).limit(
+                    bounded_limit + 1
+                )
+            )
+        ).all()
+    )
+    has_more = len(rows) > bounded_limit
+    page_rows = rows[:bounded_limit]
+    tags_by_note = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_NOTE,
+        entity_ids=[note.id for note, _chapter_title in page_rows],
+        book_id=book.id,
+    )
+    items = [
+        _book_note_payload(
+            note,
+            book=book,
+            chapter_title=chapter_title,
+            tags=tags_by_note.get(note.id, []),
+            include_body=include_body,
+        )
+        for note, chapter_title in page_rows
+    ]
+    return {
+        "items": items,
+        "next_cursor": (
+            _encode_book_note_page_cursor(page_rows[-1][0].updated_at, page_rows[-1][0].id)
+            if has_more and page_rows
+            else None
+        ),
+        "has_more": has_more,
+    }
+
+
+async def get_book_note(
+    db: AsyncSession,
+    *,
+    book: Book,
+    note_id: uuid.UUID,
+    collaborator: BookCollaborator | None = None,
+) -> dict[str, Any]:
+    row = (
+        await db.execute(
+            select(BookNote, Chapter.title)
+            .outerjoin(
+                Chapter,
+                (Chapter.book_id == BookNote.book_id)
+                & (Chapter.number == BookNote.chapter_number),
+            )
+            .where(BookNote.book_id == book.id, BookNote.id == note_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(404, "Note not found")
+    note, chapter_title = row
+    if (
+        collaborator is not None
+        and note.chapter_number is not None
+        and not collaboration_access.collaboration_allows_chapter(
+            collaborator, int(note.chapter_number)
+        )
+    ):
+        raise HTTPException(404, "Note not found")
+    return _book_note_payload(
+        note,
+        book=book,
+        chapter_title=chapter_title,
+        tags=await get_custom_tags_for_entity(
+            db,
+            entity_type=ENTITY_TYPE_NOTE,
+            entity_id=note.id,
+            book_id=book.id,
+        ),
+        include_body=True,
+    )
 
 
 async def list_user_notes(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:

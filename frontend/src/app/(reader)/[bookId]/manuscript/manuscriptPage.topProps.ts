@@ -163,6 +163,7 @@ export function buildManuscriptTopProps({
     exporting,
     failedSaveByTarget,
     focusMode,
+    homeHref: `/${bookId}`,
     includeTableOfContentsOnExport,
     isDark,
     normalizedProcessingStatus,

@@ -5,11 +5,13 @@ import React, { useState } from "react"
 import { RecallCard } from "@/components/intelligence/RecallCard"
 import { CoverEditOverlay } from "@/components/ui/CoverEditOverlay"
 import { SmartBookCover } from "@/components/ui/SmartBookCover"
+import { WorkspaceModeSwitcher } from "@/components/reader/WorkspaceModeSwitcher"
 import { useRecall } from "@/lib/hooks/useRecall"
 import { cn } from "@/lib/utils/text"
 import { chapterKindLabel } from "@/lib/utils/chapterLabels"
 import {
   buildReaderChapterPreview,
+  estimateChapterRemainingReadingMinutes,
   estimateRemainingReadingMinutes,
   formatBookFormatLabel,
   formatReadingDuration,
@@ -74,7 +76,9 @@ export function ReaderOverview({
   const previewChapters = buildReaderChapterPreview(chapters, continueChapter)
   const remainingMinutes = estimateRemainingReadingMinutes(book, progress)
   const chapterScroll = Math.max(0, Math.min(100, Math.round((bookmark?.scrollPct ?? 0) * 100)))
-  const chapterMinutesLeft = chapterScroll > 0 ? Math.max(3, Math.round((100 - chapterScroll) / 100 * 14)) : null
+  const chapterMinutesLeft = bookmark
+    ? estimateChapterRemainingReadingMinutes(currentChapter?.word_count, bookmark.scrollPct)
+    : null
   const summaryReadyCount = (summaryCollection?.summaries ?? []).filter((summary) => summary.available).length
   const recentNote = [...bookNotes].sort((left, right) => (
     new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
@@ -83,7 +87,7 @@ export function ReaderOverview({
   const aboutCopy = book.public_description?.trim() || buildAboutFallback(book)
   const bookmarkCount = bookmark ? 1 : 0
   const startedLabel = formatDateLabel(book.created_at)
-  const lastOpenedLabel = bookmark?.savedAt ? formatRecentDateLabel(bookmark.savedAt) : "Today"
+  const lastOpenedLabel = bookmark?.savedAt ? formatRecentDateLabel(bookmark.savedAt) : "Not opened yet"
   const formatLabel = formatBookFormatLabel(book.format)
   const chapterCount = chapters.length || book.total_chapters || 0
   const chapterUnit = book.work_type === "screenplay" ? "Scene" : "Chapter"
@@ -93,8 +97,12 @@ export function ReaderOverview({
   const nextChapter = chapters.find((chapter) => chapter.number > continueChapter) ?? null
   const noteCountLabel = `${bookNotes.length} note${bookNotes.length === 1 ? "" : "s"}`
   const highlightCountLabel = `${savedQuotes.length} highlight${savedQuotes.length === 1 ? "" : "s"}`
-  const summaryCountLabel = summaryReadyCount > 0 ? `${summaryReadyCount} ready` : "Syncing"
-  const spoilerSafePulseScore = Math.max(0, Math.min(100, Math.round(54 + percentComplete * 0.32 + summaryReadyCount * 2)))
+  const summaryCountLabel = `${summaryReadyCount} ready`
+  const processedChapterCount = chapters.filter((chapter) => chapter.processed).length
+  const readChapterCount = chapters.filter((chapter) => chapter.read).length
+  const storyMemoryCoverage = chapterCount > 0
+    ? Math.min(100, Math.round((summaryReadyCount / chapterCount) * 100))
+    : 0
   const recentActivities = [
     bookmark ? { title: `Read ${chapterUnit} ${bookmark.chapter}`, body: bookmark.chapterTitle || currentChapter?.title || "Saved reader position", time: lastOpenedLabel } : null,
     savedQuotes[0] ? { title: "Saved a quote", body: truncatePreview(savedQuotes[0].quote_text, 82), time: formatRecentDateLabel(savedQuotes[0].created_at) } : null,
@@ -135,14 +143,13 @@ export function ReaderOverview({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {canUseAuthorMode ? (
-              <ModeToggle
-                isDark={isDark}
-                activeMode={activeBookMode}
-                modeSaving={modeSaving}
-                onModeChange={onModeChange}
-              />
-            ) : null}
+            <WorkspaceModeSwitcher
+              isDark={isDark}
+              activeMode={activeBookMode}
+              modeSaving={modeSaving}
+              writingAvailable={canUseAuthorMode}
+              onModeChange={onModeChange}
+            />
 
             <button
               type="button"
@@ -305,10 +312,10 @@ export function ReaderOverview({
           </div>
 
           <div className="mt-6 space-y-3">
-            <DetailRow isDark={isDark} label="Total Chapters" value={chapterCount ? String(chapterCount) : "Syncing"} />
+            <DetailRow isDark={isDark} label="Total Chapters" value={String(chapterCount)} />
             <DetailRow isDark={isDark} label="Estimated Time to Finish" value={formatReadingDuration(remainingMinutes)} />
             <DetailRow isDark={isDark} label="Last Opened" value={lastOpenedLabel} />
-            <DetailRow isDark={isDark} label="Started Reading" value={startedLabel} />
+            <DetailRow isDark={isDark} label="Added to Library" value={startedLabel} />
             <DetailRow isDark={isDark} label="Format" value={formatLabel} />
             <DetailRow isDark={isDark} label="Progress" value={`${percentComplete}%`} />
           </div>
@@ -353,28 +360,27 @@ export function ReaderOverview({
 
         <article className={readerPanelClass(isDark)}>
           <div className="flex items-start justify-between gap-3">
-            <SectionTitle isDark={isDark} icon="spark">Story Pulse</SectionTitle>
-            <span className={cn("rounded-full px-3 py-1 text-3xs font-semibold", isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600")}>Spoiler-safe</span>
+            <SectionTitle isDark={isDark} icon="spark">Story Memory</SectionTitle>
+            <span className={cn("rounded-full px-3 py-1 text-3xs font-semibold", isDark ? "bg-white/[0.06] text-slate-300" : "bg-slate-100 text-slate-600")}>Book data</span>
           </div>
           <div className="mt-5 flex items-center gap-4">
             <div
               className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full"
-              style={{ background: `conic-gradient(#8b5cf6 0 ${spoilerSafePulseScore}%, ${isDark ? "#1b2430" : "#edf0f5"} ${spoilerSafePulseScore}% 100%)` }}
+              style={{ background: `conic-gradient(#8b5cf6 0 ${storyMemoryCoverage}%, ${isDark ? "#1b2430" : "#edf0f5"} ${storyMemoryCoverage}% 100%)` }}
             >
               <div className={cn("flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-full", isDark ? "bg-[#0d121b]" : "bg-white")}>
-                <span className={cn("text-2xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{spoilerSafePulseScore}</span>
+                <span className={cn("text-2xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{storyMemoryCoverage}</span>
                 <span className={cn("text-3xs", isDark ? "text-slate-500" : "text-slate-400")}>/100</span>
               </div>
             </div>
             <p className={cn("text-sm leading-6", isDark ? "text-slate-300" : "text-slate-600")}>
-              The story is unfolding through content you have reached. LoreVia keeps this score bounded to your reading progress.
+              Summary coverage is calculated from chapters with an available recap.
             </p>
           </div>
           <div className="mt-5 space-y-3">
-            <ReaderMetricRow isDark={isDark} label="Continuity" value={Math.min(96, spoilerSafePulseScore + 14)} />
-            <ReaderMetricRow isDark={isDark} label="World depth" value={Math.min(94, spoilerSafePulseScore + 10)} />
-            <ReaderMetricRow isDark={isDark} label="Character consistency" value={Math.min(92, spoilerSafePulseScore + 8)} />
-            <ReaderMetricRow isDark={isDark} label="Pacing" value={Math.max(58, spoilerSafePulseScore - 6)} />
+            <DetailRow isDark={isDark} label="Summaries ready" value={String(summaryReadyCount)} />
+            <DetailRow isDark={isDark} label="Chapters processed" value={String(processedChapterCount)} />
+            <DetailRow isDark={isDark} label="Chapters read" value={String(readChapterCount)} />
           </div>
         </article>
 
@@ -382,7 +388,7 @@ export function ReaderOverview({
           <SectionTitle isDark={isDark} icon="book">Current Chapter</SectionTitle>
           <div className="mt-5 space-y-3">
             <DetailRow isDark={isDark} label="Chapter" value={currentChapterLabel} />
-            <DetailRow isDark={isDark} label="Position" value={bookmark ? `${chapterScroll}%` : `${Math.round(progress?.scroll_pct ?? 0)}%`} />
+            <DetailRow isDark={isDark} label="Position" value={bookmark ? `${chapterScroll}%` : `${Math.round((progress?.scroll_pct ?? 0) * 100)}%`} />
             <DetailRow isDark={isDark} label="Last read" value={lastOpenedLabel} />
           </div>
           <button type="button" onClick={onContinueReading} className={readerFooterLinkClass(isDark)}>
@@ -487,7 +493,7 @@ export function ReaderOverview({
             Short recaps for every processed chapter so you can jump back in without rereading everything.
           </p>
           <div className={cn("mt-5 rounded-md border px-4 py-3 text-sm", isDark ? "border-white/[0.07] bg-white/[0.03] text-slate-300" : "border-slate-200 bg-slate-50 text-slate-700")}>
-            {summaryReadyCount > 0 ? `${summaryReadyCount} chapter summaries ready` : "Summaries are syncing now"}
+            {summaryReadyCount} chapter summar{summaryReadyCount === 1 ? "y" : "ies"} ready
           </div>
           <button
             type="button"
@@ -718,7 +724,6 @@ function ReaderWorkspaceContent({
   bookId: string
 }) {
   const chaptersRead = progress?.chapters_read_count ?? 0
-  const sessionGoal = 45
   const sessionProgress = clamp(Math.round(progress?.scroll_pct ? progress.scroll_pct * 100 : percentComplete), 0, 100)
   const savedItems = bookmarkCount + savedQuotesCount + notesCount
 
@@ -753,9 +758,9 @@ function ReaderWorkspaceContent({
       </div>
       <div className="grid gap-5">
         <div className={cn("rounded-md border p-5", isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50")}>
-          <p className={cn("text-3xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Session goal</p>
-          <p className={cn("mt-4 text-3xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{sessionGoal} pages</p>
-          <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>Daily reading goal</p>
+          <p className={cn("text-3xs font-semibold uppercase tracking-[0.22em]", isDark ? "text-slate-500" : "text-slate-400")}>Current session</p>
+          <p className={cn("mt-4 text-3xl font-semibold", isDark ? "text-white" : "text-slate-950")}>{sessionProgress}%</p>
+          <p className={cn("mt-1 text-sm", isDark ? "text-slate-400" : "text-slate-500")}>{chapterUnit} {continueChapter} position</p>
           <ReaderMetricRow isDark={isDark} label="Session progress" value={sessionProgress} />
           <button
             type="button"
@@ -799,48 +804,6 @@ function ReaderMiniCard({ isDark, label, value, onClick, suffix = "" }: { isDark
   )
 }
 
-function ModeToggle({
-  isDark,
-  activeMode,
-  modeSaving,
-  onModeChange,
-}: {
-  isDark: boolean
-  activeMode: "reader" | "author"
-  modeSaving: boolean
-  onModeChange: (nextMode: "reader" | "author") => void
-}) {
-  const thumbClass = activeMode === "author" ? "translate-x-full" : "translate-x-0"
-
-  return (
-    <div
-      role="group"
-      aria-label="Workspace mode"
-      className={cn("relative inline-grid h-11 grid-cols-2 rounded-full border p-1", isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50")}
-    >
-      <span
-        aria-hidden="true"
-        className={cn("pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-teal-800 transition-transform duration-300 ease-out", thumbClass)}
-      />
-      {(["reader", "author"] as const).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          onClick={() => onModeChange(mode)}
-          disabled={modeSaving}
-          aria-pressed={activeMode === mode}
-          className={cn(
-            "relative z-10 min-w-[5.8rem] rounded-full px-4 text-xs font-semibold uppercase tracking-[0.18em] transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/60",
-            activeMode === mode ? "text-white" : isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-900",
-          )}
-        >
-          {mode}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function readerPanelClass(isDark: boolean) {
   return cn("rounded-lg border p-5 sm:p-6", isDark ? "border-white/[0.07] bg-[#0d121b]" : "border-slate-200 bg-white")
 }
@@ -871,20 +834,21 @@ function truncatePreview(value: string, max = 160) {
 }
 
 function buildAboutFallback(book: Book) {
-  const authorLabel = book.author?.trim() || "its author"
-  const genreLabel = book.genre?.trim() || (book.work_type === "screenplay" ? "screenplay" : "story")
-  return `${book.title} is loaded in reader mode for a cleaner reading pass. Use this space to move between chapters, summaries, highlights, and notes while staying oriented inside ${authorLabel}'s ${genreLabel.toLowerCase()}.`
+  const authorLabel = book.author?.trim()
+  const genreLabel = book.genre?.trim()
+  const details = [authorLabel ? `by ${authorLabel}` : null, genreLabel].filter(Boolean).join(". ")
+  return details ? `${book.title}. ${details}.` : "No description has been added for this book."
 }
 
 function formatDateLabel(value: string) {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "Today"
+  if (Number.isNaN(date.getTime())) return "Unavailable"
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 }
 
 function formatRecentDateLabel(value: string) {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "Today"
+  if (Number.isNaN(date.getTime())) return "Unavailable"
 
   const now = new Date()
   const sameDay = now.toDateString() === date.toDateString()

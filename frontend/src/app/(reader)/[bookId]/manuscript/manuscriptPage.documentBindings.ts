@@ -8,7 +8,9 @@ import { useManuscriptStructureActions } from "./manuscriptPage.structureActions
 import { useManuscriptWorkspacePersistence } from "./manuscriptPage.workspacePersistence"
 import { parseChapterHeadingInput } from "./manuscriptPage.helpers"
 
-type ManuscriptDocumentBindingsArgs = Record<string, any>
+type ManuscriptDocumentBindingsArgs = ReturnType<
+  (typeof import("./manuscriptPage.setup"))["useManuscriptPageSetup"]
+>
 
 export function useManuscriptDocumentBindings(args: ManuscriptDocumentBindingsArgs) {
   const {
@@ -32,13 +34,8 @@ export function useManuscriptDocumentBindings(args: ManuscriptDocumentBindingsAr
     lastAutoChecksRef,
     manuscriptLoadStartedAtRef,
     nextChapterNumber,
-    processingRetrying,
     queryClient,
     refetchWorkspaceTree,
-    refetchWriterWorkspace,
-    reprocessing,
-    reprocessingChapterNumber,
-    replaceExisting,
     router,
     sceneBodyDraft,
     sceneChapterDraft,

@@ -18,8 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import (
     invalidate_advisor_cache_namespaces,
-    mark_book_cache_dirty,
-    mark_series_cache_dirty,
 )
 from app.models.book import SeriesBook
 from app.utils.advisor_chat_utils import (
@@ -119,21 +117,26 @@ async def invalidate_advisor_caches_for_book(db: AsyncSession, *, book_id: uuid.
             select(SeriesBook.series_id).where(SeriesBook.book_id == uuid.UUID(str(book_id)))
         )
     ).all()
-    await mark_book_cache_dirty(str(book_id))
-    for row in series_rows:
-        await mark_series_cache_dirty(str(row.series_id))
     await invalidate_advisor_caches(
         book_id=book_id,
         series_ids=[row.series_id for row in series_rows],
     )
 
 
-async def classify_intent(client: AsyncOpenAI, message: str) -> str:
+async def classify_intent(
+    client: AsyncOpenAI,
+    message: str,
+    *,
+    user_id: uuid.UUID,
+    book_id: uuid.UUID | None = None,
+) -> str:
     try:
         response = await create_tracked_chat_completion(
             client=client,
             feature="advisor_intent_classification",
             model=settings.OPENAI_INTEL_MODEL,
+            user_id=user_id,
+            book_id=book_id,
             max_tokens=10,
             temperature=0,
             messages=[

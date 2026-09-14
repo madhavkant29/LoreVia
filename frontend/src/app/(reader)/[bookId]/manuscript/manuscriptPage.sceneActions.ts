@@ -1,11 +1,12 @@
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
+import type { Route } from "next"
 
 import { booksApi } from "@/lib/api/books"
 import {
   parseSceneAutosaveDraft,
 } from "@/lib/utils/manuscriptEditor"
 import type { ConfirmDialogConfig } from "@/types/ux"
-import type { NovelScene, SceneVersion, SceneVersionDetail } from "@/types/book"
+import type { NovelScene, SceneVersion, SceneVersionDetail, WorkspaceScene } from "@/types/book"
 import {
   buildSceneDraftStorageKey,
   textToHtml,
@@ -13,9 +14,10 @@ import {
 
 type Confirm = (config: ConfirmDialogConfig) => Promise<boolean>
 
-type ManuscriptSceneRouter = {
-  replace: (href: string) => void
-}
+type ManuscriptSceneRouter = Pick<
+  ReturnType<(typeof import("next/navigation"))["useRouter"]>,
+  "replace"
+>
 
 type ManuscriptSceneSearchParams = {
   get: (name: string) => string | null
@@ -88,8 +90,28 @@ export function useManuscriptSceneActions({
     }
   }, [bookId, setSceneVersions])
 
-  const openSceneEditor = useCallback((scene?: NovelScene | null) => {
-    const nextScene = scene ?? null
+  const openSceneEditor = useCallback(async (scene?: WorkspaceScene | null) => {
+    let nextScene: NovelScene | null = null
+    if (scene) {
+      if (typeof scene.body === "string") {
+        nextScene = scene as NovelScene
+      } else {
+        try {
+          const scenes = await booksApi.listScenes(
+            bookId,
+            typeof scene.chapter_number === "number" ? { chapterNumber: scene.chapter_number } : undefined
+          )
+          nextScene = scenes.find((item) => item.id === scene.id) ?? null
+        } catch {
+          setStatusMessage("Could not load this scene. Try opening it again.")
+          return
+        }
+        if (!nextScene) {
+          setStatusMessage("Could not find that scene.")
+          return
+        }
+      }
+    }
     const fallbackChapterNumber = nextScene?.chapter_number ?? (selectedChapter ?? null)
     const storageKey = buildSceneDraftStorageKey(bookId, nextScene, fallbackChapterNumber)
     const recoveredDraft = typeof window === "undefined" ? null : parseSceneAutosaveDraft(window.localStorage.getItem(storageKey))
@@ -171,7 +193,7 @@ export function useManuscriptSceneActions({
 
     handledSceneIntentRef.current = true
     openSceneEditor(null)
-    router.replace(`/${bookId}/manuscript`)
+    router.replace(`/${bookId}/manuscript` as Route)
   }, [bookId, handledSceneIntentRef, openSceneEditor, router, searchParams])
 
   const saveScene = useCallback(async () => {
@@ -216,7 +238,7 @@ export function useManuscriptSceneActions({
     syncLocalChapterFromServer,
   ])
 
-  const removeScene = useCallback(async (scene: NovelScene) => {
+  const removeScene = useCallback(async (scene: WorkspaceScene) => {
     await booksApi.deleteScene(bookId, scene.id)
     await loadWorkspaceTree()
     if (typeof scene.chapter_number === "number" && scene.chapter_number > 0) {

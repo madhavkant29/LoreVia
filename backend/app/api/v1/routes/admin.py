@@ -43,6 +43,7 @@ from app.services.admin_service import (
     record_admin_read,
     revoke_admin_principal,
 )
+from app.services.public_asset_service import publish_public_book_assets, revoke_public_book_assets
 from app.utils.admin_security import set_admin_csrf_cookie
 from app.utils.auth_utils import verify_password_safely
 from app.utils.public.moderation import (
@@ -131,7 +132,12 @@ async def _apply_book_moderation_action(
         request=request,
         scopes_snapshot=_admin_scopes_from_request(request),
     )
-    await db.commit()
+    if action == "restore":
+        await db.commit()
+        await publish_public_book_assets(db, book=book)
+    else:
+        await revoke_public_book_assets(book.id, db=db, strict=True)
+        await db.commit()
     return {"ok": True, "book_id": str(book.id), "moderation_status": book.moderation_status}
 
 

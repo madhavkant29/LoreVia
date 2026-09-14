@@ -11,6 +11,8 @@ import {
 function notificationPayload(readAt: string | null = null): NotificationListResponse {
   return {
     unread_count: readAt ? 0 : 1,
+    next_cursor: null,
+    has_more: false,
     items: [
       {
         id: "notification-1",

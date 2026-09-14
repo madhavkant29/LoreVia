@@ -110,6 +110,7 @@ function FullBookChapterCard({
             <input
               key={`book-heading-${chapter.number}-${draft.title}`}
               type="text"
+              aria-label={`Chapter ${chapter.number} title`}
               defaultValue={formatChapterHeading(chapter.number, draft.title)}
               onBlur={(event) => onHeadingBlur(chapter.number, draft, event.target.value)}
               className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}

@@ -34,7 +34,6 @@ import {
   filterMergeSuggestions,
   filterPendingCharacterCandidates,
   filterPendingRelationshipCandidates,
-  formatStatus,
   graphVisibilityLabel,
   graphVisibilityReasonCopy,
   getPendingCharacterCandidates,
@@ -51,13 +50,11 @@ import {
   openQuestionsForCharacter,
   qualityFlags,
   relationshipChangeKey,
-  relationshipStrengthColor,
   reviewStatusLabel,
   sentimentLabel,
   sortedMergeableCharacters,
   sortedRelationshipCounterpartOptions,
   sortGrowthEvents,
-  strengthValue,
   visibleTraitEntries,
   buildRelationshipCounts,
   type MergeSuggestion,
@@ -427,10 +424,6 @@ describe("characters page helpers", () => {
     expect(sentimentLabel(0.6)).toBe("Positive")
     expect(sentimentLabel(-0.6)).toBe("Tense")
     expect(sentimentLabel(undefined)).toBe("Neutral")
-    expect(strengthValue(-2)).toBe(18)
-    expect(strengthValue(2)).toBe(100)
-    expect(relationshipStrengthColor(null, true)).toBe("bg-slate-500")
-    expect(relationshipStrengthColor(0.8, false)).toBe("bg-teal-600")
     expect(chapterAppearanceLabel(null)).toBe("Chapter unknown")
     expect(chapterAppearanceLabel(3)).toBe("Chapter 3")
     expect(growthTitle({ event: "Learns the truth", chapter: 4 } as NonNullable<Character["growth_events"]>[number])).toBe("Learns the truth")
@@ -466,6 +459,7 @@ describe("characters page helpers", () => {
       "Arc stale",
     ])
     expect(buildCharacterHealth(mira, mergeIds, connections)).toMatchObject({
+      score: 13,
       tone: "attention",
       issues: expect.arrayContaining(["Age is not grounded", "Duplicate candidate found"]),
     })

@@ -14,7 +14,7 @@ import { asQueryKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { resolveAssetUrl } from "@/lib/utils/assetUrls"
 import { formatReputationScore, getEligibleForumAuthorBooks } from "@/lib/utils/publicForum"
-import type { Book } from "@/types/book"
+import type { BookSelector } from "@/types/book"
 import type { PublicForumPost, PublicForumPostListResponse } from "@/types/public"
 import type { User } from "@/types/user"
 
@@ -50,7 +50,7 @@ export function PublicForumPageClient({
   const [ranking, setRanking] = useState(initialData?.ranking_key ?? "most_popular")
   const [timeWindow, setTimeWindow] = useState(initialData?.time_window ?? "monthly")
   const [viewer, setViewer] = useState<User | null>(null)
-  const [authorBooks, setAuthorBooks] = useState<Book[]>([])
+  const [authorBooks, setAuthorBooks] = useState<BookSelector[]>([])
   const [composerThreadType, setComposerThreadType] = useState<"novel" | "general">("novel")
   const [selectedBookId, setSelectedBookId] = useState("")
   const [headline, setHeadline] = useState("")
@@ -123,7 +123,7 @@ export function PublicForumPageClient({
         return
       }
       const [booksPayload, myForumPosts] = await Promise.all([
-        booksApi.list(true).catch(() => null),
+        booksApi.listSelector(true).catch(() => null),
         publicApi.listMyForumPosts().catch(() => null),
       ])
       if (!active) return
@@ -331,6 +331,7 @@ export function PublicForumPageClient({
               {feedTab === "ranked" ? (
                 <>
                   <select
+                    aria-label="Forum ranking"
                     value={ranking}
                     onChange={(event) => setRanking(event.target.value)}
                     className={`h-11 rounded-md border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}
@@ -343,6 +344,7 @@ export function PublicForumPageClient({
                   </select>
 
                   <select
+                    aria-label="Forum ranking period"
                     value={timeWindow}
                     onChange={(event) => setTimeWindow(event.target.value)}
                     className={`h-11 rounded-md border px-4 text-sm outline-none ${isDark ? "border-white/10 bg-[#151b22] text-slate-100" : "border-slate-200 bg-white text-slate-900"}`}

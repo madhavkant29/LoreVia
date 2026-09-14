@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import json
 import uuid
+from datetime import datetime
 from typing import Any, cast
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.storage import download_book, upload_binary
 from app.models.book import (
@@ -111,6 +116,188 @@ async def list_novel_scenes(
             collaborator, int(scene["chapter_number"])
         )
     ]
+
+
+def _encode_novel_scene_page_cursor(created_at: datetime, scene_id: uuid.UUID) -> str:
+    payload = json.dumps(
+        {"created_at": created_at.isoformat(), "id": str(scene_id)}, separators=(",", ":")
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_novel_scene_page_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        created_at = datetime.fromisoformat(str(payload["created_at"]))
+        if created_at.tzinfo is None:
+            raise ValueError("Cursor timestamp must include a timezone")
+        return created_at, uuid.UUID(str(payload["id"]))
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        binascii.Error,
+        json.JSONDecodeError,
+    ) as exc:
+        raise HTTPException(400, "Invalid scene page cursor") from exc
+
+
+def _scene_collaboration_visibility_clause(collaborator: BookCollaborator | None):
+    if collaborator is None or not collaboration_access.collaboration_is_chapter_restricted(
+        collaborator
+    ):
+        return None
+    scope = collaboration_access.collaboration_scope_payload(collaborator)
+    clauses = [NovelScene.chapter_number.is_not(None)]
+    chapter_start = scope.get("chapter_start")
+    chapter_end = scope.get("chapter_end")
+    if chapter_start is not None:
+        clauses.append(NovelScene.chapter_number >= int(chapter_start))
+    if chapter_end is not None:
+        clauses.append(NovelScene.chapter_number <= int(chapter_end))
+    return and_(*clauses)
+
+
+def _scene_page_payload(
+    scene: NovelScene,
+    *,
+    tags: list[str],
+    include_body: bool,
+) -> dict[str, Any]:
+    return _scene_out(scene, tags=tags, include_body=include_body)
+
+
+async def list_novel_scenes_page(
+    db: AsyncSession,
+    *,
+    book: Book,
+    collaborator: BookCollaborator | None = None,
+    chapter_number: int | None = None,
+    status: str | None = None,
+    query: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+    include_body: bool = False,
+) -> dict[str, Any]:
+    """Return a bounded scene page; scene bodies are opt-in."""
+    bounded_limit = max(1, min(int(limit), 100))
+    statement = select(NovelScene).where(NovelScene.book_id == book.id)
+    if not include_body:
+        statement = statement.options(
+            load_only(
+                NovelScene.id,
+                NovelScene.book_id,
+                NovelScene.chapter_id,
+                NovelScene.chapter_number,
+                NovelScene.title,
+                NovelScene.description,
+                NovelScene.scene_metadata,
+                NovelScene.path,
+                NovelScene.status,
+                NovelScene.sort_order,
+                NovelScene.source,
+                NovelScene.origin_chapter_number,
+                NovelScene.created_at,
+                NovelScene.updated_at,
+            )
+        )
+    if chapter_number is not None:
+        statement = statement.where(NovelScene.chapter_number == chapter_number)
+    if status:
+        statement = statement.where(NovelScene.status == status)
+    normalized_query = " ".join(str(query or "").split())
+    if normalized_query:
+        like = f"%{normalized_query}%"
+        statement = statement.where(
+            or_(
+                NovelScene.title.ilike(like),
+                NovelScene.description.ilike(like),
+                NovelScene.body.ilike(like),
+            )
+        )
+    collaboration_clause = _scene_collaboration_visibility_clause(collaborator)
+    if collaboration_clause is not None:
+        statement = statement.where(collaboration_clause)
+    if cursor:
+        cursor_created_at, cursor_id = _decode_novel_scene_page_cursor(cursor)
+        statement = statement.where(
+            or_(
+                NovelScene.created_at < cursor_created_at,
+                and_(NovelScene.created_at == cursor_created_at, NovelScene.id < cursor_id),
+            )
+        )
+    rows = list(
+        (
+            await db.execute(
+                statement.order_by(NovelScene.created_at.desc(), NovelScene.id.desc()).limit(
+                    bounded_limit + 1
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    has_more = len(rows) > bounded_limit
+    scenes = rows[:bounded_limit]
+    tags_by_scene = await list_custom_tags_for_entity_ids(
+        db,
+        entity_type=ENTITY_TYPE_SCENE,
+        entity_ids=[scene.id for scene in scenes],
+        book_id=book.id,
+    )
+    return {
+        "items": [
+            _scene_page_payload(
+                scene,
+                tags=tags_by_scene.get(scene.id, []),
+                include_body=include_body,
+            )
+            for scene in scenes
+        ],
+        "next_cursor": (
+            _encode_novel_scene_page_cursor(scenes[-1].created_at, scenes[-1].id)
+            if has_more and scenes
+            else None
+        ),
+        "has_more": has_more,
+    }
+
+
+async def get_novel_scene(
+    db: AsyncSession,
+    *,
+    book: Book,
+    scene_id: uuid.UUID,
+    collaborator: BookCollaborator | None = None,
+) -> dict[str, Any]:
+    scene = (
+        await db.execute(
+            select(NovelScene).where(NovelScene.book_id == book.id, NovelScene.id == scene_id)
+        )
+    ).scalar_one_or_none()
+    if scene is None:
+        raise HTTPException(404, "Scene not found")
+    if (
+        collaborator is not None
+        and (
+            scene.chapter_number is None
+            or not collaboration_access.collaboration_allows_chapter(
+                collaborator, int(scene.chapter_number)
+            )
+        )
+    ):
+        raise HTTPException(404, "Scene not found")
+    return _scene_out(
+        scene,
+        tags=await get_custom_tags_for_entity(
+            db,
+            entity_type=ENTITY_TYPE_SCENE,
+            entity_id=scene.id,
+            book_id=book.id,
+        ),
+    )
 
 
 async def save_novel_scene(

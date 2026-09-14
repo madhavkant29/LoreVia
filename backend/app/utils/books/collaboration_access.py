@@ -1,5 +1,5 @@
 """
-Book utility helpers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â DB query wrappers, cover management, progress
+Book utility helpers — DB query wrappers, cover management, progress
 computation, manuscript parsing, and chapter number utilities extracted
 from the books route.
 """
@@ -52,6 +52,16 @@ def collaboration_allows_chapter(
     if chapter_end is not None and chapter_number > chapter_end:
         return False
     return True
+
+
+def collaboration_is_chapter_restricted(
+    collaborator: BookCollaborator | None,
+) -> bool:
+    if collaborator is None:
+        return False
+    return bool(
+        _collaboration_permissions_for_role(collaborator)["can_view_selected_chapters_only"]
+    )
 
 
 def collaboration_can_comment(collaborator: BookCollaborator | None) -> bool:
@@ -186,6 +196,32 @@ async def get_book_with_collaboration_access(
     if collaborator:
         return book, collaborator
     raise HTTPException(404, "Book not found")
+
+
+async def get_book_with_ai_scan_access(
+    db: AsyncSession,
+    book_id: uuid.UUID,
+    user: User,
+    *,
+    require_owner_plan: bool = True,
+) -> tuple[Book, BookCollaborator | None, BookAccessContext]:
+    book, collaborator = await get_book_with_collaboration_access(db, book_id, user)
+    access = build_book_access_context(book, user_id=user.id, collaborator=collaborator)
+    if collaborator is not None:
+        if access.workspace_shell != "author" or not access.can_run_ai_scans:
+            raise HTTPException(403, "This collaboration cannot run AI manuscript scans.")
+        if require_owner_plan:
+            from app.utils.billing_utils import require_author_access
+
+            owner = await db.get(User, book.user_id)
+            if owner is None:
+                raise HTTPException(404, "Book owner not found.")
+            require_author_access(owner)
+    elif require_owner_plan:
+        from app.utils.billing_utils import require_author_access
+
+        require_author_access(user)
+    return book, collaborator, access
 
 
 def require_book_owner_access(

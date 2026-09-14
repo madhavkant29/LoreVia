@@ -95,6 +95,34 @@ async def snapshot_chapter_version(
     return version
 
 
+async def snapshot_chapter_version_reference(
+    db: AsyncSession,
+    book: Book,
+    chapter: Chapter,
+    *,
+    note: str,
+    snapshot_kind: str = "manual",
+    restored_from_version_id: uuid.UUID | None = None,
+) -> ChapterVersion | None:
+    """Record a version by retaining an immutable chapter storage key."""
+    if not chapter.s3_key:
+        return None
+    version = ChapterVersion(
+        book_id=book.id,
+        chapter_id=chapter.id,
+        chapter_number=chapter.number,
+        title=chapter.title,
+        s3_key=chapter.s3_key,
+        word_count=chapter.word_count,
+        note=note,
+        snapshot_kind=snapshot_kind,
+        restored_from_version_id=restored_from_version_id,
+    )
+    db.add(version)
+    await db.flush()
+    return version
+
+
 async def get_chapter_version_content(
     db: AsyncSession,
     *,

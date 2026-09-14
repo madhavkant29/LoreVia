@@ -110,6 +110,17 @@ LoreVia2/
 - If tests need app settings, seed safe local dummy env vars instead of changing production config.
 - For DB-backed tests, confirm the local test database and required extensions are available before running the suite.
 
+### 7a. Story Intelligence Evaluation Corpus
+
+- `backend/evals/story_intelligence/v1/cases.json` is the versioned, synthetic gold-standard corpus for character and continuity evaluation. It is test/evaluation data, not production application data.
+- Keep the corpus out of production request paths. Production code must never load it to answer user requests, authorize users, calculate plan limits, or provide runtime defaults.
+- Use only original synthetic text. Never add customer manuscripts, personal data, secrets, or copied copyrighted passages.
+- Every case must have a unique non-empty `id`, non-empty `text`, and complete labels for characters, identity links, relationships, state transitions, timeline events, knowledge events, plot threads, and findings.
+- Preserve coverage of at least 25 cases, with at least five cases each for fantasy, romance, mystery, science fiction, and contemporary fiction. Add focused cases for regressions and meaningful edge cases rather than weakening expected labels to make a model pass.
+- Treat existing versioned expectations as benchmark history. Add cases when behavior is refined; create a new corpus version when label semantics or scoring assumptions change incompatibly.
+- Validate corpus changes with `python scripts/evaluate_story_intelligence.py --validate-only` from `backend/`, and run `backend/tests/unit/test_story_intelligence_evaluation.py` through Docker Compose Local. Evaluating accuracy requires a separate predictions file; the corpus itself does not invoke an AI model.
+- Review metric changes for character precision/recall, identity merging, continuity findings, citation coverage, latency, and cost before using results to justify a rollout. The benchmark supplements normal unit, integration, and end-to-end tests; it does not replace them.
+
 ### 8. Environment Files
 
 - **Do not modify, delete, replace, rename, or rewrite any `.env`, `.env.*`, production env file, or local secret file unless the user explicitly asks for that exact change.**
@@ -119,7 +130,9 @@ LoreVia2/
 
 ### 9. Operational Authorization Boundaries
 
-- **Agents must never create, edit, generate, apply, test, run, or trigger database migrations.** When a code change would require a migration, document the required schema change and leave all migration work to the user.
+- **Agents may create, generate, and edit unpublished database migration revision files when code changes require them.** Existing migrations that have been pushed, shared, or applied outside a disposable local database remain immutable; repair them with a new follow-up revision.
+- **Agents must never apply, run, test, or trigger migrations against staging, production, or any other remote database.**
+- Agents may create, reset, migrate, and test an explicitly identified disposable database provided by Docker Compose Local when the current task permits it. A task-specific instruction not to run migrations forbids local execution as well.
 - Agents may make code changes and run local Docker and Node commands.
 - Agents may create or update feature branches and pull requests.
 - **Agents must never merge a pull request, push to `main`, deploy to any environment, or trigger a production workflow unless the user gives explicit authorization for that exact action in the current conversation.** A general implementation plan or a request to continue is not merge or deployment authorization.
@@ -133,16 +146,16 @@ LoreVia2/
 3. Check `app/models/` — the model may already exist.
 4. Only then write new code, always in the right layer.
 
-## Schema Changes (Human-Maintainer Reference Only)
+## Schema Changes
 
-The following section documents repository requirements for human-maintainer migration work. It does not authorize an agent to perform migration work and does not override Rule 9.
+The following section documents repository requirements for migration work. Agents may author and revise unpublished migration files under Rule 9 and may execute or test them only against an explicitly identified disposable Docker Compose Local database when the current task permits it.
 
 When adding a new table or changing schema:
 
 1. Update the SQLAlchemy model in `backend/app/models/...`.
 2. Create a new Alembic revision.
 3. Fill in the migration’s `upgrade()` and `downgrade()` functions.
-4. Push the branch after verifying the migration locally.
+4. Verify the migration locally when the task permits it; push only with the user's authorization.
 
 ### Migration Best Practices
 

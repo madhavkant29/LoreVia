@@ -1,4 +1,4 @@
-import React, { act, type ReactNode } from "react"
+import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -100,6 +100,22 @@ describe("ReaderOverview", () => {
     const view = renderReaderOverview()
 
     expect(view.textContent).not.toContain("Story So Far")
+  })
+
+  it("shows measured story-memory coverage without invented pulse scores", () => {
+    recallHookMock.mockReturnValue({
+      recall: null,
+      lastChapter: null,
+      show: false,
+      dismiss: vi.fn(),
+    })
+
+    const view = renderReaderOverview()
+
+    expect(view.textContent).toContain("Story Memory")
+    expect(view.textContent).toContain("1 ready")
+    expect(view.textContent).toContain("Not opened yet")
+    expect(view.textContent).not.toContain("Story Pulse")
   })
 })
 

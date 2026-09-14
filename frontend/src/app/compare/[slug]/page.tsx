@@ -83,7 +83,7 @@ export default async function CompetitorComparisonPage({ params }: ComparisonPag
 
         <section className="mx-auto max-w-7xl px-5 py-12 md:px-8">
           <div className="grid gap-10 lg:grid-cols-[0.82fr_1.18fr]">
-            <div>
+            <div className="min-w-0">
               <p className="text-3xs font-semibold uppercase tracking-[0.32em] text-[#6fae9f]">
                 Where LoreVia is different
               </p>
@@ -97,7 +97,7 @@ export default async function CompetitorComparisonPage({ params }: ComparisonPag
               </div>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <ComparisonTable competitorName={page.competitorName} rows={page.rows} />
             </div>
           </div>

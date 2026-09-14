@@ -1,5 +1,5 @@
 import { memo } from "react"
-import type { KeyboardEvent, MutableRefObject, RefObject } from "react"
+import type { KeyboardEvent, RefObject } from "react"
 import Link from "next/link"
 
 import { cn } from "@/lib/utils/text"
@@ -75,13 +75,14 @@ export const AskLoreViaWorkspace = memo(function AskLoreViaWorkspace({
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
             <Link
               href={`/${bookId}`}
+              data-testid="ask-workspace-home-link"
               className={cn(
                 "inline-flex items-center gap-2 font-medium transition",
                 isDark ? "text-sky-300 hover:text-sky-200" : "text-violet-700 hover:text-violet-800"
               )}
             >
               <ArrowLeftIcon className="h-4 w-4" />
-              <span>Overview</span>
+              <span>Home</span>
             </Link>
             {bookTitle ? (
               <>

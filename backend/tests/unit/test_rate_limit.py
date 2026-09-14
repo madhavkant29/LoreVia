@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from redis.exceptions import RedisError
 from starlette.requests import Request
 
 from app.api.deps import rate_limit as rate_limit_module
@@ -13,8 +14,10 @@ from app.api.deps.rate_limit import (
     rate_limit_continuity_checker,
     rate_limit_internal_job,
     rate_limit_manuscript_import,
+    rate_limit_public,
     rate_limit_recall,
     rate_limit_summary,
+    rate_limit_support,
     rate_limit_upload,
     rate_limit_world_building_ai,
     rate_limit_world_building_upload,
@@ -45,6 +48,41 @@ def test_client_identifier_prefers_cloudflare_header() -> None:
     )
 
     assert _client_identifier(request) == "203.0.113.11"
+
+
+def test_client_identifier_requires_configured_edge_token(monkeypatch) -> None:
+    monkeypatch.setattr("app.core.config.settings.EDGE_PROXY_SECRET", "s" * 48)
+    monkeypatch.setattr("app.core.config.settings.EDGE_PROXY_SECRET_FILE", None)
+    headers = {
+        "cf-connecting-ip": "203.0.113.11",
+        "x-lorevia-edge-verified": "1",
+    }
+
+    assert _client_identifier(_request_with_headers(headers)) == "127.0.0.1"
+    assert (
+        _client_identifier(
+            _request_with_headers({**headers, "x-lorevia-edge-token": "wrong-token"})
+        )
+        == "127.0.0.1"
+    )
+    assert (
+        _client_identifier(_request_with_headers({**headers, "x-lorevia-edge-token": "s" * 48}))
+        == "203.0.113.11"
+    )
+
+
+def test_client_identifier_never_uses_marker_only_in_production(monkeypatch) -> None:
+    monkeypatch.setattr("app.core.config.settings.DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr("app.core.config.settings.EDGE_PROXY_SECRET", None)
+    monkeypatch.setattr("app.core.config.settings.EDGE_PROXY_SECRET_FILE", None)
+    request = _request_with_headers(
+        {
+            "cf-connecting-ip": "203.0.113.11",
+            "x-lorevia-edge-verified": "1",
+        }
+    )
+
+    assert _client_identifier(request) == "127.0.0.1"
 
 
 def test_client_identifier_ignores_forged_cloudflare_header_without_edge_marker() -> None:
@@ -83,6 +121,29 @@ def test_client_identifier_falls_back_to_socket_client() -> None:
     request = _request_with_headers({}, client_host="10.0.0.9")
 
     assert _client_identifier(request) == "10.0.0.9"
+
+
+@pytest.mark.asyncio
+async def test_public_rate_limit_fails_open_during_redis_outage(monkeypatch):
+    async def _redis_unavailable():
+        raise RedisError("redis unavailable")
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _redis_unavailable)
+
+    await rate_limit_public(_request_with_headers({}, client_host="198.51.100.8"))
+
+
+@pytest.mark.asyncio
+async def test_security_sensitive_rate_limit_fails_closed_during_redis_outage(monkeypatch):
+    async def _redis_unavailable():
+        raise RedisError("redis unavailable")
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _redis_unavailable)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_support(SimpleNamespace(id="user-1"))
+
+    assert getattr(exc_info.value, "status_code", None) == 503
 
 
 class _FakeRedis:

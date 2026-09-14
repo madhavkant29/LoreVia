@@ -1,4 +1,4 @@
-import { startTransition, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
+import { startTransition, useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import {
@@ -78,12 +78,12 @@ export function useVaultNotesEditorActions({
   setSelectedPath,
   setStatus,
 }: UseVaultNotesEditorActionsArgs) {
-  const refreshGraph = async () => {
+  const refreshGraph = useCallback(async () => {
     const nextGraph = await booksApi.getVaultGraph(bookId)
     setGraph(nextGraph)
-  }
+  }, [bookId, setGraph])
 
-  const saveNote = async (path: string, content: string) => {
+  const saveNote = useCallback(async (path: string, content: string) => {
     latestDraftRef.current[path] = content
     try {
       const result = await booksApi.saveVaultNote(bookId, { path, content })
@@ -104,7 +104,7 @@ export function useVaultNotesEditorActions({
     } catch {
       setStatus(`Could not save ${path}`)
     }
-  }
+  }, [bookId, latestDraftRef, refreshGraph, selectedPath, setDrafts, setNotes, setRelations, setStatus])
 
   const updateDraft = (path: string, value: string) => {
     latestDraftRef.current[path] = value

@@ -55,7 +55,7 @@ export function ManuscriptChapterRailSection({
         className={`mt-4 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black/30 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
       />
       <div className="mt-4">
-        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Chapters</p>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Chapters</p>
         <div className="mt-2 space-y-2">
           {filteredChapterItems.map((chapter) => {
             const active = selectedChapter === chapter.number || (selectedChapter === null && draftChapterNumber === chapter.number)
@@ -81,8 +81,8 @@ export function ManuscriptChapterRailSection({
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${active ? "bg-teal-300" : chapter.processed ? "bg-emerald-400" : isDark ? "bg-slate-600" : "bg-stone-300"}`} />
                     </div>
                     <p className="mt-1 line-clamp-1 text-xs opacity-75">{chapter.title || `Chapter ${formatIndex(chapter.number, chapterIndexFormat)}`}</p>
-                    <p className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{rowStats.sceneCount} scene{rowStats.sceneCount === 1 ? "" : "s"} - {rowReadingTime}</p>
-                    <p className={`mt-2 text-3xs ${needsReprocess ? isDark ? "text-amber-200" : "text-amber-700" : isDark ? "text-slate-500" : "text-stone-500"}`}>
+                    <p className={`text-3xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{rowStats.sceneCount} scene{rowStats.sceneCount === 1 ? "" : "s"} - {rowReadingTime}</p>
+                    <p className={`mt-2 text-3xs ${needsReprocess ? isDark ? "text-amber-200" : "text-amber-700" : isDark ? "text-slate-300" : "text-stone-500"}`}>
                       {rowWordCount > 0 ? `${rowWordCount.toLocaleString()} words` : "Draft ready"} - {needsReprocess ? "Needs reprocess" : dirtyDrafts.includes(chapter.number) ? "needs review" : "saved"}
                     </p>
                   </button>

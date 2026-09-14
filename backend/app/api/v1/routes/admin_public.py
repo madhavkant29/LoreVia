@@ -13,7 +13,12 @@ from app.api.deps.auth import (
 )
 from app.api.v1.routes.admin_common import admin_scopes_from_request
 from app.core.database import get_db
-from app.core.redis import cache_del, key_public_book_detail, key_public_books
+from app.core.redis import (
+    cache_del,
+    key_public_book_detail,
+    key_public_books,
+    mark_public_catalog_cache_dirty,
+)
 from app.models.book import Book
 from app.models.user import User
 from app.schemas.admin import PendingPublicShareOut, PublicShareApprovalBody
@@ -28,6 +33,7 @@ from app.services.admin_service import (
     record_admin_read,
     serialize_pending_public_shares,
 )
+from app.services.public_asset_service import publish_public_book_assets, revoke_public_book_assets
 from app.utils.public.content import append_public_demo_book_chapter, create_public_demo_book
 from app.utils.public.serialization import get_public_share_status
 from app.utils.public_utils import (
@@ -179,8 +185,14 @@ async def review_public_share(
         scopes_snapshot=admin_scopes_from_request(request),
         metadata={"approved": body.approved},
     )
-    await db.commit()
+    if body.approved:
+        await db.commit()
+        await publish_public_book_assets(db, book=book)
+    else:
+        await revoke_public_book_assets(book.id, db=db, strict=True)
+        await db.commit()
     await cache_del(key_public_books())
+    await mark_public_catalog_cache_dirty()
     await cache_del(key_public_book_detail(str(book.id)))
     return {
         "book_id": str(book.id),

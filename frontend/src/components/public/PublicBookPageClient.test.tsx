@@ -142,7 +142,7 @@ describe("PublicBookPageClient", () => {
   })
 
   it("switches to a non-copyright report and closes the modal", async () => {
-    const view = await renderElement(<PublicBookPageClient bookId="book-1" />)
+    await renderElement(<PublicBookPageClient bookId="book-1" />)
     await clickButton("Report this book")
     const select = document.body.querySelector("select") as HTMLSelectElement
     await act(async () => {

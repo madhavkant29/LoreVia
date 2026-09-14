@@ -9,9 +9,9 @@ import { intelligenceApi } from "@/lib/api/intelligence"
 import { booksApi } from "@/lib/api/books"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
 import { WorkspacePage } from "@/components/ui/Workspace"
-import { asQueryKey, booksListCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, booksSelectorCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { Book } from "@/types/book"
+import type { BookSelector } from "@/types/book"
 import type { CrossBookIntelligence, CrossBookMatch } from "@/types/intelligence"
 
 type MatchMode = "all" | "characters" | "wiki"
@@ -30,9 +30,9 @@ export default function CrossBookWikiPage() {
     queryKey: asQueryKey(`cross-book-wiki:${bookId}`),
     queryFn: () => intelligenceApi.getCrossBookIntelligence(bookId),
   })
-  const { data: booksData = [], isLoading: booksLoading } = useQuery<Book[]>({
-    queryKey: asQueryKey(booksListCacheKey()),
-    queryFn: () => booksApi.list(),
+  const { data: booksData = [], isLoading: booksLoading } = useQuery<BookSelector[]>({
+    queryKey: asQueryKey(booksSelectorCacheKey()),
+    queryFn: () => booksApi.listSelector(),
   })
   const [mode, setMode] = useState<MatchMode>("all")
   const [threshold, setThreshold] = useState(60)
@@ -84,7 +84,7 @@ export default function CrossBookWikiPage() {
           actions={(
             <>
               <Link href="/series" className="app-button-secondary">Series</Link>
-              <Link href="/library" className="app-button-secondary">Library</Link>
+              <Link href={`/${bookId}`} className="app-button-secondary">Home</Link>
             </>
           )}
         />
@@ -123,6 +123,7 @@ export default function CrossBookWikiPage() {
                 <div className="mt-2 flex items-center gap-4">
                   <input
                     type="range"
+                    aria-label="Similarity threshold"
                     min={40}
                     max={95}
                     value={threshold}

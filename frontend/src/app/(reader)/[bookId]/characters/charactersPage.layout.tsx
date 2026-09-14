@@ -290,7 +290,6 @@ export function CharactersPageLayout({
   setSidebarTab,
   setShowAllCast,
   setStatusFilter,
-  setWorkspaceMode,
 }: CharactersPageLayoutProps) {
   if (loading) {
     return <CharacterBibleSkeleton isDark={isDark} atmosphere={atmosphere} />
@@ -302,6 +301,7 @@ export function CharactersPageLayout({
         <CharacterWorkspaceHeader
           title="Character Bible"
           description="Manage cast, aliases, relationships, continuity, and duplicate review."
+          homeHref={`/${bookId}`}
           onBack={onBack}
           isDark={isDark}
           stats={<CharacterBibleHeaderStats isDark={isDark} stats={derived.dashboardStats} />}

@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
+import pytest
+
 from app.models.book import Book
 from app.models.operations import (
     AiQualityEvent,
@@ -13,7 +15,7 @@ from app.models.operations import (
     SupportIncident,
     TaskExecution,
 )
-from app.models.user import LlmUsageEvent, User
+from app.models.user import LlmUsageEvent, ProcessingUsageEvent, User
 from app.services.operations_admin_service import (
     contribution_margin,
     dismiss_terminal_execution,
@@ -45,7 +47,10 @@ async def _user_and_book(db):
     return user, book
 
 
-async def test_operations_quality_and_margin_metrics_include_control_plane_allocations(db):
+async def test_operations_quality_and_margin_metrics_include_control_plane_allocations(
+    db,
+):
+    baseline_quality = await quality_metrics(db)
     user, book = await _user_and_book(db)
     now = datetime.now(UTC)
     book.created_at = now - timedelta(days=10)
@@ -130,7 +135,12 @@ async def test_operations_quality_and_margin_metrics_include_control_plane_alloc
     )
     assert analysis_task["average_duration_seconds"] == 10
     assert quality["character_corrections_after_promotion"] == 1
-    assert quality["support_incidents_per_processed_manuscript"] == 1
+    assert quality["support_incidents"] == baseline_quality["support_incidents"] + 1
+    assert quality["processed_manuscripts"] == baseline_quality["processed_manuscripts"] + 1
+    assert quality["support_incidents_per_processed_manuscript"] == round(
+        quality["support_incidents"] / quality["processed_manuscripts"],
+        4,
+    )
     assert any(
         row["extractor_version"] == "v1" and row["model"] == "gpt-4o-mini"
         for row in quality["by_model_version"]
@@ -166,7 +176,8 @@ async def test_admin_retry_reopens_run_and_dismiss_closes_it(db, monkeypatch):
     await db.commit()
     dispatch = AsyncMock(return_value=1)
     monkeypatch.setattr(
-        "app.services.operations_admin_service.dispatch_pending_extraction_tasks", dispatch
+        "app.services.operations_admin_service.dispatch_pending_extraction_tasks",
+        dispatch,
     )
 
     await retry_terminal_execution(db, execution.id)
@@ -187,3 +198,149 @@ async def test_admin_retry_reopens_run_and_dismiss_closes_it(db, monkeypatch):
     await db.refresh(run)
     assert run.status == "dismissed"
     assert run.completed_at is not None
+
+
+async def test_admin_dismiss_clears_active_rebuild_and_releases_reservations(db):
+    user, book = await _user_and_book(db)
+    rebuild_run_id = uuid.uuid4().hex
+    book.status = "processing"
+    book.writer_workspace = {
+        "reprocess": {},
+        "processing": {
+            "status": "paused",
+            "rebuild_run_id": rebuild_run_id,
+        },
+    }
+    run = BookProcessingRun(
+        user_id=user.id,
+        book_id=book.id,
+        run_kind="manual_reprocess",
+        status="paused",
+        rebuild_run_id=rebuild_run_id,
+    )
+    db.add(run)
+    await db.flush()
+    reservation = ProcessingUsageEvent(
+        user_id=user.id,
+        book_id=book.id,
+        usage_kind="manual_reprocess",
+        source_id=f"manual:{rebuild_run_id}:chapter-1",
+        word_count=100,
+        status="reserved",
+    )
+    db.add(reservation)
+    await db.flush()
+    execution = TaskExecution(
+        identity_key=uuid.uuid4().hex,
+        task_name="extraction_tasks.process_chapter",
+        processing_run_id=run.id,
+        user_id=user.id,
+        book_id=book.id,
+        rebuild_run_id=rebuild_run_id,
+        status="paused",
+        arguments_json={
+            "book_id": str(book.id),
+            "chapter_number": 1,
+            "processing_reservation_id": str(reservation.id),
+        },
+    )
+    db.add(execution)
+    await db.flush()
+    reservation.task_id = str(execution.id)
+    await db.commit()
+
+    await dismiss_terminal_execution(
+        db,
+        execution.id,
+        admin_user_id=user.id,
+        reason="Cancelled after review",
+    )
+
+    await db.refresh(book)
+    await db.refresh(run)
+    await db.refresh(reservation)
+    assert reservation.status == "released"
+    assert run.status == "dismissed"
+    assert book.writer_workspace["processing"].get("rebuild_run_id") is None
+    assert book.writer_workspace["processing"]["status"] == "failed"
+
+
+async def test_admin_retry_re_reserves_released_chapter_charge(db, monkeypatch):
+    user, book = await _user_and_book(db)
+    run = BookProcessingRun(
+        user_id=user.id,
+        book_id=book.id,
+        run_kind="chapter_reprocess",
+        status="failed_terminal",
+    )
+    db.add(run)
+    await db.flush()
+    reservation = ProcessingUsageEvent(
+        user_id=user.id,
+        book_id=book.id,
+        usage_kind="chapter_reprocess",
+        source_id=uuid.uuid4().hex,
+        word_count=100,
+        status="released",
+        released_at=datetime.now(UTC),
+    )
+    db.add(reservation)
+    await db.flush()
+    execution = TaskExecution(
+        identity_key=uuid.uuid4().hex,
+        task_name="extraction_tasks.process_chapter",
+        processing_run_id=run.id,
+        user_id=user.id,
+        book_id=book.id,
+        status="failed_terminal",
+        arguments_json={
+            "book_id": str(book.id),
+            "chapter_number": 1,
+            "processing_reservation_id": str(reservation.id),
+        },
+    )
+    db.add(execution)
+    await db.flush()
+    reservation.task_id = str(execution.id)
+    await db.commit()
+    dispatch = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        "app.services.operations_admin_service.dispatch_pending_extraction_tasks",
+        dispatch,
+    )
+
+    await retry_terminal_execution(db, execution.id)
+
+    await db.refresh(reservation)
+    assert reservation.status == "reserved"
+    assert reservation.released_at is None
+    assert reservation.task_id == str(execution.id)
+    dispatch.assert_awaited_once()
+
+
+async def test_admin_retry_rejects_individual_failed_rebuild_task(db):
+    user, book = await _user_and_book(db)
+    run = BookProcessingRun(
+        user_id=user.id,
+        book_id=book.id,
+        run_kind="manual_reprocess",
+        status="failed_terminal",
+        rebuild_run_id=uuid.uuid4().hex,
+    )
+    db.add(run)
+    await db.flush()
+    execution = TaskExecution(
+        identity_key=uuid.uuid4().hex,
+        task_name="extraction_tasks.process_chapter",
+        processing_run_id=run.id,
+        user_id=user.id,
+        book_id=book.id,
+        rebuild_run_id=run.rebuild_run_id,
+        status="failed_terminal",
+        arguments_json={"book_id": str(book.id), "chapter_number": 1},
+    )
+    db.add(execution)
+    await db.commit()
+
+    with pytest.raises(ValueError, match="cannot be retried individually"):
+        await retry_terminal_execution(db, execution.id)

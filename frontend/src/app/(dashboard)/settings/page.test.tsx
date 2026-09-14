@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const replaceMock = vi.hoisted(() => vi.fn())
+const pushMock = vi.hoisted(() => vi.fn())
 const setUserMock = vi.hoisted(() => vi.fn())
 const logoutMock = vi.hoisted(() => vi.fn())
 const setThemeMock = vi.hoisted(() => vi.fn())
@@ -10,6 +11,8 @@ const portalMock = vi.hoisted(() => vi.fn())
 const setUsernameMock = vi.hoisted(() => vi.fn())
 const logoutApiMock = vi.hoisted(() => vi.fn())
 const clearAuthCookiesMock = vi.hoisted(() => vi.fn())
+const apiClientGetMock = vi.hoisted(() => vi.fn())
+const apiClientPutMock = vi.hoisted(() => vi.fn())
 const getEmailPreferencesMock = vi.hoisted(() => vi.fn())
 const updateEmailPreferencesMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
@@ -20,6 +23,7 @@ const authState = vi.hoisted(() => ({
     tier_label: "Author",
     plan_tier: "author_monthly",
     trial_active: false,
+    trial_ends_at: null as string | null,
     reading_mode: "casual",
     daily_word_goal: 1000,
     today_word_count: 250,
@@ -30,6 +34,7 @@ const authState = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     replace: replaceMock,
+    push: pushMock,
   }),
 }))
 
@@ -63,6 +68,10 @@ vi.mock("@/lib/api/auth", () => ({
 }))
 
 vi.mock("@/lib/api/client", () => ({
+  apiClient: {
+    get: apiClientGetMock,
+    put: apiClientPutMock,
+  },
   clearAuthCookies: clearAuthCookiesMock,
 }))
 
@@ -112,6 +121,7 @@ describe("SettingsPage billing actions", () => {
     })
 
     replaceMock.mockReset()
+    pushMock.mockReset()
     setUserMock.mockReset()
     logoutMock.mockReset()
     setThemeMock.mockReset()
@@ -119,6 +129,8 @@ describe("SettingsPage billing actions", () => {
     setUsernameMock.mockReset()
     logoutApiMock.mockReset()
     clearAuthCookiesMock.mockReset()
+    apiClientGetMock.mockReset()
+    apiClientPutMock.mockReset()
     getEmailPreferencesMock.mockReset()
     updateEmailPreferencesMock.mockReset()
     authState.user = {
@@ -128,6 +140,7 @@ describe("SettingsPage billing actions", () => {
       tier_label: "Author",
       plan_tier: "author_monthly",
       trial_active: false,
+      trial_ends_at: null,
       reading_mode: "casual",
       daily_word_goal: 1000,
       today_word_count: 250,
@@ -139,6 +152,18 @@ describe("SettingsPage billing actions", () => {
       marketing: true,
       unsubscribed_all: false,
       unsubscribed_at: null,
+    })
+    apiClientGetMock.mockImplementation((url: string) => {
+      if (url === "/support/config") {
+        return Promise.resolve({
+          data: {
+            assistant_enabled: true,
+            community_url: null,
+            corpus_version: "test",
+          },
+        })
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`))
     })
   })
 
@@ -167,7 +192,7 @@ describe("SettingsPage billing actions", () => {
     const view = await renderSettingsPage()
 
     expect(view.textContent).toContain("Manage billing / cancel subscription")
-    expect(view.textContent).toContain("cancel renewal")
+    expect(view.textContent).toContain("Cancel renewal")
   })
 
   it("opens the billing portal from the cancel subscription action", async () => {
@@ -186,6 +211,33 @@ describe("SettingsPage billing actions", () => {
 
     expect(portalMock).toHaveBeenCalledTimes(1)
     expect(window.location.href).toBe("https://billing.example.test/session")
+  })
+
+  it("keeps refund policy and refund request actions beside paid billing controls", async () => {
+    const view = await renderSettingsPage()
+
+    expect(view.querySelector('a[href="/refund"]')?.textContent).toContain("Refund policy")
+    expect(view.querySelector('a[href^="mailto:support@getlorevia.com"]')?.textContent).toContain("Request a refund")
+  })
+
+  it("shows the active free-trial countdown without implying a scheduled charge", async () => {
+    authState.user = {
+      ...authState.user,
+      tier: "free",
+      tier_label: "Author (free trial)",
+      plan_tier: "free",
+      trial_active: true,
+      trial_ends_at: "2099-09-08T10:00:00Z",
+    }
+
+    const view = await renderSettingsPage()
+
+    expect(view.textContent).toContain("Free trial countdown")
+    expect(view.textContent).toContain("remaining")
+    expect(view.textContent).toContain("Your free trial is already active")
+    expect(view.textContent).toContain("no charge is scheduled when the trial ends")
+    expect(view.textContent).toContain("View paid plans")
+    expect(view.textContent).not.toContain("Manage billing / cancel subscription")
   })
 
   it("shows the account username editor and saves an updated public handle", async () => {
@@ -217,6 +269,7 @@ describe("SettingsPage billing actions", () => {
     expect(setUsernameMock).toHaveBeenCalledWith("new-handle")
     expect(setUserMock).toHaveBeenCalledWith(expect.objectContaining({ username: "new-handle" }))
     expect(view.textContent).toContain("Public username updated.")
+    expect(view.textContent).toContain("@new-handle")
   })
 
   it("loads and updates promotional email preferences", async () => {
@@ -294,7 +347,7 @@ describe("SettingsPage billing actions", () => {
     expect(view.querySelector('a[href="#session"]')).not.toBeNull()
   })
 
-  it("marks the settings sidebar item for the section nearest the scroll position", async () => {
+  it("marks the settings sidebar item for the section active under the header", async () => {
     const view = await renderSettingsPage()
     const accountLink = view.querySelector('a[href="#account"]') as HTMLAnchorElement | null
     const sessionLink = view.querySelector('a[href="#session"]') as HTMLAnchorElement | null
@@ -307,9 +360,11 @@ describe("SettingsPage billing actions", () => {
       appearance: makeRect(-500, -380),
       reading: makeRect(-360, -220),
       privacy: makeRect(-200, -80),
-      emails: makeRect(-60, 80),
-      goals: makeRect(90, 250),
-      session: makeRect(150, 260),
+      community: makeRect(-160, -40),
+      emails: makeRect(-40, 40),
+      goals: makeRect(50, 90),
+      session: makeRect(96, 260),
+      danger: makeRect(280, 420),
     }
 
     for (const [id, rect] of Object.entries(sectionRects)) {

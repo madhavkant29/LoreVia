@@ -21,6 +21,22 @@ describe("getApiErrorDetail", () => {
     expect(getApiErrorDetail(error)).toBeNull()
   })
 
+  it("returns the message from structured backend details", () => {
+    const error = {
+      isAxiosError: true,
+      response: {
+        data: {
+          detail: {
+            kind: "llm_tokens",
+            message: "Support Assistant token limit exceeded for the 5-hour window.",
+          },
+        },
+      },
+    }
+
+    expect(getApiErrorDetail(error)).toBe("Support Assistant token limit exceeded for the 5-hour window.")
+  })
+
   it("returns null for non-axios errors", () => {
     expect(getApiErrorDetail(new Error("boom"))).toBeNull()
   })

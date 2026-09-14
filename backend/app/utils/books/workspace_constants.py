@@ -136,6 +136,17 @@ DEFAULT_WRITER_WORKSPACE = {
     },
     "revision_recent_edits": [],
     "revision_rounds": [],
+    "ai_beta_reader": {"reports": []},
+    "first_impression": {
+        "status": "not_started",
+        "job_id": None,
+        "report_id": None,
+        "request_hash": None,
+        "source_fingerprint": None,
+        "started_at": None,
+        "completed_at": None,
+        "error_code": None,
+    },
     "index_format": "arabic",
     "reprocess": {
         "auto_reprocess_enabled": True,

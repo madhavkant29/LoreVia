@@ -5,6 +5,7 @@ import pytest
 from app.models.book import Book, Chapter, NovelScene
 from app.models.character import Character, CharacterVoiceProfile
 from app.models.intelligence import ChapterSummary, PlotThread, WikiEntry
+from app.services.notification_service import refresh_revision_digest_for_book
 from app.utils.books.manuscript import (
     serialize_manuscript_content,
 )
@@ -338,7 +339,7 @@ async def test_revision_intelligence_endpoint_surfaces_revision_sections_and_per
 
 
 @pytest.mark.asyncio
-async def test_notifications_include_revision_digest_for_author_books(
+async def test_notification_get_is_pure_and_worker_refreshes_author_revision_digest(
     client, db, auth_headers, monkeypatch
 ):
     me = await client.get("/api/v1/auth/me", headers=auth_headers)
@@ -440,11 +441,29 @@ async def test_notifications_include_revision_digest_for_author_books(
         "app.utils.books.revision_analysis.download_book", lambda key: chapter_payloads[key]
     )
 
-    response = await client.get("/api/v1/notifications", headers=auth_headers)
+    response = await client.get(
+        "/api/v1/notifications?sync_revision_digests=true", headers=auth_headers
+    )
 
     assert response.status_code == 200
     payload = response.json()
-    revision_item = next(item for item in payload["items"] if item["kind"] == "revision_digest")
+    assert all(item["kind"] != "revision_digest" for item in payload["items"])
+    assert response.headers["deprecation"] == "true"
+
+    revision_response = await client.get(
+        f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers
+    )
+    assert revision_response.status_code == 200
+    change_impacts = revision_response.json()["change_impacts"]
+    assert change_impacts
+    first_item_id = change_impacts[0]["id"]
+
+    assert await refresh_revision_digest_for_book(db, book.id) is True
+    digest_response = await client.get("/api/v1/notifications", headers=auth_headers)
+    assert digest_response.status_code == 200
+    revision_item = next(
+        item for item in digest_response.json()["items"] if item["kind"] == "revision_digest"
+    )
     assert revision_item["book_id"] == str(book.id)
     assert revision_item["data"]["active_item_count"] >= 1
     assert revision_item["data"]["high_severity_count"] >= 1
@@ -454,13 +473,6 @@ async def test_notifications_include_revision_digest_for_author_books(
     )
     assert mark_read.status_code == 200
     assert mark_read.json()["read_at"] is not None
-    revision_response = await client.get(
-        f"/api/v1/books/{book.id}/revision-intelligence", headers=auth_headers
-    )
-    assert revision_response.status_code == 200
-    change_impacts = revision_response.json()["change_impacts"]
-    assert change_impacts
-    first_item_id = change_impacts[0]["id"]
 
     workspace_update = await client.put(
         f"/api/v1/books/{book.id}/writer-workspace",
@@ -477,6 +489,8 @@ async def test_notifications_include_revision_digest_for_author_books(
         },
     )
     assert workspace_update.status_code == 200
+
+    assert await refresh_revision_digest_for_book(db, book.id) is True
 
     refreshed_response = await client.get("/api/v1/notifications", headers=auth_headers)
     assert refreshed_response.status_code == 200

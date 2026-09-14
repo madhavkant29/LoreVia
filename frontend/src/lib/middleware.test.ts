@@ -58,6 +58,9 @@ describe("middleware CSP", () => {
     const response = middleware(new NextRequest("https://getlorevia.com/library"))
 
     expect(response.headers.get("location")).toBe("https://getlorevia.com/login?next=%2Flibrary")
+    expect(response.headers.get("Cache-Control")).toBe(
+      "private, no-store, no-cache, max-age=0, must-revalidate"
+    )
   })
 
   it("preserves the target query string in login next redirects", () => {
@@ -66,6 +69,8 @@ describe("middleware CSP", () => {
     const response = middleware(new NextRequest("https://getlorevia.com/library?sort=recent"))
 
     expect(response.headers.get("location")).toBe("https://getlorevia.com/login?next=%2Flibrary%3Fsort%3Drecent")
+    expect(response.headers.get("Cache-Control")).toContain("private")
+    expect(response.headers.get("Cache-Control")).toContain("no-store")
   })
 
   it("redirects unauthenticated users from private book routes to login", () => {

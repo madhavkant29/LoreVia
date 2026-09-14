@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { getMock, postMock } = vi.hoisted(() => ({
+const { getMock, invalidateQueryKeysMock, postMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
+  invalidateQueryKeysMock: vi.fn(),
   postMock: vi.fn(),
 }))
 
@@ -12,12 +13,17 @@ vi.mock("./client", () => ({
   },
 }))
 
+vi.mock("@/lib/query/queryClient", () => ({
+  invalidateQueryKeys: invalidateQueryKeysMock,
+}))
+
 import { intelligenceApi } from "./intelligence"
 
 describe("intelligence api", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
     getMock.mockReset()
+    invalidateQueryKeysMock.mockReset()
     postMock.mockReset()
     getMock.mockResolvedValue({ data: { ok: true } })
     postMock.mockResolvedValue({ data: { ok: true } })
@@ -73,17 +79,51 @@ describe("intelligence api", () => {
     })
   })
 
+  it("serializes AI beta reader requests, status, reports, and revision tasks", async () => {
+    postMock.mockResolvedValue({ data: { task_id: "revision-task", candidate_id: "candidate-1", created: true } })
+
+    await intelligenceApi.runBetaReader("book-1", {
+      scope: "chapter_range",
+      chapter_start: 2,
+      chapter_end: 4,
+      character_ids: ["char-1", "char-2"],
+      checks: ["repetition", "voice", "reader_feedback"],
+    })
+    await intelligenceApi.getBetaReaderJob("book-1", "job-1")
+    await intelligenceApi.getBetaReaderReports("book-1")
+    const task = await intelligenceApi.createBetaReaderRevisionTask(
+      "book-1",
+      "report/1",
+      "candidate 1",
+    )
+
+    expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/beta-reader", {
+      scope: "chapter_range",
+      chapter_start: 2,
+      chapter_end: 4,
+      character_ids: ["char-1", "char-2"],
+      checks: ["repetition", "voice", "reader_feedback"],
+    })
+    expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/beta-reader/jobs/job-1")
+    expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/beta-reader/reports")
+    expect(postMock).toHaveBeenCalledWith(
+      "/intelligence/book-1/advisor/beta-reader/reports/report%2F1/revision-candidates/candidate%201",
+    )
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:revision-intelligence")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("book:book-1:writer-workspace")
+    expect(task.created).toBe(true)
+  })
+
   it("polls advisor tasks until the result is ready", async () => {
     postMock.mockResolvedValueOnce({ data: { task_id: "task-1", status: "queued", cached: false } })
     getMock
       .mockResolvedValueOnce({ data: { task_id: "task-1", status: "queued", result: null } })
       .mockResolvedValueOnce({ data: { task_id: "task-1", status: "complete", result: { reply: "Ready", intent: "general", response_type: "standard", retrieved_passages: [] } } })
 
-    const result = await intelligenceApi.advisorMessage("book-1", [{ role: "user", content: "Help" }], 12)
+    const result = await intelligenceApi.advisorMessage("book-1", [{ role: "user", content: "Help" }])
 
     expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/message-async", {
       messages: [{ role: "user", content: "Help" }],
-      total_chapters: 12,
     })
     expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/message-async/task-1")
     expect(result.reply).toBe("Ready")
@@ -125,7 +165,6 @@ describe("intelligence api", () => {
     const result = await intelligenceApi.advisorMessageStream(
       "book-1",
       [{ role: "user", content: "Help" }],
-      12,
       { onDelta: (content) => chunks.push(content) },
     )
 
@@ -134,7 +173,6 @@ describe("intelligence api", () => {
       credentials: "include",
       body: JSON.stringify({
         messages: [{ role: "user", content: "Help" }],
-        total_chapters: 12,
       }),
     }))
     expect(chunks).toEqual(["Hel", "lo"])
@@ -226,11 +264,11 @@ describe("intelligence api", () => {
 
   it("returns immediate advisor replies and reports failed async tasks", async () => {
     postMock.mockResolvedValueOnce({ data: { reply: "Immediate", intent: "general", response_type: "standard", retrieved_passages: [] } })
-    await expect(intelligenceApi.advisorMessage("book-1", [], 0)).resolves.toEqual(expect.objectContaining({ reply: "Immediate" }))
+    await expect(intelligenceApi.advisorMessage("book-1", [])).resolves.toEqual(expect.objectContaining({ reply: "Immediate" }))
 
     postMock.mockResolvedValueOnce({ data: { task_id: "task-failed", status: "queued" } })
     getMock.mockResolvedValueOnce({ data: { status: "failed", error: "Provider failed" } })
-    await expect(intelligenceApi.advisorMessage("book-1", [], 0)).rejects.toThrow("Provider failed")
+    await expect(intelligenceApi.advisorMessage("book-1", [])).rejects.toThrow("Provider failed")
 
     postMock.mockResolvedValueOnce({ data: { task_id: "series-failed", status: "queued" } })
     getMock.mockResolvedValueOnce({ data: { status: "failed", error: null } })

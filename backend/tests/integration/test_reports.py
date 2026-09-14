@@ -7,7 +7,7 @@ from app.models.user import User
 
 
 @pytest.mark.asyncio
-async def test_copyright_report_creates_notifications_and_temporary_hold(client, db, monkeypatch):
+async def test_copyright_report_creates_notification_without_automatic_takedown(client, db):
     owner = User(
         email=f"report-owner-{uuid.uuid4().hex[:8]}@lorevia.app",
         username=f"reportowner{uuid.uuid4().hex[:8]}",
@@ -35,27 +35,6 @@ async def test_copyright_report_creates_notifications_and_temporary_hold(client,
     db.add(book)
     await db.commit()
 
-    async def no_duplicate(*_args, **_kwargs):
-        return None
-
-    async def should_hide(*_args, **_kwargs):
-        return True
-
-    invalidated: list[uuid.UUID] = []
-
-    async def invalidate(target):
-        invalidated.append(target.id)
-
-    monkeypatch.setattr(
-        "app.api.v1.routes.reports.ensure_public_content_report_not_duplicate",
-        no_duplicate,
-    )
-    monkeypatch.setattr(
-        "app.api.v1.routes.reports.copyright_report_requires_temporary_hold",
-        should_hide,
-    )
-    monkeypatch.setattr("app.api.v1.routes.reports.invalidate_public_book_caches", invalidate)
-
     response = await client.post(
         "/api/v1/reports/content",
         json={
@@ -71,11 +50,11 @@ async def test_copyright_report_creates_notifications_and_temporary_hold(client,
     )
 
     assert response.status_code == 201, response.text
-    assert response.json()["status"] == "content_hidden"
+    assert response.json()["status"] == "open"
     await db.refresh(book)
-    assert book.is_public is False
-    assert book.moderation_status == "hidden"
-    assert invalidated == [book.id]
+    assert book.is_public is True
+    assert book.public_status == "published"
+    assert book.moderation_status == "reported"
 
 
 @pytest.mark.asyncio

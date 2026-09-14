@@ -40,16 +40,16 @@ const marketingPricingContent = pricingTiers.map((tier) => ({
             "Everything in Free",
             "2M active words and 1M processed words monthly",
             "5 GB source storage",
-            "30 Story Advisor turns per day",
-            "30 continuity and editorial scans per day",
+            "Up to 30 Story Advisor turns per day",
+            "Up to 30 continuity and editorial scans per day; AI-intensive features share monthly capacity",
             "Manuscript editor, notes, summaries, and search",
           ]
         : [
             "Everything in Author",
             "8M active words and 4M processed words monthly",
             "25 GB source storage",
-            "60 Story Advisor turns per day",
-            "60 continuity and editorial scans per day",
+            "Up to 75 Story Advisor turns per day",
+            "Up to 75 continuity and editorial scans per day; AI-intensive features share monthly capacity",
             "Multi-book continuity",
           ],
   cta: "Analyze my manuscript",
@@ -136,9 +136,7 @@ export function HomePricingSection({ ctaHref }: HomePricingSectionProps) {
                   )}
                   {tier.access === "paid" ? (
                     <p className="mt-2 text-sm text-[#8fa19a]">
-                      {billingCycle === "annual"
-                        ? `Billed yearly at $${price}/year`
-                        : `10 days free, then $${price}/mo`}
+                      {`Paid plan: $${price}${billingCycle === "annual" ? "/year" : "/mo"}. The free trial does not auto-convert.`}
                     </p>
                   ) : (
                     <div className="mt-2 h-5" aria-hidden="true" />

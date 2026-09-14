@@ -4,6 +4,13 @@ const PADDLE_TRANSACTION_QUERY_KEY = "_ptxn"
 const BILLING_CONFIRMATION_QUERY_KEY = "lvct"
 export const PADDLE_SCRIPT_SRC = "https://cdn.paddle.com/paddle/v2/paddle.js"
 
+export type PaddleCheckoutEvent = {
+  data?: {
+    transaction_id?: string
+  }
+  name?: string
+}
+
 export type PaddleEnvironment = "sandbox" | "production"
 
 export function getPaddleClientToken(): string | null {
@@ -40,6 +47,13 @@ export function getTransactionIdFromCheckoutUrl(url: string | null | undefined):
   } catch {
     return null
   }
+}
+
+export function shouldAbandonClosedCheckout(
+  transactionId: string | null,
+  completedTransactionId: string | null,
+): transactionId is string {
+  return Boolean(transactionId) && transactionId !== completedTransactionId
 }
 
 export function getBillingConfirmationToken(
@@ -86,6 +100,8 @@ export function buildPaddleCheckoutSettings(successUrl?: string) {
     allowLogout: false as const,
     displayMode: "overlay" as const,
     locale,
+    showAddDiscounts: false,
+    showAddTaxId: false,
     theme: "light" as const,
     variant: "one-page" as const,
     ...(resolvedSuccessUrl ? { successUrl: resolvedSuccessUrl } : {}),

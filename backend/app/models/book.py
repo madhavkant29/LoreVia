@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -31,6 +32,7 @@ class Book(Base):
     __table_args__ = (
         UniqueConstraint("public_slug", name="uq_books_public_slug"),
         Index("ix_books_user_hidden_created", "user_id", "hidden_at", "created_at"),
+        Index("ix_books_user_hidden_created_id", "user_id", "hidden_at", "created_at", "id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -151,6 +153,12 @@ class Book(Base):
     wiki_entries = relationship("WikiEntry", back_populates="book", cascade="all, delete-orphan")
     world_building_documents = relationship(
         "WorldBuildingDocument", back_populates="book", cascade="all, delete-orphan"
+    )
+    world_source_observations = relationship(
+        "WorldSourceObservation", back_populates="book", cascade="all, delete-orphan"
+    )
+    world_analysis_states = relationship(
+        "WorldAnalysisState", back_populates="book", cascade="all, delete-orphan"
     )
     world_canonical_identities = relationship(
         "WorldCanonicalIdentity", back_populates="book", cascade="all, delete-orphan"
@@ -327,6 +335,12 @@ class BookCollaborator(Base):
             "invite_status",
             "invited_at",
         ),
+        Index(
+            "ix_book_collaborators_email_status_book",
+            "email",
+            "invite_status",
+            "book_id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -396,6 +410,12 @@ class BookForumPost(Base):
             "status",
             "created_at",
         ),
+        Index(
+            "ix_book_forum_posts_author_updated_id",
+            "author_user_id",
+            "updated_at",
+            "id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -449,6 +469,7 @@ class BookForumInterest(Base):
     __table_args__ = (
         UniqueConstraint("post_id", "interested_user_id", name="uq_book_forum_interests_post_user"),
         Index("ix_book_forum_interests_post_status_created_at", "post_id", "status", "created_at"),
+        Index("ix_book_forum_interests_post_created_id", "post_id", "created_at", "id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -488,6 +509,7 @@ class BookForumComment(Base):
     __tablename__ = "book_forum_comments"
     __table_args__ = (
         Index("ix_book_forum_comments_post_created_at", "post_id", "created_at"),
+        Index("ix_book_forum_comments_post_created_id", "post_id", "created_at", "id"),
         Index("ix_book_forum_comments_parent_created_at", "parent_comment_id", "created_at"),
     )
 
@@ -614,6 +636,7 @@ class Chapter(Base):
     content_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )
+    public_asset_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     structure_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
@@ -644,6 +667,15 @@ class Chapter(Base):
 
 class ChapterVersion(Base):
     __tablename__ = "chapter_versions"
+    __table_args__ = (
+        Index(
+            "ix_chapter_versions_book_chapter_created_id",
+            "book_id",
+            "chapter_number",
+            "created_at",
+            "id",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
@@ -754,6 +786,11 @@ class VaultNote(Base):
     __table_args__ = (
         UniqueConstraint(
             "user_id", "book_id", "path", "source", name="uq_book_vault_notes_user_book_path_source"
+        ),
+        Index(
+            "ix_book_vault_notes_text_search",
+            text("to_tsvector('simple', coalesce(path, '') || ' ' || coalesce(content, ''))"),
+            postgresql_using="gin",
         ),
     )
 
@@ -1083,6 +1120,23 @@ class Dialogue(Base):
 
 class NovelScene(Base):
     __tablename__ = "novel_scenes"
+    __table_args__ = (
+        Index(
+            "ix_novel_scenes_book_chapter_sort_created",
+            "book_id",
+            "chapter_number",
+            "sort_order",
+            "created_at",
+        ),
+        Index(
+            "ix_novel_scenes_text_search",
+            text(
+                "to_tsvector('simple', coalesce(title, '') || ' ' || "
+                "coalesce(description, '') || ' ' || coalesce(body, ''))"
+            ),
+            postgresql_using="gin",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(

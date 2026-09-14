@@ -1,5 +1,8 @@
 "use client"
 
+import type { ReactNode } from "react"
+import Link from "next/link"
+
 type ChaptersPageHeaderProps = {
   title: string
   subtitle: string
@@ -7,6 +10,7 @@ type ChaptersPageHeaderProps = {
   totalCount: number | null
   isDark: boolean
   backLabel: string
+  homeHref?: string
   primaryActionLabel: string
   primaryActionBusyLabel: string
   primaryActionBusy: boolean
@@ -22,6 +26,7 @@ export function ChaptersPageHeader({
   totalCount,
   isDark,
   backLabel,
+  homeHref,
   primaryActionLabel,
   primaryActionBusyLabel,
   primaryActionBusy,
@@ -33,8 +38,8 @@ export function ChaptersPageHeader({
 
   return (
     <section className="relative">
-      <button
-        type="button"
+      <HeaderHomeLink
+        href={homeHref}
         onClick={onBack}
         className={`inline-flex items-center gap-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 ${
           isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"
@@ -51,7 +56,7 @@ export function ChaptersPageHeader({
           </svg>
         </span>
         <span>{backLabel}</span>
-      </button>
+      </HeaderHomeLink>
 
       <div className="mt-8 flex flex-col gap-8 xl:flex-row xl:items-start xl:justify-between">
         <div className="max-w-[46rem]">
@@ -107,5 +112,31 @@ export function ChaptersPageHeader({
         </div>
       </div>
     </section>
+  )
+}
+
+function HeaderHomeLink({
+  children,
+  className,
+  href,
+  onClick,
+}: {
+  children: ReactNode
+  className: string
+  href?: string
+  onClick: () => void
+}) {
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {children}
+      </Link>
+    )
+  }
+
+  return (
+    <button type="button" onClick={onClick} className={className}>
+      {children}
+    </button>
   )
 }

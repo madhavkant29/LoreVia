@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.api.v1.routes import notifications
+from app.services import notification_service
 
 
 class _ScalarList:
@@ -52,13 +53,15 @@ def _notification(*, user_id):
 
 
 @pytest.mark.asyncio
-async def test_list_notifications_skips_revision_digest_sync_when_disabled(monkeypatch):
+async def test_list_notifications_never_syncs_revision_digests(monkeypatch):
     sync_calls: list[tuple[uuid.UUID, int]] = []
 
     async def _fake_sync(_db, user_id, *, limit):
         sync_calls.append((user_id, limit))
 
-    monkeypatch.setattr(notifications, "sync_revision_digest_notifications", _fake_sync)
+    monkeypatch.setattr(
+        notification_service, "sync_revision_digest_notifications", _fake_sync, raising=False
+    )
 
     user_id = uuid.uuid4()
     db = _FakeDB(
@@ -70,7 +73,7 @@ async def test_list_notifications_skips_revision_digest_sync_when_disabled(monke
 
     payload = await notifications.list_notifications(
         limit=10,
-        sync_revision_digests=False,
+        sync_revision_digests=True,
         db=db,
         current_user=SimpleNamespace(id=user_id),
     )
@@ -81,13 +84,15 @@ async def test_list_notifications_skips_revision_digest_sync_when_disabled(monke
 
 
 @pytest.mark.asyncio
-async def test_list_notifications_syncs_revision_digests_by_default(monkeypatch):
+async def test_list_notifications_uses_no_digest_sync_by_default(monkeypatch):
     sync_calls: list[tuple[uuid.UUID, int]] = []
 
     async def _fake_sync(_db, user_id, *, limit):
         sync_calls.append((user_id, limit))
 
-    monkeypatch.setattr(notifications, "sync_revision_digest_notifications", _fake_sync)
+    monkeypatch.setattr(
+        notification_service, "sync_revision_digest_notifications", _fake_sync, raising=False
+    )
 
     user_id = uuid.uuid4()
     db = _FakeDB(
@@ -103,17 +108,19 @@ async def test_list_notifications_syncs_revision_digests_by_default(monkeypatch)
         current_user=SimpleNamespace(id=user_id),
     )
 
-    assert sync_calls == [(user_id, 6)]
+    assert sync_calls == []
 
 
 @pytest.mark.asyncio
-async def test_mark_all_notifications_read_uses_plain_integer_limit(monkeypatch):
+async def test_mark_all_notifications_read_never_rebuilds_revision_digests(monkeypatch):
     sync_calls: list[tuple[uuid.UUID, int]] = []
 
     async def _fake_sync(_db, user_id, *, limit):
         sync_calls.append((user_id, limit))
 
-    monkeypatch.setattr(notifications, "sync_revision_digest_notifications", _fake_sync)
+    monkeypatch.setattr(
+        notification_service, "sync_revision_digest_notifications", _fake_sync, raising=False
+    )
 
     user_id = uuid.uuid4()
     pending_notification = _notification(user_id=user_id)
@@ -132,4 +139,4 @@ async def test_mark_all_notifications_read_uses_plain_integer_limit(monkeypatch)
     )
 
     assert payload.unread_count == 1
-    assert sync_calls == [(user_id, 6)]
+    assert sync_calls == []

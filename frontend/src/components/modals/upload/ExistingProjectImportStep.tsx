@@ -3,7 +3,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react"
 
 import { Tooltip } from "@/components/ui/Tooltip"
-import type { Book, ChapterConsistencyReport } from "@/types/book"
+import type { BookSelector, ChapterConsistencyReport } from "@/types/book"
 
 import { buildImportOutcomeCards } from "./uploadUtils"
 
@@ -13,7 +13,7 @@ type Props = {
   isDark: boolean
   isManagingExisting: boolean
   isScreenplayWorkspace: boolean
-  selectedExistingBook: Book | null
+  selectedExistingBook: BookSelector | null
   chapterSource: ChapterSource
   setChapterSource: Dispatch<SetStateAction<ChapterSource>>
   setError: Dispatch<SetStateAction<string | null>>

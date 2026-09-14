@@ -12,4 +12,6 @@ export interface NotificationItem {
 export interface NotificationListResponse {
   items: NotificationItem[]
   unread_count: number
+  next_cursor: string | null
+  has_more: boolean
 }

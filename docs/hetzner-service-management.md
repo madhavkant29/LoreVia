@@ -32,6 +32,29 @@ If you need to do it manually:
 - It enables `lorevia-compose.service`
 - It can be disabled by setting `ENABLE_SYSTEMD_UNIT=0`
 
+## Coordinated Vercel and VPS release contract
+
+The public frontend and API are separate production deployments. Read-only probes on 2026-09-06 confirmed this topology:
+
+- `getlorevia.com` redirects to the Vercel-hosted `www.getlorevia.com` frontend.
+- `api.getlorevia.com` reaches the VPS API through Cloudflare.
+- The Vercel same-origin `/api/v1` rewrite reaches that API.
+
+Treat one Git commit as the release candidate for both hosts. The release owner should complete this sequence for every production release:
+
+1. Record the exact reviewed Git commit SHA and the currently active Vercel production deployment and VPS commit before changing either host. Confirm the VPS environment has an independent 32-128 character URL-safe `EDGE_PROXY_SECRET` (generate one with `openssl rand -hex 32`). Compose requires it for Nginx and the API; both fail closed when it is absent or malformed, and Nginx removes it from its long-lived process environment after rendering the private upstream header.
+2. Confirm the Vercel project uses `frontend` as its root, the intended production branch, and the production values for `API_ORIGIN`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_URL`, Paddle, Supabase, and observability settings. Ensure [Automatically expose System Environment Variables](https://vercel.com/docs/environment-variables/system-environment-variables) is enabled so `VERCEL_GIT_COMMIT_SHA` is present at build and runtime. Check names and presence without copying secret values into tickets or logs.
+3. Build and exercise a Vercel preview from the exact release commit. Its API contract must remain compatible with the currently deployed VPS version.
+4. Deploy backward-compatible API and worker changes from that same commit using `deploy.sh`. Production migration execution still requires the explicit database safeguards and authorization documented elsewhere in this repository.
+5. Verify `https://api.getlorevia.com/health` and `/ready`, then promote the already-tested Vercel deployment from the same commit.
+6. Run `python backend/scripts/check_public_release_boundaries.py`. It verifies the same full Git SHA from the Vercel `/api/release` endpoint and VPS `/health`, API readiness, anonymous private-page redirect, direct and same-origin API denial, trusted/untrusted CORS, no-store response policy, and required security headers. It uses unauthenticated GET and OPTIONS requests only; malformed or mismatched revisions and any boundary regression fail the check. `check_release_pair.py` remains available when only the revision comparison is needed.
+7. Verify the homepage, unauthenticated private-page redirect, login, one authenticated book read, one authorized save, and one deliberately unauthorized cross-book request. Confirm the browser uses the same-origin `/api/v1` path.
+8. Record the released commit, Vercel deployment identifier, completion time, and operator. Do not infer success solely from a green CI build or from one host being healthy.
+
+If the frontend fails but the API is healthy, restore the recorded prior Vercel production deployment. If the API fails, restore the prior reviewed VPS commit only after confirming its schema compatibility; do not downgrade a database casually. When a change is not backward compatible across the two hosts, use an explicit compatibility window or feature gate instead of relying on simultaneous deployment timing.
+
+The frontend Docker image built by CI is a build artifact; it is not evidence that Vercel is serving that image or commit. Verify the active Vercel source commit directly during release.
+
 ## Daily commands
 
 - Check status:
@@ -53,6 +76,7 @@ Once the stack is up, use Docker for service-level logs:
 - `docker compose -f docker-compose.yml logs -f worker-analysis`
 - `docker compose -f docker-compose.yml logs -f worker-embedding`
 - `docker compose -f docker-compose.yml logs -f worker-intelligence`
+- `docker compose -f docker-compose.yml logs -f worker-maintenance`
 - `docker compose -f docker-compose.yml logs -f celery-beat`
 
 ## Advisor streaming

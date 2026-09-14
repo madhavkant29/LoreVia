@@ -1,5 +1,4 @@
 "use client"
-
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import type { Route } from "next"
@@ -14,8 +13,9 @@ import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import { renderMarkdownHtml } from "@/lib/utils/richText"
-import type { Book, BookSeries, SeriesBible } from "@/types/book"
+import type { Book, BookSelector, BookSeries, SeriesBible } from "@/types/book"
 import type { AdvisorMessage, AdvisorResponse, SeriesContinuityResponse } from "@/types/intelligence"
+import type { SeriesWorldAnalysis } from "@/types/world-building"
 
 function storyUnitName(workType?: Book["work_type"], plural = false) {
   if (workType === "screenplay") return plural ? "scenes" : "scene"
@@ -56,7 +56,7 @@ export default function SeriesPage() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const [series, setSeries] = useState<BookSeries[]>([])
-  const [books, setBooks] = useState<Book[]>([])
+  const [books, setBooks] = useState<BookSelector[]>([])
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -75,11 +75,11 @@ export default function SeriesPage() {
   const [continuityResult, setContinuityResult] = useState<SeriesContinuityResponse | null>(null)
   const [continuityLoading, setContinuityLoading] = useState(false)
   const [continuityStatus, setContinuityStatus] = useState<string | null>(null)
-  const [worldAnalysisBySeriesId, setWorldAnalysisBySeriesId] = useState<Record<string, any>>({})
+  const [worldAnalysisBySeriesId, setWorldAnalysisBySeriesId] = useState<Record<string, SeriesWorldAnalysis>>({})
   const [worldAnalysisLoadingId, setWorldAnalysisLoadingId] = useState<string | null>(null)
 
   async function load() {
-    const [seriesResponse, bookRows] = await Promise.all([booksApi.listSeries(), booksApi.list()])
+    const [seriesResponse, bookRows] = await Promise.all([booksApi.listSeries(), booksApi.listSelector()])
     setSeries(seriesResponse.items)
     setBooks(bookRows)
   }
@@ -321,10 +321,10 @@ export default function SeriesPage() {
                   <div className="mt-3 grid gap-3 md:grid-cols-3">
                     <SeriesBibleStat label="Books" value={String(worldAnalysisBySeriesId[lane.id].book_count ?? lane.books.length)} isDark={isDark} />
                     <SeriesBibleStat label="Analyses" value={String(worldAnalysisBySeriesId[lane.id].analysis_count ?? 0)} isDark={isDark} />
-                    <SeriesBibleStat label="Context blocks" value={String((worldAnalysisBySeriesId[lane.id].world_context ?? []).length ?? 0)} isDark={isDark} />
+                    <SeriesBibleStat label="Context blocks" value={String((worldAnalysisBySeriesId[lane.id].world_context ?? []).length)} isDark={isDark} />
                   </div>
                   <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    {(worldAnalysisBySeriesId[lane.id].world_context ?? []).slice(0, 6).map((item: any, index: number) => (
+                    {(worldAnalysisBySeriesId[lane.id].world_context ?? []).slice(0, 6).map((item, index) => (
                       <div key={`${lane.id}-world-${index}`} className={`rounded-sm border-2 px-3 py-2 text-sm ${subtleSurfaceClass} ${isDark ? "text-slate-200" : "text-stone-700"}`}>
                         {typeof item === "string" ? item : item.name || item.title || item.description || JSON.stringify(item)}
                       </div>
@@ -840,7 +840,7 @@ function AddBookCard({
   busy,
 }: {
   laneId: string
-  book: Book
+  book: BookSelector
   isDark: boolean
   onRefresh: () => Promise<void>
   onBusy: (value: string | null) => void

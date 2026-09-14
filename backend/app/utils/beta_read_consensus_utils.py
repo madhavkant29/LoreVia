@@ -159,7 +159,8 @@ def build_beta_read_consensus_payload(
             continue
         chapter_items = chapter_groups[hotspot["chapter_number"]]
         candidate_id = hashlib.sha1(
-            f"beta-consensus:{hotspot['chapter_number']}".encode()
+            f"beta-consensus:{hotspot['chapter_number']}".encode(),
+            usedforsecurity=False,
         ).hexdigest()[:20]
         revision_candidates.append(
             {

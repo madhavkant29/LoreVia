@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react"
+import Link from "next/link"
 
 import { ManuscriptExportMenu } from "@/components/reader/ManuscriptExportMenu"
 import { ManuscriptModeSwitch } from "@/components/reader/ManuscriptModeSwitch"
@@ -24,6 +25,7 @@ type ManuscriptHeaderProps = {
   exporting: CompileFormat | null
   failedSaveByTarget: Partial<Record<SaveTarget, () => Promise<void>>>
   focusMode: boolean
+  homeHref: string
   includeTableOfContentsOnExport: boolean
   isDark: boolean
   normalizedProcessingStatus: NormalizedProcessingStatus | null
@@ -62,6 +64,7 @@ export function ManuscriptHeader({
   exporting,
   failedSaveByTarget,
   focusMode,
+  homeHref,
   includeTableOfContentsOnExport,
   isDark,
   normalizedProcessingStatus,
@@ -97,6 +100,13 @@ export function ManuscriptHeader({
             <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center ${isDark ? "text-slate-200" : "text-stone-700"}`} aria-hidden>
               <BookOpenIcon />
             </span>
+            <Link
+              href={homeHref}
+              data-testid="manuscript-home-link"
+              className={`shrink-0 text-sm font-semibold ${isDark ? "text-slate-300 hover:text-teal-200" : "text-stone-600 hover:text-teal-700"}`}
+            >
+              Home
+            </Link>
             <button
               type="button"
               onClick={onOpenProject}
@@ -174,7 +184,7 @@ export function ManuscriptHeader({
               aria-label="Editor settings"
               title="Editor settings"
             >
-              â€¢â€¢â€¢
+              ...
             </button>
           </div>
         </div>

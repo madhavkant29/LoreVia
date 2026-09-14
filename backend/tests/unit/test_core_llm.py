@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 
 import pytest
+from google.genai.errors import APIError as GeminiAPIError
 
 from app.core import llm
 
@@ -36,6 +38,7 @@ async def test_complete_with_fallback_tracks_openai_completion_without_duplicate
         openai_model="gpt-test",
         openai_client=client,
         usage_feature="reader_recall",
+        usage_user_id=uuid.uuid4(),
     )
 
     assert result == "Rejoin the story here."
@@ -69,6 +72,7 @@ async def test_complete_with_fallback_forwards_usage_db(monkeypatch):
         user="User prompt",
         openai_model="gpt-test",
         usage_feature="reader_recall",
+        usage_user_id=uuid.uuid4(),
         usage_db=usage_db,
     )
 
@@ -82,7 +86,7 @@ async def test_complete_with_fallback_retries_transient_errors(monkeypatch):
 
     async def _mock_completion(**kwargs):
         call_count[0] += 1
-        if call_count[0] < 3:
+        if call_count[0] < 2:
             import httpx
 
             raise httpx.ConnectError("transient connection error")
@@ -99,10 +103,11 @@ async def test_complete_with_fallback_retries_transient_errors(monkeypatch):
         user="User prompt",
         openai_model="gpt-test",
         usage_feature="reader_recall",
+        usage_user_id=uuid.uuid4(),
     )
 
     assert result == "Success after retry"
-    assert call_count[0] == 3
+    assert call_count[0] == 2
 
 
 @pytest.mark.asyncio
@@ -127,6 +132,8 @@ async def test_complete_with_fallback_no_retry_on_400(monkeypatch):
         openai_model="gpt-test",
         gemini_model="gemini-test",
         usage_feature="reader_recall",
+        usage_user_id=None,
+        usage_billing_scope="system",
     )
 
     assert result == "Gemini fallback"
@@ -157,10 +164,12 @@ async def test_complete_with_fallback_retries_503_then_falls_back_to_gemini(monk
         openai_model="gpt-test",
         gemini_model="gemini-test",
         usage_feature="reader_recall",
+        usage_user_id=None,
+        usage_billing_scope="system",
     )
 
     assert result == "Gemini fallback after retries"
-    assert call_count[0] == 3
+    assert call_count[0] == 2
 
 
 @pytest.mark.asyncio
@@ -183,6 +192,8 @@ async def test_complete_with_fallback_propagates_unexpected_openai_client_bugs(m
             openai_model="gpt-test",
             gemini_model="gemini-test",
             usage_feature="reader_recall",
+            usage_user_id=None,
+            usage_billing_scope="system",
         )
 
 
@@ -202,8 +213,8 @@ def test_is_transient_openai_error_non_transient():
 def test_get_openai_client_reuses_instance(monkeypatch):
     monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
 
-    client1 = llm._get_openai_client()
-    client2 = llm._get_openai_client()
+    client1 = llm.get_openai_client()
+    client2 = llm.get_openai_client()
 
     assert client1 is client2
 
@@ -217,17 +228,72 @@ def test_get_openai_client_disables_hidden_sdk_retries(monkeypatch):
         return client
 
     monkeypatch.setattr(llm, "_openai_client", None)
+    monkeypatch.setattr(llm, "_openai_clients", {})
     monkeypatch.setattr(llm, "AsyncOpenAI", fake_openai)
     monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
 
-    assert llm._get_openai_client() is client
+    assert llm.get_openai_client() is client
     assert captured == {"api_key": "test-key", "max_retries": 0}
+
+
+@pytest.mark.asyncio
+async def test_openai_registry_is_loop_aware_and_closes_owned_clients(monkeypatch):
+    first = _FakeOpenAIClient()
+    second = _FakeOpenAIClient()
+    clients = iter([first, second])
+
+    monkeypatch.setattr(llm, "_openai_clients", {})
+    monkeypatch.setattr(llm, "AsyncOpenAI", lambda **_kwargs: next(clients))
+    monkeypatch.setattr(llm, "_openai_client_registry_key", lambda: (101, 1))
+    assert llm.get_openai_client() is first
+    assert llm.get_openai_client() is first
+
+    monkeypatch.setattr(llm, "_openai_client_registry_key", lambda: (101, 2))
+    assert llm.get_openai_client() is second
+
+    await llm.close_openai_clients()
+    assert first.closed is second.closed is True
+
+
+def test_get_gemini_client_sets_timeout_and_disables_hidden_sdk_retries(monkeypatch):
+    from google import genai
+
+    captured: dict[str, object] = {}
+    client = object()
+
+    def fake_gemini_client(**kwargs):
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr(llm, "_gemini_client", None)
+    monkeypatch.setattr(llm, "_gemini_client_cache_key", None)
+    monkeypatch.setattr(llm.settings, "GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setattr(llm.settings, "GEMINI_REQUEST_TIMEOUT_SECONDS", 45)
+    monkeypatch.setattr(genai, "Client", fake_gemini_client)
+
+    assert llm._get_gemini_client() is client
+    http_options = captured["http_options"]
+    assert http_options.timeout == 45_000
+    assert http_options.retry_options.attempts == 1
+
+
+def test_gemini_error_classification_and_usage_counts():
+    assert llm._is_transient_gemini_error(
+        GeminiAPIError(503, {"message": "temporarily unavailable"})
+    )
+    assert not llm._is_transient_gemini_error(GeminiAPIError(400, {"message": "invalid request"}))
+    usage = SimpleNamespace(
+        prompt_token_count=120,
+        candidates_token_count=30,
+        total_token_count=150,
+    )
+    assert llm._gemini_usage_counts(SimpleNamespace(usage_metadata=usage)) == (120, 30, 150)
 
 
 def test_get_openai_client_returns_external_when_provided(monkeypatch):
     monkeypatch.setattr(llm.settings, "OPENAI_API_KEY", "test-key")
 
     external = object()
-    result = llm._get_openai_client(external)
+    result = llm.get_openai_client(external)
 
     assert result is external

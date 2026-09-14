@@ -55,7 +55,7 @@ from app.utils.export_novel_render_utils import (
     novel_pdf_compiled,
 )
 from app.utils.export_preset_utils import manuscript_export_preset, novel_export_preset
-from app.utils.export_vault_utils import manuscript_vault_zip
+from app.utils.export_vault_utils import manuscript_vault_zip, write_manuscript_vault_zip
 from app.utils.index_format import format_index
 
 __all__ = [
@@ -96,6 +96,7 @@ __all__ = [
     "manuscript_pdf",
     "manuscript_pdf_compiled",
     "manuscript_vault_zip",
+    "write_manuscript_vault_zip",
     "normalize_export_font_family",
     "novel_docx",
     "novel_epub_compiled",

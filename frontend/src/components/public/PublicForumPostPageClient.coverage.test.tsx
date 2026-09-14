@@ -12,7 +12,9 @@ const publicApiMock = vi.hoisted(() => ({
   createForumInterest: vi.fn(),
   getForumPost: vi.fn(),
   listForumComments: vi.fn(),
+  listForumCommentsPage: vi.fn(),
   listForumInterests: vi.fn(),
+  listForumInterestsPage: vi.fn(),
   reactToForumComment: vi.fn(),
   reactToForumPost: vi.fn(),
   updateForumPost: vi.fn(),
@@ -185,6 +187,11 @@ beforeEach(() => {
   authApiMock.me.mockResolvedValue(readerViewer)
   publicApiMock.getForumPost.mockResolvedValue(basePost)
   publicApiMock.listForumComments.mockResolvedValue([baseComment])
+  publicApiMock.listForumCommentsPage.mockResolvedValue({
+    items: [baseComment],
+    next_cursor: null,
+    has_more: false,
+  })
   publicApiMock.listForumInterests.mockResolvedValue([
     {
       id: "interest-1",
@@ -200,6 +207,23 @@ beforeEach(() => {
       updated_at: "2026-01-01T02:00:00Z",
     },
   ])
+  publicApiMock.listForumInterestsPage.mockResolvedValue({
+    items: [{
+      id: "interest-1",
+      post_id: "post-1",
+      book_id: "book-1",
+      author_user_id: "author-1",
+      interested_user_id: "reader-1",
+      interested_username: "reader",
+      interested_email: "reader@example.com",
+      message: "I can beta read this week.",
+      status: "pending",
+      created_at: "2026-01-01T02:00:00Z",
+      updated_at: "2026-01-01T02:00:00Z",
+    }],
+    next_cursor: null,
+    has_more: false,
+  })
   publicApiMock.createForumComment.mockImplementation(async (_postId, body, parentCommentId) => ({
     ...baseComment,
     id: parentCommentId ? "reply-new" : "comment-new",
@@ -296,6 +320,81 @@ describe("PublicForumPostPageClient", () => {
     await click("Send collaborator note")
     expect(publicApiMock.createForumInterest).toHaveBeenCalledWith("post-1", "I can read this weekend.")
     await waitForText("Your collaborator interest note was sent to the author.")
+  })
+
+  it("loads subsequent comment and author-interest cursor pages", async () => {
+    const nextComment = {
+      ...baseComment,
+      id: "comment-2",
+      body: "The second page is visible.",
+      replies: [],
+      created_at: "2026-01-01T03:00:00Z",
+      updated_at: "2026-01-01T03:00:00Z",
+    }
+    publicApiMock.listForumCommentsPage.mockResolvedValueOnce({
+      items: [nextComment],
+      next_cursor: null,
+      has_more: false,
+    })
+    publicApiMock.listForumInterestsPage.mockResolvedValue({
+      items: [{
+        id: "interest-1",
+        post_id: "post-1",
+        book_id: "book-1",
+        author_user_id: "author-1",
+        interested_user_id: "reader-1",
+        interested_username: "reader",
+        interested_email: "reader@example.com",
+        message: "I can beta read this week.",
+        status: "pending",
+        created_at: "2026-01-01T02:00:00Z",
+        updated_at: "2026-01-01T02:00:00Z",
+      }],
+      next_cursor: "interest-page-2",
+      has_more: true,
+    })
+    authApiMock.me.mockResolvedValue(authorViewer)
+
+    await renderClient(
+      <PublicForumPostPageClient
+        postId="post-1"
+        initialPost={basePost}
+        initialComments={[baseComment]}
+        initialCommentCursor="comment-page-2"
+      />,
+    )
+    await waitForText("Load more comments")
+    await click("Load more comments")
+    await waitForText("The second page is visible.")
+    expect(publicApiMock.listForumCommentsPage).toHaveBeenCalledWith(
+      "post-1",
+      "comment-page-2",
+    )
+
+    await waitForText("Load more requests")
+    publicApiMock.listForumInterestsPage.mockResolvedValueOnce({
+        items: [{
+          id: "interest-2",
+          post_id: "post-1",
+          book_id: "book-1",
+          author_user_id: "author-1",
+          interested_user_id: "reader-2",
+          interested_username: "second-reader",
+          interested_email: "second@example.com",
+          message: "I can review the full draft.",
+          status: "pending",
+          created_at: "2026-01-01T04:00:00Z",
+          updated_at: "2026-01-01T04:00:00Z",
+        }],
+        next_cursor: null,
+        has_more: false,
+      })
+    await click("Load more requests")
+    await waitForText("I can review the full draft.")
+    expect(publicApiMock.listForumInterestsPage).toHaveBeenCalledWith(
+      "post-1",
+      "interest-page-2",
+    )
   })
 
   it("shows the load failure state when no initial shell is available", async () => {

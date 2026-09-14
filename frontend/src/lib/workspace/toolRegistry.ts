@@ -26,6 +26,9 @@ export interface WorkspaceToolEntry {
   planGate?: "author"
   mobilePriority?: number
   description?: string
+  purpose?: string
+  whenToUse?: string
+  helpArticleId?: string
 }
 
 export const complexityRank: Record<ComplexityMode, number> = {
@@ -43,10 +46,10 @@ export const toolComplexityRank: Record<WorkspaceToolComplexity, number> = {
 export const workspaceToolRegistry: WorkspaceToolEntry[] = [
   {
     id: "dashboard.library",
-    label: "Library",
+    label: "Home",
     route: "/library",
     group: "Library",
-    keywords: ["projects", "books", "workspace"],
+    keywords: ["home", "library", "projects", "books", "workspace"],
     icon: "library",
     placements: ["dashboard", "command"],
     complexity: "core",
@@ -344,6 +347,21 @@ export const workspaceToolRegistry: WorkspaceToolEntry[] = [
     requiresProcessing: true,
   },
   {
+    id: "book.ai_beta_reader",
+    label: "AI Beta Reader",
+    route: "/:bookId/ai-beta-reader",
+    group: "Analyze",
+    keywords: ["ai beta reader", "repetition", "overused phrases", "character voices"],
+    icon: "analysis",
+    placements: ["book", "command"],
+    complexity: "standard",
+    presets: ["review", "all"],
+    permission: "run_ai_scans",
+    requiresProcessing: true,
+    planGate: "author",
+    description: "Find overused language, compare character voices, and get manuscript-grounded reader feedback.",
+  },
+  {
     id: "book.ask",
     label: "Ask LoreVia",
     route: "/:bookId/ask",
@@ -476,4 +494,21 @@ export function routeForTool(tool: WorkspaceToolEntry, bookId?: string, chapter 
   return tool.route
     .replace(":bookId", bookId ?? "")
     .replace(":chapter", String(chapter))
+}
+
+export function helpMetadataForTool(tool: WorkspaceToolEntry) {
+  const purpose = tool.purpose ?? tool.description ?? `${tool.label} helps with ${tool.group.toLowerCase()} work.`
+  const whenToUse = tool.whenToUse ?? `Use this when you need to ${tool.keywords.slice(0, 3).join(", ")}.`
+  const requirements = [
+    tool.planGate ? "Author plan" : null,
+    tool.permission ? `Permission: ${tool.permission.replaceAll("_", " ")}` : null,
+    tool.requiresProcessing ? "Processed manuscript required" : null,
+    `Complexity: ${tool.complexity}`,
+  ].filter((value): value is string => Boolean(value))
+  return {
+    purpose,
+    whenToUse,
+    requirements,
+    helpArticleId: tool.helpArticleId ?? "story-bible-analysis-and-search-tools",
+  }
 }

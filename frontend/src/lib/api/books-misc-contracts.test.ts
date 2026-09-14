@@ -38,15 +38,25 @@ describe("books api misc contracts", () => {
     await booksApi.getEvents("book-1")
     await booksApi.getReaderEvents("book-1", 7)
     await booksApi.getCharacters("book-1")
+    await booksApi.getCharacters("book-1", { fields: ["id", "name"], include: [] })
 
     expect(getMock).toHaveBeenCalledWith("/books/book-1/chapter-reports", { params: { limit: 5 } })
     expect(getMock).toHaveBeenCalledWith("/books/book-1/chapter-versions", {
       params: { chapter_number: 3, limit: 4 },
     })
-    expect(getMock).toHaveBeenCalledWith("/books/book-1/scenes", {
-      params: { chapter_number: 2, status: "draft", query: "gate" },
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/scenes/page", {
+      params: {
+        chapter_number: 2,
+        status: "draft",
+        query: "gate",
+        include_body: true,
+        limit: 100,
+      },
     })
     expect(getMock).toHaveBeenCalledWith("/books/book-1/events/reader", { params: { chapter: 7 } })
+    expect(getMock).toHaveBeenCalledWith("/books/book-1/characters", {
+      params: { fields: "id,name", include: "" },
+    })
   })
 
   it("covers remaining book mutations and workspace payload mapping", async () => {
@@ -89,7 +99,41 @@ describe("books api misc contracts", () => {
     expect(postMock).toHaveBeenCalledWith("/books/book-1/manuscript/readability", { text: "A short sentence." })
   })
 
+  it("passes an explicit workspace-search result limit", async () => {
+    await booksApi.searchWorkspace("book-1", { query: "Nora", limit: 20 })
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/workspace/search", {
+      query: "Nora",
+      scopes: ["manuscript", "scenes", "notes"],
+      case_sensitive: false,
+      whole_word: false,
+      regex: false,
+      filters: {},
+      limit: 20,
+    })
+  })
+
+  it("uses the additive cursor contract for paged workspace search", async () => {
+    await booksApi.searchWorkspacePage("book-1", {
+      query: "Nora",
+      limit: 20,
+      cursor: "next-workspace-page",
+    })
+
+    expect(postMock).toHaveBeenCalledWith("/books/book-1/workspace/search/page", {
+      query: "Nora",
+      scopes: ["manuscript", "scenes", "notes"],
+      case_sensitive: false,
+      whole_word: false,
+      regex: false,
+      filters: {},
+      limit: 20,
+      cursor: "next-workspace-page",
+    })
+  })
+
   it("covers character adjudication, relationship, export, and vault endpoints", async () => {
+    getMock.mockResolvedValue({ data: { items: [], next_cursor: null } })
     await booksApi.demoteCharacter("book-1", "character-1")
     await booksApi.approveCharacter("book-1", "character-1")
     await booksApi.rejectCharacter("book-1", "character-1")
@@ -157,5 +201,9 @@ describe("books api misc contracts", () => {
     expect(putMock).toHaveBeenCalledWith("/books/book-1/mode", { mode: "author" })
     expect(deleteMock).toHaveBeenCalledWith("/books/book-1")
     expect(postMock).toHaveBeenCalledWith("/books/empty-project", { title: "Untitled", genre: "Fantasy" })
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:page:active")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:page:all")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:selector:active")
+    expect(invalidateQueryKeysMock).toHaveBeenCalledWith("books:selector:all")
   })
 })

@@ -75,6 +75,73 @@ async def test_mark_advisor_job_failed_redacts_sensitive_error_detail(db):
     assert refreshed.error_detail == "openai_api_key=[REDACTED]"
 
 
+@pytest.mark.asyncio
+async def test_advisor_job_execution_claim_blocks_duplicates_and_allows_recovery(db):
+    user = User(
+        email=f"advisor-claim-{uuid.uuid4().hex[:8]}@lorevia.test",
+        username=f"advisorclaim{uuid.uuid4().hex[:8]}",
+        password_hash=hash_password("SafePass123!@#"),
+        token_version=1,
+    )
+    db.add(user)
+    await db.flush()
+    job = AdvisorJob(
+        user_id=user.id,
+        scope="book",
+        status="queued",
+        expires_at=datetime.now(UTC) + timedelta(hours=2),
+    )
+    db.add(job)
+    await db.commit()
+    started_at = datetime.now(UTC)
+
+    first = await jobs.mark_advisor_job_running(
+        db,
+        job_id=job.id,
+        execution_id="execution-one",
+        now=started_at,
+    )
+    duplicate = await jobs.mark_advisor_job_running(
+        db,
+        job_id=job.id,
+        execution_id="execution-two",
+        now=started_at + timedelta(minutes=1),
+    )
+    redelivery = await jobs.mark_advisor_job_running(
+        db,
+        job_id=job.id,
+        execution_id="execution-one",
+        now=started_at + timedelta(minutes=1),
+    )
+    recovered = await jobs.mark_advisor_job_running(
+        db,
+        job_id=job.id,
+        execution_id="execution-two",
+        now=started_at + timedelta(minutes=16),
+    )
+    stale_completion = await jobs.mark_advisor_job_complete(
+        db,
+        job_id=job.id,
+        execution_id="execution-one",
+        result_payload={"reply": "stale"},
+    )
+    completed = await jobs.mark_advisor_job_complete(
+        db,
+        job_id=job.id,
+        execution_id="execution-two",
+        result_payload={"reply": "current"},
+    )
+
+    assert first is job
+    assert duplicate is None
+    assert redelivery is job
+    assert recovered is job
+    assert stale_completion is None
+    assert completed is job
+    assert job.status == "complete"
+    assert job.result_json == {"reply": "current"}
+
+
 class _FakeJobDB:
     def __init__(self, stored=None):
         self.stored = stored
@@ -91,7 +158,7 @@ class _FakeJobDB:
     async def refresh(self, value):
         self.refreshed.append(value)
 
-    async def get(self, model, item_id):
+    async def get(self, model, item_id, **_kwargs):
         assert model is AdvisorJob
         return self.stored if self.stored is not None and self.stored.id == item_id else None
 
@@ -122,6 +189,13 @@ async def test_create_get_serialize_and_transition_advisor_job(monkeypatch):
         "error": None,
     }
 
+    job.status = "failed"
+    job.error_code = "llm_budget"
+    job.error_detail = "AI capacity resets on September 1."
+    assert jobs.serialize_advisor_job(job)["error"] == job.error_detail
+    assert await jobs.mark_advisor_job_running(db, job_id=job.id) is None
+
+    job.status = "queued"
     await jobs.mark_advisor_job_running(db, job_id=job.id)
     assert job.status == "running" and job.error_code is None and job.error_detail is None
 

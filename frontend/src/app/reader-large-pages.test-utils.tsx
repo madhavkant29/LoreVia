@@ -43,6 +43,7 @@ const booksApiMock = vi.hoisted(() => ({
   restoreChapterVersion: vi.fn(),
   restoreSceneVersion: vi.fn(),
   retryProcessing: vi.fn(),
+  saveChapterContent: vi.fn(),
   saveBookNote: vi.fn(),
   saveManuscriptAnnotation: vi.fn(),
   saveScene: vi.fn(),
@@ -375,6 +376,17 @@ beforeEach(() => {
   booksApiMock.getWorkspaceTree.mockResolvedValue(buildWorkspaceTree())
   booksApiMock.getWriterWorkspace.mockResolvedValue(workspace)
   booksApiMock.importManuscript.mockResolvedValue({ imported_chapters: [2], chapter_content_versions: { 2: 4 } })
+  booksApiMock.saveChapterContent.mockImplementation((_bookId: string, chapterNumber: number) =>
+    Promise.resolve({
+      status: "updated",
+      book_id: "book-1",
+      chapter_number: chapterNumber,
+      content_version: 4,
+      client_mutation_id: "mutation-1",
+      saved_at: "2026-01-01T00:00:00Z",
+      story_memory_status: "queued",
+    }),
+  )
   booksApiMock.listVaultNotes.mockResolvedValue([])
   booksApiMock.reorderChapterScenes.mockResolvedValue({ scene_ids: ["scene-1"], structure_version: 2 })
   booksApiMock.reprocessChapter.mockResolvedValue({})

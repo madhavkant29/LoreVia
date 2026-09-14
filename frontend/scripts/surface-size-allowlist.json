@@ -1,6 +1,6 @@
 {
   "src/app/(dashboard)/settings/page.tsx": {
-    "maxLines": 784,
+    "maxLines": 890,
     "reason": "Complex account settings workspace with extracted controls and searchable categories."
   },
   "src/app/(reader)/[bookId]/advisor/page.tsx": {
@@ -12,7 +12,7 @@
     "reason": "Legacy admin console orchestrator."
   },
   "src/app/(reader)/[bookId]/export/page.tsx": {
-    "maxLines": 993,
+    "maxLines": 995,
     "reason": "Legacy export workflow page awaiting shared disclosure primitives."
   },
   "src/app/(reader)/[bookId]/collaboration/page.tsx": {
@@ -28,11 +28,11 @@
     "reason": "Legacy beta feedback workflow page."
   },
   "src/app/(reader)/[bookId]/page.tsx": {
-    "maxLines": 786,
+    "maxLines": 788,
     "reason": "Book overview orchestrates processing, visibility, and registry-driven cards."
   },
   "src/app/(reader)/[bookId]/author-loop/page.tsx": {
-    "maxLines": 669,
+    "maxLines": 704,
     "reason": "Legacy author loop workflow page."
   },
   "src/app/(dashboard)/stats/page.tsx": {

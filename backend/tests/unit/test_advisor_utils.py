@@ -506,6 +506,7 @@ async def test_retrieve_series_continuity_passages_returns_empty_when_pgvector_e
             db=_FakeDB(),
             prior_book_ids=[uuid.uuid4()],
             query="where did this canon start",
+            user_id=uuid.uuid4(),
         )
 
     assert payload == []
@@ -578,7 +579,11 @@ async def test_prepare_advisor_reply_context_builds_grounded_messages(monkeypatc
             }
         ]
 
-    monkeypatch.setattr(advisor_chat_utils, "AsyncOpenAI", lambda **_kwargs: FakeClient())
+    async def cache_version(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr(advisor_chat_utils, "get_openai_client", lambda: FakeClient())
+    monkeypatch.setattr(advisor_chat_utils, "get_book_cache_version", cache_version)
     monkeypatch.setattr(advisor_chat_utils, "get_advisor_response_cache", no_cache)
     monkeypatch.setattr(advisor_chat_utils, "build_story_context", story_context)
     monkeypatch.setattr(advisor_chat_utils, "semantic_search", search)
@@ -730,6 +735,7 @@ async def test_stream_advisor_payload_records_usage_and_finalizes(monkeypatch):
             "cached": None,
             "client": Client(),
             "cache_key": "cache-key",
+            "cache_version": 0,
             "intent": "direction",
             "hits": [],
             "world_analysis": None,
@@ -770,7 +776,74 @@ async def test_stream_advisor_payload_records_usage_and_finalizes(monkeypatch):
     assert [event["event"] for event in events] == ["delta", "delta", "done"]
     assert events[-1]["data"]["reply"] == "First answer"
     assert usage[0]["total_tokens"] == 14
-    assert closed == [True]
+    assert closed == []
+
+
+@pytest.mark.asyncio
+async def test_stream_advisor_payload_settles_success_when_usage_trailer_is_missing(monkeypatch):
+    async def chunks():
+        yield SimpleNamespace(
+            usage=None,
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="Answer"))],
+        )
+
+    class Completions:
+        async def create(self, **_kwargs):
+            return chunks()
+
+    class Client:
+        chat = SimpleNamespace(completions=Completions())
+
+        async def close(self):
+            return None
+
+    async def prepare(**_kwargs):
+        return {
+            "cached": None,
+            "client": Client(),
+            "cache_key": "cache-key",
+            "cache_version": 0,
+            "intent": "direction",
+            "hits": [],
+            "world_analysis": None,
+            "llm_messages": [{"role": "user", "content": "Question"}],
+        }
+
+    reservation = SimpleNamespace(id="advisor-reservation", operation="chat", user_id=uuid.uuid4())
+    settled: list[object] = []
+
+    async def reserve(**_kwargs):
+        return reservation
+
+    async def finish(completed_reservation, response):
+        assert response is None
+        settled.append(completed_reservation)
+
+    async def fail(*_args, **_kwargs):
+        raise AssertionError("a completed provider stream must not be settled as failed")
+
+    async def finalize(**kwargs):
+        return {"reply": kwargs["reply"]}
+
+    monkeypatch.setattr(advisor_chat_utils, "prepare_advisor_reply_context", prepare)
+    monkeypatch.setattr(advisor_chat_utils, "reserve_llm_call", reserve)
+    monkeypatch.setattr(advisor_chat_utils, "finish_llm_reservation", finish)
+    monkeypatch.setattr(advisor_chat_utils, "fail_llm_reservation", fail)
+    monkeypatch.setattr(advisor_chat_utils, "finalize_advisor_reply_payload", finalize)
+
+    events = [
+        event
+        async for event in advisor_chat_utils.stream_advisor_reply_payload(
+            db=SimpleNamespace(),
+            book=SimpleNamespace(id=uuid.uuid4()),
+            user_id=uuid.uuid4(),
+            messages=[{"role": "user", "content": "Question"}],
+            total_chapters=3,
+        )
+    ]
+
+    assert [event["event"] for event in events] == ["delta", "done"]
+    assert settled == [reservation]
 
 
 @pytest.mark.asyncio
@@ -798,6 +871,7 @@ async def test_stream_series_advisor_payload_records_usage_and_finalizes(monkeyp
             "cached": None,
             "client": Client(),
             "cache_key": "series-cache",
+            "cache_version": 0,
             "intent": "consistency",
             "book_count": 2,
             "llm_messages": [{"role": "user", "content": "Compare volumes"}],
@@ -835,7 +909,7 @@ async def test_stream_series_advisor_payload_records_usage_and_finalizes(monkeyp
     assert [event["event"] for event in events] == ["delta", "done"]
     assert events[-1]["data"] == {"reply": "Series answer", "book_count": 2}
     assert usage[0]["total_tokens"] == 15
-    assert closed == [True]
+    assert closed == []
 
 
 @pytest.mark.asyncio
@@ -863,13 +937,17 @@ async def test_prepare_series_advisor_context_builds_history_and_handles_empty_s
     async def context(*_args, **_kwargs):
         return "Earlier volume context"
 
+    async def cache_version(*_args, **_kwargs):
+        return 0
+
     class Client:
         async def close(self):
             return None
 
     monkeypatch.setattr(advisor_chat_utils, "get_series_advisor_response_cache", no_cache)
+    monkeypatch.setattr(advisor_chat_utils, "get_series_cache_version", cache_version)
     monkeypatch.setattr(advisor_chat_utils, "build_series_story_context", context)
-    monkeypatch.setattr(advisor_chat_utils, "AsyncOpenAI", lambda **_kwargs: Client())
+    monkeypatch.setattr(advisor_chat_utils, "get_openai_client", lambda: Client())
     monkeypatch.setattr(advisor_chat_utils, "classify_intent_fast", lambda _text: "opportunity")
 
     prepared = await advisor_chat_utils.prepare_series_advisor_reply_context(

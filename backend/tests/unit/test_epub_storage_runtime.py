@@ -14,6 +14,7 @@ REAL_UPLOAD_BOOK_BYTES = storage.upload_book_bytes
 REAL_UPLOAD_BINARY = storage.upload_binary
 REAL_UPLOAD_TEXT = storage.upload_text
 REAL_DOWNLOAD_BOOK = storage.download_book
+REAL_LIST_OBJECT_KEYS = storage.list_object_keys
 
 
 def restore_storage_functions(monkeypatch):
@@ -22,6 +23,7 @@ def restore_storage_functions(monkeypatch):
     monkeypatch.setattr(storage, "upload_binary", REAL_UPLOAD_BINARY)
     monkeypatch.setattr(storage, "upload_text", REAL_UPLOAD_TEXT)
     monkeypatch.setattr(storage, "download_book", REAL_DOWNLOAD_BOOK)
+    monkeypatch.setattr(storage, "list_object_keys", REAL_LIST_OBJECT_KEYS)
 
 
 class FakeEpubItem:
@@ -116,6 +118,9 @@ def test_local_storage_round_trip_move_delete_and_permissions(monkeypatch, tmp_p
     assert storage.download_book("assets/image.bin") == b"binary"
     assert storage.download_book("notes/note.txt") == b"hello"
     assert storage.get_presigned_url("assets/image.bin") is None
+    assert storage.list_object_keys("assets") == ["assets/image.bin"]
+    assert storage.list_object_keys("notes", limit=1) == ["notes/note.txt"]
+    assert storage.list_object_keys("missing") == []
 
     assert storage.move_object("assets/image.bin", "archive/image.bin") == "archive/image.bin"
     assert storage.download_book("archive/image.bin") == b"binary"
@@ -196,6 +201,19 @@ class FakeS3Client:
         self.calls.append(("presign", operation, kwargs))
         return "https://storage.example/signed"
 
+    def list_objects_v2(self, **kwargs):
+        self.calls.append(("list_objects_v2", kwargs))
+        if "ContinuationToken" not in kwargs:
+            return {
+                "Contents": [{"Key": "system/upload-intents/first.json"}],
+                "IsTruncated": True,
+                "NextContinuationToken": "next-page",
+            }
+        return {
+            "Contents": [{"Key": "system/upload-intents/second.json"}],
+            "IsTruncated": False,
+        }
+
 
 def test_remote_storage_exercises_s3_operations(monkeypatch):
     restore_storage_functions(monkeypatch)
@@ -214,6 +232,10 @@ def test_remote_storage_exercises_s3_operations(monkeypatch):
     assert storage.move_object("source", "destination") == "destination"
     assert storage.move_object("same", "same") == "same"
     assert storage.get_presigned_url("destination", expires=120) == "https://storage.example/signed"
+    assert storage.list_object_keys("system/upload-intents", limit=2) == [
+        "system/upload-intents/first.json",
+        "system/upload-intents/second.json",
+    ]
 
     call_names = [call[0] for call in client.calls]
     assert "upload_fileobj" in call_names
@@ -222,3 +244,4 @@ def test_remote_storage_exercises_s3_operations(monkeypatch):
     assert "copy_object" in call_names
     assert call_names.count("delete_object") == 2
     assert "presign" in call_names
+    assert call_names.count("list_objects_v2") == 2

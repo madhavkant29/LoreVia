@@ -211,7 +211,9 @@ export function buildAuthorLoopSteps(params: {
   const activeAssignments = params.assignments.filter((assignment) => assignment.view_bucket === "active" || assignment.view_bucket === "scheduled")
   const feedbackCount = params.selectedAssignment?.feedback_items.length ?? 0
   const openFeedbackCount = params.selectedAssignment?.feedback_items.filter((item) => item.author_status === "open").length ?? 0
-  const storyScore = params.storyHealth?.score ?? 0
+  const storyScore = params.storyHealth && params.storyHealth.available !== false
+    ? params.storyHealth.score
+    : null
 
   return [
     {
@@ -232,7 +234,7 @@ export function buildAuthorLoopSteps(params: {
       id: "continuity",
       label: "Run continuity scan",
       detail: params.storyHealth ? `${params.storyHealth.summary}` : "Scan ready once the manuscript finishes processing.",
-      tone: storyScore >= 75 ? "ready" : storyScore >= 55 ? "working" : "attention",
+      tone: storyScore === null ? "working" : storyScore >= 75 ? "ready" : storyScore >= 55 ? "working" : "attention",
     },
     {
       id: "issues",

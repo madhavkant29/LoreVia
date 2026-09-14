@@ -2,7 +2,7 @@ import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { CharacterProfileTabs } from "./CharacterProfileTabs"
+import { CharacterProfileTabs, type CharacterProfileTab } from "./CharacterProfileTabs"
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -20,7 +20,7 @@ describe("CharacterProfileTabs", () => {
   })
 
   it("marks the current profile tab and reports a new selection", () => {
-    const onSelect = vi.fn()
+    const onSelect = vi.fn<(tab: CharacterProfileTab) => void>()
     const view = renderTabs(onSelect)
 
     expect(view.querySelector('button[aria-selected="true"]')?.textContent).toBe("Evidence")
@@ -31,7 +31,7 @@ describe("CharacterProfileTabs", () => {
   })
 })
 
-function renderTabs(onSelect: ReturnType<typeof vi.fn>) {
+function renderTabs(onSelect: (tab: CharacterProfileTab) => void) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)

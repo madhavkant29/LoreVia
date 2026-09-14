@@ -11,6 +11,17 @@ SYSTEMD_UNIT_SOURCE="${SYSTEMD_UNIT_SOURCE:-${APP_DIR}/ops/systemd/lorevia-compo
 SYSTEMD_UNIT_TARGET="${SYSTEMD_UNIT_TARGET:-/etc/systemd/system/lorevia-compose.service}"
 ENABLE_SYSTEMD_UNIT="${ENABLE_SYSTEMD_UNIT:-1}"
 SYSTEMD_RELOAD="${SYSTEMD_RELOAD:-1}"
+RUNTIME_SERVICES=(
+  redis
+  nginx
+  backend
+  worker-extraction
+  worker-analysis
+  worker-embedding
+  worker-intelligence
+  worker-maintenance
+  celery-beat
+)
 
 if [[ -z "${SUDO:-}" ]]; then
   if [[ "$(id -u)" -eq 0 ]]; then
@@ -46,11 +57,44 @@ enable_systemd_unit() {
   ${SUDO} systemctl enable lorevia-compose.service
 }
 
+runtime_services_healthy() {
+  local service
+  local container_id
+  local health_status
+
+  for service in "${RUNTIME_SERVICES[@]}"; do
+    container_id="$(${COMPOSE} ps -q "${service}")"
+    if [[ -z "${container_id}" ]]; then
+      return 1
+    fi
+    health_status="$(docker inspect \
+      --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+      "${container_id}")"
+    if [[ "${health_status}" != "healthy" ]]; then
+      return 1
+    fi
+  done
+}
+
 cd "${APP_DIR}"
+
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+  echo "Refusing to deploy from a dirty checkout."
+  git status --short
+  exit 1
+fi
 
 git fetch --prune origin
 git checkout "${DEPLOY_BRANCH}"
 git pull --ff-only origin "${DEPLOY_BRANCH}"
+
+RELEASE_SHA="$(git rev-parse --verify HEAD)"
+if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Could not resolve a full Git release SHA."
+  exit 1
+fi
+export RELEASE_SHA
+echo "Building LoreVia release ${RELEASE_SHA}."
 
 if [[ "${RUN_TESTS:-0}" == "1" ]]; then
   docker compose -f docker-compose-local.yml exec -T api pytest tests/integration/test_beta_reads_api.py tests/unit/test_trial_email_service.py -v
@@ -128,6 +172,12 @@ asyncio.run(main())
 '
 }
 
+verify_release_data_preflight() {
+  ${COMPOSE} run --rm \
+    -e DATABASE_URL="${ALEMBIC_DATABASE_URL}" \
+    backend python scripts/check_release_data_preflight.py
+}
+
 current_output="$(run_alembic current -q || true)"
 heads_output="$(run_alembic heads -q)"
 
@@ -140,6 +190,9 @@ fi
 
 head_rev="$(printf '%s\n' "${heads_output}" | awk 'NF {print $1; exit}')"
 current_revs="$(printf '%s\n' "${current_output}" | awk 'NF {print $1}')"
+
+echo "Running aggregate-only read-only release data preflight."
+verify_release_data_preflight
 
 if printf '%s\n' "${current_revs}" | grep -Fx "${head_rev}" >/dev/null 2>&1; then
   echo "Database already at Alembic head ${head_rev}; skipping upgrade."
@@ -160,15 +213,16 @@ verify_runtime_schema
 
 enable_systemd_unit
 
-${COMPOSE} up -d redis nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence celery-beat
+${COMPOSE} up -d "${RUNTIME_SERVICES[@]}"
 
-for retry_index in $(seq 0 6); do
-  if ${COMPOSE} exec -T nginx wget -qO- http://127.0.0.1/nginx-health >/dev/null 2>&1 && \
+for retry_index in $(seq 0 8); do
+  if runtime_services_healthy && \
+     ${COMPOSE} exec -T nginx wget -qO- http://127.0.0.1:8080/nginx-health >/dev/null 2>&1 && \
      ${COMPOSE} exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)" >/dev/null 2>&1; then
     echo "Deploy succeeded"
     exit 0
   fi
-  if [[ "${retry_index}" -lt 6 ]]; then
+  if [[ "${retry_index}" -lt 8 ]]; then
     retry_delay=$((2 ** retry_index))
     if [[ "${retry_delay}" -gt 16 ]]; then
       retry_delay=16
@@ -178,4 +232,5 @@ for retry_index in $(seq 0 6); do
 done
 
 echo "Health checks did not pass after deployment"
+${COMPOSE} ps
 exit 1

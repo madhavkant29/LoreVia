@@ -14,6 +14,12 @@ import type { Book } from "@/types/book"
 
 const ANALYSIS_TOOLS_BASE = [
   {
+    href: "ai-beta-reader",
+    eyebrow: "Reader experience",
+    title: "AI Beta Reader",
+    description: "Find repeated words and phrases, compare character voices, and turn reader-style feedback into revision priorities.",
+  },
+  {
     href: "voice",
     eyebrow: "Dialogue drift",
     title: "Voice consistency",

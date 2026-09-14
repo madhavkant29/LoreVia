@@ -56,7 +56,7 @@ function mergeGoalCalendar(existing: GoalCalendarItem[], additions: GoalCalendar
 function SectionFrame({ title, body, isDark, children }: { title: string; body: string; isDark: boolean; children: React.ReactNode }) {
   return (
     <section className={`rounded-md border p-5 ${isDark ? "border-white/[0.06] bg-white/[0.025]" : "border-slate-200/70 bg-slate-50/60"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{title}</p>
+      <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>{title}</p>
       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{body}</p>
       <div className="mt-4">{children}</div>
     </section>
@@ -85,7 +85,7 @@ function RevisionItemCard({
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${severityBadgeClass(item.severity, isDark)}`}>{item.severity}</span>
         <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${statusBadgeClass(item.status, isDark)}`}>{item.status.replace("_", " ")}</span>
-        {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{`Chapter ${item.chapter_ref}`}</span> : null}
+        {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-300" : "text-xs text-slate-600"}>{`Chapter ${item.chapter_ref}`}</span> : null}
       </div>
       <p className={`mt-3 text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{item.title}</p>
       <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.description}</p>
@@ -138,11 +138,11 @@ function RevisionItemSummary({ item, isDark }: { item: RevisionActionItem; isDar
     <div className={`rounded-md border px-3 py-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-white"}`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.18em] ${severityBadgeClass(item.severity, isDark)}`}>{item.severity}</span>
-        {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{`Chapter ${item.chapter_ref}`}</span> : null}
+        {item.chapter_ref ? <span className={isDark ? "text-xs text-slate-300" : "text-xs text-slate-600"}>{`Chapter ${item.chapter_ref}`}</span> : null}
       </div>
       <p className={`mt-2 text-sm font-semibold leading-6 ${isDark ? "text-white" : "text-slate-900"}`}>{item.title}</p>
       {item.recommendation ? (
-        <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>{item.recommendation}</p>
+        <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.recommendation}</p>
       ) : null}
     </div>
   )
@@ -155,9 +155,9 @@ function TimelineMatrix({ fact, isDark }: { fact: CharacterKnowledgeTimelineFact
       <table className="mt-3 min-w-full border-separate border-spacing-2 text-xs">
         <thead>
           <tr>
-            <th className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Character</th>
+            <th className={`text-left font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>Character</th>
             {fact.rows[0]?.cells.map((cell) => (
-              <th key={`${fact.fact}-chapter-${cell.chapter_number}`} className={`text-left font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Ch {cell.chapter_number}</th>
+              <th key={`${fact.fact}-chapter-${cell.chapter_number}`} className={`text-left font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>Ch {cell.chapter_number}</th>
             ))}
           </tr>
         </thead>
@@ -173,7 +173,7 @@ function TimelineMatrix({ fact, isDark }: { fact: CharacterKnowledgeTimelineFact
                         ? isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-50 text-emerald-700"
                         : cell.state === "known"
                           ? isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-50 text-sky-700"
-                          : isDark ? "bg-white/[0.08] text-slate-400" : "bg-white text-slate-500 border border-slate-200"
+                          : isDark ? "bg-white/[0.08] text-slate-300" : "bg-white text-slate-600 border border-slate-200"
                     }`}
                   >
                     {cell.state}
@@ -203,7 +203,7 @@ function KnowledgeStatePanel({
   onToggleTimelineDetails: () => void
 }) {
   if (facts.length === 0) {
-    return <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>Knowledge-state checks will appear after the next intelligence pass.</p>
+    return <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>Knowledge-state checks will appear after the next intelligence pass.</p>
   }
 
   const visibleFacts = showTimelineDetails ? facts : facts.slice(0, 4)
@@ -234,7 +234,7 @@ function KnowledgeStatePanel({
         )
       })}
       {hiddenFactCount > 0 ? (
-        <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{hiddenFactCount} more knowledge thread{hiddenFactCount === 1 ? "" : "s"} hidden until timeline details are opened.</p>
+        <p className={isDark ? "text-xs text-slate-300" : "text-xs text-slate-600"}>{hiddenFactCount} more knowledge thread{hiddenFactCount === 1 ? "" : "s"} hidden until timeline details are opened.</p>
       ) : null}
       {timelines.length > 0 ? (
         <div>
@@ -391,7 +391,7 @@ export function RevisionIntelligencePanel({
 
   const renderActionList = (items: RevisionActionItem[], emptyText: string, limit?: number) => {
     if (items.length === 0) {
-      return <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>{emptyText}</p>
+      return <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>{emptyText}</p>
     }
     const visibleItems = typeof limit === "number" ? items.slice(0, limit) : items
     const hiddenCount = items.length - visibleItems.length
@@ -410,7 +410,7 @@ export function RevisionIntelligencePanel({
           />
         ))}
         {hiddenCount > 0 ? (
-          <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{hiddenCount} more item{hiddenCount === 1 ? "" : "s"} kept off this view. Use the checklist to pull the next set into focus.</p>
+          <p className={isDark ? "text-xs text-slate-300" : "text-xs text-slate-600"}>{hiddenCount} more item{hiddenCount === 1 ? "" : "s"} kept off this view. Use the checklist to pull the next set into focus.</p>
         ) : null}
       </div>
     )
@@ -418,7 +418,7 @@ export function RevisionIntelligencePanel({
 
   const renderActionSummaryList = (items: RevisionActionItem[], emptyText: string, limit = 3) => {
     if (items.length === 0) {
-      return <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>{emptyText}</p>
+      return <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>{emptyText}</p>
     }
     const visibleItems = items.slice(0, limit)
     const hiddenCount = items.length - visibleItems.length
@@ -428,7 +428,7 @@ export function RevisionIntelligencePanel({
           <RevisionItemSummary key={item.id} item={item} isDark={isDark} />
         ))}
         {hiddenCount > 0 ? (
-          <p className={isDark ? "text-xs text-slate-500" : "text-xs text-slate-400"}>{hiddenCount} more item{hiddenCount === 1 ? "" : "s"} available in the revision board.</p>
+          <p className={isDark ? "text-xs text-slate-300" : "text-xs text-slate-600"}>{hiddenCount} more item{hiddenCount === 1 ? "" : "s"} available in the revision board.</p>
         ) : null}
       </div>
     )
@@ -440,7 +440,7 @@ export function RevisionIntelligencePanel({
         <div className="border-b px-5 py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision hub</p>
+              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Revision hub</p>
               <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Revision pressure at a glance.</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{revision.summary.hero_message}</p>
             </div>
@@ -462,7 +462,7 @@ export function RevisionIntelligencePanel({
               { label: "Task-ready", value: revision.summary.task_ready_count },
             ].map((stat) => (
               <div key={stat.label} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-                <p className={isDark ? "text-xs uppercase tracking-[0.2em] text-slate-500" : "text-xs uppercase tracking-[0.2em] text-slate-400"}>{stat.label}</p>
+                <p className={isDark ? "text-xs uppercase tracking-[0.2em] text-slate-300" : "text-xs uppercase tracking-[0.2em] text-slate-600"}>{stat.label}</p>
                 <p className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{stat.value}</p>
               </div>
             ))}
@@ -486,7 +486,7 @@ export function RevisionIntelligencePanel({
     return (
       <section className={panelClass(isDark)}>
         <div className="border-b px-5 py-5">
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Story map details</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Story map details</p>
           <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Knowledge state, timeline clarity, and reader friction.</h2>
         </div>
 
@@ -524,7 +524,7 @@ export function RevisionIntelligencePanel({
                       className={`w-full rounded-md border p-4 text-left transition ${isDark ? "border-white/[0.06] bg-[#101720] hover:bg-[#162230]" : "border-slate-200 bg-white hover:bg-slate-50"} ${isActive ? (isDark ? "ring-1 ring-sky-400/60" : "ring-1 ring-sky-500/50") : ""}`}
                     >
                       <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{fact.fact}</p>
-                      <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{learnedCount} known handoff{learnedCount === 1 ? "" : "s"} / {unknownCount} unknown</p>
+                      <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{learnedCount} known handoff{learnedCount === 1 ? "" : "s"} / {unknownCount} unknown</p>
                     </button>
                   )
                 })}
@@ -532,7 +532,7 @@ export function RevisionIntelligencePanel({
                   <button
                     type="button"
                     onClick={() => setShowAllTimelineSummaries((current) => !current)}
-                    className={`text-left text-xs font-medium transition ${isDark ? "text-slate-500 hover:text-slate-300" : "text-slate-400 hover:text-slate-600"}`}
+                    className={`text-left text-xs font-medium transition ${isDark ? "text-slate-300 hover:text-white" : "text-slate-600 hover:text-slate-800"}`}
                   >
                     {showAllTimelineSummaries
                       ? "Show fewer timeline threads."
@@ -580,7 +580,7 @@ export function RevisionIntelligencePanel({
     <section className={panelClass(isDark)}>
         <div className="flex flex-col gap-4 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Revision command center</p>
+          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Revision command center</p>
           <h2 className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Know what your edit breaks before your readers do.</h2>
           <p className={`mt-2 max-w-3xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{revision.summary.hero_message}</p>
           {revision.summary.recent_edit_label ? (
@@ -604,7 +604,7 @@ export function RevisionIntelligencePanel({
             { label: "Task-ready", value: revision.summary.task_ready_count },
           ].map((stat) => (
             <div key={stat.label} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-              <p className={isDark ? "text-xs uppercase tracking-[0.2em] text-slate-500" : "text-xs uppercase tracking-[0.2em] text-slate-400"}>{stat.label}</p>
+              <p className={isDark ? "text-xs uppercase tracking-[0.2em] text-slate-300" : "text-xs uppercase tracking-[0.2em] text-slate-600"}>{stat.label}</p>
               <p className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{stat.value}</p>
             </div>
           ))}
@@ -682,7 +682,7 @@ export function RevisionIntelligencePanel({
                           <span className={`rounded-full px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusBadgeClass(item.status, isDark)}`}>{item.status.replace("_", " ")}</span>
                         </div>
                       </div>
-                    )) : <p className={isDark ? "text-sm text-slate-500" : "text-sm text-slate-400"}>This pass is clear for now.</p>}
+                    )) : <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>This pass is clear for now.</p>}
                   </div>
                 </div>
               ))}

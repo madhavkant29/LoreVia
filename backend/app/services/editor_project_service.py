@@ -11,9 +11,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.core.redis import (
@@ -35,6 +36,7 @@ from app.models.intelligence import (
     ChapterSummary,
     CharacterRelationship,
     PlotThread,
+    ReaderEvent,
     WikiEntry,
     WorldElement,
     WorldGapAnalysis,
@@ -106,55 +108,6 @@ def update_reprocess_metadata(
     book.writer_workspace = workspace
 
 
-async def purge_manual_chapter_reprocess_content(
-    db: AsyncSession,
-    *,
-    book: Book,
-    chapter: Chapter,
-) -> None:
-    await db.execute(delete(BookChunk).where(BookChunk.chapter_id == chapter.id))
-    await db.execute(delete(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id))
-    await db.execute(
-        delete(CharacterMention).where(
-            CharacterMention.book_id == book.id,
-            CharacterMention.chapter_number == chapter.number,
-        )
-    )
-    await db.execute(
-        delete(CharacterCandidate).where(
-            CharacterCandidate.book_id == book.id,
-            CharacterCandidate.chapter_number == chapter.number,
-            CharacterCandidate.status.in_(
-                (CHARACTER_CANDIDATE_PENDING, CHARACTER_CANDIDATE_SUPPRESSED)
-            ),
-        )
-    )
-    await db.execute(
-        delete(CharacterRelationshipCandidate).where(
-            CharacterRelationshipCandidate.book_id == book.id,
-            CharacterRelationshipCandidate.chapter_number == chapter.number,
-        )
-    )
-    await db.execute(
-        delete(CharacterRelationship).where(
-            CharacterRelationship.book_id == book.id,
-            CharacterRelationship.from_chapter == chapter.number,
-            CharacterRelationship.edited_by_author.is_(False),
-        )
-    )
-    await db.execute(
-        delete(CharacterState).where(
-            CharacterState.character_id.in_(
-                select(Character.id).where(Character.book_id == book.id)
-            ),
-            CharacterState.at_chapter == chapter.number,
-        )
-    )
-    chapter.processed = False
-    chapter.analysis_state = {}
-    await db.flush()
-
-
 def has_reprocess_started(book: Book) -> bool:
     metadata = _reprocess_metadata(book)
     return bool(
@@ -200,6 +153,9 @@ async def reset_generated_data(db: AsyncSession, book: Book) -> dict[str, int]:
             chapter.processed = not bool(chapter.word_count and chapter.word_count > 0)
             chapter.analysis_state = {}
         counts["chapters_reset"] = len(chapters)
+
+    result = await db.execute(delete(ReaderEvent).where(ReaderEvent.book_id == _book_id))
+    counts["reader_events"] = result.rowcount
 
     result = await db.execute(delete(WikiEntry).where(WikiEntry.book_id == _book_id))
     counts["wiki_entries"] = result.rowcount
@@ -314,7 +270,7 @@ async def _resolve_character_anchor_ids(db: AsyncSession, book_id: uuid.UUID) ->
     """Find character IDs that should be preserved as extraction anchors.
 
     Anchors are characters that are:
-      - manually created (is_manual == True), OR
+      - manually created or explicitly curated/reviewed, OR
       - referenced by a curated relationship (edited_by_author == True), OR
       - have authored custom tags (entity_type == "character")
     """
@@ -323,7 +279,12 @@ async def _resolve_character_anchor_ids(db: AsyncSession, book_id: uuid.UUID) ->
     manual_result = await db.execute(
         select(Character.id).where(
             Character.book_id == book_id,
-            Character.is_manual.is_(True),
+            or_(
+                Character.is_manual.is_(True),
+                Character.approval_source == "manual_review",
+                Character.analysis_metadata["user_curated"].as_boolean().is_(True),
+                Character.analysis_metadata["protected_from_repair"].as_boolean().is_(True),
+            ),
         )
     )
     anchors.update(row[0] for row in manual_result.all())
@@ -360,13 +321,32 @@ async def prepare_rebuild(
     *,
     reason: str = "manual_reprocess",
     auto_first_threshold_words: int | None = None,
+    rebuild_run_id: str | None = None,
 ) -> str:
-    """Reset generated data and mark the book as processing with a new run ID.
+    """Create a hidden generation and mark the book as processing.
 
     Returns the new rebuild_run_id string.
     """
-    rebuild_run_id = uuid.uuid4().hex
-    counts = await reset_generated_data(db, book)
+    rebuild_run_id = rebuild_run_id or uuid.uuid4().hex
+    from app.services.data_generation_service import (
+        create_staging_generation,
+        ensure_active_generation,
+    )
+
+    await ensure_active_generation(db, book_id=book.id)
+    await create_staging_generation(
+        db,
+        book_id=book.id,
+        rebuild_run_id=rebuild_run_id,
+        reason=reason,
+    )
+
+    chapters = list(
+        (await db.execute(select(Chapter).where(Chapter.book_id == book.id))).scalars().all()
+    )
+    for chapter in chapters:
+        chapter.processed = not bool(chapter.word_count and chapter.word_count > 0)
+        chapter.analysis_state = {}
 
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
     from app.utils.books.writer_workspace import (
@@ -409,19 +389,27 @@ async def prepare_rebuild(
     await invalidate_advisor_caches_for_book(db, book_id=book.id)
 
     log.info(
-        "editor_rebuild_prepared book_id=%s rebuild_run_id=%s counts=%s",
+        "editor_rebuild_prepared book_id=%s rebuild_run_id=%s staged_chapters=%s",
         book.id,
         rebuild_run_id,
-        counts,
+        len(chapters),
     )
     return rebuild_run_id
 
 
-async def dispatch_rebuild(db: AsyncSession, book: Book) -> tuple[int, int]:
+async def dispatch_rebuild(
+    db: AsyncSession,
+    book: Book,
+    *,
+    reservation_ids_by_chapter_id: dict[uuid.UUID, uuid.UUID] | None = None,
+    manual_reprocess: bool = False,
+    run_kind: str = "editor_rebuild",
+) -> tuple[int, int]:
     """Queue chapter processing tasks for rebuild.
 
     Returns (chapters_queued, total_words).
     """
+    book_id = book.id
     from app.models.user import User
     from app.services.task_execution_service import enqueue_extraction_execution
     from app.utils.billing_utils import has_paid_reading_access
@@ -488,7 +476,12 @@ async def dispatch_rebuild(db: AsyncSession, book: Book) -> tuple[int, int]:
         chapters_by_number = {chapter.number: chapter for chapter in chapters}
         for dispatch in dispatch_plan:
             chapter = chapters_by_number[dispatch.chapter_number]
-            await enqueue_extraction_execution(
+            reservation_id = (
+                reservation_ids_by_chapter_id.get(chapter.id)
+                if reservation_ids_by_chapter_id is not None
+                else None
+            )
+            execution = await enqueue_extraction_execution(
                 db,
                 book_id=book.id,
                 user_id=book.user_id,
@@ -496,16 +489,30 @@ async def dispatch_rebuild(db: AsyncSession, book: Book) -> tuple[int, int]:
                 chapter_number=chapter.number,
                 chapters_total=len(chapter_numbers),
                 rebuild_run_id=rebuild_run_id,
-                run_kind="editor_rebuild",
+                manual_reprocess=manual_reprocess,
+                processing_reservation_id=reservation_id,
+                run_kind=run_kind,
+                identity_suffix=reservation_id,
             )
+            if reservation_id is not None:
+                from app.models.user import ProcessingUsageEvent
+
+                reservation = await db.get(ProcessingUsageEvent, reservation_id)
+                if reservation is None:
+                    raise RuntimeError(f"processing_reservation_missing:{reservation_id}")
+                reservation.task_id = str(execution.id)
+                await db.flush()
     except EDITOR_REBUILD_DISPATCH_EXCEPTIONS as exc:
-        await fail_rebuild_if_active(
-            db,
-            book,
-            expected_rebuild_run_id=rebuild_run_id,
-            error=str(exc),
-        )
-        await db.commit()
+        await db.rollback()
+        failed_book = await db.get(Book, book_id)
+        if failed_book is not None:
+            await fail_rebuild_if_active(
+                db,
+                failed_book,
+                expected_rebuild_run_id=rebuild_run_id,
+                error=str(exc),
+            )
+            await db.commit()
         raise
 
     log.info(
@@ -527,51 +534,77 @@ async def maybe_auto_reprocess_editor_project(
         return False, 0, 0
     if get_rebuild_run_id(book) is not None or has_reprocess_started(book):
         return False, 0, 0
-    total_words = int(
+    chapters = list(
         (
             await db.execute(
-                select(func.coalesce(func.sum(Chapter.word_count), 0)).where(
+                select(Chapter).where(
                     Chapter.book_id == book.id,
                     Chapter.word_count > 0,
                 )
             )
-        ).scalar()
-        or 0
+        )
+        .scalars()
+        .all()
     )
+    total_words = sum(int(chapter.word_count or 0) for chapter in chapters)
     if total_words < AUTO_FIRST_REPROCESS_WORD_THRESHOLD:
         return False, 0, total_words
 
     from app.models.user import User
     from app.services.processing_allowance_service import (
-        consume_processing_reservation,
-        release_processing_reservation,
-        reserve_processing_words,
+        AUTO_FIRST_REPROCESS_USAGE_KIND,
+        ProcessingReservationRequest,
+        auto_first_reprocess_source_prefix,
+        release_processing_reservations_for_source_prefix,
+        reserve_processing_word_batch,
     )
 
     user = await db.get(User, book.user_id)
     if user is None:
         return False, 0, total_words
-    reservation, _allowance = await reserve_processing_words(
+    rebuild_run_id = uuid.uuid4().hex
+    source_prefix = auto_first_reprocess_source_prefix(rebuild_run_id)
+    reservations, _allowance = await reserve_processing_word_batch(
         db,
         user,
         book_id=book.id,
-        usage_kind="auto_first_reprocess",
-        source_id=f"{book.id}:auto-first",
-        word_count=total_words,
+        usage_kind=AUTO_FIRST_REPROCESS_USAGE_KIND,
+        requests=[
+            ProcessingReservationRequest(
+                source_id=f"{source_prefix}{chapter.id}:{chapter.content_version}",
+                word_count=int(chapter.word_count or 0),
+            )
+            for chapter in chapters
+        ],
     )
+    reservation_ids_by_chapter_id = {
+        chapter.id: reservation.id
+        for chapter, reservation in zip(chapters, reservations, strict=True)
+    }
 
     try:
         await prepare_rebuild(
             db,
             book,
             reason="auto_first_2000_words",
+            rebuild_run_id=rebuild_run_id,
             auto_first_threshold_words=AUTO_FIRST_REPROCESS_WORD_THRESHOLD,
         )
-        chapters_queued, rebuilt_words = await dispatch_rebuild(db, book)
-        await consume_processing_reservation(db, reservation.id)
+        chapters_queued, rebuilt_words = await dispatch_rebuild(
+            db,
+            book,
+            reservation_ids_by_chapter_id=reservation_ids_by_chapter_id,
+            run_kind=AUTO_FIRST_REPROCESS_USAGE_KIND,
+        )
         await db.commit()
     except EDITOR_REBUILD_DISPATCH_EXCEPTIONS:
-        await release_processing_reservation(db, reservation.id)
+        await release_processing_reservations_for_source_prefix(
+            db,
+            user_id=book.user_id,
+            book_id=book.id,
+            usage_kind=AUTO_FIRST_REPROCESS_USAGE_KIND,
+            source_prefix=source_prefix,
+        )
         await db.commit()
         raise
     return True, chapters_queued, rebuilt_words
@@ -600,17 +633,39 @@ async def complete_rebuild_if_ready(db: AsyncSession, book: Book) -> bool:
     )
     if not processing or not processing.get("rebuild_run_id"):
         return False
+    from app.services.data_generation_service import generation_scope
+
+    with generation_scope(str(processing["rebuild_run_id"])):
+        return await _complete_rebuild_if_ready_in_generation(db, book)
+
+
+async def _complete_rebuild_if_ready_in_generation(db: AsyncSession, book: Book) -> bool:
+    workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else None
+    )
+    if not processing or not processing.get("rebuild_run_id"):
+        return False
     processing = await reconcile_editor_rebuild_processing_state(db, book, processing=processing)
     workspace["processing"] = processing
     book.writer_workspace = workspace
     if not processing.get("is_fully_ready"):
+        return False
+    rebuild_run_id = str(processing.get("rebuild_run_id"))
+    from app.services.data_generation_service import promote_staging_generation
+
+    if not await promote_staging_generation(
+        db,
+        book_id=book.id,
+        rebuild_run_id=rebuild_run_id,
+    ):
         return False
     now = datetime.now(UTC)
     reprocess_metadata = dict(
         workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else {}
     )
     reprocess_metadata["last_completed_at"] = now.isoformat()
-    reprocess_metadata["last_completed_rebuild_run_id"] = processing.get("rebuild_run_id")
+    reprocess_metadata["last_completed_rebuild_run_id"] = rebuild_run_id
     workspace["reprocess"] = reprocess_metadata
     processing.pop("rebuild_run_id", None)
     processing["status"] = "ready"
@@ -618,6 +673,7 @@ async def complete_rebuild_if_ready(db: AsyncSession, book: Book) -> bool:
     processing["completed_at"] = now.isoformat()
     workspace["processing"] = processing
     book.writer_workspace = workspace
+    flag_modified(book, "writer_workspace")
     if book.status == "processing":
         book.status = "ready"
     await db.flush()
@@ -769,11 +825,48 @@ async def fail_rebuild_if_active(
     ):
         return False
     now = datetime.now(UTC)
+    failed_rebuild_run_id = str(processing.get("rebuild_run_id"))
+    from app.services.data_generation_service import (
+        fail_staging_generation,
+        has_active_generation,
+    )
+
+    await fail_staging_generation(
+        db,
+        book_id=book.id,
+        rebuild_run_id=failed_rebuild_run_id,
+    )
+    from app.services.processing_allowance_service import (
+        AUTO_FIRST_REPROCESS_USAGE_KIND,
+        MANUAL_REPROCESS_USAGE_KIND,
+        auto_first_reprocess_source_prefix,
+        manual_reprocess_source_prefix,
+        release_processing_reservations_for_source_prefix,
+    )
+
+    for usage_kind, source_prefix in (
+        (
+            MANUAL_REPROCESS_USAGE_KIND,
+            manual_reprocess_source_prefix(failed_rebuild_run_id),
+        ),
+        (
+            AUTO_FIRST_REPROCESS_USAGE_KIND,
+            auto_first_reprocess_source_prefix(failed_rebuild_run_id),
+        ),
+    ):
+        await release_processing_reservations_for_source_prefix(
+            db,
+            user_id=book.user_id,
+            book_id=book.id,
+            usage_kind=usage_kind,
+            source_prefix=source_prefix,
+            now=now,
+        )
     reprocess_metadata = dict(
         workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else {}
     )
     reprocess_metadata["last_failed_at"] = now.isoformat()
-    reprocess_metadata["last_failed_rebuild_run_id"] = processing.get("rebuild_run_id")
+    reprocess_metadata["last_failed_rebuild_run_id"] = failed_rebuild_run_id
     if error:
         reprocess_metadata["last_error"] = " ".join(str(error).split()).strip()
     workspace["reprocess"] = reprocess_metadata
@@ -783,7 +876,7 @@ async def fail_rebuild_if_active(
     processing["failed_at"] = now.isoformat()
     workspace["processing"] = processing
     book.writer_workspace = workspace
-    book.status = "failed"
+    book.status = "ready" if await has_active_generation(db, book_id=book.id) else "failed"
     await db.flush()
     return True
 
@@ -824,7 +917,44 @@ async def cancel_rebuild_for_manual_edit(
     if not rebuild_run_id:
         return False
 
+    from app.services.data_generation_service import (
+        fail_staging_generation,
+        has_active_generation,
+    )
+
+    await fail_staging_generation(
+        db,
+        book_id=book.id,
+        rebuild_run_id=str(rebuild_run_id),
+    )
+
     now = datetime.now(UTC)
+    from app.services.processing_allowance_service import (
+        AUTO_FIRST_REPROCESS_USAGE_KIND,
+        MANUAL_REPROCESS_USAGE_KIND,
+        auto_first_reprocess_source_prefix,
+        manual_reprocess_source_prefix,
+        release_processing_reservations_for_source_prefix,
+    )
+
+    for usage_kind, source_prefix in (
+        (
+            MANUAL_REPROCESS_USAGE_KIND,
+            manual_reprocess_source_prefix(str(rebuild_run_id)),
+        ),
+        (
+            AUTO_FIRST_REPROCESS_USAGE_KIND,
+            auto_first_reprocess_source_prefix(str(rebuild_run_id)),
+        ),
+    ):
+        await release_processing_reservations_for_source_prefix(
+            db,
+            user_id=book.user_id,
+            book_id=book.id,
+            usage_kind=usage_kind,
+            source_prefix=source_prefix,
+            now=now,
+        )
     reprocess_metadata = dict(
         workspace.get("reprocess") if isinstance(workspace.get("reprocess"), dict) else {}
     )
@@ -884,7 +1014,7 @@ async def cancel_rebuild_for_manual_edit(
     workspace["reprocess"] = reprocess_metadata
     workspace["processing"] = processing
     book.writer_workspace = workspace
-    book.status = "failed"
+    book.status = "ready" if await has_active_generation(db, book_id=book.id) else "failed"
     await db.flush()
     return True
 

@@ -1,8 +1,10 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.models.book import Book, BookUploadCharge, Chapter, NovelScene
 from app.models.character import (
@@ -13,6 +15,7 @@ from app.models.character import (
     CharacterState,
     CharacterVoiceProfile,
 )
+from app.models.generation import BookDataGeneration
 from app.models.intelligence import (
     BookChunk,
     ChapterSummary,
@@ -24,7 +27,7 @@ from app.models.intelligence import (
 )
 from app.models.operations import TaskDispatchOutbox, TaskExecution
 from app.models.tag import CustomTag
-from app.models.user import User
+from app.models.user import ProcessingUsageEvent, User
 
 
 async def _create_user(db) -> uuid.UUID:
@@ -163,10 +166,24 @@ async def test_reset_generated_data_preserves_anchor_characters(db):
     tagged_char = Character(
         id=uuid.uuid4(), book_id=book.id, name="Tagged", first_chapter=1, is_manual=False
     )
+    curated_char = Character(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        name="Curated",
+        first_chapter=1,
+        analysis_metadata={"user_curated": True},
+    )
+    reviewed_char = Character(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        name="Reviewed",
+        first_chapter=1,
+        approval_source="manual_review",
+    )
     generated_char = Character(
         id=uuid.uuid4(), book_id=book.id, name="Generated", first_chapter=1, is_manual=False
     )
-    db.add_all([manual_char, tagged_char, generated_char])
+    db.add_all([manual_char, tagged_char, curated_char, reviewed_char, generated_char])
     await db.flush()
 
     tag = CustomTag(
@@ -188,9 +205,11 @@ async def test_reset_generated_data_preserves_anchor_characters(db):
     remaining_ids = {c.id for c in remaining}
     assert manual_char.id in remaining_ids, "Manual character should survive"
     assert tagged_char.id in remaining_ids, "Tagged character should survive"
+    assert curated_char.id in remaining_ids, "Metadata-curated character should survive"
+    assert reviewed_char.id in remaining_ids, "Manually reviewed character should survive"
     assert generated_char.id not in remaining_ids, "Generated character should be deleted"
     assert counts["characters_deleted"] == 1
-    assert counts["characters_preserved"] == 2
+    assert counts["characters_preserved"] == 4
 
 
 @pytest.mark.asyncio
@@ -469,6 +488,18 @@ async def test_maybe_auto_reprocess_editor_project_starts_once_at_threshold(db, 
         )
     )
     assert execution is not None
+    reservation = await db.scalar(
+        select(ProcessingUsageEvent).where(
+            ProcessingUsageEvent.book_id == book.id,
+            ProcessingUsageEvent.usage_kind == "auto_first_reprocess",
+        )
+    )
+    assert reservation is not None
+    assert reservation.source_id.startswith(
+        f"auto-first:{book.writer_workspace['processing']['rebuild_run_id']}:"
+    )
+    assert reservation.status == "reserved"
+    assert reservation.task_id == str(execution.id)
     assert book.writer_workspace["reprocess"]["auto_first_started_at"]
     assert book.writer_workspace["reprocess"]["last_reason"] == "auto_first_2000_words"
     charge_count = await db.scalar(
@@ -511,6 +542,7 @@ async def test_maybe_auto_reprocess_editor_project_does_not_start_after_manual_r
 @pytest.mark.asyncio
 async def test_complete_rebuild_if_ready_clears_active_run_id(db):
     user_id = await _create_user(db)
+    rebuild_run_id = uuid.uuid4().hex
     book = Book(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -523,13 +555,22 @@ async def test_complete_rebuild_if_ready_clears_active_run_id(db):
             "processing": {
                 "status": "processing",
                 "stage": "analysis",
-                "rebuild_run_id": "run-ready",
+                "rebuild_run_id": rebuild_run_id,
                 "is_fully_ready": True,
             },
             "reprocess": {"last_started_at": "2026-06-02T00:00:00+00:00"},
         },
     )
     db.add(book)
+    db.add(
+        BookDataGeneration(
+            id=uuid.UUID(rebuild_run_id),
+            book_id=book.id,
+            rebuild_run_id=rebuild_run_id,
+            status="staging",
+            reason="test",
+        )
+    )
     await db.commit()
 
     from app.services.editor_project_service import complete_rebuild_if_ready
@@ -540,8 +581,87 @@ async def test_complete_rebuild_if_ready_clears_active_run_id(db):
 
     assert completed is True
     assert "rebuild_run_id" not in book.writer_workspace["processing"]
-    assert book.writer_workspace["reprocess"]["last_completed_rebuild_run_id"] == "run-ready"
+    assert book.writer_workspace["reprocess"]["last_completed_rebuild_run_id"] == rebuild_run_id
     assert book.status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_full_rebuild_keeps_active_chunks_until_atomic_promotion(db):
+    user_id = await _create_user(db)
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Generation test",
+        format="manual",
+        s3_key="generation-test.txt",
+        status="ready",
+        is_editor_project=True,
+        total_chapters=1,
+    )
+    chapter = Chapter(
+        id=uuid.uuid4(),
+        book_id=book.id,
+        number=1,
+        s3_key="generation-ch1.txt",
+        word_count=100,
+        processed=True,
+    )
+    db.add_all([book, chapter])
+    await db.flush()
+    db.add(
+        BookChunk(
+            book_id=book.id,
+            chapter_id=chapter.id,
+            chunk_index=0,
+            text="old active text",
+        )
+    )
+    await db.commit()
+
+    from app.services.data_generation_service import generation_scope
+    from app.services.editor_project_service import complete_rebuild_if_ready, prepare_rebuild
+
+    rebuild_run_id = await prepare_rebuild(db, book)
+    active_texts = list(
+        (await db.execute(select(BookChunk.text).where(BookChunk.book_id == book.id)))
+        .scalars()
+        .all()
+    )
+    assert active_texts == ["old active text"]
+
+    with generation_scope(rebuild_run_id):
+        staged_before = list(
+            (await db.execute(select(BookChunk.text).where(BookChunk.book_id == book.id)))
+            .scalars()
+            .all()
+        )
+        assert staged_before == []
+        db.add(
+            BookChunk(
+                book_id=book.id,
+                chapter_id=chapter.id,
+                chunk_index=0,
+                text="new staged text",
+            )
+        )
+        db.add(
+            ChapterSummary(
+                chapter_id=chapter.id,
+                mode="detailed",
+                content="new staged summary",
+            )
+        )
+        chapter.processed = True
+        await db.commit()
+        assert await complete_rebuild_if_ready(db, book) is True
+        await db.commit()
+
+    promoted_texts = list(
+        (await db.execute(select(BookChunk.text).where(BookChunk.book_id == book.id)))
+        .scalars()
+        .all()
+    )
+    assert promoted_texts == ["new staged text"]
 
 
 @pytest.mark.asyncio
@@ -618,6 +738,15 @@ async def test_fail_rebuild_if_active_clears_only_matching_run(db):
         writer_workspace={"processing": {"rebuild_run_id": "run-current", "status": "processing"}},
     )
     db.add(book)
+    reservation = ProcessingUsageEvent(
+        user_id=user_id,
+        book_id=book.id,
+        usage_kind="manual_reprocess",
+        source_id="manual:run-current:chapter-1:1",
+        word_count=100,
+        status="reserved",
+    )
+    db.add(reservation)
     await db.commit()
 
     from app.services.editor_project_service import fail_rebuild_if_active
@@ -625,6 +754,7 @@ async def test_fail_rebuild_if_active_clears_only_matching_run(db):
     stale_failed = await fail_rebuild_if_active(
         db, book, expected_rebuild_run_id="run-stale", error="stale"
     )
+    assert reservation.status == "reserved"
     active_failed = await fail_rebuild_if_active(
         db, book, expected_rebuild_run_id="run-current", error="queue unavailable"
     )
@@ -637,6 +767,48 @@ async def test_fail_rebuild_if_active_clears_only_matching_run(db):
     assert book.writer_workspace["processing"]["status"] == "failed"
     assert book.writer_workspace["reprocess"]["last_failed_rebuild_run_id"] == "run-current"
     assert book.status == "failed"
+    assert reservation.status == "released"
+
+
+@pytest.mark.asyncio
+async def test_cancel_rebuild_releases_unfinished_manual_reservations(db):
+    user_id = await _create_user(db)
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Cancelled draft",
+        format="manual",
+        s3_key="cancelled-draft.txt",
+        status="processing",
+        is_editor_project=True,
+        writer_workspace={"processing": {"rebuild_run_id": "run-cancel", "status": "processing"}},
+    )
+    db.add(book)
+    await db.flush()
+    db.add(Chapter(book_id=book.id, number=1, s3_key="cancel-ch1.txt", word_count=100))
+    reservation = ProcessingUsageEvent(
+        user_id=user_id,
+        book_id=book.id,
+        usage_kind="manual_reprocess",
+        source_id="manual:run-cancel:chapter-1:1",
+        word_count=100,
+        status="reserved",
+    )
+    db.add(reservation)
+    await db.commit()
+
+    from app.services.editor_project_service import cancel_rebuild_for_manual_edit
+
+    assert await cancel_rebuild_for_manual_edit(
+        db,
+        book,
+        reason="The manuscript changed during reprocessing.",
+    )
+    await db.commit()
+    await db.refresh(reservation)
+
+    assert reservation.status == "released"
+    assert book.writer_workspace["processing"]["status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -712,6 +884,141 @@ async def test_dispatch_rebuild_broker_failure_keeps_durable_work_pending(db, mo
     assert execution.error_category == "dispatch"
     assert book.writer_workspace["processing"]["rebuild_run_id"] == "run-dispatch"
     assert book.status == "processing"
+
+
+@pytest.mark.asyncio
+async def test_partial_rebuild_dispatch_releases_every_unfinished_reservation(db, monkeypatch):
+    user_id = await _create_user(db)
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Partial dispatch",
+        format="manual",
+        s3_key="partial-dispatch.txt",
+        status="processing",
+        is_editor_project=True,
+        writer_workspace={"processing": {"rebuild_run_id": "run-partial", "status": "processing"}},
+    )
+    db.add(book)
+    await db.flush()
+    chapters = [
+        Chapter(book_id=book.id, number=1, s3_key="partial-1.txt", word_count=100),
+        Chapter(book_id=book.id, number=2, s3_key="partial-2.txt", word_count=200),
+    ]
+    db.add_all(chapters)
+    await db.flush()
+    reservations = [
+        ProcessingUsageEvent(
+            user_id=user_id,
+            book_id=book.id,
+            usage_kind="manual_reprocess",
+            source_id=f"manual:run-partial:{chapter.id}:1",
+            word_count=int(chapter.word_count or 0),
+            status="reserved",
+        )
+        for chapter in chapters
+    ]
+    db.add_all(reservations)
+    await db.commit()
+    calls = 0
+
+    async def enqueue(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("dispatch interrupted")
+        return SimpleNamespace(id=uuid.uuid4())
+
+    monkeypatch.setattr(
+        "app.services.task_execution_service.enqueue_extraction_execution",
+        enqueue,
+    )
+    from app.services.editor_project_service import dispatch_rebuild
+
+    with pytest.raises(RuntimeError, match="dispatch interrupted"):
+        await dispatch_rebuild(
+            db,
+            book,
+            reservation_ids_by_chapter_id={
+                chapter.id: reservation.id
+                for chapter, reservation in zip(chapters, reservations, strict=True)
+            },
+            manual_reprocess=True,
+            run_kind="manual_reprocess",
+        )
+
+    for reservation in reservations:
+        await db.refresh(reservation)
+    await db.refresh(book)
+    assert calls == 2
+    assert all(reservation.status == "released" for reservation in reservations)
+    assert book.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rebuild_rolls_back_before_cleanup_after_db_failure(db, monkeypatch):
+    user_id = await _create_user(db)
+    book = Book(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title="Failed dispatch",
+        format="manual",
+        s3_key="failed-dispatch.txt",
+        status="processing",
+        is_editor_project=True,
+        writer_workspace={"processing": {"rebuild_run_id": "run-db-fail", "status": "processing"}},
+    )
+    db.add(book)
+    await db.flush()
+    chapter = Chapter(book_id=book.id, number=1, s3_key="failed-1.txt", word_count=100)
+    db.add(chapter)
+    await db.flush()
+    reservation = ProcessingUsageEvent(
+        user_id=user_id,
+        book_id=book.id,
+        usage_kind="manual_reprocess",
+        source_id="manual:run-db-fail:chapter-1:1",
+        word_count=100,
+        status="reserved",
+    )
+    db.add(reservation)
+    await db.commit()
+
+    async def enqueue(db_arg, *_args, **_kwargs):
+        db_arg.add(
+            TaskExecution(
+                identity_key=f"broken-{uuid.uuid4().hex}",
+                task_name="extraction_tasks.process_chapter",
+                feature="processing",
+                user_id=uuid.uuid4(),
+                book_id=book.id,
+                chapter_id=chapter.id,
+                chapter_number=chapter.number,
+                arguments_json={},
+            )
+        )
+        await db_arg.flush()
+
+    monkeypatch.setattr(
+        "app.services.task_execution_service.enqueue_extraction_execution",
+        enqueue,
+    )
+    from app.services.editor_project_service import dispatch_rebuild
+
+    with pytest.raises(IntegrityError):
+        await dispatch_rebuild(
+            db,
+            book,
+            reservation_ids_by_chapter_id={chapter.id: reservation.id},
+            manual_reprocess=True,
+            run_kind="manual_reprocess",
+        )
+
+    await db.refresh(book)
+    await db.refresh(reservation)
+    assert book.status == "failed"
+    assert book.writer_workspace["processing"]["status"] == "failed"
+    assert reservation.status == "released"
 
 
 @pytest.mark.asyncio

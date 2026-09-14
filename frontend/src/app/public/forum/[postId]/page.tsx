@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import dynamic from "next/dynamic"
 
 import { JsonLdScript } from "@/components/seo/JsonLdScript"
-import { getPublicForumPostServer, listPublicForumCommentsServer } from "@/lib/api/public.server"
+import { getPublicForumPostServer, listPublicForumCommentsPageServer } from "@/lib/api/public.server"
 import {
   DEFAULT_OG_IMAGE,
   SITE_NAME,
@@ -47,9 +47,13 @@ export async function generateMetadata({ params }: { params: Promise<{ postId: s
 
 export default async function PublicForumPostPage({ params }: { params: Promise<{ postId: string }> }) {
   const { postId } = await params
-  const [post, comments] = await Promise.all([
+  const [post, commentsPage] = await Promise.all([
     getPublicForumPostServer(postId).catch(() => null),
-    listPublicForumCommentsServer(postId).catch(() => []),
+    listPublicForumCommentsPageServer(postId).catch(() => ({
+      items: [],
+      next_cursor: null,
+      has_more: false,
+    })),
   ])
   const threadJsonLd = post ? buildForumThreadJsonLd({
     title: post.headline,
@@ -73,7 +77,12 @@ export default async function PublicForumPostPage({ params }: { params: Promise<
       {post && breadcrumbJsonLd ? (
         <JsonLdScript id={`public-forum-post-breadcrumbs-jsonld-${post.id}`} data={breadcrumbJsonLd} />
       ) : null}
-      <PublicForumPostPageClient postId={postId} initialPost={post} initialComments={comments} />
+      <PublicForumPostPageClient
+        postId={postId}
+        initialPost={post}
+        initialComments={commentsPage.items}
+        initialCommentCursor={commentsPage.next_cursor}
+      />
     </>
   )
 }

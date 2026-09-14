@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 
 from openai import AsyncOpenAI
 
@@ -68,6 +69,8 @@ async def generate_whats_the_word_result(
     *,
     client: AsyncOpenAI,
     model: str,
+    user_id: uuid.UUID,
+    book_id: uuid.UUID,
     book_title: str,
     description: str,
     previous_word: str | None = None,
@@ -76,6 +79,8 @@ async def generate_whats_the_word_result(
         client=client,
         feature="advisor_whats_the_word",
         model=model,
+        user_id=user_id,
+        book_id=book_id,
         temperature=0.9,
         max_tokens=120,
         response_format={"type": "json_object"},

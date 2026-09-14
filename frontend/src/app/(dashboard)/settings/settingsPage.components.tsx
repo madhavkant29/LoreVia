@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import {
   BarChart3,
   BookOpen,
@@ -38,6 +38,7 @@ export const SETTINGS_NAV = [
   { id: "workspace", label: "Workspace visibility", icon: <SettingsSlidersIcon /> },
   { id: "reading", label: "Reading behavior", icon: <ReadingIcon /> },
   { id: "privacy", label: "Privacy", icon: <PrivacyIcon /> },
+  { id: "community", label: "Community", icon: <FriendsIcon /> },
   { id: "emails", label: "Emails", icon: <MailIcon /> },
   { id: "goals", label: "Writing goals", icon: <GoalIcon /> },
   { id: "session", label: "Session", icon: <SignOutIcon /> },
@@ -57,6 +58,7 @@ export const SETTINGS_SEARCH_TERMS: Record<string, string> = {
   workspace: "workspace visibility hidden tools focused standard power layout",
   reading: "reading writing behavior mode casual analyst speed",
   privacy: "privacy data analytics direct messages permissions",
+  community: "community discord support users",
   emails: "notifications email product updates marketing security billing",
   goals: "writing goals daily words progress streak",
   session: "security session sign out logout device",
@@ -65,6 +67,83 @@ export const SETTINGS_SEARCH_TERMS: Record<string, string> = {
 
 export function modeLabel(mode: string) {
   return MODES.find((item) => item.value === mode)?.label ?? "Casual"
+}
+
+export function useActiveSettingsSection() {
+  const [activeSectionId, setActiveSectionId] = useState(SETTINGS_NAV[0].id)
+
+  useEffect(() => {
+    let frameId: number | null = null
+
+    const updateActiveSection = () => {
+      const anchorY = Math.min(window.innerHeight * 0.22, 160)
+      const activationY = Math.min(window.innerHeight * 0.16, 112)
+      const sections = SETTINGS_NAV
+        .map((item) => {
+          const element = document.getElementById(item.id)
+          return element ? { id: element.id, rect: element.getBoundingClientRect() } : null
+        })
+        .filter((section): section is { id: string; rect: DOMRect } => Boolean(section))
+
+      if (!sections.length) return
+
+      const visibleSections = sections.filter((section) => section.rect.bottom > 0 && section.rect.top < window.innerHeight)
+      const candidates = visibleSections.length ? visibleSections : sections
+      const activeAtHeader = candidates.filter((section) => section.rect.top <= activationY && section.rect.bottom > activationY)
+      const activeSection = activeAtHeader.at(-1)
+        ?? [...candidates].sort(
+          (first, second) => Math.abs(first.rect.top - anchorY) - Math.abs(second.rect.top - anchorY),
+        )[0]
+
+      setActiveSectionId(activeSection.id)
+    }
+
+    const scheduleUpdate = () => {
+      if (frameId !== null) return
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null
+        updateActiveSection()
+      })
+    }
+
+    updateActiveSection()
+    window.addEventListener("scroll", scheduleUpdate, { passive: true })
+    window.addEventListener("resize", scheduleUpdate)
+    window.addEventListener("scrollend", scheduleUpdate)
+    document.addEventListener("scroll", scheduleUpdate, { capture: true, passive: true })
+    const sectionObserver =
+      typeof window.IntersectionObserver === "function"
+        ? new IntersectionObserver(scheduleUpdate, {
+            root: null,
+            rootMargin: "-25% 0px -55% 0px",
+            threshold: [0, 0.25, 0.5, 0.75, 1],
+          })
+        : null
+    const resizeObserver =
+      typeof window.ResizeObserver === "function" ? new ResizeObserver(scheduleUpdate) : null
+    const observedSections = SETTINGS_NAV
+      .map((item) => document.getElementById(item.id))
+      .filter((element): element is HTMLElement => Boolean(element))
+    observedSections.forEach((section) => {
+      sectionObserver?.observe(section)
+      resizeObserver?.observe(section)
+    })
+    resizeObserver?.observe(document.body)
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId)
+      }
+      window.removeEventListener("scroll", scheduleUpdate)
+      window.removeEventListener("resize", scheduleUpdate)
+      window.removeEventListener("scrollend", scheduleUpdate)
+      document.removeEventListener("scroll", scheduleUpdate, { capture: true })
+      sectionObserver?.disconnect()
+      resizeObserver?.disconnect()
+    }
+  }, [])
+
+  return { activeSectionId, setActiveSectionId }
 }
 
 export function SettingsPanel({ id, title, compact = false, children }: { id: string; title: string; compact?: boolean; children: ReactNode }) {

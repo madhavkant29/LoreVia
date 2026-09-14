@@ -10,6 +10,7 @@ export default defineConfig({
     jsx: "automatic",
     jsxImportSource: "react",
   },
+  oxc: false,
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
@@ -17,6 +18,7 @@ export default defineConfig({
     },
   },
   test: {
+    execArgv: ["--no-experimental-webstorage"],
     coverage: {
       exclude: [
         "**/*.d.ts",

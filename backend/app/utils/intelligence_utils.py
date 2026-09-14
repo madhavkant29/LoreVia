@@ -585,7 +585,7 @@ async def compute_cross_book_snapshot_hash(
         wiki_count, wiki_max_ts = wiki_result.one()
         parts.append(f"wiki:{wiki_count}:{wiki_max_ts}")
 
-    return hashlib.md5("|".join(parts).encode()).hexdigest()[:12]
+    return hashlib.md5("|".join(parts).encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 async def get_cross_book_character_matches(

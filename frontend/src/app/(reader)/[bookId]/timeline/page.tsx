@@ -14,7 +14,7 @@ import { defaultBookUiPreference, useUiPreferencesStore } from "@/lib/stores/uiP
 import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
 import { asQueryKey, bookCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { Book } from "@/types/book"
-import type { CharacterTimelineTrack, PlotThreadTimelineTrack, RelationshipTimelineMarker, TimelineChapter, TimelineResponse } from "@/types/reader"
+import type { RelationshipTimelineMarker, TimelineChapter, TimelineResponse } from "@/types/reader"
 import { capture } from "@/lib/analytics/posthog"
 
 const CELL_WIDTH = 68
@@ -26,11 +26,14 @@ export default function TimelinePage() {
   const hydrateBookPreferences = useUiPreferencesStore((state) => state.hydrateBook)
   const patchBookPreferences = useUiPreferencesStore((state) => state.patchBook)
   const setTimelineCollapsedSection = useUiPreferencesStore((state) => state.setTimelineCollapsedSection)
-  const timelineCollapsedSections = useUiPreferencesStore(
-    (state) => (
-      state.bookPreferences[preferenceBookId]
-      ?? defaultBookUiPreference(preferenceBookId, state.preferences.complexity_mode)
+  const complexityMode = useUiPreferencesStore((state) => state.preferences.complexity_mode)
+  const storedBookPreference = useUiPreferencesStore((state) => state.bookPreferences[preferenceBookId])
+  const timelineCollapsedSections = useMemo(
+    () => (
+      storedBookPreference
+      ?? defaultBookUiPreference(preferenceBookId, complexityMode)
     ).timeline_collapsed_sections,
+    [complexityMode, preferenceBookId, storedBookPreference],
   )
   const isDark = theme === "dark"
 
@@ -61,7 +64,7 @@ export default function TimelinePage() {
   })
   const error = isError ? "Major events unavailable" : null
 
-  const chapters = timeline?.chapters ?? []
+  const chapters = useMemo(() => timeline?.chapters ?? [], [timeline?.chapters])
   const chapterCount = chapters.length
   const isAuthor = book?.mode === "author"
 
@@ -205,7 +208,6 @@ function ChapterHeader({ chapters, isDark }: { chapters: TimelineChapter[]; isDa
 }
 
 function TimelineSection<T extends { id: string }>({
-  sectionId,
   title,
   subtitle,
   rows,
@@ -296,7 +298,6 @@ function TrackRow({
 }
 
 function RelationshipSection({
-  sectionId,
   chapters,
   markers,
   chapterIndex,

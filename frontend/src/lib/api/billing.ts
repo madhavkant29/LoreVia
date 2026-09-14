@@ -15,9 +15,37 @@ export type BillingConfirmation = {
   customer_email: string | null
 }
 
+export type BillingCheckoutPreview = {
+  plan: PaidPlanCode
+  display_name: string
+  billing_interval: "monthly" | "annual"
+  trial_status: "active" | "expired"
+  trial_active: boolean
+  trial_ends_at: string | null
+  charge_today: string
+  recurring_price: string
+  confirmation_required: boolean
+  confirmation_text: string | null
+  checkout_button_label: string
+  default_action_label: string | null
+  quote_token: string | null
+  billing_enabled: boolean
+  message: string | null
+}
+
 export const billingApi = {
-  checkout: (plan: PaidPlanCode) =>
-    apiClient.post<{ checkout_url: string | null; billing_enabled: boolean; message?: string }>("/billing/checkout", { plan }).then((r) => r.data),
+  checkoutPreview: (plan: PaidPlanCode) =>
+    apiClient.post<BillingCheckoutPreview>("/billing/checkout/preview", { plan }).then((r) => r.data),
+  checkout: (plan: PaidPlanCode, confirmedImmediateCharge = false, quoteToken?: string | null) =>
+    apiClient.post<{ checkout_url: string | null; billing_enabled: boolean; message?: string }>("/billing/checkout", {
+      plan,
+      confirmed_immediate_charge: confirmedImmediateCharge,
+      quote_token: quoteToken ?? null,
+    }).then((r) => r.data),
+  abandonCheckout: (transactionId: string) =>
+    apiClient.post<{ abandoned: boolean; transaction_id: string; status: string }>("/billing/checkout/abandon", {
+      transaction_id: transactionId,
+    }).then((r) => r.data),
   confirmation: (transactionId: string, confirmationToken?: string | null) =>
     apiClient.get<BillingConfirmation>("/billing/confirmation", {
       params: {

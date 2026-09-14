@@ -55,6 +55,7 @@ async def test_on_startup_skips_db_and_redis_checks(monkeypatch) -> None:
 async def test_on_shutdown_closes_redis_and_disposes_engine(monkeypatch) -> None:
     disposed = False
     redis_closed = False
+    openai_closed = False
 
     async def _fake_dispose():
         nonlocal disposed
@@ -64,12 +65,18 @@ async def test_on_shutdown_closes_redis_and_disposes_engine(monkeypatch) -> None
         nonlocal redis_closed
         redis_closed = True
 
+    async def _fake_close_openai_clients():
+        nonlocal openai_closed
+        openai_closed = True
+
     fake_engine = SimpleNamespace(dispose=_fake_dispose)
     monkeypatch.setattr("app.core.database.engine", fake_engine)
     monkeypatch.setattr("app.core.redis.close_all_redis_clients", _fake_close_all_redis_clients)
+    monkeypatch.setattr("app.core.llm.close_openai_clients", _fake_close_openai_clients)
 
     await events.on_shutdown()
 
+    assert openai_closed is True
     assert redis_closed is True
     assert disposed is True
 

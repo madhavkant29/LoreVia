@@ -1,5 +1,5 @@
 """
-Character utility helpers â€” shared across route modules.
+Character utility helpers — shared across route modules.
 Covers display filtering, status derivation, relationship summaries,
 and text-sanitization helpers used on character data.
 """
@@ -197,6 +197,34 @@ def serialize_book_character(
             total_chapters=total_chapters,
         )
     return result
+
+
+def serialize_character_navigation(
+    char: Character,
+    *,
+    requested_fields: set[str],
+) -> dict[str, Any]:
+    """Serialize the small character shape used by navigation and pickers."""
+    visibility_state, approval_state, approval_source, approval_reason_codes = character_governance(
+        char
+    )
+    values: dict[str, Any] = {
+        "id": str(char.id),
+        "book_id": str(char.book_id),
+        "name": char.name,
+        "aliases": char.aliases or [],
+        "role": char.role,
+        "first_chapter": char.first_chapter,
+        "last_seen_chapter": char.last_seen_chapter,
+        "mention_count": char.mention_count or 0,
+        "status": character_status(char) if "status" in requested_fields else None,
+        "visibility_state": visibility_state,
+        "approval_state": approval_state,
+        "approval_source": approval_source,
+        "approval_reason_codes": approval_reason_codes,
+        "is_manual": bool(getattr(char, "is_manual", False)),
+    }
+    return {key: value for key, value in values.items() if key in requested_fields}
 
 
 def serialize_reader_character(

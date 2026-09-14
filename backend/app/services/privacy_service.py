@@ -57,6 +57,7 @@ from app.models.user import (
     UserWritingActivity,
 )
 from app.services.paddle_service import cancel_subscription_at_period_end
+from app.services.public_asset_service import revoke_public_book_assets
 from app.services.supabase_auth_service import delete_supabase_auth_user
 from app.utils.auth_utils import next_token_version, verify_password_safely
 from app.utils.books.manuscript import (
@@ -474,6 +475,7 @@ async def queue_book_permanent_deletion(
         metadata_json={"title": book.title, "requested_by_user_id": str(requested_by.id)},
     )
     db.add(request)
+    await revoke_public_book_assets(book.id, db=db, strict=True)
     await db.commit()
     await db.refresh(request)
     return request
@@ -560,6 +562,7 @@ async def request_account_deletion(
         for key in await collect_book_storage_keys(db, book.id):
             if key not in storage_keys:
                 storage_keys.append(key)
+        await revoke_public_book_assets(book.id, db=db, strict=True)
     forum_image_keys = (
         (
             await db.execute(

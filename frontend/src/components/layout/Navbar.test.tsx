@@ -7,6 +7,12 @@ const usePreferencesStoreMock = vi.hoisted(() => vi.fn())
 const replaceMock = vi.hoisted(() => vi.fn())
 const logoutApiMock = vi.hoisted(() => vi.fn())
 const clearAuthCookiesMock = vi.hoisted(() => vi.fn())
+const apiClientMock = vi.hoisted(() => ({
+  delete: vi.fn(() => Promise.resolve({ data: {} })),
+  get: vi.fn(() => Promise.resolve({ data: {} })),
+  post: vi.fn(() => Promise.resolve({ data: {} })),
+  put: vi.fn(() => Promise.resolve({ data: {} })),
+}))
 const prefetchChatsSidebarDataMock = vi.hoisted(() => vi.fn())
 const prefetchNotificationsSidebarDataMock = vi.hoisted(() => vi.fn())
 
@@ -42,6 +48,7 @@ vi.mock("@/lib/api/auth", () => ({
 }))
 
 vi.mock("@/lib/api/client", () => ({
+  apiClient: apiClientMock,
   clearAuthCookies: clearAuthCookiesMock,
 }))
 
@@ -79,6 +86,7 @@ describe("Navbar", () => {
     usePreferencesStoreMock.mockReset()
     logoutApiMock.mockReset()
     clearAuthCookiesMock.mockReset()
+    Object.values(apiClientMock).forEach((mock) => mock.mockClear())
     replaceMock.mockReset()
     prefetchChatsSidebarDataMock.mockReset()
     prefetchNotificationsSidebarDataMock.mockReset()

@@ -13,7 +13,6 @@ type LibraryDialogThemeProps = {
 
 export function PublishBookDialog({
   surfaceClass,
-  mutedText,
   headingText,
   controlClass,
   publishSlug,
@@ -83,7 +82,6 @@ export function PublishBookDialog({
 export function PermanentDeleteBookDialog({
   book,
   surfaceClass,
-  mutedText,
   headingText,
   controlClass,
   deleteConfirmation,

@@ -1,5 +1,5 @@
 """
-Book utility helpers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â DB query wrappers, cover management, progress
+Book utility helpers — DB query wrappers, cover management, progress
 computation, manuscript parsing, and chapter number utilities extracted
 from the books route.
 """

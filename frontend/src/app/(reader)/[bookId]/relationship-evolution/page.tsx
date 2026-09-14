@@ -1,7 +1,8 @@
 "use client"
 import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { useParams, useRouter } from "next/navigation"
+import Link from "next/link"
+import { useParams } from "next/navigation"
 import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { readerApi } from "@/lib/api/reader"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
@@ -9,7 +10,6 @@ import type { RelationshipEvolutionPair } from "@/types/reader"
 
 export default function RelationshipEvolutionPage() {
   const { bookId } = useParams<{ bookId: string }>()
-  const router = useRouter()
   const [chapter, setChapter] = useState(1)
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
@@ -33,7 +33,7 @@ export default function RelationshipEvolutionPage() {
   return (
     <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-5xl">
-        <button onClick={() => router.back()} className={`text-sm font-medium transition ${isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"}`}>{"<- Back"}</button>
+        <Link href={`/${bookId}`} className={`text-sm font-medium transition ${isDark ? "text-indigo-300 hover:text-indigo-200" : "text-violet-700 hover:text-violet-800"}`}>Home</Link>
         <h1 className={`mt-4 font-serif text-5xl ${isDark ? "text-white" : "text-stone-950"}`}>Relationship Evolution</h1>
         <p className={`mt-3 text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>See how alliances and tensions shift over time, and which event changed the relationship.</p>
         <p className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Showing relationship events through chapter {chapter}.</p>

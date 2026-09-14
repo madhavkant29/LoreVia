@@ -2,7 +2,7 @@ import Link from "next/link"
 import type { DragEvent } from "react"
 
 import { ManuscriptSceneOrderStatus, type SceneOrderSaveState } from "@/components/reader/ManuscriptSceneOrderStatus"
-import type { NovelScene, WorkspaceSceneGroup } from "@/types/book"
+import type { WorkspaceScene, WorkspaceSceneGroup } from "@/types/book"
 
 import {
   SCENE_DRAG_CHAPTER_MIME,
@@ -23,9 +23,9 @@ type ManuscriptSceneRailSectionProps = {
   sceneDropTarget: SceneDropTarget | null
   sceneOrderSaveState: Record<number, SceneOrderSaveState>
   onDragSceneStart: (chapterNumber: number, sceneId: string, index: number) => void
-  onInsertSceneIntoDraft: (scene: NovelScene) => void
-  onOpenSceneEditor: (scene: NovelScene | null) => void
-  onRemoveScene: (scene: NovelScene) => void
+  onInsertSceneIntoDraft: (scene: WorkspaceScene) => void
+  onOpenSceneEditor: (scene: WorkspaceScene | null) => void
+  onRemoveScene: (scene: WorkspaceScene) => void
   onReorderScenesInChapter: (chapterNumber: number, sceneId: string, targetIndex: number) => void
   onResetSceneDragState: () => void
   onSceneDropTargetChange: (target: SceneDropTarget) => void
@@ -83,14 +83,14 @@ export function ManuscriptSceneRailSection({
   return (
     <div className="mt-4">
       <div className="flex items-center justify-between gap-3">
-        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Scenes / reorder</p>
+        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Scenes / reorder</p>
         <Link
           href={`/${bookId}/scenes`}
           className={`rounded-sm border px-2.5 py-1 text-3xs font-semibold ${isDark ? "border-white/10 bg-white/[0.04] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
         >
           Open workspace
         </Link>
-        <label className={`flex items-center gap-2 text-3xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+        <label className={`flex items-center gap-2 text-3xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>
           <input
             type="checkbox"
             checked={includeSceneMetadataOnImport}
@@ -120,7 +120,7 @@ export function ManuscriptSceneRailSection({
                 className="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-2 text-left"
               >
                 <span className={`text-xs font-semibold uppercase tracking-[0.12em] ${isDark ? "text-slate-300" : "text-stone-700"}`}>{group.label}</span>
-                <span className={`text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{collapsed ? "+" : "âˆ’"}</span>
+                <span className={`text-3xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{collapsed ? "+" : "-"}</span>
               </button>
               {isChapterSceneGroup && (isDraggingWithinChapter || chapterOrderState !== "idle") ? (
                 <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
@@ -145,7 +145,7 @@ export function ManuscriptSceneRailSection({
                               onSceneDropTargetChange({ chapterNumber: chapterSceneNumber, index })
                             }}
                             onDrop={(event) => dropScene(event, chapterSceneNumber, chapterReorderDisabled, index)}
-                            className={`overflow-hidden rounded-sm border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${isBeforeDropTarget ? isDark ? "border-teal-400/40 bg-teal-500/15 text-teal-100" : "border-teal-300 bg-teal-50 text-teal-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
+                            className={`overflow-hidden rounded-sm border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${isBeforeDropTarget ? isDark ? "border-teal-400/40 bg-teal-500/15 text-teal-100" : "border-teal-300 bg-teal-50 text-teal-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-300" : "border-dashed border-stone-200 bg-stone-50 text-stone-600"}`}
                           >
                             <span className="inline-flex h-full items-center">{getSceneDropSlotLabel(index, chapterSceneCount)}</span>
                           </div>
@@ -206,11 +206,11 @@ export function ManuscriptSceneRailSection({
                           </div>
                           <div data-testid={`scene-copy-${scene.id}`} className="mt-3 min-w-0">
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                              {isChapterSceneGroup ? <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Scene {scene.sort_order}</span> : null}
+                              {isChapterSceneGroup ? <span className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Scene {scene.sort_order}</span> : null}
                               <p className={`min-w-0 break-words text-sm font-semibold leading-5 ${isDark ? "text-white" : "text-stone-900"}`}>{scene.title}</p>
                             </div>
-                            <p className={`mt-1 break-words text-3xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{scene.path}</p>
-                            {scene.description ? <p className={`mt-2 break-words text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{scene.description}</p> : null}
+                            <p className={`mt-1 break-words text-3xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{scene.path}</p>
+                            {scene.description ? <p className={`mt-2 break-words text-xs leading-5 ${isDark ? "text-slate-300" : "text-stone-500"}`}>{scene.description}</p> : null}
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2">
                             <button onClick={() => onOpenSceneEditor(scene)} className={`rounded-none px-2.5 py-1 text-3xs ${isDark ? "bg-white/10 text-slate-200" : "bg-white text-stone-700"}`}>Edit</button>
@@ -230,7 +230,7 @@ export function ManuscriptSceneRailSection({
                         onSceneDropTargetChange({ chapterNumber: chapterSceneNumber, index: chapterSceneCount })
                       }}
                       onDrop={(event) => dropScene(event, chapterSceneNumber, chapterReorderDisabled, chapterSceneCount)}
-                      className={`overflow-hidden rounded-sm border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${sceneDropTarget?.chapterNumber === chapterSceneNumber && sceneDropTarget.index === chapterSceneCount ? isDark ? "border-teal-400/40 bg-teal-500/15 text-teal-100" : "border-teal-300 bg-teal-50 text-teal-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-500" : "border-dashed border-stone-200 bg-stone-50 text-stone-400"}`}
+                      className={`overflow-hidden rounded-sm border text-center text-3xs font-semibold uppercase tracking-[0.16em] transition-all ${isDraggingWithinChapter ? "h-8 px-3" : "h-0 border-transparent px-0 opacity-0"} ${sceneDropTarget?.chapterNumber === chapterSceneNumber && sceneDropTarget.index === chapterSceneCount ? isDark ? "border-teal-400/40 bg-teal-500/15 text-teal-100" : "border-teal-300 bg-teal-50 text-teal-700" : isDark ? "border-dashed border-white/10 bg-white/[0.03] text-slate-300" : "border-dashed border-stone-200 bg-stone-50 text-stone-600"}`}
                     >
                       <span className="inline-flex h-full items-center">{getSceneDropSlotLabel(chapterSceneCount, chapterSceneCount)}</span>
                     </div>
@@ -240,7 +240,7 @@ export function ManuscriptSceneRailSection({
             </div>
           )
         })}
-        {filteredSceneGroups.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>No scenes match this search yet.</p> : null}
+        {filteredSceneGroups.length === 0 ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-stone-500"}`}>No scenes match this search yet.</p> : null}
       </div>
     </div>
   )

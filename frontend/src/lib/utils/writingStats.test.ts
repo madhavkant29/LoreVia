@@ -68,7 +68,7 @@ describe("writing stats utilities", () => {
     expect(formatWordCount(23065)).toBe("23,065 words")
   })
 
-  it("includes LLM usage in secondary stats", () => {
+  it("includes customer-facing AI capacity in secondary stats", () => {
     const stats = buildSecondaryStats({
       public: {
         total_books_read: 2,
@@ -79,6 +79,10 @@ describe("writing stats utilities", () => {
         total_token_consumption: 42000,
         llm_request_count: 18,
         llm_total_tokens: 9876,
+        ai_interactive_available: true,
+        ai_processing_available: true,
+        ai_capacity_usage_percent: 34,
+        ai_capacity_resets_at: "2026-09-01T00:00:00Z",
         total_chapters_tracked: 9,
         saved_quotes: 3,
         active_analyzed_words: 12345,
@@ -107,6 +111,7 @@ describe("writing stats utilities", () => {
     })
 
     expect(stats.some((item) => item.label === "LLM requests" && item.value === "18")).toBe(true)
-    expect(stats.some((item) => item.label === "LLM tokens" && item.value === "9,876")).toBe(true)
+    expect(stats.some((item) => item.label === "AI capacity" && item.value === "34% used")).toBe(true)
+    expect(stats.find((item) => item.label === "AI capacity")?.note).toContain("Sep 1, 2026")
   })
 })

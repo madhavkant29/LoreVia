@@ -153,7 +153,6 @@ describe("NotificationBell", () => {
       enabled: false,
       pollMs: false,
       refreshOnFocus: true,
-      syncRevisionDigests: false,
     })
 
     const buttons = view.querySelectorAll("button")
@@ -169,7 +168,6 @@ describe("NotificationBell", () => {
       enabled: true,
       pollMs: false,
       refreshOnFocus: true,
-      syncRevisionDigests: true,
     })
   })
 

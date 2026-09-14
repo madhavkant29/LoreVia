@@ -1,8 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Suspense, useEffect, useState } from "react"
+import { useParams, useSearchParams } from "next/navigation"
+import { Suspense, useCallback, useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { booksApi } from "@/lib/api/books"
@@ -31,7 +31,6 @@ export default function SearchPage() {
 
 function SearchPageInner() {
   const { bookId } = useParams<{ bookId: string }>()
-  const router = useRouter()
   const searchParams = useSearchParams()
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
@@ -49,13 +48,8 @@ function SearchPageInner() {
     staleTime: 20_000,
   })
 
-  useEffect(() => {
-    const seededQuery = searchParams.get("q")?.trim()
-    if (!seededQuery || query || loading || results.length > 0 || thematicResults.length > 0) return
-    runSearch(seededQuery).catch(() => {})
-  }, [loading, query, results.length, searchParams, thematicResults.length])
-
-  const runSearch = async (nextQuery = query) => {
+  const isAuthor = book?.mode === "author"
+  const runSearch = useCallback(async (nextQuery = query) => {
     const trimmed = nextQuery.trim()
     if (!trimmed) return
     setQuery(trimmed)
@@ -69,7 +63,7 @@ function SearchPageInner() {
         setResults([])
         capture("search_results_loaded", { book_id: bookId, result_count: data.results.length, mode })
       } else {
-        const data = await readerApi.search(bookId, trimmed, 9999)
+        const data = await readerApi.search(bookId, trimmed)
         setResults(data)
         setThematicResults([])
         capture("search_results_loaded", { book_id: bookId, result_count: data.length, mode })
@@ -82,14 +76,18 @@ function SearchPageInner() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [bookId, isAuthor, mode, query])
 
-  const isAuthor = book?.mode === "author"
+  useEffect(() => {
+    const seededQuery = searchParams.get("q")?.trim()
+    if (!seededQuery || query || loading || results.length > 0 || thematicResults.length > 0) return
+    runSearch(seededQuery).catch(() => {})
+  }, [loading, query, results.length, runSearch, searchParams, thematicResults.length])
 
   return (
     <div className={`min-h-screen px-4 py-8 transition-colors ${isDark ? "bg-[#071211] text-slate-100" : "bg-stone-50 text-stone-950"}`}>
       <div className="mx-auto max-w-5xl">
-        <button onClick={() => router.back()} className={`text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>{"<- Back"}</button>
+        <Link href={`/${bookId}`} className={`text-sm font-medium transition ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>Home</Link>
 
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
           <div>

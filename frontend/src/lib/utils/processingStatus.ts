@@ -10,6 +10,8 @@ export type NormalizedProcessingStatus = {
   lastError: string | null
   retryAvailable: boolean
   resumeAvailable?: boolean
+  autoResume?: boolean
+  nextResumeAt?: string | null
   paused?: boolean
   partialReady: boolean
   ready: boolean
@@ -71,32 +73,42 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
   const chaptersTotal = nonNegativeInt(processing?.chapters_total)
   const retryActions = Array.isArray(processing?.retry_actions) ? processing.retry_actions : []
   const retryExplicitlyDisabled = processing?.retry_available === false
-  const retryAvailable = Boolean(
+  const blocker = processing?.resume_blockers?.[0]
+  const autoResume = Boolean(
+    processing?.auto_resume
+    || (processing?.pause_reason === "llm_token_limit" && blocker?.auto_resume)
+  )
+  const nextResumeAt = processing?.next_resume_at || blocker?.next_resume_at || null
+  const retryAvailable = !autoResume && Boolean(
     processing?.retry_available
     || retryActions.some((action) => action !== "wait_for_analysis")
     || (stage === "failed" && !retryExplicitlyDisabled)
     || processing?.last_error
   )
-  const resumeAvailable = Boolean(
+  const resumeAvailable = !autoResume && Boolean(
     processing?.resume_available || retryActions.includes("continue_processing")
   )
   const partialReady = stage !== "ready" && stage !== "failed" && chaptersCompleted !== null && chaptersCompleted > 0
-  const detail = buildProcessingDetail(stage, chaptersCompleted, chaptersTotal, progressPct, partialReady)
+  const detail = autoResume
+    ? buildAutoResumeDetail(blocker?.kind, nextResumeAt, chaptersCompleted, chaptersTotal)
+    : buildProcessingDetail(stage, chaptersCompleted, chaptersTotal, progressPct, partialReady)
   const failureKind = stage === "failed" ? (retryAvailable ? "recoverable" : "support_required") : null
 
   return {
     stage,
-    label: resumeAvailable ? "Processing paused" : processing?.current_step_label || STAGE_LABELS[stage],
+    label: resumeAvailable || autoResume ? "Processing paused" : processing?.current_step_label || STAGE_LABELS[stage],
     detail: resumeAvailable
-      ? processing?.resume_blockers?.[0]?.detail || "Continue when processing capacity is available"
+      ? blocker?.detail || "Continue when processing capacity is available"
       : detail,
     progressPct,
     chaptersCompleted,
     chaptersTotal,
-    lastError: processing?.last_error || null,
+    lastError: autoResume ? null : processing?.last_error || null,
     retryAvailable,
     resumeAvailable,
-    paused: resumeAvailable,
+    autoResume,
+    nextResumeAt,
+    paused: resumeAvailable || autoResume,
     partialReady,
     ready: stage === "ready",
     failed: stage === "failed",
@@ -111,6 +123,24 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
             ? "partial_ready"
             : "processing",
   }
+}
+
+function buildAutoResumeDetail(
+  blockerKind: string | undefined,
+  nextResumeAt: string | null,
+  chaptersCompleted: number | null,
+  chaptersTotal: number | null,
+) {
+  const parsed = nextResumeAt ? new Date(nextResumeAt) : null
+  const limitLabel = blockerKind === "llm_budget" ? "Monthly AI capacity" : "Token limit"
+  const fallbackLabel = blockerKind === "llm_budget" ? "the monthly reset" : "the rolling window refreshes"
+  const resumeCopy = parsed && !Number.isNaN(parsed.getTime())
+    ? `${limitLabel} reached. Reprocessing will resume automatically around ${parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`
+    : `${limitLabel} reached. Reprocessing will resume automatically when ${fallbackLabel}.`
+  const progressCopy = chaptersCompleted !== null && chaptersTotal
+    ? ` ${chaptersCompleted}/${chaptersTotal} chapters complete.`
+    : ""
+  return `${resumeCopy}${progressCopy}`
 }
 
 function buildProcessingDetail(

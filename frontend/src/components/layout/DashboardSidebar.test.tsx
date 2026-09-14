@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 const replaceMock = vi.hoisted(() => vi.fn())
 const prefetchChatsSidebarDataMock = vi.hoisted(() => vi.fn())
 const prefetchNotificationsSidebarDataMock = vi.hoisted(() => vi.fn())
+const supportConfigMock = vi.hoisted(() => vi.fn(() => Promise.resolve({ community_url: null })))
 
 const authState = {
   hydrated: true,
@@ -45,6 +46,13 @@ vi.mock("@/components/layout/NotificationBell", () => ({
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
     list: vi.fn(),
+    listSelector: vi.fn(),
+  },
+}))
+
+vi.mock("@/lib/api/support", () => ({
+  supportApi: {
+    config: supportConfigMock,
   },
 }))
 
@@ -56,7 +64,7 @@ vi.mock("@/lib/query/queryClient", () => ({
 
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (key: string) => key,
-  booksListCacheKey: () => "books-list",
+  booksSelectorCacheKey: () => "books-selector",
 }))
 
 vi.mock("@/lib/query/sidebarPrefetch", () => ({
@@ -70,6 +78,25 @@ vi.mock("@/lib/stores/authStore", () => ({
 
 vi.mock("@/lib/stores/preferencesStore", () => ({
   usePreferencesStore: () => ({ theme: "dark", toggleTheme: vi.fn() }),
+}))
+
+vi.mock("@/lib/stores/uiPreferencesStore", () => ({
+  useUiPreferencesStore: (selector: (state: {
+    preferences: {
+      complexity_mode: "standard"
+      dashboard_visibility: Record<string, unknown>
+      dashboard_order: string[]
+      public_tool_visibility: Record<string, unknown>
+    }
+  }) => unknown) =>
+    selector({
+      preferences: {
+        complexity_mode: "standard",
+        dashboard_visibility: {},
+        dashboard_order: [],
+        public_tool_visibility: {},
+      },
+    }),
 }))
 
 import { DashboardSidebar } from "./DashboardSidebar"
@@ -92,6 +119,7 @@ describe("DashboardSidebar", () => {
     replaceMock.mockReset()
     prefetchChatsSidebarDataMock.mockReset()
     prefetchNotificationsSidebarDataMock.mockReset()
+    supportConfigMock.mockReset().mockResolvedValue({ community_url: null })
     container = null
     root = null
   })
@@ -99,7 +127,9 @@ describe("DashboardSidebar", () => {
   it("renders dashboard navigation with one public uploads link and an active library item", () => {
     const view = renderSidebar()
     const uploadsLinks = Array.from(view.querySelectorAll("a")).filter((element) => element.textContent?.includes("Public Uploads"))
-    const libraryLink = Array.from(view.querySelectorAll("a")).find((element) => element.textContent?.includes("Library"))
+    const libraryLink = Array.from(view.querySelectorAll('a[href="/library"]')).find((element) =>
+      element.textContent?.includes("Home"),
+    )
 
     expect(uploadsLinks).toHaveLength(1)
     expect(uploadsLinks[0].getAttribute("href")).toBe("/public/uploads")

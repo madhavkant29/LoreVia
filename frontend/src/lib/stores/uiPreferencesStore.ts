@@ -68,7 +68,7 @@ let broadcastChannel: BroadcastChannel | null = null
 const syncPromises = new Map<string, Promise<boolean>>()
 const syncTimers = new Map<string, number>()
 
-export function defaultUserUiPreference(mode: ComplexityMode = "standard"): UserUiPreference {
+export function defaultUserUiPreference(mode: ComplexityMode = "focused"): UserUiPreference {
   return {
     schema_version: 1,
     revision: 1,
@@ -499,12 +499,25 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
         }
       } catch {
         if (!accountIsCurrent(userId, generation)) return
-        set({
-          syncState: cached ? "sync_pending" : "api_unavailable",
-          syncMessage: cached
-            ? "Saved on this device; sync pending"
-            : "Using the standard layout until preferences load.",
-        })
+        if (cached) {
+          set({
+            syncState: "sync_pending",
+            syncMessage: "Saved on this device; sync pending",
+          })
+        } else {
+          const fallbackPreferences = defaultUserUiPreference("focused")
+          set((state) => ({
+            preferences: fallbackPreferences,
+            bookPreferences: Object.fromEntries(
+              Object.keys(state.bookPreferences).map((bookId) => [
+                bookId,
+                defaultBookUiPreference(bookId, fallbackPreferences.complexity_mode),
+              ]),
+            ),
+            syncState: "api_unavailable",
+            syncMessage: "Using the focused layout until preferences load.",
+          }))
+        }
       }
     },
 

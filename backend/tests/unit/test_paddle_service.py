@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,76 @@ def _sign_payload(payload: dict, timestamp: int, secret: str) -> tuple[bytes, st
         hashlib.sha256,
     ).hexdigest()
     return raw_body, f"ts={timestamp};h1={digest}"
+
+
+@pytest.mark.asyncio
+async def test_find_checkout_transaction_pages_until_exact_intent_match(monkeypatch):
+    requested_params: list[dict] = []
+    responses = [
+        {
+            "data": [
+                {
+                    "id": "txn_newer",
+                    "custom_data": {"checkout_intent_id": "another-intent"},
+                }
+            ],
+            "meta": {"pagination": {"has_more": True}},
+        },
+        {
+            "data": [
+                {
+                    "id": "txn_recovered",
+                    "status": "draft",
+                    "customer_id": "ctm_123",
+                    "custom_data": {"checkout_intent_id": "intent_123"},
+                }
+            ],
+            "meta": {"pagination": {"has_more": False}},
+        },
+    ]
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, _url, *, headers=None, params=None):
+            requested_params.append(dict(params or {}))
+            return FakeResponse(responses.pop(0))
+
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient",
+        lambda timeout=20.0: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY",
+        "pdl_test_key",
+        raising=False,
+    )
+
+    state = await paddle_service.find_paddle_transaction_by_checkout_intent(
+        "intent_123",
+        customer_id="ctm_123",
+        created_after=datetime(2026, 9, 6, 10, 0, tzinfo=UTC),
+    )
+
+    assert state is not None
+    assert state.transaction_id == "txn_recovered"
+    assert requested_params[0]["customer_id"] == "ctm_123"
+    assert requested_params[0]["created_at[GTE]"] == "2026-09-06T10:00:00+00:00"
+    assert requested_params[1]["after"] == "txn_newer"
 
 
 def test_verify_webhook_signature_accepts_valid_recent_signature(monkeypatch):
@@ -133,7 +204,24 @@ async def test_create_checkout_url_uses_recommended_checkout_page_when_override_
             return {
                 "data": {
                     "id": "txn_123",
+                    "status": "draft",
+                    "customer_id": "ctm_123",
+                    "currency_code": "USD",
+                    "collection_mode": "automatic",
+                    "discount_id": None,
+                    "custom_data": {
+                        "user_id": "user_123",
+                        "plan": "author_monthly",
+                        "checkout_intent_id": "intent_123",
+                    },
+                    "items": [
+                        {
+                            "price": {"id": "pri_author_monthly"},
+                            "quantity": 1,
+                        }
+                    ],
                     "checkout": {"url": "https://getlorevia.com/checkout?_ptxn=txn_123"},
+                    "details": {"totals": {"total": "1900"}},
                 }
             }
 
@@ -179,6 +267,9 @@ async def test_create_checkout_url_uses_recommended_checkout_page_when_override_
         user_id="user_123",
         email="author@getlorevia.com",
         plan="author_monthly",
+        checkout_intent_id="intent_123",
+        expected_total_minor="1900",
+        currency_code="USD",
     )
 
     assert checkout_url == "https://getlorevia.com/checkout?_ptxn=txn_123"
@@ -186,6 +277,349 @@ async def test_create_checkout_url_uses_recommended_checkout_page_when_override_
     assert transaction_id == "txn_123"
     assert captured["url"] == "https://api.paddle.com/transactions"
     assert captured["json"]["checkout"]["url"] == "https://getlorevia.com/checkout"
+    assert captured["json"]["currency_code"] == "USD"
+    assert captured["json"]["custom_data"]["checkout_intent_id"] == "intent_123"
+
+
+@pytest.mark.asyncio
+async def test_create_checkout_url_cancels_transaction_when_total_changed(monkeypatch):
+    canceled: list[tuple[str, dict]] = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": "txn_changed",
+                        "status": "draft",
+                        "customer_id": "ctm_123",
+                        "currency_code": "USD",
+                        "collection_mode": "automatic",
+                        "discount_id": None,
+                        "custom_data": {
+                            "user_id": "user_123",
+                            "plan": "author_monthly",
+                            "checkout_intent_id": "intent_123",
+                        },
+                        "items": [
+                            {
+                                "price": {"id": "pri_author_monthly"},
+                                "quantity": 1,
+                            }
+                        ],
+                        "checkout": {"url": "https://getlorevia.com/checkout?_ptxn=txn_changed"},
+                        "details": {"totals": {"total": "2000"}},
+                    }
+                }
+            )
+
+        async def patch(self, url, headers=None, json=None):
+            canceled.append((url, json))
+            return FakeResponse({"data": {"id": "txn_changed", "status": "canceled"}})
+
+    async def fake_get_or_create_customer(email, existing_customer_id=None):
+        return "ctm_123"
+
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient",
+        lambda timeout=20.0: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.get_or_create_customer",
+        fake_get_or_create_customer,
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY",
+        "pdl_test_key",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "pri_author_monthly",
+        raising=False,
+    )
+
+    with pytest.raises(paddle_service.PaddlePriceChangedError, match="differ from"):
+        await paddle_service.create_checkout_url(
+            user_id="user_123",
+            email="author@getlorevia.com",
+            plan="author_monthly",
+            checkout_intent_id="intent_123",
+            expected_total_minor="1900",
+            currency_code="USD",
+        )
+
+    assert canceled == [
+        (
+            "https://api.paddle.com/transactions/txn_changed",
+            {"status": "canceled"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_checkout_url_cancels_transaction_when_identity_does_not_match(
+    monkeypatch,
+):
+    canceled: list[str] = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": "txn_wrong_owner",
+                        "status": "draft",
+                        "customer_id": "ctm_123",
+                        "currency_code": "USD",
+                        "collection_mode": "automatic",
+                        "discount_id": None,
+                        "custom_data": {
+                            "user_id": "another_user",
+                            "plan": "author_monthly",
+                            "checkout_intent_id": "intent_123",
+                        },
+                        "items": [
+                            {
+                                "price": {"id": "pri_author_monthly"},
+                                "quantity": 1,
+                            }
+                        ],
+                        "checkout": {
+                            "url": "https://getlorevia.com/checkout?_ptxn=txn_wrong_owner"
+                        },
+                        "details": {"totals": {"total": "1900"}},
+                    }
+                }
+            )
+
+        async def patch(self, url, headers=None, json=None):
+            canceled.append(url)
+            return FakeResponse({"data": {"status": "canceled"}})
+
+    async def fake_get_or_create_customer(email, existing_customer_id=None):
+        return "ctm_123"
+
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient",
+        lambda timeout=20.0: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.get_or_create_customer",
+        fake_get_or_create_customer,
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY",
+        "pdl_test_key",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "pri_author_monthly",
+        raising=False,
+    )
+
+    with pytest.raises(paddle_service.PaddlePriceChangedError, match="differ from"):
+        await paddle_service.create_checkout_url(
+            user_id="user_123",
+            email="author@getlorevia.com",
+            plan="author_monthly",
+            checkout_intent_id="intent_123",
+            expected_total_minor="1900",
+            currency_code="USD",
+        )
+
+    assert canceled == ["https://api.paddle.com/transactions/txn_wrong_owner"]
+
+
+@pytest.mark.asyncio
+async def test_get_paddle_price_quote_uses_tax_inclusive_provider_total(monkeypatch):
+    requests: list[tuple[str, dict | None]] = []
+    price = {
+        "id": "pri_author_monthly",
+        "status": "active",
+        "trial_period": None,
+        "tax_mode": "internal",
+        "unit_price_overrides": [],
+        "billing_cycle": {"interval": "month", "frequency": 1},
+        "unit_price": {"amount": "1900", "currency_code": "USD"},
+    }
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            requests.append((url, None))
+            return FakeResponse({"data": price})
+
+        async def post(self, url, headers=None, json=None):
+            requests.append((url, json))
+            return FakeResponse(
+                {
+                    "data": {
+                        "currency_code": "USD",
+                        "address": {"country_code": "US"},
+                        "details": {
+                            "line_items": [
+                                {
+                                    "price": price,
+                                    "totals": {"total": "1900"},
+                                    "formatted_totals": {"total": "$19.00"},
+                                }
+                            ]
+                        },
+                    }
+                }
+            )
+
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient",
+        lambda timeout=20.0: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY",
+        "pdl_test_key",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "pri_author_monthly",
+        raising=False,
+    )
+
+    quote = await paddle_service.get_paddle_price_quote(
+        "author_monthly",
+        customer_ip_address="203.0.113.10",
+    )
+
+    assert quote.amount_minor == "1900"
+    assert quote.currency_code == "USD"
+    assert quote.formatted_total == "$19.00 USD"
+    assert quote.country_code == "US"
+    assert requests[1][1] == {
+        "items": [{"price_id": "pri_author_monthly", "quantity": 1}],
+        "currency_code": "USD",
+        "customer_ip_address": "203.0.113.10",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("price_change", "expected_message"),
+    [
+        ({"trial_period": {"interval": "day", "frequency": 10}}, "own trial"),
+        ({"tax_mode": "external"}, "tax-inclusive"),
+        ({"unit_price_overrides": [{"country_codes": ["IN"]}]}, "regional"),
+        ({"unit_price": {"amount": "2000", "currency_code": "USD"}}, "advertised USD"),
+        ({"unit_price": {"amount": "1900", "currency_code": "EUR"}}, "advertised USD"),
+    ],
+)
+async def test_get_paddle_price_quote_rejects_unsafe_price_configuration(
+    monkeypatch,
+    price_change,
+    expected_message,
+):
+    price = {
+        "id": "pri_author_monthly",
+        "status": "active",
+        "trial_period": None,
+        "tax_mode": "internal",
+        "unit_price_overrides": [],
+        "billing_cycle": {"interval": "month", "frequency": 1},
+        "unit_price": {"amount": "1900", "currency_code": "USD"},
+        **price_change,
+    }
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": price}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.services.paddle_service.httpx.AsyncClient",
+        lambda timeout=20.0: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_API_KEY",
+        "pdl_test_key",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.paddle_service.settings.PADDLE_AUTHOR_MONTHLY_PRICE_ID",
+        "pri_author_monthly",
+        raising=False,
+    )
+
+    with pytest.raises(
+        paddle_service.PaddlePriceConfigurationError,
+        match=expected_message,
+    ):
+        await paddle_service.get_paddle_price_quote("author_monthly")
 
 
 @pytest.mark.asyncio
