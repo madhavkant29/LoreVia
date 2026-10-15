@@ -70,7 +70,6 @@ export default function ContactPage() {
       title="We're here to help."
       description="Use this page to route support, billing, legal, copyright, privacy, and security questions without guessing which channel is appropriate."
       effectiveDate={TRUST_EFFECTIVE_DATE}
-      notice="This page is operational, not decorative. It tells you where to send what, what context helps, and how to report something sensitive privately."
       sections={sections}
       rightRail={
         <LegalRightRail

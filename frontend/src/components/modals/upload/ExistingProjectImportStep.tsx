@@ -30,7 +30,8 @@ type Props = {
   setChapterText: Dispatch<SetStateAction<string>>
   inputRef: RefObject<HTMLInputElement | null>
   files: File[]
-  setFiles: Dispatch<SetStateAction<File[]>>
+  onFilesSelected: (files: File[]) => void
+  chapterUploadAccept: string
   chapterUploadHelp: string
   splitIntoChapters: boolean
   setSplitIntoChapters: Dispatch<SetStateAction<boolean>>
@@ -61,7 +62,8 @@ export function ExistingProjectImportStep({
   setChapterText,
   inputRef,
   files,
-  setFiles,
+  onFilesSelected,
+  chapterUploadAccept,
   chapterUploadHelp,
   splitIntoChapters,
   setSplitIntoChapters,
@@ -138,7 +140,7 @@ export function ExistingProjectImportStep({
             </>
           ) : (
             <div onClick={() => inputRef.current?.click()} className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition-colors ${isDark ? "border-white/15 bg-white/[0.03] hover:border-indigo-400" : "border-gray-300 bg-white hover:border-indigo-400"}`}>
-              <input ref={inputRef} type="file" multiple accept={isScreenplayWorkspace ? ".pdf,.fountain,.txt,.md" : ".pdf,.epub,.docx,.txt,.md"} className="hidden" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
+              <input ref={inputRef} type="file" multiple accept={chapterUploadAccept} className="hidden" onChange={(event) => { onFilesSelected(Array.from(event.target.files ?? [])); event.target.value = "" }} />
               <p className={`text-sm ${isDark ? files.length > 0 ? "text-slate-100" : "text-slate-400" : files.length > 0 ? "text-slate-700" : "text-slate-400"}`}>
                 {files.length > 0 ? files.length === 1 ? files[0].name : `${files.length} files selected` : chapterUploadHelp}
               </p>

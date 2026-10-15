@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND")
   },
+  usePathname: () => "/demo/gregor-samsa-character-tracker",
 }))
 
 vi.mock("@/components/marketing/PublicContentHeader", () => ({
@@ -96,6 +97,7 @@ describe("public slug runtime pages", () => {
     expect(container?.querySelectorAll("#sources-and-further-reading")).toHaveLength(1)
     expect(container?.querySelector('nav a[href="#sources-and-further-reading"]')).toBeTruthy()
     expect(container?.querySelector('a[data-editorial-event="editorial_related_opened"]')).toBeTruthy()
+    expect(container?.querySelector(".editorial-hero img")).toBeTruthy()
 
     root?.unmount()
     container?.remove()
@@ -103,10 +105,13 @@ describe("public slug runtime pages", () => {
     container = null
 
     await renderElement(await DemoPage({ params: Promise.resolve({ slug: demo.slug }) }))
-    expect(bodyText()).toContain(demo.title)
+    expect(bodyText()).toContain(demo.title.replace(/^Demo:\s*/, ""))
     expect(bodyText()).toContain(demo.featuredInsight)
     expect((container as HTMLDivElement | null)?.querySelector("main")?.getAttribute("data-active-section")).toBe("demo")
     expect((container as HTMLDivElement | null)?.querySelector(`[data-testid="demo-jsonld-${demo.slug}"]`)).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector("[data-testid='demo-case-study']")).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelectorAll("[data-testid='demo-case-study'] > section")).toHaveLength(demo.sections.length)
+    expect(bodyText()).not.toContain("Why this page exists")
 
     ;(root as Root | null)?.unmount()
     ;(container as HTMLDivElement | null)?.remove()
@@ -119,6 +124,8 @@ describe("public slug runtime pages", () => {
     expect((container as HTMLDivElement | null)?.querySelector("main")?.getAttribute("data-active-section")).toBe("answers")
     expect((container as HTMLDivElement | null)?.querySelector(`[data-testid="answer-jsonld-${answer.slug}"]`)).toBeTruthy()
     expect((container as HTMLDivElement | null)?.querySelector("article.editorial-article--answer")).toBeTruthy()
+    expect((container as HTMLDivElement | null)?.querySelector(".editorial-article--answer .editorial-hero")).toBeNull()
+    expect((container as HTMLDivElement | null)?.querySelectorAll(".editorial-related-grid--text img")).toHaveLength(0)
 
     const blogMetadata = await generateBlogMetadata({ params: Promise.resolve({ slug: article.slug }) })
     const demoMetadata = await generateDemoMetadata({ params: Promise.resolve({ slug: demo.slug }) })

@@ -324,6 +324,21 @@ const localStorageMock = {
 beforeEach(() => {
   vi.stubGlobal("localStorage", localStorageMock)
   localStorageMock.clear()
+  // These specs exercise the desktop manuscript workspace with inline rails.
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
   Object.defineProperty(window, "print", { configurable: true, value: vi.fn() })
   Object.defineProperty(window.URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:manuscript") })
   Object.defineProperty(window.URL, "revokeObjectURL", { configurable: true, value: vi.fn() })

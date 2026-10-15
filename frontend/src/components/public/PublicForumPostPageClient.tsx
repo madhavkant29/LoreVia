@@ -412,12 +412,11 @@ export function PublicForumPostPageClient({
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_312px] lg:px-8">
         <main className="min-w-0">
-          <article className={`overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+          <article className={`border-y ${isDark ? "border-white/10" : "border-slate-200"}`}>
             <div className="flex">
-              <div className={`hidden w-[72px] shrink-0 flex-col items-center justify-start gap-2 border-r px-3 py-4 md:flex ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50/70"}`}>
-                <VoteArrowIcon className={isDark ? "text-slate-500" : "text-slate-400"} />
+              <div className={`hidden w-[64px] shrink-0 flex-col items-center justify-start gap-1 border-r px-3 py-5 md:flex ${isDark ? "border-white/10" : "border-slate-200"}`}>
                 <span className="text-xl font-semibold">{Math.round(post.discoverability_score)}</span>
-                <span className={`text-3xs uppercase tracking-[0.16em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>pulse</span>
+                <span className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>score</span>
               </div>
 
               <div className="min-w-0 flex-1 px-4 py-5 sm:px-5">
@@ -428,7 +427,7 @@ export function PublicForumPostPageClient({
                   <MetaText isDark={isDark}>{post.author_trust_level}</MetaText>
                   <MetaDivider isDark={isDark} />
                   <MetaText isDark={isDark}>rep {formatReputationScore(post.author_reputation_score)}</MetaText>
-                  <span className={`rounded-full px-2 py-1 font-semibold ${isPubliclyInteractive ? (isDark ? "bg-emerald-400/12 text-emerald-200" : "bg-emerald-100 text-emerald-700") : (isDark ? "bg-white/[0.06] text-slate-400" : "bg-slate-100 text-slate-600")}`}>
+                  <span className={`font-semibold ${isPubliclyInteractive ? (isDark ? "text-emerald-200" : "text-emerald-700") : (isDark ? "text-slate-400" : "text-slate-600")}`}>
                     {isPubliclyInteractive ? "thread open" : "thread closed"}
                   </span>
                 </div>
@@ -626,7 +625,7 @@ export function PublicForumPostPageClient({
             </section>
           ) : null}
 
-          <section className={`mt-5 rounded-lg border ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+          <section data-testid="forum-comment-thread" className={`mt-5 border-y ${isDark ? "border-white/10" : "border-slate-200"}`}>
             <div className={`border-b px-4 py-4 sm:px-5 ${isDark ? "border-white/10" : "border-slate-200"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -639,8 +638,8 @@ export function PublicForumPostPageClient({
               {status ? <p className={`mt-3 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{status}</p> : null}
 
               {isPubliclyInteractive ? (
-                <div className="mt-4 rounded-md border p-3 md:p-4">
-                  <div className={`rounded-md ${isDark ? "border-white/10 bg-[#0f141b]" : "bg-slate-50"}`}>
+                <div className={`mt-4 border-t pt-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
+                  <div>
                     <textarea
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
@@ -718,17 +717,17 @@ export function PublicForumPostPageClient({
           </section>
         </main>
 
-        <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-          <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Thread snapshot</p>
-            <div className="mt-4 grid gap-3 text-sm">
-              <div className={`rounded-md px-4 py-4 ${isDark ? "bg-[#0f141b]" : "bg-slate-50"}`}>
-                <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author</p>
+        <aside className="space-y-8 lg:sticky lg:top-4 lg:self-start">
+          <section className={`border-y py-5 ${isDark ? "border-white/10" : "border-slate-300"}`}>
+            <p className={`text-sm font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>Thread snapshot</p>
+            <div className="mt-4 grid gap-5 text-sm">
+              <div>
+                <p className={`text-xs font-semibold ${isDark ? "text-slate-500" : "text-slate-500"}`}>Author</p>
                 <p className="mt-2 text-base font-semibold">@{post.author_username || post.author || "writer"}</p>
                 <p className={`mt-1 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{post.author_trust_level} / rep {formatReputationScore(post.author_reputation_score)}</p>
               </div>
-              <div className={`rounded-md px-4 py-4 ${isDark ? "bg-[#0f141b]" : "bg-slate-50"}`}>
-                <p className={`text-3xs uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Signals</p>
+              <div className={`border-t pt-4 ${isDark ? "border-white/10" : "border-slate-300"}`}>
+                <p className={`text-xs font-semibold ${isDark ? "text-slate-500" : "text-slate-500"}`}>Signals</p>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <MiniMetric isDark={isDark} value={String(post.comment_count)} label="comments" />
                   <MiniMetric isDark={isDark} value={String(isNovelThread ? post.interest_count : 0)} label={isNovelThread ? "reader notes" : "replies"} />
@@ -740,8 +739,8 @@ export function PublicForumPostPageClient({
           </section>
 
           {!isAuthorViewer && isNovelThread ? (
-            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Collaborator contact</p>
+            <section className={`border-y py-5 ${isDark ? "border-white/10" : "border-slate-300"}`}>
+              <p className={`text-sm font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>Collaborator contact</p>
               <h2 className="mt-2 text-lg font-semibold">Offer to beta read</h2>
               <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
                 This thread is meant to gather serious reader intent around a private manuscript, not to expose the manuscript itself.
@@ -789,27 +788,27 @@ export function PublicForumPostPageClient({
               )}
             </section>
           ) : isAuthorViewer && isNovelThread ? (
-            <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#121821]" : "border-slate-200 bg-white"}`}>
+            <section className={`border-y py-5 ${isDark ? "border-white/10" : "border-slate-300"}`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>Incoming collaborators</p>
+                  <p className={`text-sm font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>Incoming collaborators</p>
                   <h2 className="mt-2 text-lg font-semibold">Reader interest</h2>
                 </div>
                 <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{interests.length} request{interests.length === 1 ? "" : "s"}</p>
               </div>
 
               {interestLoadFailed ? (
-                <div className={`mt-4 rounded-md border px-4 py-4 text-sm ${isDark ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                <div className={`mt-4 border-l-2 px-4 py-2 text-sm ${isDark ? "border-rose-400 text-rose-200" : "border-rose-600 text-rose-700"}`}>
                   Collaborator notes could not be loaded right now. Refresh this page to try again.
                 </div>
               ) : interests.length === 0 ? (
-                <div className={`mt-4 rounded-md border border-dashed px-4 py-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-200 text-slate-500"}`}>
+                <div className={`mt-4 border-t pt-4 text-sm ${isDark ? "border-white/10 text-slate-500" : "border-slate-300 text-slate-500"}`}>
                   No collaborator notes have arrived for this public discussion yet.
                 </div>
               ) : (
-                <div className="mt-4 space-y-3">
+                <div className={`mt-4 border-y ${isDark ? "border-white/10" : "border-slate-300"}`}>
                   {interests.map((interest) => (
-                    <article key={interest.id} className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-[#0f141b]" : "border-slate-200 bg-slate-50"}`}>
+                    <article key={interest.id} className={`border-b py-4 last:border-b-0 ${isDark ? "border-white/10" : "border-slate-300"}`}>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <p className="font-semibold">@{interest.interested_username || interest.interested_email}</p>
@@ -984,7 +983,7 @@ function CommentRow({
       </div>
 
       {hasReplies ? (
-        <div className={`ml-12 mt-4 space-y-0 rounded-md border-l pl-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
+        <div className={`ml-12 mt-4 space-y-0 border-l pl-4 ${isDark ? "border-white/10" : "border-slate-200"}`}>
           {comment.replies.map((reply) => (
             <CommentRow
               key={reply.id}
@@ -1138,10 +1137,7 @@ function MiniMetric({ isDark, value, label }: { isDark: boolean, value: string, 
 
 function UserBadge({ isDark, username }: { isDark: boolean, username: string }) {
   return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 font-medium ${isDark ? "bg-white/[0.05] text-slate-100" : "bg-slate-100 text-slate-900"}`}>
-      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-3xs font-semibold ${isDark ? "bg-[#202834] text-slate-100" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}>
-        {username.slice(0, 1).toUpperCase()}
-      </span>
+    <span className={`font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
       @{username}
     </span>
   )
@@ -1149,7 +1145,7 @@ function UserBadge({ isDark, username }: { isDark: boolean, username: string }) 
 
 function ActionPill({ children, icon, isDark }: { children: React.ReactNode, icon?: React.ReactNode, isDark: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 ${isDark ? "bg-white/[0.04] text-slate-300" : "bg-slate-100 text-slate-700"}`}>
+    <span className={`inline-flex items-center gap-1.5 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
       {icon}
       {children}
     </span>

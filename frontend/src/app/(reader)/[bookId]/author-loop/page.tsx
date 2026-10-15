@@ -1,92 +1,64 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import type { ReactNode } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
 import dynamic from "next/dynamic"
 import Link from "next/link"
+import type { Route } from "next"
 import { useParams } from "next/navigation"
+import { useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode } from "react"
+import { useQuery } from "@tanstack/react-query"
 
+import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
+import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
+import { RevisionMilestonesPanel, type RevisionComparisonView } from "@/components/author/RevisionMilestonesPanel"
 import { betaReadsApi } from "@/lib/api/betaReads"
 import { booksApi } from "@/lib/api/books"
 import { useBookDetail } from "@/lib/hooks/useBookDetail"
 import { asQueryKey, bookCacheKey } from "@/lib/query/cacheKeys"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { buildAuthorLoopIssueCards, buildAuthorLoopSteps, buildCharacterReviewStats, buildProjectNextActions } from "@/lib/utils/authorLoop"
-import { applyRevisionBoardState, buildRevisionTask, todayDateKey } from "@/lib/utils/revisionIntelligence"
+import { buildAuthorLoopIssueCards, buildCharacterReviewStats, deadlineFromWindow } from "@/lib/utils/authorLoop"
+import { useAuthorLoopActions } from "./authorLoopPage.actions"
 import type { BetaReadAssignment, BetaReadAssignmentDetail, BetaReadFeedbackItem } from "@/types/betaRead"
-import type { Book, GoalCalendarItem, WriterWorkspace } from "@/types/book"
+import type { Book, StoryHealth, WriterWorkspace } from "@/types/book"
 import type { Character } from "@/types/character"
-import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
-import { BetaConsensusPanel, ProjectNextActionPanel, RevisionMilestonesPanel } from "@/components/author/AuthorLoopControlPanels"
-
-const AuthorToolsNav = dynamic(
-  () => import("@/components/layout/AuthorToolsNav").then((module) => module.AuthorToolsNav),
-  {
-    ssr: false,
-    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
-  }
-)
 
 const UploadModal = dynamic(
   () => import("@/components/modals/UploadModal").then((module) => module.UploadModal),
-  {
-    ssr: false,
-    loading: () => <div className="rounded-md border border-white/[0.065] bg-[#0d141c] p-4" />,
-  }
+  { ssr: false, loading: () => <p className="py-5 text-sm text-slate-500">Loading upload tools…</p> },
 )
 
-function deadlineFromWindow(windowDays: number) {
-  const date = new Date()
-  date.setDate(date.getDate() + windowDays)
-  return date.toISOString().slice(0, 10)
+type AuthorLoopStepId = "upload" | "bible" | "continuity" | "issues" | "invite" | "feedback"
+
+const STEPS: Array<{ id: AuthorLoopStepId; label: string; description: string }> = [
+  { id: "upload", label: "Manuscript", description: "Confirm the current draft." },
+  { id: "bible", label: "Characters", description: "Clean up extracted profiles." },
+  { id: "continuity", label: "Continuity", description: "Review manuscript health." },
+  { id: "issues", label: "Revision queue", description: "Turn evidence into work." },
+  { id: "invite", label: "Invite readers", description: "Choose scope and questions." },
+  { id: "feedback", label: "Reader feedback", description: "Triage returned notes." },
+]
+
+const STEP_IDS = new Set<AuthorLoopStepId>(STEPS.map((step) => step.id))
+
+function surfaceClass(isDark: boolean) {
+  return `border-y py-6 ${isDark ? "border-white/10" : "border-stone-200"}`
 }
 
-function parseDeadlineWindow(deadline: string) {
-  const target = new Date(`${deadline}T12:00:00`)
-  if (Number.isNaN(target.getTime())) return null
-  const current = new Date()
-  current.setHours(12, 0, 0, 0)
-  const diffMs = target.getTime() - current.getTime()
-  const diffDays = Math.ceil(diffMs / 86_400_000)
-  if (diffDays < 3 || diffDays > 7) return null
-  return diffDays
-}
-
-function taskExists(goalCalendar: GoalCalendarItem[], taskId: string) {
-  return goalCalendar.some((item) => item.id === taskId)
-}
-
-function pushGoalTask(goalCalendar: GoalCalendarItem[], task: GoalCalendarItem) {
-  return taskExists(goalCalendar, task.id) ? goalCalendar : [task, ...goalCalendar]
-}
-
-function toneClasses(isDark: boolean, tone: "ready" | "working" | "attention") {
-  if (tone === "ready") return isDark ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-  if (tone === "attention") return isDark ? "border-amber-400/25 bg-amber-400/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-700"
-  return isDark ? "border-sky-400/20 bg-sky-400/10 text-sky-200" : "border-sky-200 bg-sky-50 text-sky-700"
-}
-
-function severityClasses(isDark: boolean, severity: "high" | "medium" | "low") {
-  if (severity === "high") return isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"
-  if (severity === "medium") return isDark ? "bg-amber-500/12 text-amber-200" : "bg-amber-50 text-amber-700"
-  return isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700"
-}
-
-function feedbackStatusClasses(isDark: boolean, status: string) {
-  if (status === "resolved") return isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700"
-  if (status === "task_created") return isDark ? "bg-violet-500/12 text-violet-200" : "bg-violet-50 text-violet-700"
-  if (status === "archived") return isDark ? "bg-slate-500/12 text-slate-300" : "bg-slate-100 text-slate-600"
-  return isDark ? "bg-amber-500/12 text-amber-200" : "bg-amber-50 text-amber-700"
+function mutedClass(isDark: boolean) {
+  return isDark ? "text-slate-400" : "text-stone-500"
 }
 
 export default function AuthorLoopPage() {
   const { bookId } = useParams<{ bookId: string }>()
+  return <AuthorLoopWorkspace key={bookId} bookId={bookId} />
+}
+
+function AuthorLoopWorkspace({ bookId }: { bookId: string }) {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
-  const queryClient = useQueryClient()
   const writerWorkspaceKey = asQueryKey(bookCacheKey(bookId, "writer-workspace"))
 
+  const [activeStep, setActiveStep] = useState<AuthorLoopStepId>("upload")
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [showUploadWorkspace, setShowUploadWorkspace] = useState(false)
   const [readerEmail, setReaderEmail] = useState("")
@@ -95,618 +67,226 @@ export default function AuthorLoopPage() {
   const [chapterEnd, setChapterEnd] = useState("3")
   const [deadline, setDeadline] = useState(deadlineFromWindow(7))
   const [authorQuestions, setAuthorQuestions] = useState("Where did you get confused?\nWhich scene stayed with you?\nWhat felt under-explained?")
-  const [creatingAssignment, setCreatingAssignment] = useState(false)
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null)
-  const [savingIssueId, setSavingIssueId] = useState<string | null>(null)
-  const [savingFeedbackId, setSavingFeedbackId] = useState<string | null>(null)
+  const [stepStorageReady, setStepStorageReady] = useState(false)
+  const [stepStorageAvailable, setStepStorageAvailable] = useState(true)
+  const [inviteDirty, setInviteDirty] = useState(false)
+  const [uploadDirty, setUploadDirty] = useState(false)
+  const [snapshotLabel, setSnapshotLabel] = useState("")
+  const [snapshotBusy, setSnapshotBusy] = useState(false)
+  const [snapshotComparison, setSnapshotComparison] = useState<RevisionComparisonView | null>(null)
 
-  const { data: book = null } = useBookDetail(bookId, {
+  useEffect(() => {
+    const storageKey = `lorevia:author-loop:${bookId}:step`
+    const hashStep = window.location.hash === "#revision-control"
+      ? "issues"
+      : window.location.hash === "#beta-consensus"
+        ? "feedback"
+        : null
+    let storedStep: string | null = null
+    try { storedStep = window.localStorage.getItem(storageKey) } catch { setStepStorageAvailable(false) }
+    if (hashStep) setActiveStep(hashStep)
+    else if (storedStep && STEP_IDS.has(storedStep as AuthorLoopStepId)) setActiveStep(storedStep as AuthorLoopStepId)
+    setStepStorageReady(true)
+  }, [bookId])
+
+  useEffect(() => {
+    if (!stepStorageReady) return
+    try { window.localStorage.setItem(`lorevia:author-loop:${bookId}:step`, activeStep) } catch { setStepStorageAvailable(false) }
+  }, [activeStep, bookId, stepStorageReady])
+
+  const bookQuery = useBookDetail(bookId, {
     refetchInterval: (query) => {
       const currentBook = query.state.data as Book | undefined
       const canPoll = typeof document === "undefined" || document.visibilityState === "visible"
-      return canPoll && currentBook && currentBook.status !== "ready" ? 4_000 : false
+      return canPoll && currentBook && ["queued", "processing", "pending"].includes(currentBook.status) ? 4_000 : false
     },
     refetchIntervalInBackground: false,
   })
-  const { data: characterData } = useQuery<Character[]>({
+  const { data: book = null } = bookQuery
+  const characterQuery = useQuery<Character[]>({
     queryKey: asQueryKey(bookCacheKey(bookId, "characters:author-loop")),
-    queryFn: () =>
-      booksApi.getCharacters<Character>(bookId, {
-        fields: ["id", "name", "first_chapter", "aliases", "description"],
-        include: [],
-      }),
+    queryFn: () => booksApi.getCharacters<Character>(bookId, { fields: ["id", "name", "first_chapter", "aliases", "description"], include: [] }),
+    enabled: activeStep === "bible",
+    retry: false,
   })
-  const characters = useMemo(
-    () => (Array.isArray(characterData) ? characterData : []),
-    [characterData],
-  )
-  const { data: storyHealth = null } = useQuery({
+  const { data: characterData } = characterQuery
+  const characters = useMemo(() => Array.isArray(characterData) ? characterData : [], [characterData])
+  const healthQuery = useQuery<StoryHealth | null>({
     queryKey: asQueryKey(bookCacheKey(bookId, "story-health")),
     queryFn: () => booksApi.getStoryHealth(bookId),
+    enabled: activeStep === "continuity",
+    retry: false,
   })
-  const { data: chapterReports = [] } = useQuery({
+  const { data: storyHealth = null } = healthQuery
+  const reportsQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "chapter-reports:12")),
     queryFn: () => booksApi.getChapterReports(bookId, 12),
+    enabled: activeStep === "issues",
+    retry: false,
   })
-  const { data: revisionIntelligence = null } = useQuery({
+  const { data: chapterReports = [] } = reportsQuery
+  const revisionQuery = useQuery({
     queryKey: asQueryKey(bookCacheKey(bookId, "revision-intelligence")),
     queryFn: () => booksApi.getRevisionIntelligence(bookId),
+    enabled: activeStep === "issues",
+    retry: false,
   })
-  const { data: writerWorkspace = null } = useQuery<WriterWorkspace | null>({
+  const { data: revisionIntelligence = null } = revisionQuery
+  const workspaceQuery = useQuery<WriterWorkspace | null>({
     queryKey: writerWorkspaceKey,
     queryFn: () => booksApi.getWriterWorkspace(bookId),
+    enabled: activeStep === "issues" || activeStep === "feedback",
+    retry: false,
+    refetchOnWindowFocus: false,
   })
-  const { data: assignments = [], refetch: refetchAssignments } = useQuery<BetaReadAssignment[]>({
+  const { data: writerWorkspace = null } = workspaceQuery
+  const assignmentsQuery = useQuery<BetaReadAssignment[]>({
     queryKey: asQueryKey(`author-loop:${bookId}:beta-assignments`),
-    queryFn: () => betaReadsApi.listBookAssignments(bookId).catch(() => []),
+    queryFn: () => betaReadsApi.listBookAssignments(bookId),
+    enabled: activeStep === "invite" || activeStep === "feedback",
+    retry: false,
   })
-  const { data: consensus = null, refetch: refetchConsensus } = useQuery({
-    queryKey: asQueryKey(`author-loop:${bookId}:beta-consensus`),
-    queryFn: () => betaReadsApi.getConsensus(bookId).catch(() => null),
-  })
-
-  const activeAssignmentId = selectedAssignmentId ?? assignments[0]?.id ?? null
-  const { data: selectedAssignment = null, refetch: refetchAssignmentDetail } = useQuery<BetaReadAssignmentDetail | null>({
+  const { data: assignments = [] } = assignmentsQuery
+  const assignmentRemoved = !!selectedAssignmentId && !!assignmentsQuery.data && !assignments.some((assignment) => assignment.id === selectedAssignmentId)
+  const activeAssignmentId = !assignmentRemoved && selectedAssignmentId ? selectedAssignmentId : assignments[0]?.id ?? null
+  const assignmentQuery = useQuery<BetaReadAssignmentDetail | null>({
     queryKey: activeAssignmentId ? asQueryKey(`author-loop:${bookId}:beta-detail:${activeAssignmentId}`) : ["author-loop:no-assignment"],
-    queryFn: () => betaReadsApi.getBookAssignmentDetail(bookId, activeAssignmentId as string).catch(() => null),
-    enabled: Boolean(activeAssignmentId),
+    queryFn: () => betaReadsApi.getBookAssignmentDetail(bookId, activeAssignmentId as string),
+    enabled: activeStep === "feedback" && Boolean(activeAssignmentId),
+    retry: false,
   })
+  const { data: selectedAssignment = null } = assignmentQuery
 
-  const issueCards = useMemo(
-    () => buildAuthorLoopIssueCards(revisionIntelligence, chapterReports, writerWorkspace),
-    [chapterReports, revisionIntelligence, writerWorkspace]
-  )
+  const issueCards = useMemo(() => buildAuthorLoopIssueCards(revisionIntelligence, chapterReports, writerWorkspace), [chapterReports, revisionIntelligence, writerWorkspace])
   const characterStats = useMemo(() => buildCharacterReviewStats(characters), [characters])
-  const steps = useMemo(
-    () => buildAuthorLoopSteps({
-      book,
-      characters,
-      storyHealth,
-      issueCards,
-      assignments,
-      selectedAssignment,
-    }),
-    [assignments, book, characters, issueCards, selectedAssignment, storyHealth]
-  )
-  const selectedFeedbackItems = selectedAssignment?.feedback_items ?? []
-  const latestCharacters = characters.slice(0, 6)
-  const nextActions = useMemo(
-    () => buildProjectNextActions({ book, bookId, issues: issueCards, consensus, assignmentCount: assignments.length }),
-    [assignments.length, book, bookId, consensus, issueCards]
-  )
+  const activeIndex = STEPS.findIndex((step) => step.id === activeStep)
+  const activeStepMeta = STEPS[activeIndex]
 
-  const saveWorkspacePatch = async (patch: Partial<WriterWorkspace>) => {
-    const updated = await booksApi.updateWriterWorkspace(bookId, patch)
-    queryClient.setQueryData(writerWorkspaceKey, updated)
-    return updated
+  const selectStep = (step: AuthorLoopStepId) => {
+    setActiveStep(step)
+    window.history.replaceState(window.history.state, "", `${location.pathname}${location.search}${step === "issues" ? "#revision-control" : step === "feedback" ? "#beta-consensus" : ""}`)
+    window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  const handleIssueStatus = async (issueId: string, status: "ignored" | "task_created") => {
-    if (!writerWorkspace) return
-    setSavingIssueId(issueId)
-    try {
-      let nextBoard = writerWorkspace.revision_board
-      let nextGoalCalendar = writerWorkspace.goal_calendar
-      if (status === "task_created") {
-        const issue = issueCards.find((item) => item.id === issueId)
-        if (!issue) return
-        const taskId = `revision-task:${issueId}`
-        nextGoalCalendar = pushGoalTask(nextGoalCalendar, {
-          id: taskId,
-          title: issue.title,
-          due_date: todayDateKey(),
-          quota_value: 1,
-          quota_unit: "tasks",
-          completed: false,
-        })
-        nextBoard = applyRevisionBoardState(nextBoard, issueId, {
-          status,
-          task_id: taskId,
-          updated_at: new Date().toISOString(),
-        })
-      } else {
-        nextBoard = applyRevisionBoardState(nextBoard, issueId, {
-          status,
-          updated_at: new Date().toISOString(),
-        })
-      }
-      await saveWorkspacePatch({ revision_board: nextBoard, goal_calendar: nextGoalCalendar })
-      setStatusMessage(status === "task_created" ? "Issue converted into a revision task." : "Issue dismissed from the active queue.")
-    } catch {
-      setStatusMessage("Could not update that issue right now.")
-    } finally {
-      setSavingIssueId(null)
+  const { creatingAssignment, savingIssueId, savingFeedbackId, copyingLink, guestLink, lastDismissedId, busy, handleIssueStatus, handleCreateAssignment, handleCopyGuestLink, handleFeedbackStatus } = useAuthorLoopActions({
+    bookId, totalChapters: book?.total_chapters ?? 0, writerWorkspace, issueCards, selectedAssignment,
+    draft: { readerEmail, scopeKind, chapterStart, chapterEnd, deadline, authorQuestions }, setReaderEmail: (value) => { setReaderEmail(value); setInviteDirty(false) }, setSelectedAssignmentId, setStatusMessage,
+  })
+  const leaveGuard = useRef(false)
+  leaveGuard.current = busy || inviteDirty || uploadDirty || snapshotBusy || !!snapshotLabel.trim()
+  useEffect(() => {
+    const unload = (event: BeforeUnloadEvent) => { if (leaveGuard.current) { event.preventDefault(); event.returnValue = "" } }
+    const click = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null
+      if (!leaveGuard.current || !link || link.target === "_blank" || link.hasAttribute("download") || event.ctrlKey || event.metaKey || new URL(link.href).pathname === location.pathname) return
+      if (!window.confirm("Leave Revision workflow? Unsaved upload drafts, invitation details and snapshot labels may be lost, and any in-progress update may still complete.")) { event.preventDefault(); event.stopPropagation() }
     }
-  }
-
-  const handleCreateAssignment = async () => {
-    const windowDays = parseDeadlineWindow(deadline)
-    if (!readerEmail.trim()) {
-      setStatusMessage("Add a beta reader email first.")
-      return
-    }
-    if (!windowDays) {
-      setStatusMessage("Choose a deadline between 3 and 7 days from today.")
-      return
-    }
-    setCreatingAssignment(true)
-    try {
-      const created = await betaReadsApi.createAssignment(bookId, {
-        readerEmail: readerEmail.trim(),
-        taskLabel: scopeKind === "full_book" ? "Focused beta read" : `Scoped beta read: chapters ${chapterStart}-${chapterEnd}`,
-        scopeKind,
-        chapterStart: scopeKind === "full_book" ? null : Number(chapterStart || "1"),
-        chapterEnd: scopeKind === "full_book" ? null : Number(chapterEnd || chapterStart || "1"),
-        windowDays,
-        requiredProgressPct: 100,
-        requiredCommentCount: 0,
-        requiredFeedbackItemCount: 1,
-        requireFinalFeedback: true,
-        authorQuestions: authorQuestions.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
-      })
-      await refetchAssignments()
-      await refetchConsensus()
-      setSelectedAssignmentId(created.id)
-      await refetchAssignmentDetail()
-      setReaderEmail("")
-      setStatusMessage("Beta reader invite sent with scoped access.")
-    } catch {
-      setStatusMessage("Could not send that beta reader invite.")
-    } finally {
-      setCreatingAssignment(false)
-    }
-  }
-
-  const handleCopyGuestLink = async () => {
-    if (!selectedAssignment) return
-    try {
-      const guestLink = await betaReadsApi.getGuestLink(bookId, selectedAssignment.assignment.id)
-      await navigator.clipboard.writeText(guestLink.share_url)
-      setStatusMessage("Private guest-review link copied. It expires with this assignment.")
-    } catch {
-      setStatusMessage("Could not create that guest-review link.")
-    }
-  }
-
-  const handleFeedbackStatus = async (item: BetaReadFeedbackItem, authorStatus: "resolved" | "archived" | "task_created") => {
-    if (!selectedAssignment || !writerWorkspace) return
-    setSavingFeedbackId(item.id)
-    try {
-      let authorTaskId: string | null = null
-      if (authorStatus === "task_created") {
-        authorTaskId = `beta-feedback:${item.id}`
-        const title = item.chapter_number ? `Review beta feedback from chapter ${item.chapter_number}` : "Review beta feedback"
-        const task = buildRevisionTask(
-          {
-            id: authorTaskId,
-            category: "beta_feedback",
-            title,
-            description: item.body || item.anchor_text || item.question_prompt || "Follow up on beta-reader feedback.",
-            severity: "medium",
-            status: "pending",
-          },
-          todayDateKey()
-        )
-        const nextGoalCalendar = pushGoalTask(writerWorkspace.goal_calendar, task)
-        await saveWorkspacePatch({ goal_calendar: nextGoalCalendar })
-      }
-      await betaReadsApi.updateBookFeedbackItem(bookId, selectedAssignment.assignment.id, item.id, {
-        authorStatus,
-        authorTaskId,
-      })
-      await refetchAssignmentDetail()
-      await refetchConsensus()
-      setStatusMessage(
-        authorStatus === "resolved"
-          ? "Feedback marked resolved."
-          : authorStatus === "archived"
-            ? "Feedback archived."
-            : "Feedback converted into a revision task."
-      )
-    } catch {
-      setStatusMessage("Could not update that feedback item.")
-    } finally {
-      setSavingFeedbackId(null)
-    }
-  }
-
+    window.addEventListener("beforeunload", unload); document.addEventListener("click", click, true)
+    return () => { window.removeEventListener("beforeunload", unload); document.removeEventListener("click", click, true) }
+  }, [])
+  const requests = [{ label: "manuscript", query: bookQuery }, ...(activeStep === "bible" ? [{ label: "characters", query: characterQuery }] : []), ...(activeStep === "continuity" ? [{ label: "continuity", query: healthQuery }] : []), ...(activeStep === "issues" ? [{ label: "chapter reports", query: reportsQuery }, { label: "revision findings", query: revisionQuery }, { label: "saved revision decisions", query: workspaceQuery }] : []), ...(["invite", "feedback"].includes(activeStep) ? [{ label: "reader assignments", query: assignmentsQuery }] : []), ...(activeStep === "feedback" && activeAssignmentId ? [{ label: "reader feedback", query: assignmentQuery }, { label: "revision tasks", query: workspaceQuery }] : [])]
+  const waiting = requests.some(({ query }) => query.isLoading)
+  const unavailable = requests.some(({ label, query }) => query.isError && !query.data && !(activeStep === "feedback" && ["reader feedback", "revision tasks"].includes(label)))
+  const savingDecision = busy || snapshotBusy || !writerWorkspace || workspaceQuery.isError
   return (
-    <div className={`min-h-screen ${isDark ? "bg-[#070b10] text-slate-100" : "bg-[#f7f7fb] text-slate-950"}`}>
-      <div className="mx-auto grid max-w-[94rem] gap-5 px-4 pb-28 pt-5 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-8">
-        <div className="hidden lg:block lg:sticky lg:top-5 lg:self-start">
-          <AuthorToolsNav
-            bookId={bookId}
-            active="author-loop"
-            isDark={isDark}
-            bookData={book}
-            title="Author loop"
-            description="Move from manuscript upload to beta feedback without losing citations, edits, or trust."
-            mode={book?.mode ?? "author"}
-            variant="rail"
-            railSize="compact"
-          />
+    <div data-author-loop-workspace className={`min-h-screen ${isDark ? "text-slate-100" : "text-stone-950"}`}>
+      <div className="mx-auto max-w-6xl px-4 pb-24 pt-5 sm:px-6 lg:px-8">
+        <WorkspaceFamilyHeader active="author-loop" bookId={bookId} family="review-center" title="Revision workflow" description={`Work from ${book?.title ?? "your manuscript"} toward reader-ready revisions, one step at a time.`} actions={<><Link href={`/${bookId}/analysis` as Route} prefetch={false} className="app-button-secondary">Back to findings</Link><button type="button" className="app-button-secondary" onClick={() => window.dispatchEvent(new Event(SUPPORT_HELP_EVENT))}>Help</button></>} />
+
+        <nav aria-label="Revision workflow steps" className={`mt-5 border-y ${isDark ? "border-white/10" : "border-stone-200"}`}>
+          <label className={`block px-1 py-3 text-xs font-medium sm:hidden ${mutedClass(isDark)}`}>
+            Workflow step
+            <select aria-label="Workflow step" value={activeStep} onChange={(event) => selectStep(event.target.value as AuthorLoopStepId)} className={`mt-2 ${inputClass(isDark)}`}>
+              {STEPS.map((step, index) => <option key={step.id} value={step.id}>{index + 1}. {step.label}</option>)}
+            </select>
+          </label>
+          <div className="app-scroll hidden max-w-full overflow-x-auto sm:block">
+            <ol className="flex min-w-max">
+              {STEPS.map((step, index) => <li key={step.id} className={index > 0 ? (isDark ? "border-l border-white/10" : "border-l border-stone-200") : ""}><button type="button" aria-current={activeStep === step.id ? "step" : undefined} onClick={() => selectStep(step.id)} className={`min-w-36 px-4 py-3 text-left transition-colors ${activeStep === step.id ? (isDark ? "bg-white/[0.07] text-white" : "bg-stone-100 text-stone-950") : mutedClass(isDark)}`}><span className="block text-xs tabular-nums">{index + 1} of {STEPS.length}</span><span className="mt-1 block text-sm font-semibold">{step.label}</span></button></li>)}
+            </ol>
+          </div>
+        </nav>
+
+        <div className="mt-7 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className={`text-xs font-medium ${mutedClass(isDark)}`}>Step {activeIndex + 1}</p><p className="mt-1 text-2xl font-semibold tracking-tight">{activeStepMeta.label}</p><p className={`mt-1 text-sm ${mutedClass(isDark)}`}>{activeStepMeta.description}</p></div><p className={`text-xs ${mutedClass(isDark)}`}>{stepStorageAvailable ? "Your current step is saved on this device." : "Device storage is unavailable. Your step will reset when you leave."}</p></div>
+        {statusMessage ? <p role="status" className={`mt-4 border-l-2 pl-3 text-sm ${isDark ? "border-teal-300 text-slate-300" : "border-teal-700 text-stone-600"}`}>{statusMessage}</p> : null}
+        {activeStep === "feedback" && assignmentRemoved ? <p className="mt-3 text-sm" role="status">The selected assignment is no longer available. Showing the first available assignment.</p> : null}
+
+        {lastDismissedId ? <button type="button" className="app-button-secondary mt-2" disabled={busy} onClick={() => void handleIssueStatus(lastDismissedId, "pending")}>Undo dismissal</button> : null}
+        <div className="mt-4 space-y-3">
+          {requests.filter(({ query }) => query.isError).map(({ label, query }) => <div key={label} role="alert"><p>Could not load or refresh {label}. Previously loaded content is retained.</p><button type="button" className="app-button-secondary mt-2" disabled={busy || query.isFetching} onClick={() => void query.refetch()}>Retry {label}</button></div>)}
+          <button type="button" className="app-button-secondary" disabled={busy || requests.some(({ query }) => query.isFetching)} onClick={() => void Promise.allSettled(requests.map(({ query }) => query.refetch()))}>Refresh this step</button>
         </div>
-
-        <main className="min-w-0 space-y-5">
-          <WorkspaceFamilyHeader
-            active="author-loop"
-            bookId={bookId}
-            family="review-center"
-            title={`${book?.title ?? "Manuscript"} author loop`}
-            description="Upload privately, build the character bible, run cited continuity checks, invite a scoped beta reader, and turn feedback into revision work without juggling separate tools."
-            actions={(
-              <>
-                <Link href={`/${bookId}/characters`} className="app-button app-button--secondary">Character bible</Link>
-                <Link href={`/${bookId}/beta-feedback`} className="app-button app-button--secondary">Beta feedback</Link>
-                <Link href={`/${bookId}/editorial-review`} className="app-button app-button--primary">Editorial review</Link>
-              </>
-            )}
-          />
-          {statusMessage ? <p className={`text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>{statusMessage}</p> : null}
-
-          <ProjectNextActionPanel actions={nextActions} isDark={isDark} />
-
-          <section className="grid gap-3 xl:grid-cols-6">
-            {steps.map((step) => (
-              <div key={step.id} className={`rounded-md border p-4 ${toneClasses(isDark, step.tone)}`}>
-                <p className="text-3xs font-semibold uppercase tracking-[0.22em]">{step.label}</p>
-                <p className="mt-2 text-sm leading-6">{step.detail}</p>
+        <main className="mt-5">
+          {waiting ? <p role="status">Loading {activeStepMeta.label.toLowerCase()}…</p> : null}
+          {unavailable && !waiting ? <p>Some step data is unavailable. Use the retry controls above to continue.</p> : null}
+          <fieldset disabled={busy} className="min-w-0 border-0 p-0" hidden={waiting || unavailable}>
+          <div hidden={activeStep !== "upload"}><UploadStep book={book} bookId={bookId} isDark={isDark} showUploadWorkspace={showUploadWorkspace} setShowUploadWorkspace={setShowUploadWorkspace} onDraftChange={setUploadDirty} /></div>
+          {activeStep === "bible" ? <CharacterStep bookId={bookId} characters={characters} stats={characterStats} isDark={isDark} /> : null}
+          {activeStep === "continuity" ? <ContinuityStep bookId={bookId} storyHealth={storyHealth} isDark={isDark} /> : null}
+          {activeStep === "issues" ? <IssuesStep bookId={bookId} issueCards={issueCards} savingIssueId={savingDecision ? savingIssueId ?? "loading" : null} onStatus={handleIssueStatus} isDark={isDark} /> : null}
+          {activeStep === "invite" ? (
+            <section className={surfaceClass(isDark)} onChange={() => setInviteDirty(true)}>
+              <div className="max-w-2xl"><h2 className="text-lg font-semibold">Invite a beta reader</h2><p className={`mt-1 text-sm leading-6 ${mutedClass(isDark)}`}>Readers receive only the selected chapters and cannot edit the manuscript. Invitations expire at the deadline.</p></div>
+              <div className="mt-6 grid max-w-2xl gap-4">
+                <InviteField label="Reader email" isDark={isDark}><input type="email" autoComplete="email" maxLength={320} value={readerEmail} onChange={(event) => setReaderEmail(event.target.value)} aria-label="Reader email" className={inputClass(isDark)} /></InviteField>
+                <div className="grid gap-4 sm:grid-cols-2"><InviteField label="Scope" isDark={isDark}><select value={scopeKind} onChange={(event) => setScopeKind(event.target.value)} aria-label="Scope" className={inputClass(isDark)}><option value="full_book">Full book</option><option value="chapter_range">Chapter range</option></select></InviteField><InviteField label="Deadline" detail="Choose 3–7 days from today. Access expires that many days after sending." isDark={isDark}><input type="date" min={deadlineFromWindow(3)} max={deadlineFromWindow(7)} value={deadline} onChange={(event) => setDeadline(event.target.value)} aria-label="Deadline" className={inputClass(isDark)} /></InviteField></div>
+                {scopeKind !== "full_book" ? <div className="grid gap-4 sm:grid-cols-2"><InviteField label="From chapter" isDark={isDark}><input type="number" min="1" value={chapterStart} onChange={(event) => setChapterStart(event.target.value)} aria-label="From chapter" className={inputClass(isDark)} /></InviteField><InviteField label="Through chapter" isDark={isDark}><input type="number" min="1" value={chapterEnd} onChange={(event) => setChapterEnd(event.target.value)} aria-label="Through chapter" className={inputClass(isDark)} /></InviteField></div> : null}
+                <InviteField label="Questions for the reader" detail="Up to 12 questions, 300 characters each; one per line." isDark={isDark}><textarea value={authorQuestions} onChange={(event) => setAuthorQuestions(event.target.value)} rows={5} aria-label="Author prompts" className={`${inputClass(isDark)} h-auto py-3`} /></InviteField>
+                <div><button type="button" onClick={() => void handleCreateAssignment()} disabled={creatingAssignment} className="app-button-primary">{creatingAssignment ? "Sending invite…" : "Send beta invite"}</button></div>
               </div>
-            ))}
-          </section>
-
-          <section className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-            <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>1. Upload manuscript</p>
-                  <h2 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Clean, private intake</h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowUploadWorkspace((current) => !current)}
-                  className={`rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-900 text-white"}`}
-                >
-                  {showUploadWorkspace ? "Hide upload tools" : "Open upload tools"}
-                </button>
-              </div>
-              <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-                <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Supported formats</p>
-                <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>DOCX, PDF, EPUB, TXT, and Markdown only. This step stays private, shows processing status, and does not expose public sharing.</p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-white"}`}>
-                    <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Privacy</p>
-                    <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Your manuscript is processed inside your workspace. Beta readers only get chapter-scoped access later if you explicitly invite them.</p>
-                  </div>
-                  <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-black/20" : "border-slate-200 bg-white"}`}>
-                    <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>Processing</p>
-                    <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                      {book?.processing?.stage || book?.processing?.status
-                        ? `${book.processing.stage ?? book.processing.status}${typeof book.processing.progress_pct === "number" ? ` / ${Math.round(book.processing.progress_pct)}%` : ""}`
-                        : book?.status === "ready"
-                          ? "Ready for continuity review."
-                          : "Upload a manuscript to start extraction and continuity checks."}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              {showUploadWorkspace ? (
-                <div className="mt-5">
-                  <UploadModal onClose={() => setShowUploadWorkspace(false)} initialMode="author" initialExistingBookId={bookId} presentation="inline" />
-                </div>
-              ) : null}
-            </div>
-
-            <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>2. Build character bible</p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <MetricCard isDark={isDark} label="Profiles" value={String(characterStats.totalCharacters)} />
-                <MetricCard isDark={isDark} label="Possible duplicates" value={String(characterStats.duplicateCount)} />
-                <MetricCard isDark={isDark} label="Needs review" value={String(characterStats.needsReviewCount)} />
-              </div>
-              <div className="mt-4 space-y-3">
-                {latestCharacters.length > 0 ? latestCharacters.map((character) => (
-                  <div key={character.id} className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{character.name}</p>
-                        <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                          First cited in chapter {character.first_chapter}
-                          {character.aliases.length > 0 ? ` / aliases: ${character.aliases.join(", ")}` : ""}
-                        </p>
-                      </div>
-                      <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${character.description ? (isDark ? "bg-emerald-500/12 text-emerald-200" : "bg-emerald-50 text-emerald-700") : (isDark ? "bg-amber-500/12 text-amber-200" : "bg-amber-50 text-amber-700")}`}>
-                        {character.description ? "Profile ready" : "Needs editing"}
-                      </span>
-                    </div>
-                    <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{character.description || "Open this profile to edit the extracted summary, resolve aliases, or mark the extraction as incorrect."}</p>
-                  </div>
-                )) : (
-                  <div className={`rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>Character extraction starts after the manuscript is processed.</div>
-                )}
-              </div>
-              <div className="mt-4">
-                <Link href={`/${bookId}/characters`} className={`text-sm font-semibold ${isDark ? "text-violet-300" : "text-violet-700"}`}>
-                  Open character bible to edit profiles, merge duplicates, or remove bad extraction
-                </Link>
-              </div>
-            </div>
-          </section>
-
-          <section id="revision-control" className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>3. Run continuity scan</p>
-                <h2 className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Cited contradictions and gaps</h2>
-                <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                  LoreVia prioritizes contradictions, dropped threads, timeline drift, character-state changes, and relationship inconsistencies. It cites chapters and avoids overclaiming when the scan is still uncertain.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <MetricPill isDark={isDark} label="Story health" value={storyHealth && storyHealth.available !== false ? `${storyHealth.score}` : "Not available"} />
-                <MetricPill isDark={isDark} label="Active issues" value={String(issueCards.length)} />
-                <MetricPill isDark={isDark} label="Queued tasks" value={String(writerWorkspace?.goal_calendar.length ?? 0)} />
-              </div>
-            </div>
-            <div className="mt-5 space-y-3">
-              {issueCards.length > 0 ? issueCards.slice(0, 8).map((issue) => (
-                <div key={issue.id} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${severityClasses(isDark, issue.severity)}`}>{issue.severity}</span>
-                    <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.sourceLabel}</span>
-                    <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{issue.citation}</span>
-                    <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-white text-slate-600"}`}>{issue.confidence}</span>
-                  </div>
-                  <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_14rem]">
-                    <div>
-                      <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{issue.title}</p>
-                      <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{issue.explanation}</p>
-                      <p className={`mt-3 text-sm ${isDark ? "text-violet-200" : "text-violet-700"}`}>Suggested fix: {issue.suggestedFix}</p>
-                      {issue.affected.length > 0 ? (
-                        <p className={`mt-3 text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Affected: {issue.affected.join(" / ")}</p>
-                      ) : null}
-                    </div>
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        disabled={savingIssueId === issue.id}
-                        onClick={() => void handleIssueStatus(issue.id, "task_created")}
-                        className={`w-full rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-slate-950 text-white hover:bg-slate-800"} disabled:opacity-50`}
-                      >
-                        {savingIssueId === issue.id ? "Saving..." : "Convert to task"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingIssueId === issue.id}
-                        onClick={() => void handleIssueStatus(issue.id, "ignored")}
-                        className={`w-full rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-white text-slate-700 hover:bg-slate-100"} disabled:opacity-50`}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )) : (
-                <div className={`rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
-                  The scan is still building. LoreVia will queue likely review targets instead of declaring the manuscript perfect too early.
-                </div>
-              )}
-            </div>
-          </section>
-
-          <RevisionMilestonesPanel bookId={bookId} isDark={isDark} />
-
-          <BetaConsensusPanel consensus={consensus} isDark={isDark} />
-
-          <section className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>5. Invite beta reader</p>
-              <div className="mt-4 grid gap-3">
-                <InviteField label="Reader email" isDark={isDark}>
-                  <input
-                    value={readerEmail}
-                    onChange={(event) => setReaderEmail(event.target.value)}
-                    aria-label="Reader email"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
-                  />
-                </InviteField>
-                <InviteField label="Scope" isDark={isDark}>
-                  <select
-                    value={scopeKind}
-                    onChange={(event) => setScopeKind(event.target.value)}
-                    aria-label="Scope"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
-                  >
-                    <option value="full_book">Full book</option>
-                    <option value="chapter_range">Chapter range</option>
-                  </select>
-                </InviteField>
-                {scopeKind !== "full_book" ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <InviteField label="From chapter" isDark={isDark}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={chapterStart}
-                        onChange={(event) => setChapterStart(event.target.value)}
-                        aria-label="From chapter"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
-                      />
-                    </InviteField>
-                    <InviteField label="Through chapter" isDark={isDark}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={chapterEnd}
-                        onChange={(event) => setChapterEnd(event.target.value)}
-                        aria-label="Through chapter"
-                        className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
-                      />
-                    </InviteField>
-                  </div>
-                ) : null}
-                <InviteField label="Deadline" isDark={isDark}>
-                  <input
-                    type="date"
-                    value={deadline}
-                    onChange={(event) => setDeadline(event.target.value)}
-                    aria-label="Deadline"
-                    className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
-                  />
-                </InviteField>
-                <InviteField label="Author prompts" detail="Add one prompt per line for the beta reader." isDark={isDark}>
-                  <textarea
-                    value={authorQuestions}
-                    onChange={(event) => setAuthorQuestions(event.target.value)}
-                    rows={5}
-                    aria-label="Author prompts"
-                    className={`rounded-md border px-3 py-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-300" : "border-slate-200 bg-white text-slate-900 focus:border-teal-600"}`}
-                  />
-                </InviteField>
-                <button
-                  type="button"
-                  onClick={() => void handleCreateAssignment()}
-                  disabled={creatingAssignment}
-                  className={`inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200 disabled:bg-teal-300/40" : "bg-[#1f615d] text-white hover:bg-[#174c49] disabled:bg-slate-300"}`}
-                >
-                  {creatingAssignment ? "Sending invite..." : "Send beta invite"}
-                </button>
-              </div>
-              <p className={`mt-3 text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                Beta readers get scoped access only. They cannot see unrelated manuscripts or edit author content.
-              </p>
-            </div>
-
-            <div className={`rounded-md border p-5 ${isDark ? "border-white/[0.065] bg-[#0d141c]" : "border-slate-200/70 bg-white"}`}>
-              <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>6. Collect scoped feedback</p>
-              {assignments.length > 0 ? (
-                <div className="mt-4 space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    {assignments.map((assignment) => (
-                      <button
-                        key={assignment.id}
-                        type="button"
-                        onClick={() => setSelectedAssignmentId(assignment.id)}
-                        className={`rounded-full px-3 py-2 text-sm font-semibold transition ${
-                          activeAssignmentId === assignment.id
-                            ? isDark ? "bg-white text-slate-950" : "bg-slate-950 text-white"
-                            : isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                        }`}
-                      >
-                        {assignment.reader_email}
-                      </button>
-                    ))}
-                  </div>
-                  {selectedAssignment ? (
-                    <>
-                      <div className="grid gap-3 sm:grid-cols-4">
-                        <MetricCard isDark={isDark} label="Feedback items" value={String(selectedAssignment.feedback_summary.feedback_item_count)} />
-                        <MetricCard isDark={isDark} label="Confusing" value={String(selectedAssignment.feedback_summary.confusing_count)} />
-                        <MetricCard isDark={isDark} label="Answers" value={String(selectedAssignment.feedback_summary.answer_count)} />
-                        <MetricCard isDark={isDark} label="Favorites" value={String(selectedAssignment.feedback_summary.favorite_count)} />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleCopyGuestLink()}
-                        className={`rounded-md px-4 py-2 text-sm font-semibold ${isDark ? "bg-teal-300 text-slate-950" : "bg-[#1f615d] text-white"}`}
-                      >
-                        Copy no-account review link
-                      </button>
-                      <div className="space-y-3">
-                        {selectedFeedbackItems.length > 0 ? selectedFeedbackItems.map((item) => (
-                          <div key={item.id} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${feedbackStatusClasses(isDark, item.author_status)}`}>{item.author_status.replace(/_/g, " ")}</span>
-                              <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
-                                {item.chapter_number ? `Chapter ${item.chapter_number}` : "Book-wide"}
-                              </span>
-                              {item.question_prompt ? <span className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>Prompt-linked</span> : null}
-                            </div>
-                            <p className={`mt-3 text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{item.question_prompt || item.anchor_text || "Reader feedback"}</p>
-                            {item.body ? <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.body}</p> : null}
-                            {item.author_task_id ? <p className={`mt-2 text-xs ${isDark ? "text-violet-300" : "text-violet-700"}`}>Task: {item.author_task_id}</p> : null}
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                disabled={savingFeedbackId === item.id}
-                                onClick={() => void handleFeedbackStatus(item, "resolved")}
-                                className={`rounded-md px-3 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-white text-slate-700 hover:bg-slate-100"} disabled:opacity-50`}
-                              >
-                                Resolve
-                              </button>
-                              <button
-                                type="button"
-                                disabled={savingFeedbackId === item.id}
-                                onClick={() => void handleFeedbackStatus(item, "archived")}
-                                className={`rounded-md px-3 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100 hover:bg-white/15" : "bg-white text-slate-700 hover:bg-slate-100"} disabled:opacity-50`}
-                              >
-                                Archive
-                              </button>
-                              <button
-                                type="button"
-                                disabled={savingFeedbackId === item.id}
-                                onClick={() => void handleFeedbackStatus(item, "task_created")}
-                                className={`rounded-md px-3 py-2 text-sm font-semibold ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-slate-950 text-white hover:bg-slate-800"} disabled:opacity-50`}
-                              >
-                                Convert to task
-                              </button>
-                            </div>
-                          </div>
-                        )) : (
-                          <div className={`rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
-                            No scoped feedback has landed yet. Beta readers can comment, answer your prompts, and mark confusing sections from the beta workspace.
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              ) : (
-                <div className={`mt-4 rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
-                  No beta reader invites yet. Create one here to start collecting chapter-scoped feedback.
-                </div>
-              )}
-            </div>
-          </section>
+              {assignments.length ? <p className={`mt-5 text-sm ${mutedClass(isDark)}`}>{assignments.length} existing assignment{assignments.length === 1 ? "" : "s"}. <button type="button" onClick={() => selectStep("feedback")} className={`font-semibold underline underline-offset-4 ${isDark ? "text-teal-300" : "text-teal-800"}`}>Review feedback</button></p> : null}
+            </section>
+          ) : null}
+          {activeStep === "feedback" ? <FeedbackStep bookId={bookId} assignments={assignments} activeAssignmentId={activeAssignmentId} selectedAssignment={selectedAssignment} savingFeedbackId={savingDecision ? savingFeedbackId ?? "loading" : null} isDark={isDark} onSelect={setSelectedAssignmentId} onCopy={handleCopyGuestLink} onStatus={handleFeedbackStatus} onInvite={() => selectStep("invite")} /> : null}
+          {activeStep === "feedback" && guestLink?.assignmentId === activeAssignmentId ? <label className="mt-4 block text-sm">Private review link<input className={`${inputClass(isDark)} mt-2`} value={guestLink.url} readOnly onFocus={(event) => event.target.select()} /></label> : null}
+          {copyingLink ? <p role="status">Preparing private review link…</p> : null}
+          </fieldset>
+          {activeStep === "issues" && !waiting && !unavailable ? <RevisionMilestonesPanel bookId={bookId} label={snapshotLabel} onLabelChange={setSnapshotLabel} busy={snapshotBusy || busy} onBusyChange={setSnapshotBusy} comparison={snapshotComparison} onComparisonChange={setSnapshotComparison} /> : null}
         </main>
+
+        <div className={`mt-6 flex items-center justify-between border-t pt-4 ${isDark ? "border-white/10" : "border-stone-200"}`}><button type="button" disabled={activeIndex === 0} onClick={() => selectStep(STEPS[activeIndex - 1].id)} className="app-button-secondary disabled:invisible">Previous</button>{activeIndex < STEPS.length - 1 ? <button type="button" onClick={() => selectStep(STEPS[activeIndex + 1].id)} className="app-button-primary">Next: {STEPS[activeIndex + 1].label}</button> : <Link href={`/${bookId}` as Route} prefetch={false} className="app-button-primary">Return to overview</Link>}</div>
       </div>
     </div>
   )
 }
 
-function MetricCard({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
-  return (
-    <div className={`rounded-md border p-3 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-400"}`}>{label}</p>
-      <p className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{value}</p>
-    </div>
-  )
+function UploadStep({ book, bookId, isDark, showUploadWorkspace, setShowUploadWorkspace, onDraftChange }: { book: Book | null; bookId: string; isDark: boolean; showUploadWorkspace: boolean; setShowUploadWorkspace: (value: boolean) => void; onDraftChange: (value: boolean) => void }) {
+  const [opened, setOpened] = useState(false)
+  useEffect(() => { if (showUploadWorkspace) setOpened(true) }, [showUploadWorkspace])
+  return <section className={surfaceClass(isDark)}><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="max-w-2xl"><h2 className="text-lg font-semibold">Current manuscript</h2><p className={`mt-2 text-sm leading-6 ${mutedClass(isDark)}`}>DOCX, PDF, EPUB, TXT, and Markdown are supported. Replacing the manuscript starts a new processing pass. Review existing sharing settings before replacing content.</p></div><button type="button" onClick={() => setShowUploadWorkspace(!showUploadWorkspace)} className="app-button-primary">{showUploadWorkspace ? "Hide upload tools" : "Open upload tools"}</button></div><dl className={`mt-6 divide-y border-y ${isDark ? "divide-white/10 border-white/10" : "divide-stone-200 border-stone-200"}`}><StatusRow label="Draft" value={book?.title ?? "Loading manuscript…"} isDark={isDark} /><StatusRow label="Processing" value={book?.status === "ready" ? "Ready for review" : `${book?.processing?.stage ?? book?.status ?? "Waiting"}${typeof book?.processing?.progress_pct === "number" ? ` · ${Math.round(book.processing.progress_pct)}%` : ""}`} isDark={isDark} /><StatusRow label="Access" value="Check Visibility for public access; reader invitations are managed separately" isDark={isDark} /></dl>{opened ? <div data-revision-upload className="mt-6" hidden={!showUploadWorkspace}><UploadModal onDraftChange={onDraftChange} onClose={() => setShowUploadWorkspace(false)} initialMode="author" initialExistingBookId={bookId} presentation="inline" /></div> : null}</section>
 }
 
-function MetricPill({ isDark, label, value }: { isDark: boolean; label: string; value: string }) {
-  return (
-    <div className={`rounded-full px-3 py-2 text-sm font-semibold ${isDark ? "bg-white/10 text-slate-100" : "bg-slate-100 text-slate-700"}`}>
-      {label}: {value}
-    </div>
-  )
+function CharacterStep({ bookId, characters, stats, isDark }: { bookId: string; characters: Character[]; stats: ReturnType<typeof buildCharacterReviewStats>; isDark: boolean }) {
+  const [showAll, setShowAll] = useState(false)
+  return <section className={surfaceClass(isDark)}><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-lg font-semibold">Character review</h2><p className={`mt-1 text-sm ${mutedClass(isDark)}`}>Correct only the profiles that affect names, aliases, or continuity.</p></div><Link href={`/${bookId}/characters` as Route} prefetch={false} className={`text-sm font-semibold underline underline-offset-4 ${isDark ? "text-teal-300" : "text-teal-800"}`}>Open full character bible</Link></div><div className={`mt-5 flex flex-wrap border-y ${isDark ? "border-white/10" : "border-stone-200"}`}><Metric label="Profiles" value={stats.totalCharacters} isDark={isDark} /><Metric label="Possible duplicates" value={stats.duplicateCount} isDark={isDark} divided /><Metric label="Needs review" value={stats.needsReviewCount} isDark={isDark} divided /></div><div className={`mt-5 divide-y border-y ${isDark ? "divide-white/10 border-white/10" : "divide-stone-200 border-stone-200"}`}>{characters.slice(0, showAll ? characters.length : 6).map((character) => <div key={character.id} className="grid gap-1 py-4 sm:grid-cols-[12rem_minmax(0,1fr)_auto] sm:items-baseline sm:gap-4"><p className="text-sm font-semibold">{character.name}</p><p className={`text-sm leading-6 ${mutedClass(isDark)}`}>{character.description || "No profile summary yet."}</p><span className={`text-xs ${mutedClass(isDark)}`}>{character.aliases.length ? `${character.aliases.length} alias${character.aliases.length === 1 ? "" : "es"}` : "Check aliases"}</span></div>)}{!characters.length ? <p className={`py-5 text-sm ${mutedClass(isDark)}`}>No character profiles are available yet.</p> : null}</div>{characters.length > 6 ? <button type="button" className="app-button-secondary mt-3" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer characters" : `Show all ${characters.length} characters`}</button> : null}</section>
 }
 
-function InviteField({
-  label,
-  detail,
-  isDark,
-  children,
-}: {
-  label: string
-  detail?: string
-  isDark: boolean
-  children: ReactNode
-}) {
-  return (
-    <label className="grid gap-2">
-      <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{label}</span>
-      {children}
-      {detail ? <span className={`text-xs leading-5 ${isDark ? "text-slate-500" : "text-slate-500"}`}>{detail}</span> : null}
-    </label>
-  )
+function ContinuityStep({ bookId, storyHealth, isDark }: { bookId: string; storyHealth: StoryHealth | null; isDark: boolean }) {
+  return <section className={surfaceClass(isDark)}><h2 className="text-lg font-semibold">Continuity health</h2><p className={`mt-2 max-w-3xl text-sm leading-7 ${mutedClass(isDark)}`}>{storyHealth?.summary || "Continuity evidence is still being prepared. You can return when manuscript processing is complete."}</p><div className={`mt-6 flex items-baseline gap-3 border-y py-4 ${isDark ? "border-white/10" : "border-stone-200"}`}><span className={`text-sm ${mutedClass(isDark)}`}>Story health</span><strong className="text-2xl tabular-nums">{storyHealth && storyHealth.available !== false ? storyHealth.score : "—"}</strong><span className={`text-xs ${mutedClass(isDark)}`}>Evidence summary, not a quality grade</span></div><div className="mt-5 flex flex-wrap gap-3"><Link href={`/${bookId}/analysis` as Route} prefetch={false} className="app-button-primary">Review findings</Link><Link href={`/${bookId}/analysis?view=chapters` as Route} prefetch={false} className="app-button-secondary">Open chapter reports</Link></div></section>
+}
+
+function IssuesStep({ bookId, issueCards, savingIssueId, onStatus, isDark }: { bookId: string; issueCards: ReturnType<typeof buildAuthorLoopIssueCards>; savingIssueId: string | null; onStatus: (id: string, status: "ignored" | "task_created") => Promise<void>; isDark: boolean }) {
+  const [showAll, setShowAll] = useState(false)
+  return <div id="revision-control" className="space-y-5"><section className={surfaceClass(isDark)}><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-lg font-semibold">Revision queue</h2><p className={`mt-1 text-sm ${mutedClass(isDark)}`}>Review available findings and the latest 12 chapter reports, then create work only for findings you accept.</p></div><span className={`text-sm ${mutedClass(isDark)}`}>{issueCards.length} active finding{issueCards.length === 1 ? "" : "s"}</span></div><div className={`mt-5 divide-y border-y ${isDark ? "divide-white/10 border-white/10" : "divide-stone-200 border-stone-200"}`}>{issueCards.slice(0, showAll ? issueCards.length : 8).map((issue) => <article key={issue.id} className="grid gap-4 py-5 lg:grid-cols-[8rem_minmax(0,1fr)_12rem]"><div className={`text-xs leading-5 ${mutedClass(isDark)}`}><p className="font-semibold capitalize">{issue.severity}</p><p>{issue.citation}</p></div><div><h3 className="text-sm font-semibold">{issue.title}</h3><p className={`mt-1 text-sm leading-6 ${mutedClass(isDark)}`}>{issue.explanation}</p><p className={`mt-2 text-sm ${isDark ? "text-teal-300" : "text-teal-800"}`}>{issue.suggestedFix}</p></div><div className="flex gap-2 lg:flex-col"><button type="button" disabled={!!savingIssueId || issue.status === "task_created"} aria-label={`Create task: ${issue.title}`} onClick={() => void onStatus(issue.id, "task_created")} className="app-button-primary flex-1">{issue.status === "task_created" ? "Task created" : "Convert to task"}</button><button type="button" disabled={!!savingIssueId} aria-label={`Dismiss: ${issue.title}`} onClick={() => void onStatus(issue.id, "ignored")} className="app-button-secondary flex-1">Dismiss</button></div></article>)}{!issueCards.length ? <p className={`py-5 text-sm ${mutedClass(isDark)}`}>No active findings are ready for triage.</p> : null}</div>{issueCards.length > 8 ? <button type="button" className="app-button-secondary mt-3" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer findings" : `Show all ${issueCards.length} findings`}</button> : null}<Link href={`/${bookId}/analysis?view=chapters` as Route} className="mt-4 block text-sm underline">Review chapter evidence in Findings</Link></section></div>
+}
+
+function FeedbackStep({ bookId, assignments, activeAssignmentId, selectedAssignment, savingFeedbackId, isDark, onSelect, onCopy, onStatus, onInvite }: { bookId: string; assignments: BetaReadAssignment[]; activeAssignmentId: string | null; selectedAssignment: BetaReadAssignmentDetail | null; savingFeedbackId: string | null; isDark: boolean; onSelect: (id: string) => void; onCopy: () => Promise<void>; onStatus: (item: BetaReadFeedbackItem, status: "resolved" | "archived" | "task_created" | "open") => Promise<void>; onInvite: () => void }) {
+  return <section id="beta-consensus" className={surfaceClass(isDark)}><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-lg font-semibold">Reader feedback</h2><p className={`mt-1 text-sm ${mutedClass(isDark)}`}>Resolve, archive, or convert only actionable notes into revision tasks.</p></div><Link href={`/${bookId}/beta-feedback` as Route} className={`text-sm font-semibold underline underline-offset-4 ${isDark ? "text-teal-300" : "text-teal-800"}`}>Open full feedback workspace</Link></div>{assignments.length ? <><label className={`mt-6 block max-w-md text-xs font-medium ${mutedClass(isDark)}`}>Reader assignment<select aria-label="Reader assignment" value={activeAssignmentId ?? ""} onChange={(event) => onSelect(event.target.value)} className={`mt-2 ${inputClass(isDark)}`}>{assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.reader_email} · {assignment.status_label}</option>)}</select></label>{selectedAssignment ? <><div className={`mt-5 flex flex-wrap border-y ${isDark ? "border-white/10" : "border-stone-200"}`}><Metric label="Notes" value={selectedAssignment.feedback_summary.feedback_item_count} isDark={isDark} /><Metric label="Confusing" value={selectedAssignment.feedback_summary.confusing_count} isDark={isDark} divided /><Metric label="Answers" value={selectedAssignment.feedback_summary.answer_count} isDark={isDark} divided /></div><button type="button" onClick={() => void onCopy()} className={`mt-5 text-sm font-semibold underline underline-offset-4 ${isDark ? "text-teal-300" : "text-teal-800"}`}>Copy private review link</button><div className={`mt-5 divide-y border-y ${isDark ? "divide-white/10 border-white/10" : "divide-stone-200 border-stone-200"}`}>{selectedAssignment.feedback_items.map((item) => <article key={item.id} className="grid gap-4 py-5 lg:grid-cols-[8rem_minmax(0,1fr)_auto]"><div className={`text-xs leading-5 ${mutedClass(isDark)}`}><p className="capitalize">{(item.author_status || "open").replaceAll("_", " ")}</p><p>{item.chapter_number ? `Chapter ${item.chapter_number}` : "Book-wide"}</p></div><div><h3 className="text-sm font-semibold">{item.question_prompt || item.anchor_text || "Reader note"}</h3>{item.body ? <p className={`mt-1 text-sm leading-6 ${mutedClass(isDark)}`}>{item.body}</p> : null}</div><div className="flex flex-wrap gap-2"><button type="button" disabled={!!savingFeedbackId} aria-label={`${item.author_status === "resolved" || item.author_status === "archived" ? "Reopen" : "Resolve"} feedback: ${item.body || item.anchor_text || item.id}`} onClick={() => void onStatus(item, item.author_status === "resolved" || item.author_status === "archived" ? "open" : "resolved")} className="app-button-secondary">{item.author_status === "resolved" || item.author_status === "archived" ? "Reopen" : "Resolve"}</button><button type="button" disabled={!!savingFeedbackId} onClick={() => void onStatus(item, "archived")} className="app-button-secondary">Archive</button><button type="button" disabled={!!savingFeedbackId || item.author_status === "task_created"} onClick={() => void onStatus(item, "task_created")} className="app-button-primary">{item.author_status === "task_created" ? "Task created" : "Convert to task"}</button></div></article>)}{!selectedAssignment.feedback_items.length ? <p className={`py-5 text-sm ${mutedClass(isDark)}`}>This reader has not returned feedback yet.</p> : null}</div></> : null}</> : <div className={`mt-6 border-y py-5 text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-200 text-stone-500"}`}>No beta-reader assignments yet. <button type="button" onClick={onInvite} className="font-semibold underline underline-offset-4">Invite a reader</button>.</div>}</section>
+}
+
+function StatusRow({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
+  return <div className="grid gap-1 py-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4"><dt className={`text-xs font-medium ${mutedClass(isDark)}`}>{label}</dt><dd className="text-sm">{value}</dd></div>
+}
+
+function Metric({ label, value, isDark, divided = false }: { label: string; value: number; isDark: boolean; divided?: boolean }) {
+  return <div className={`min-w-36 px-4 py-3 first:pl-0 ${divided ? (isDark ? "border-l border-white/10" : "border-l border-stone-200") : ""}`}><p className={`text-xs ${mutedClass(isDark)}`}>{label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{value}</p></div>
+}
+
+function inputClass(isDark: boolean) {
+  return `h-11 w-full rounded-sm border px-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-[#101720] text-slate-100 focus:border-teal-300" : "border-stone-300 bg-white text-stone-900 focus:border-teal-700"}`
+}
+
+function InviteField({ label, detail, isDark, children }: { label: string; detail?: string; isDark: boolean; children: ReactNode }) {
+  return <label className="grid gap-2"><span className={`text-xs font-medium ${mutedClass(isDark)}`}>{label}</span>{children}{detail ? <span className={`text-xs ${mutedClass(isDark)}`}>{detail}</span> : null}</label>
 }

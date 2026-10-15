@@ -2,7 +2,7 @@ const SHELL_CACHE = "lorevia-shell-v2"
 const STATIC_CACHE = "lorevia-static-v2"
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(["/offline", "/logoandtext.png", "/manifest.webmanifest"])).then(() => self.skipWaiting()))
+  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(["/offline", "/imagelight.png", "/manifest.webmanifest"])).then(() => self.skipWaiting()))
 })
 
 self.addEventListener("activate", (event) => {

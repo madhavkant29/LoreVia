@@ -35,7 +35,7 @@ export function ManuscriptMobileFooter({
             type="button"
             onClick={onSave}
             disabled={saving}
-            className="app-button-primary min-h-9 px-3 text-xs"
+            className="app-button-primary min-h-11 px-3 text-sm dark:bg-teal-700 dark:text-white"
           >
             {saving ? "Saving..." : activeSaveState === "error" ? "Retry" : "Save"}
           </button>

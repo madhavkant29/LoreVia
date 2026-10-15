@@ -6,6 +6,7 @@ const replaceMock = vi.hoisted(() => vi.fn())
 const prefetchChatsSidebarDataMock = vi.hoisted(() => vi.fn())
 const prefetchNotificationsSidebarDataMock = vi.hoisted(() => vi.fn())
 const supportConfigMock = vi.hoisted(() => vi.fn(() => Promise.resolve({ community_url: null })))
+let currentPathname = "/library"
 
 const authState = {
   hydrated: true,
@@ -27,7 +28,7 @@ vi.mock("next/link", () => ({
 }))
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/library",
+  usePathname: () => currentPathname,
   useRouter: () => ({ replace: replaceMock }),
 }))
 
@@ -120,6 +121,7 @@ describe("DashboardSidebar", () => {
     prefetchChatsSidebarDataMock.mockReset()
     prefetchNotificationsSidebarDataMock.mockReset()
     supportConfigMock.mockReset().mockResolvedValue({ community_url: null })
+    currentPathname = "/library"
     container = null
     root = null
   })
@@ -137,6 +139,8 @@ describe("DashboardSidebar", () => {
     expect(Boolean(libraryLink && uploadsLinks[0] && libraryLink.compareDocumentPosition(uploadsLinks[0]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(libraryLink?.className).toContain("bg-stone-200")
     expect(view.textContent).toContain("Page content")
+    expect(prefetchChatsSidebarDataMock).not.toHaveBeenCalled()
+    expect(prefetchNotificationsSidebarDataMock).not.toHaveBeenCalled()
   })
 
   it("links the bottom profile card to the public writer profile", () => {
@@ -147,6 +151,19 @@ describe("DashboardSidebar", () => {
     expect(view.textContent).toContain("@writer")
     expect(view.textContent).toContain("Author")
     expect(Array.from(view.querySelectorAll("button")).some((button) => button.getAttribute("aria-label") === "Open profile menu")).toBe(false)
+  })
+
+  it("uses a focused billing shell without workspace navigation on upgrade", () => {
+    currentPathname = "/upgrade"
+    const view = renderSidebar()
+
+    expect(view.querySelector('nav')).toBeNull()
+    expect(view.querySelector('[data-testid="chat-launcher"]')).toBeNull()
+    expect(view.querySelector('[data-testid="notification-bell"]')).toBeNull()
+    expect(view.querySelector('a[aria-label="Return to LoreVia workspace"]')?.getAttribute("href")).toBe("/library")
+    expect(view.textContent).toContain("Back to workspace")
+    expect(view.textContent).toContain("Page content")
+    expect(supportConfigMock).not.toHaveBeenCalled()
   })
 })
 

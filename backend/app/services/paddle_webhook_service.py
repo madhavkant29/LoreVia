@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,6 +20,8 @@ from app.models.user import (
 from app.services.email_service import (
     send_subscription_cancellation,
     send_subscription_confirmation,
+    send_subscription_payment_failed,
+    send_subscription_renewal_succeeded,
 )
 from app.services.refund_service import (
     REFUND_STATUS_APPROVED,
@@ -25,18 +29,29 @@ from app.services.refund_service import (
     apply_adjustment_webhook,
 )
 from app.services.revenue_ledger_service import record_completed_transaction_revenue
+from app.services.subscription_email_service import (
+    claim_subscription_email_event,
+    mark_subscription_email_event,
+    payment_failure_period_end,
+    transaction_amount,
+)
 from app.utils.billing_utils import (
+    SUBSCRIPTION_EMAIL_PAYMENT_FAILED,
+    SUBSCRIPTION_EMAIL_RENEWAL_SUCCEEDED,
     SUPPORTED_PADDLE_WEBHOOK_EVENTS,
     coerce_user_id,
     event_id_from_paddle_payload,
+    paddle_billing_period_bounds,
     paddle_plan_from_event_data,
     paddle_price_id_from_event_data,
+    paddle_scheduled_cancellation,
     record_subscription_event,
     subscription_event_type_for_metrics,
     subscription_service_is_active,
     tier_from_plan_code,
 )
 from app.utils.logging.errors import public_error_message, redact_sensitive_text
+from app.utils.privacy_utils import user_is_deleted
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +63,37 @@ SERVICE_ACTIVE_STATUSES = {"active", "trialing"}
 CANCELED_STATUSES = {"canceled", "cancelled"}
 SUBSCRIPTION_CONFIRMATION_EMAIL = "subscription_confirmation"
 SUBSCRIPTION_CANCELLATION_EMAIL = "subscription_cancellation"
+SUBSCRIPTION_PAYMENT_FAILED_EMAIL = "subscription_payment_failed"
+SUBSCRIPTION_RENEWED_EMAIL = "subscription_renewed"
+RECURRING_TRANSACTION_ORIGIN = "subscription_recurring"
+PAYMENT_FAILURE_EVENT_TYPES = {
+    "transaction.payment_failed",
+    "transaction.past_due",
+    "subscription.past_due",
+}
+SCHEDULED_CHANGE_AWARE_EVENTS = {
+    "subscription.created",
+    "subscription.updated",
+    "subscription.activated",
+    "subscription.resumed",
+    "subscription.trialing",
+    "subscription.past_due",
+    "subscription.canceled",
+}
 WEBHOOK_PROCESSING_EXCEPTIONS = (RuntimeError, ValueError, SQLAlchemyError)
 WEBHOOK_LAST_RESORT_EXCEPTIONS = (Exception,)
 WEBHOOK_PROCESSING_LEASE = timedelta(minutes=5)
 PADDLE_STATE_WATERMARK_EVENT = "paddle_state_applied"
+
+
+@dataclass(frozen=True)
+class SubscriptionEmailJob:
+    kind: str
+    email: str
+    plan: str
+    amount: str | None = None
+    period_end: datetime | None = None
+    event_row_id: uuid.UUID | None = None
 
 
 async def process_paddle_webhook(event: dict[str, Any]) -> dict[str, Any]:
@@ -213,7 +255,7 @@ async def _process_claimed_webhook(
 
             data = payload.get("data") or {}
             occurred_at = _event_occurred_at(payload)
-            email_job: tuple[str, str, str] | None = None
+            email_jobs: list[SubscriptionEmailJob] = []
             if event_type.startswith("adjustment."):
                 await apply_adjustment_webhook(
                     db,
@@ -222,7 +264,7 @@ async def _process_claimed_webhook(
                 )
             else:
                 context = await _resolve_subscription_context(db, event_type=event_type, data=data)
-                email_job = await _apply_subscription_change(
+                email_jobs = await _apply_subscription_change(
                     db,
                     event_id=event_id,
                     event_type=event_type,
@@ -239,19 +281,63 @@ async def _process_claimed_webhook(
             await db.rollback()
             raise
 
-    if email_job is not None:
-        email_kind, email_address, plan_tier = email_job
-        try:
-            if email_kind == SUBSCRIPTION_CONFIRMATION_EMAIL:
-                await send_subscription_confirmation(email_address, plan_tier)
-            elif email_kind == SUBSCRIPTION_CANCELLATION_EMAIL:
-                await send_subscription_cancellation(email_address, plan_tier)
-        except WEBHOOK_PROCESSING_EXCEPTIONS:
-            logger.exception(
-                "Failed to send subscription lifecycle email for Paddle event %s", event_id
-            )
+    for email_job in email_jobs:
+        await deliver_subscription_email_job(email_job, event_id=event_id)
 
     return {"received": True}
+
+
+async def deliver_subscription_email_job(
+    email_job: SubscriptionEmailJob,
+    *,
+    event_id: str,
+) -> None:
+    try:
+        if email_job.kind == SUBSCRIPTION_CONFIRMATION_EMAIL:
+            await send_subscription_confirmation(email_job.email, email_job.plan)
+        elif email_job.kind == SUBSCRIPTION_CANCELLATION_EMAIL:
+            await send_subscription_cancellation(email_job.email, email_job.plan)
+        elif email_job.kind == SUBSCRIPTION_PAYMENT_FAILED_EMAIL:
+            delivered = await send_subscription_payment_failed(
+                email_job.email,
+                email_job.plan,
+                amount=email_job.amount,
+            )
+            await _mark_subscription_email_delivery(
+                event_row_id=email_job.event_row_id,
+                delivered=delivered,
+            )
+        elif email_job.kind == SUBSCRIPTION_RENEWED_EMAIL:
+            delivered = await send_subscription_renewal_succeeded(
+                email_job.email,
+                email_job.plan,
+                amount=email_job.amount,
+                current_period_end=email_job.period_end,
+            )
+            await _mark_subscription_email_delivery(
+                event_row_id=email_job.event_row_id,
+                delivered=delivered,
+            )
+    except WEBHOOK_PROCESSING_EXCEPTIONS:
+        logger.exception(
+            "Failed to send subscription lifecycle email for Paddle event %s", event_id
+        )
+
+
+async def _mark_subscription_email_delivery(
+    *,
+    event_row_id: uuid.UUID | None,
+    delivered: bool,
+) -> None:
+    if event_row_id is None:
+        return
+    async with AsyncSessionLocal() as session:
+        await mark_subscription_email_event(
+            session,
+            event_id=event_row_id,
+            delivered=delivered,
+        )
+        await session.commit()
 
 
 async def _apply_subscription_change(
@@ -262,7 +348,7 @@ async def _apply_subscription_change(
     data: dict[str, Any],
     context: dict[str, Any],
     occurred_at: datetime | None,
-) -> tuple[str, str, str] | None:
+) -> list[SubscriptionEmailJob]:
     subscription: Subscription | None = context["subscription"]
     customer_id = context["customer_id"]
     subscription_id = context["subscription_id"]
@@ -271,7 +357,7 @@ async def _apply_subscription_change(
     plan_price_id = context["price_id"]
 
     if subscription is None:
-        return None
+        return []
 
     if occurred_at is not None:
         latest_applied_at = await _latest_applied_subscription_event_at(
@@ -287,11 +373,12 @@ async def _apply_subscription_change(
                 occurred_at.isoformat(),
                 latest_applied_at.isoformat(),
             )
-            return None
+            return []
 
     previous_status = _normalized_status(subscription.status)
     user = await db.get(User, subscription.user_id)
     previous_user_tier = _normalized_status(user.tier if user else None)
+    account_deleted = user_is_deleted(user)
 
     next_status = _next_subscription_status(
         event_type=event_type,
@@ -299,12 +386,20 @@ async def _apply_subscription_change(
         current_status=previous_status,
     )
     plan_to_store = plan or subscription.plan or "free"
+    final_cancellation = event_type == "subscription.canceled" and next_status in CANCELED_STATUSES
 
-    subscription.plan = plan_to_store
+    subscription.plan = "free" if final_cancellation else plan_to_store
     subscription.status = next_status
     subscription.paddle_customer_id = customer_id or subscription.paddle_customer_id
     subscription.paddle_sub_id = subscription_id or subscription.paddle_sub_id
     subscription.paddle_transaction_id = transaction_id or subscription.paddle_transaction_id
+    _apply_subscription_lifecycle_fields(
+        subscription,
+        event_type=event_type,
+        data=data,
+        status=next_status,
+        occurred_at=occurred_at,
+    )
 
     next_tier = _tier_after_event(
         event_type=event_type,
@@ -313,6 +408,8 @@ async def _apply_subscription_change(
         price_id=plan_price_id,
         current_tier=previous_user_tier or "free",
     )
+    if account_deleted:
+        next_tier = "free"
     if next_tier is not None:
         await db.execute(update(User).where(User.id == subscription.user_id).values(tier=next_tier))
 
@@ -349,7 +446,7 @@ async def _apply_subscription_change(
         user_id=subscription.user_id,
         event_type=PADDLE_STATE_WATERMARK_EVENT,
         source_event_id=f"{event_id}:state",
-        plan=plan_to_store,
+        plan=subscription.plan,
         status=next_status,
         paddle_customer_id=subscription.paddle_customer_id,
         paddle_sub_id=subscription.paddle_sub_id,
@@ -364,35 +461,197 @@ async def _apply_subscription_change(
         transaction_id=subscription.paddle_transaction_id,
     )
 
+    email_jobs: list[SubscriptionEmailJob] = []
+    if account_deleted or user is None or not user.email:
+        return email_jobs
+
     if (
         event_type == "transaction.completed"
         and not _is_service_active(previous_status)
         and _is_service_active(next_status)
         and previous_user_tier == "free"
     ):
-        if user and user.email:
-            return (
-                SUBSCRIPTION_CONFIRMATION_EMAIL,
-                user.email,
-                next_tier or previous_user_tier or "free",
+        email_jobs.append(
+            SubscriptionEmailJob(
+                kind=SUBSCRIPTION_CONFIRMATION_EMAIL,
+                email=user.email,
+                plan=next_tier or previous_user_tier or "free",
             )
+        )
+
+    if event_type == "transaction.completed" and _is_recurring_renewal_transaction(data):
+        renewal_period_end = subscription.current_period_end
+        if renewal_period_end is not None:
+            amount = transaction_amount(data)
+            claim = await claim_subscription_email_event(
+                db,
+                subscription=subscription,
+                email_type=SUBSCRIPTION_EMAIL_RENEWAL_SUCCEEDED,
+                billing_period_end=renewal_period_end,
+                scheduled_for=datetime.now(UTC),
+                metadata={
+                    "plan": plan_to_store,
+                    "amount": amount,
+                    "transaction_id": transaction_id,
+                    "webhook_event_type": event_type,
+                },
+            )
+            if claim is not None:
+                email_jobs.append(
+                    SubscriptionEmailJob(
+                        kind=SUBSCRIPTION_RENEWED_EMAIL,
+                        email=user.email,
+                        plan=plan_to_store,
+                        amount=amount,
+                        period_end=renewal_period_end,
+                        event_row_id=claim.id,
+                    )
+                )
 
     if (
         event_type == "subscription.canceled"
         and previous_status not in CANCELED_STATUSES
         and next_status in CANCELED_STATUSES
-        and user
-        and user.email
     ):
-        return (
-            SUBSCRIPTION_CANCELLATION_EMAIL,
-            user.email,
-            tier_from_plan_code(plan_to_store, plan_price_id)
-            or previous_user_tier
-            or plan_to_store,
+        email_jobs.append(
+            SubscriptionEmailJob(
+                kind=SUBSCRIPTION_CANCELLATION_EMAIL,
+                email=user.email,
+                plan=tier_from_plan_code(plan_to_store, plan_price_id)
+                or previous_user_tier
+                or plan_to_store,
+            )
         )
 
-    return None
+    if event_type in PAYMENT_FAILURE_EVENT_TYPES:
+        event_period_start, event_period_end = paddle_billing_period_bounds(data)
+        failure_period_end = payment_failure_period_end(
+            subscription,
+            event_period_end=event_period_end,
+            fallback=occurred_at or datetime.now(UTC),
+        )
+        if failure_period_end is not None:
+            amount = transaction_amount(data)
+            claim = await claim_subscription_email_event(
+                db,
+                subscription=subscription,
+                email_type=SUBSCRIPTION_EMAIL_PAYMENT_FAILED,
+                billing_period_end=failure_period_end,
+                scheduled_for=datetime.now(UTC),
+                metadata={
+                    "plan": plan_to_store,
+                    "amount": amount,
+                    "webhook_event_type": event_type,
+                    "period_starts_at": event_period_start.isoformat()
+                    if event_period_start
+                    else None,
+                },
+            )
+            if claim is not None:
+                email_jobs.append(
+                    SubscriptionEmailJob(
+                        kind=SUBSCRIPTION_PAYMENT_FAILED_EMAIL,
+                        email=user.email,
+                        plan=plan_to_store,
+                        amount=amount,
+                        event_row_id=claim.id,
+                    )
+                )
+
+    return email_jobs
+
+
+def _apply_subscription_lifecycle_fields(
+    subscription: Subscription,
+    *,
+    event_type: str,
+    data: dict[str, Any],
+    status: str,
+    occurred_at: datetime | None,
+) -> None:
+    period_start, period_end = paddle_billing_period_bounds(data)
+    if period_start is not None:
+        subscription.current_period_start = period_start
+    if period_end is not None:
+        subscription.current_period_end = period_end
+
+    scheduled_cancel, cancel_effective_at = paddle_scheduled_cancellation(data)
+    if event_type == "subscription.canceled" and status not in CANCELED_STATUSES:
+        scheduled_cancel = True
+        cancel_effective_at = cancel_effective_at or subscription.current_period_end or occurred_at
+
+    if event_type in SCHEDULED_CHANGE_AWARE_EVENTS and "scheduled_change" in data:
+        subscription.cancel_at_period_end = scheduled_cancel
+        if scheduled_cancel:
+            subscription.cancellation_scheduled_at = (
+                cancel_effective_at or subscription.cancellation_scheduled_at or occurred_at
+            )
+        else:
+            subscription.cancellation_scheduled_at = None
+    elif scheduled_cancel:
+        subscription.cancel_at_period_end = True
+        subscription.cancellation_scheduled_at = (
+            cancel_effective_at or subscription.cancellation_scheduled_at or occurred_at
+        )
+
+    if event_type == "subscription.canceled" and status in CANCELED_STATUSES:
+        subscription.cancel_at_period_end = False
+
+    if event_type in PAYMENT_FAILURE_EVENT_TYPES:
+        subscription.last_payment_status = "failed"
+    elif event_type == "transaction.completed":
+        subscription.last_payment_status = "succeeded"
+    elif event_type == "transaction.updated":
+        incoming = _normalized_status(data.get("status"))
+        if incoming:
+            subscription.last_payment_status = incoming
+
+
+async def sync_subscription_from_paddle(
+    db,
+    *,
+    subscription: Subscription,
+    data: dict[str, Any],
+    event_type: str = "subscription.updated",
+    occurred_at: datetime | None = None,
+) -> list[SubscriptionEmailJob]:
+    """Synchronize one local subscription from a Paddle subscription entity.
+
+    Webhook processing resolves the local subscription from the event payload
+    and calls the shared applier directly. Reconciliation jobs already know the
+    local row, so they reuse this wrapper instead of duplicating field mapping.
+    """
+
+    context = {
+        "subscription": subscription,
+        "user_id": subscription.user_id,
+        "customer_id": _customer_id_from_data(data) or subscription.paddle_customer_id,
+        "subscription_id": _subscription_id_from_data(event_type=event_type, data=data)
+        or subscription.paddle_sub_id,
+        "transaction_id": _transaction_id_from_data(event_type=event_type, data=data),
+        "plan": paddle_plan_from_event_data(data),
+        "price_id": paddle_price_id_from_event_data(data),
+        "status": _normalized_status(data.get("status")),
+    }
+    # Reconciliation replays provider state rather than a specific webhook.
+    # Map terminal/prepaid provider statuses onto their lifecycle event types
+    # so a missed cancellation or pause actually downgrades entitlements.
+    incoming_status = context["status"]
+    effective_event_type = event_type
+    if incoming_status == "canceled":
+        effective_event_type = "subscription.canceled"
+    elif incoming_status == "paused":
+        effective_event_type = "subscription.paused"
+    # The watermark event id must be unique per sync: a constant id collides
+    # with the unique SubscriptionEvent.source_event_id on the second run.
+    return await _apply_subscription_change(
+        db,
+        event_id=f"reconcile:{subscription.paddle_sub_id or subscription.id}:{uuid.uuid4().hex}",
+        event_type=effective_event_type,
+        data=data,
+        context=context,
+        occurred_at=occurred_at,
+    )
 
 
 async def _resolve_subscription_context(
@@ -602,7 +861,9 @@ def _transaction_id_from_data(*, event_type: str, data: dict[str, Any]) -> str |
 
 def _next_subscription_status(*, event_type: str, incoming_status: str, current_status: str) -> str:
     if event_type == "transaction.completed":
-        if current_status in {"paused", "past_due", *CANCELED_STATUSES, "trialing", "active"}:
+        # A completed payment recovers a past_due subscription. Paused and
+        # canceled subscriptions must not be resurrected by a late transaction.
+        if current_status in {"paused", *CANCELED_STATUSES}:
             return current_status
         return "active"
     if event_type == "transaction.past_due":
@@ -672,6 +933,17 @@ def _is_service_active(status: str | None) -> bool:
 
 def _normalized_status(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def _is_recurring_renewal_transaction(data: dict[str, Any]) -> bool:
+    """True only for Paddle's automatic subscription-renewal transactions.
+
+    Paddle sets origin=subscription_recurring exclusively for renewal charges,
+    so initial checkouts (api/web), one-time charges (subscription_charge), and
+    plan changes (subscription_update) can never trigger a renewal email.
+    """
+
+    return _normalized_status(data.get("origin")) == RECURRING_TRANSACTION_ORIGIN
 
 
 def _string_or_none(value: object | None) -> str | None:

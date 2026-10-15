@@ -1,5 +1,5 @@
 export type BookStatus = "pending" | "processing" | "ready" | "failed"
-export type ProcessingStage = "queued" | "parsing" | "extracting" | "summarizing" | "embedding" | "analyzing" | "ready" | "failed"
+export type ProcessingStage = "queued" | "parsing" | "extracting" | "summarizing" | "embedding" | "analyzing" | "ready" | "failed" | "frozen"
 export type SaveState = "saved" | "saving" | "offline_draft" | "retrying" | "error"
 export type BookFormat = "pdf" | "epub" | "docx" | "doc" | "fountain" | "txt" | "md" | "manual"
 export type BookWorkType = "novel" | "screenplay" | "other"
@@ -1268,6 +1268,10 @@ export interface BookProcessing {
   }>
   next_chapter_number?: number | null
   next_resume_at?: string | null
+  frozen?: boolean
+  freeze_reason?: string | null
+  freeze_message?: string | null
+  frozen_at?: string | null
   pipeline?: {
     extraction?: ProcessingPipelineStage | null
     analysis?: ProcessingPipelineStage | null

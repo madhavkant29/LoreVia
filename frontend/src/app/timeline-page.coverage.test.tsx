@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const useQueryMock = vi.hoisted(() => vi.fn())
+const useInfiniteQueryMock = vi.hoisted(() => vi.fn())
 const useParamsMock = vi.hoisted(() => vi.fn(() => ({ bookId: "book-1" })))
 const setTimelineCollapsedSectionMock = vi.hoisted(() => vi.fn())
 const patchBookPreferencesMock = vi.hoisted(() => vi.fn())
@@ -21,6 +22,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
+  useInfiniteQuery: useInfiniteQueryMock,
 }))
 
 vi.mock("@/components/reader/WorkspaceFamilyHeader", () => ({
@@ -93,6 +95,7 @@ vi.mock("@/lib/stores/uiPreferencesStore", () => ({
   }),
 }))
 vi.mock("@/lib/analytics/posthog", () => ({ capture: captureMock }))
+vi.mock("@/components/ui/ShortcutHelp", () => ({ SUPPORT_HELP_EVENT: "lorevia:open-support-help" }))
 
 import TimelinePage from "@/app/(reader)/[bookId]/timeline/page"
 
@@ -190,6 +193,7 @@ async function clickButton(label: string) {
 }
 
 beforeEach(() => {
+  useInfiniteQueryMock.mockReturnValue({ data: { pages: [{ events: [] }] }, isLoading: false })
   useParamsMock.mockReturnValue({ bookId: "book-1" })
   preferencesState.theme = "light"
   preferencesState.timelineCollapsedSections = {}
@@ -218,21 +222,44 @@ afterEach(() => {
 })
 
 describe("timeline runtime page", () => {
+  it("requests paginated events explicitly and retries failed event pages", async () => {
+    const fetchNextPage = vi.fn()
+    useInfiniteQueryMock.mockReturnValue({ data: { pages: [{ events: [{ chapter_number: 2, kind: "turning_point", title: "The lock opens", detail: null }], total_events: 101 }] }, hasNextPage: true, isError: true, isFetchNextPageError: true, fetchNextPage })
+    await renderPage()
+    expect(text()).toContain("1 of 101 story events loaded")
+    expect(text()).toContain("Previously loaded events remain visible")
+    await clickButton("Retry story events")
+    expect(fetchNextPage).toHaveBeenCalledOnce()
+    const options = useInfiniteQueryMock.mock.calls[0][0]
+    const { readerApi } = await import("@/lib/api/reader")
+    await options.queryFn({ pageParam: 100 })
+    expect(readerApi.getTimeline).toHaveBeenCalledWith("book-1", { include: "events", limit: 100, offset: 100 })
+  })
+
+  it("never draws a marker or links a missing chapter", async () => {
+    useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => String(queryKey) === "book-1:detail" ? defaultQueryResult(bookFixture) : defaultQueryResult({ ...timelineFixture, relationship_markers: [{ id: "missing", title: "Unknown turn", chapter_number: 9 }] }))
+    await renderPage()
+    expect(container?.querySelector('[data-timeline-mark="relationship-missing"]')).toBeNull()
+    expect(container?.querySelector('a[href="/book-1/chapter/9"]')).toBeNull()
+    expect(text()).toContain("No available chapter for this entry.")
+  })
+
   it("renders populated author timeline lanes and collapse handlers", async () => {
     await renderPage()
 
     expect(captureMock).toHaveBeenCalledWith("major_events_opened", { book_id: "book-1" })
     expect(text()).toContain("Arc timeline")
-    expect(text()).toContain("Chapters mapped")
+    expect(text()).toContain("Chapters3")
     expect(text()).toContain("Mara")
-    expect(text()).toContain("KEEPER")
+    expect(text()).toContain("keeper")
     expect(text()).toContain("The brass key")
     expect(text()).toContain("The hidden gate")
     expect(text()).toContain("Mara and Theo trust shift")
 
     await clickButton("Characters")
-    await clickButton("Plot Threads")
-    await clickButton("Relationship Shifts")
+    await clickButton("Plot threads")
+    await clickButton("Relationship shifts")
+    await clickButton("Collapse all")
 
     expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("book-1", "characters", true)
     expect(setTimelineCollapsedSectionMock).toHaveBeenCalledWith("book-1", "plotThreads", true)

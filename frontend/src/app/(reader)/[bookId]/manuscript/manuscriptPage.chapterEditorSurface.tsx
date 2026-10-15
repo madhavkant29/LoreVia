@@ -50,7 +50,6 @@ export function ManuscriptChapterEditorSurface({
   activeChapterNeedsReprocess,
   activeChapterNumber,
   autosaveMetaLabel,
-  bookTitle,
   characters,
   chapterApproxPages,
   chapterHeading,
@@ -95,23 +94,24 @@ export function ManuscriptChapterEditorSurface({
             }}
           />
         ) : null}
-        <div className={`border-b px-5 py-5 sm:px-7 ${isDark ? "border-white/10 bg-[#111721]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
-          <div className="flex items-start justify-between gap-4">
+        <div className={`border-b px-5 py-4 sm:px-7 ${isDark ? "border-white/10 bg-[#111721]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
             <div className="min-w-0 flex-1">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>{bookTitle || "Manuscript"}</p>
+              <p className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-stone-600"}`}><label htmlFor={`chapter-title-${activeChapterNumber}`}>Chapter title</label></p>
               <input
                 key={`chapter-heading-${activeChapterNumber}-${chapterHeading}`}
+                id={`chapter-title-${activeChapterNumber}`}
                 type="text"
                 aria-label="Chapter title"
                 defaultValue={chapterHeading}
                 onBlur={(event) => onChapterHeadingBlur(event.target.value)}
-                className={`mt-3 w-full border-0 bg-transparent font-serif text-3xl font-semibold leading-tight outline-none sm:text-4xl ${isDark ? "text-white" : "text-stone-950"}`}
+                className={`mt-3 w-full border-0 bg-transparent font-serif text-2xl font-semibold leading-tight outline-none focus-visible:ring-2 focus-visible:ring-teal-500 sm:text-3xl ${isDark ? "text-white" : "text-stone-950"}`}
               />
               <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{chapterReadingTime} · {chapterSceneCount} scene{chapterSceneCount === 1 ? "" : "s"}</p>
               <p className={`mt-2 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{chapterWordCount.toLocaleString()} words · ~{chapterApproxPages} pages</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`rounded-sm px-3 py-1.5 text-3xs font-semibold ${saveStateTone}`}>
+              <span className={`rounded-sm px-3 py-1.5 text-xs font-semibold ${saveStateTone}`}>
                 {saveStateLabel}
               </span>
               <button
@@ -148,6 +148,8 @@ export function ManuscriptChapterEditorSurface({
               <button
                 type="button"
                 onClick={onReplaceExistingToggle}
+                aria-pressed={replaceExisting}
+                aria-label="Replace existing chapter"
                 className={`rounded-sm px-2.5 py-1 font-semibold ${replaceExisting ? isDark ? "bg-white text-slate-950" : "bg-stone-900 text-white" : isDark ? "bg-white/10 text-slate-200" : "bg-stone-100 text-stone-700"}`}
               >
                 {replaceExisting ? "On" : "Off"}
@@ -158,6 +160,7 @@ export function ManuscriptChapterEditorSurface({
             <div className={`mt-4 inline-flex items-center gap-2 rounded-sm border px-3 py-2 text-xs ${isDark ? "border-white/10 bg-black/30 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
               <span>Index format</span>
               <select
+                aria-label="Index format"
                 value={indexFormat}
                 onChange={(event) => onIndexFormatChange(event.target.value)}
                 className={`rounded-sm border px-2 py-1 font-semibold outline-none ${isDark ? "border-white/[0.08] bg-black/70 text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
@@ -172,7 +175,7 @@ export function ManuscriptChapterEditorSurface({
           ) : null}
           {autosaveMetaLabel ? <p className={`mt-3 text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>{autosaveMetaLabel}</p> : null}
         </div>
-        <div className={`sticky top-[8.25rem] z-10 border-b px-3 py-3 transition-all duration-200 translate-y-0 opacity-100 pointer-events-auto ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
+        <div className={`sticky top-0 xl:top-[var(--manuscript-header-height,8.25rem)] z-10 overflow-x-auto border-b px-3 py-3 transition-[opacity,transform] duration-200 translate-y-0 opacity-100 pointer-events-auto sm:overflow-visible ${isDark ? "border-white/10 bg-[#0c1118]" : "border-[#e6dfd4] bg-[#f7f3ed]"}`}>
           <EditorToolbar editorKey={editorKey} isDark={isDark} compact characters={characters} onAddComment={onAddComment} onOpenNotes={onNotesShortcut} />
         </div>
         <RichTextEditor
@@ -186,7 +189,7 @@ export function ManuscriptChapterEditorSurface({
           onCharacterClick={onCharacterClick}
           editorKey={editorKey}
           style={{ ...sheetStyle, textIndent: firstLineIndent ? "1.5em" : "0" }}
-          className={`relative min-h-[58vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-[22mm] ${isDark ? "text-slate-100" : "text-stone-900"}`}
+          className={`relative min-h-[54vh] w-full border-0 bg-transparent px-5 py-10 outline-none sm:px-[18mm] sm:py-10 ${isDark ? "text-slate-100" : "text-stone-900"}`}
           contentClassName="mx-auto w-full max-w-[780px]"
         />
         <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs sm:px-7 ${isDark ? "border-white/10 bg-[#0b1016] text-slate-300" : "border-[#e6dfd4] bg-[#f7f3ed] text-stone-500"}`}>

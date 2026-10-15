@@ -389,8 +389,20 @@ async def test_request_account_deletion_anonymizes_user_books_and_tracks_provide
         deleted_email_hash=None,
         deleted_at=None,
     )
-    successful_subscription = SimpleNamespace(paddle_sub_id="sub-ok", status="active")
-    failed_subscription = SimpleNamespace(paddle_sub_id="sub-fail", status="active")
+    successful_subscription = SimpleNamespace(
+        paddle_sub_id="sub-ok",
+        status="active",
+        cancel_at_period_end=False,
+        cancellation_scheduled_at=None,
+        current_period_end=None,
+    )
+    failed_subscription = SimpleNamespace(
+        paddle_sub_id="sub-fail",
+        status="active",
+        cancel_at_period_end=False,
+        cancellation_scheduled_at=None,
+        current_period_end=None,
+    )
     book = SimpleNamespace(
         id=uuid.uuid4(),
         hidden_at=None,
@@ -419,7 +431,13 @@ async def test_request_account_deletion_anonymizes_user_books_and_tracks_provide
     async def fake_cancel(subscription_id):
         if subscription_id == "sub-fail":
             raise httpx.HTTPError("provider unavailable")
-        return {"scheduled_change": "cancel"}
+        return {
+            "scheduled_change": "cancel",
+            "current_billing_period": {
+                "starts_at": "2026-09-19T00:00:00Z",
+                "ends_at": "2026-10-19T00:00:00Z",
+            },
+        }
 
     async def fake_supabase_delete(auth_id):
         assert auth_id == "auth-1"
@@ -447,7 +465,11 @@ async def test_request_account_deletion_anonymizes_user_books_and_tracks_provide
 
     assert followup is True
     assert successful_subscription.status == "cancelling"
+    assert successful_subscription.cancel_at_period_end is True
+    assert successful_subscription.cancellation_scheduled_at is not None
+    assert successful_subscription.current_period_end == datetime(2026, 10, 19, tzinfo=UTC)
     assert failed_subscription.status == "active"
+    assert failed_subscription.cancel_at_period_end is False
     assert user.email.startswith("deleted+")
     assert user.username is None
     assert user.tier == "free"

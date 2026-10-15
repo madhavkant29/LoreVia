@@ -1177,3 +1177,118 @@ async def test_checkout_rejects_duplicate_paddle_subscription(
     assert preview.status_code == 409
     assert checkout.status_code == 409
     assert "already has a Paddle subscription" in checkout.json()["detail"]
+
+
+async def _create_billing_subscription(
+    client,
+    db,
+    auth_headers,
+    *,
+    status: str,
+    cancel_at_period_end: bool = False,
+    last_payment_status: str | None = None,
+) -> tuple[uuid.UUID, datetime]:
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user_id = uuid.UUID(me.json()["id"])
+    user = await db.get(User, user_id)
+    user.tier = "author" if status in {"active", "past_due"} else "free"
+    period_start = datetime(2026, 9, 19, tzinfo=UTC)
+    period_end = datetime(2026, 10, 19, tzinfo=UTC)
+    db.add(
+        Subscription(
+            user_id=user_id,
+            plan="author_monthly",
+            status=status,
+            paddle_customer_id=f"ctm_status_{status}_{uuid.uuid4().hex[:8]}",
+            paddle_sub_id=f"sub_status_{uuid.uuid4().hex[:8]}",
+            current_period_start=period_start,
+            current_period_end=period_end,
+            cancel_at_period_end=cancel_at_period_end,
+            cancellation_scheduled_at=period_end if cancel_at_period_end else None,
+            last_payment_status=last_payment_status,
+        )
+    )
+    await db.commit()
+    return user_id, period_end
+
+
+@pytest.mark.asyncio
+async def test_billing_subscription_endpoint_reports_active_renewal(client, db, auth_headers):
+    await _create_billing_subscription(client, db, auth_headers, status="active")
+
+    response = await client.get("/api/v1/billing/subscription", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["plan"] == "author_monthly"
+    assert payload["plan_tier"] == "author"
+    assert payload["display_state"] == "active"
+    assert payload["price"] == {"amount": 19, "currency": "USD", "interval": "month"}
+    assert payload["cancel_at_period_end"] is False
+    assert payload["auto_renew"] is True
+    assert payload["next_charge_at"] is not None
+    assert payload["has_paddle_subscription"] is True
+
+
+@pytest.mark.asyncio
+async def test_billing_subscription_endpoint_reports_cancellation_scheduled(
+    client, db, auth_headers
+):
+    _user_id, period_end = await _create_billing_subscription(
+        client,
+        db,
+        auth_headers,
+        status="active",
+        cancel_at_period_end=True,
+    )
+
+    response = await client.get("/api/v1/billing/subscription", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["display_state"] == "cancellation_scheduled"
+    assert payload["cancel_at_period_end"] is True
+    assert payload["auto_renew"] is False
+    assert payload["next_charge_at"] is None
+    assert payload["current_period_end"] == period_end.isoformat().replace("+00:00", "Z")
+
+
+@pytest.mark.asyncio
+async def test_billing_subscription_endpoint_reports_past_due(client, db, auth_headers):
+    await _create_billing_subscription(
+        client,
+        db,
+        auth_headers,
+        status="past_due",
+        last_payment_status="failed",
+    )
+
+    response = await client.get("/api/v1/billing/subscription", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["display_state"] == "past_due"
+    assert payload["auto_renew"] is False
+    assert payload["next_charge_at"] is None
+    assert payload["last_payment_status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_billing_subscription_endpoint_reports_free_without_paddle_subscription(
+    client, db, auth_headers
+):
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    user = await db.get(User, uuid.UUID(me.json()["id"]))
+    user.tier = "free"
+    user.created_at = datetime.now(UTC) - timedelta(days=60)
+    await db.commit()
+
+    response = await client.get("/api/v1/billing/subscription", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["plan"] == "free"
+    assert payload["display_state"] == "free"
+    assert payload["price"] == {"amount": 0, "currency": "USD", "interval": "month"}
+    assert payload["auto_renew"] is False
+    assert payload["has_paddle_subscription"] is False

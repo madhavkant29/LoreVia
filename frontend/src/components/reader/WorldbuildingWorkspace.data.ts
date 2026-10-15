@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { booksApi } from "@/lib/api/books"
+import { readerApi } from "@/lib/api/reader"
 import { worldBuildingApi } from "@/lib/api/worldBuilding"
-import { asQueryKey, booksStatsCacheKey } from "@/lib/query/cacheKeys"
+import { asQueryKey, booksStatsCacheKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import type { UserStats } from "@/types/book"
 import type {
   CanonOverride,
@@ -34,12 +35,16 @@ export function useWorldbuildingWorkspaceData(bookId: string, focus: WorkspaceFo
       return payload
     },
     staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 
   const documentsQuery = useQuery<WorldBuildingDocument[]>({
     queryKey: [`worldbuilding:${bookId}:documents`],
     queryFn: () => worldBuildingApi.listDocuments(bookId),
     enabled: false,
+    retry: false,
   })
 
   const selectedDocumentQuery = useQuery<WorldBuildingDocumentDetail | null>({
@@ -49,30 +54,36 @@ export function useWorldbuildingWorkspaceData(bookId: string, focus: WorkspaceFo
       return worldBuildingApi.getDocument(bookId, selectedDocumentId)
     },
     enabled: Boolean(selectedDocumentId),
+    retry: false,
+    refetchOnWindowFocus: false,
   })
 
   const notesQuery = useQuery<WorldNote[]>({
     queryKey: [`worldbuilding:${bookId}:notes`],
     queryFn: () => worldBuildingApi.listNotes(bookId),
     enabled: false,
+    retry: false,
   })
 
   const canonOverridesQuery = useQuery<CanonOverride[]>({
     queryKey: [`worldbuilding:${bookId}:canon-overrides`],
     queryFn: () => worldBuildingApi.listCanonOverrides(bookId),
     enabled: false,
+    retry: false,
   })
 
   const elementsQuery = useQuery<WorldElement[]>({
     queryKey: [`worldbuilding:${bookId}:elements`],
     queryFn: () => worldBuildingApi.listElements(bookId),
     enabled: false,
+    retry: false,
   })
 
   const wikiQuery = useQuery<WikiEntry[]>({
     queryKey: [`worldbuilding:${bookId}:wiki`],
     queryFn: () => worldBuildingApi.listWiki(bookId),
     enabled: false,
+    retry: false,
   })
 
   const uploadStatsQuery = useQuery<UserStats | null>({
@@ -85,11 +96,26 @@ export function useWorldbuildingWorkspaceData(bookId: string, focus: WorkspaceFo
     queryKey: [`worldbuilding:${bookId}:analysis:${focus}`],
     queryFn: () => worldBuildingApi.getGaps(bookId),
     enabled: false,
+    retry: false,
   })
 
   const loadingBootstrap = bootstrapQuery.isLoading
+  const chaptersQuery = useQuery({ queryKey: asQueryKey(readerCacheKey(bookId, "chapters")), queryFn: () => readerApi.getChapterList(bookId), enabled: bootstrapQuery.isSuccess, retry: false })
 
   return {
+    availableChapters: chaptersQuery.data?.chapters.map((chapter) => chapter.number) ?? [],
+    bootstrapLoading: loadingBootstrap,
+    bootstrapReady: !!bootstrapQuery.data,
+    bootstrapError: bootstrapQuery.isError,
+    refetchBootstrap: bootstrapQuery.refetch,
+    documentError: selectedDocumentQuery.isError,
+    refreshErrors: [
+      { label: "canon sources", query: documentsQuery }, { label: "cleanup notes", query: notesQuery }, { label: "canon aliases", query: canonOverridesQuery },
+      { label: "lore facts", query: elementsQuery }, { label: "wiki entries", query: wikiQuery }, { label: "upload allowances", query: uploadStatsQuery }, { label: "comparison", query: analysisQuery }, { label: "manuscript chapters", query: chaptersQuery },
+    ].flatMap(({ label, query: result }) => {
+
+      return result.isError ? [{ label: String(label), retry: result.refetch, busy: result.isFetching }] : []
+    }),
     analysisLoading: loadingBootstrap && focus === "gap" ? true : analysisQuery.isLoading,
     canonOverrides: canonOverridesQuery.data ?? [],
     documents: documentsQuery.data ?? [],
@@ -97,7 +123,7 @@ export function useWorldbuildingWorkspaceData(bookId: string, focus: WorkspaceFo
     elementsLoading: loadingBootstrap || elementsQuery.isLoading,
     extractedElements: elementsQuery.data ?? [],
     initialAnalysis: analysisQuery.data ?? null,
-    loadingAnalysis: analysisQuery.isLoading,
+    loadingAnalysis: analysisQuery.isFetching,
     loadingDocumentBody: selectedDocumentQuery.isLoading,
     notes: notesQuery.data ?? [],
     notesLoading: loadingBootstrap || notesQuery.isLoading,

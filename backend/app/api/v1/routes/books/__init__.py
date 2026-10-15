@@ -22,6 +22,10 @@ from app.api.v1.routes.books.visibility import router as visibility_router
 
 router = APIRouter()
 
+# Literal single-segment paths such as /books/series must be registered before
+# core_router, whose GET /{book_id} catch-all would otherwise match them and
+# fail UUID validation with a 422.
+router.include_router(series_router)
 router.include_router(core_router)
 router.include_router(intelligence_router)
 router.include_router(continuity_router)
@@ -30,7 +34,6 @@ router.include_router(lifecycle_router)
 router.include_router(imports_router)
 router.include_router(exports_router)
 router.include_router(characters_router)
-router.include_router(series_router)
 router.include_router(notes_router)
 router.include_router(publish_router)
 router.include_router(events_router)

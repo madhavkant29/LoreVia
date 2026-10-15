@@ -67,7 +67,7 @@ async def upload_world_documents(
 ):
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
     upload_files = [upload for upload in (files or []) if upload.filename]
 
     if upload_files:
@@ -150,7 +150,7 @@ async def get_world_document(
 ):
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
     document = await get_world_building_document(db, book, document_id)
     payload = await load_world_building_document_payload(document)
     return serialize_world_document(document, payload=payload)
@@ -169,7 +169,7 @@ async def patch_world_document(
 ):
     book = await get_owned_world_building_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
     document = await get_world_building_document(db, book, document_id)
     previous_s3_key = document.s3_key
     updated = await update_world_building_document(

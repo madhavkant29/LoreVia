@@ -4,6 +4,7 @@ type PostHogCaptureClient = {
   capture: (event: string, properties?: AnalyticsProps) => void
   identify: (userId: string, properties?: AnalyticsProps) => void
   reset: () => void
+  opt_out_capturing?: () => void
 }
 
 declare global {

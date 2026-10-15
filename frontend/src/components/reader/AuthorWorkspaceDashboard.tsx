@@ -4,49 +4,28 @@ import React, { Suspense, useDeferredValue, useState } from "react"
 
 import { panelClass } from "@/components/overview/utils"
 import { RevisionIntelligencePanel } from "@/components/revision/RevisionIntelligencePanel"
+import { ErrorCard } from "@/components/ui/ErrorCard"
 import { Skeleton } from "@/components/ui/Skeleton"
 import {
   ActiveIssuesCard,
-  CompactQuickLinksCard,
   CurrentProjectCard,
   OverviewHeader,
   RecentChaptersCard,
-  RecentSignalsCard,
   RevisionPreviewPlaceholder,
   StoryPulseCard,
 } from "./AuthorDashboardPrimaryPanels"
 import {
-  AuthorOverviewTab,
   PlanningTab,
-  RevisionHubTab,
   StoryMapTab,
   WorkspaceStatsTab,
 } from "./AuthorDashboardTabs"
 import type { Book, GoalCalendarItem, PreWritingCheck, RevisionIntelligence, StoryHealth, UserStats, WriterWorkspace } from "@/types/book"
-import type { ChapterListResponse } from "@/types/reader"
-
-type IconName =
-  | "analysis"
-  | "book"
-  | "calendar"
-  | "chat"
-  | "chevron"
-  | "edit"
-  | "file"
-  | "flame"
-  | "gap"
-  | "graph"
-  | "moon"
-  | "pen"
-  | "search"
-  | "spark"
-  | "sun"
-  | "timeline"
-  | "users"
-  | "voice"
+import { buildManuscriptRecap } from "@/lib/utils/summaries"
+import type { ChapterListResponse, SummaryCollectionResponse } from "@/types/reader"
 
 type WorkspaceSaveState = "idle" | "saving" | "saved" | "error"
-type AuthorDashboardTab = "overview" | "revision" | "planning" | "story-map" | "stats"
+const DETAIL_TABS = [["planning", "Planning"], ["story-map", "Story Map"], ["stats", "Statistics"]] as const
+type AuthorDashboardTab = typeof DETAIL_TABS[number][0]
 type Props = {
   bookId: string
   book: Book
@@ -60,15 +39,16 @@ type Props = {
   targetWords: number | null
   percentComplete: number
   chapters: ChapterListResponse["chapters"]
+  summaryCollection?: SummaryCollectionResponse | null
   unitTitle: string
   unitPrefix: string
   storyHealth: StoryHealth | null
   preWritingCheck: PreWritingCheck | null
   revisionIntelligence: RevisionIntelligence | null
   writerWorkspace: WriterWorkspace | null
-  continuityIssueCount: number
-  worldGapCount: number
-  timelineIssueCount: number
+  continuityIssueCount: number | null
+  worldGapCount: number | null
+  timelineIssueCount: number | null
   processingSummary: string | null
   chapterCount: number | null
   characterCount: number
@@ -105,12 +85,12 @@ export function AuthorWorkspaceDashboard({
   activeBookMode,
   canUseAuthorMode,
   modeSaving,
-  greetingName,
   canOpenManuscript,
   currentWords,
   targetWords,
   percentComplete,
   chapters,
+  summaryCollection = null,
   unitTitle,
   unitPrefix,
   storyHealth,
@@ -148,23 +128,15 @@ export function AuthorWorkspaceDashboard({
   onRevisionChange,
   onWriterWorkspaceChange,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<AuthorDashboardTab>("overview")
+  const [activeTab, setActiveTab] = useState<AuthorDashboardTab>("planning")
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [coverUrlOverride, setCoverUrlOverride] = useState<string | null>(null)
   const deferedBookCoverUrl = coverUrlOverride !== null ? coverUrlOverride : book.cover_url
   const deferredStoryHealth = useDeferredValue(storyHealth)
   const deferredPreWritingCheck = useDeferredValue(preWritingCheck)
   const deferredRevisionIntelligence = useDeferredValue(revisionIntelligence)
   const deferredWriterWorkspace = useDeferredValue(writerWorkspace)
-  const recentAlerts = preWritingCheck?.alerts ?? []
-  const quickLinks = [
-    { title: "Story Advisor", body: "Ask for revision guidance and continuity checks.", href: `/${bookId}/advisor`, icon: "graph" as IconName },
-    { title: "Ask LoreVia", body: "Search the manuscript memory without leaving the workspace.", href: `/${bookId}/ask`, icon: "chat" as IconName },
-    { title: "Character Graph", body: "Open the relationship map for cast-level context.", href: `/${bookId}/graph`, icon: "users" as IconName },
-    { title: "Timeline", body: "Review event order and pressure points.", href: `/${bookId}/timeline`, icon: "timeline" as IconName },
-  ]
-  const totalRevisionItems = deferredRevisionIntelligence?.summary.active_item_count ?? continuityIssueCount + worldGapCount + timelineIssueCount
-  const highSeverityItems = deferredRevisionIntelligence?.summary.high_severity_count ?? continuityIssueCount
-
+  const manuscriptRecap = buildManuscriptRecap(summaryCollection)
   return (
     <div className="space-y-4">
       <OverviewHeader
@@ -172,12 +144,11 @@ export function AuthorWorkspaceDashboard({
         activeBookMode={activeBookMode}
         canUseAuthorMode={canUseAuthorMode}
         modeSaving={modeSaving}
-        greetingName={greetingName}
         onModeChange={onModeChange}
         onToggleTheme={onToggleTheme}
       />
 
-      <section className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(0,1.32fr)_minmax(18rem,0.86fr)_minmax(17.5rem,0.82fr)]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(19rem,0.75fr)]">
         <CurrentProjectCard
           book={book}
           isDark={isDark}
@@ -189,11 +160,11 @@ export function AuthorWorkspaceDashboard({
           dailyTarget={dailyTarget}
           loginStreakDays={loginStreakDays}
           onOpenManuscript={onOpenManuscript}
-          onOpenRelationships={onOpenRelationships}
-          onNavigate={onNavigate}
           bookId={bookId}
           resolvedCoverUrl={deferedBookCoverUrl}
           onCoverUpdated={(updated) => setCoverUrlOverride(updated.cover_url ?? null)}
+          manuscriptRecap={manuscriptRecap?.content ?? null}
+          recapChapterCount={manuscriptRecap?.chapterCount ?? 0}
         />
         <RecentChaptersCard
           book={book}
@@ -204,137 +175,89 @@ export function AuthorWorkspaceDashboard({
           onNavigate={onNavigate}
           bookId={bookId}
         />
-        <StoryPulseCard
-          bookId={bookId}
-          isDark={isDark}
-          storyHealth={deferredStoryHealth}
-          storyHealthError={storyHealthError}
-          onRetryStoryHealth={onRetryStoryHealth}
-        />
       </section>
 
       <Suspense fallback={<Skeleton variant="card" className="min-h-72" />}>
-        <section className="grid gap-5 xl:auto-rows-fr xl:grid-cols-[minmax(18rem,0.92fr)_minmax(0,1.12fr)_minmax(17rem,0.8fr)]">
-        <ActiveIssuesCard
-          isDark={isDark}
-          continuityIssueCount={continuityIssueCount}
-          worldGapCount={worldGapCount}
-          timelineIssueCount={timelineIssueCount}
-          onNavigate={onNavigate}
-          bookId={bookId}
-          processingSummary={processingSummary}
-        />
-        {deferredRevisionIntelligence ? (
-          <RevisionIntelligencePanel
-            bookId={bookId}
-            revision={deferredRevisionIntelligence}
-            writerWorkspace={deferredWriterWorkspace}
+        <section className="grid gap-4 xl:grid-cols-[minmax(19rem,0.72fr)_minmax(0,1.25fr)_minmax(18rem,0.72fr)]">
+          <ActiveIssuesCard
             isDark={isDark}
-            onRevisionChange={onRevisionChange}
-            onWriterWorkspaceChange={onWriterWorkspaceChange}
-            variant="preview"
-          />
-        ) : (
-          <RevisionPreviewPlaceholder isDark={isDark} />
-        )}
-        <div className="grid auto-rows-fr gap-5">
-          <CompactQuickLinksCard isDark={isDark} links={quickLinks} onNavigate={onNavigate} />
-          <RecentSignalsCard
-            isDark={isDark}
-            unitTitle={unitTitle}
-            recentAlerts={recentAlerts}
-            chapters={chapters}
+            continuityIssueCount={continuityIssueCount}
+            worldGapCount={worldGapCount}
+            timelineIssueCount={timelineIssueCount}
             onNavigate={onNavigate}
             bookId={bookId}
-            preWritingCheckError={preWritingCheckError}
-            onRetryPreWritingCheck={onRetryPreWritingCheck}
+            processingSummary={processingSummary}
           />
-        </div>
-      </section>
+          {deferredRevisionIntelligence ? (
+            <RevisionIntelligencePanel
+              bookId={bookId}
+              revision={deferredRevisionIntelligence}
+              writerWorkspace={deferredWriterWorkspace}
+              isDark={isDark}
+              onRevisionChange={onRevisionChange}
+              onWriterWorkspaceChange={onWriterWorkspaceChange}
+              variant="preview"
+            />
+          ) : revisionIntelligenceError && onRetryRevisionIntelligence ? (
+            <ErrorCard variant="compact" isDark={isDark} message="Revision intelligence could not be loaded." onRetry={onRetryRevisionIntelligence} />
+          ) : (
+            <RevisionPreviewPlaceholder isDark={isDark} />
+          )}
+          <StoryPulseCard
+            bookId={bookId}
+            isDark={isDark}
+            storyHealth={deferredStoryHealth}
+            storyHealthError={storyHealthError}
+            onRetryStoryHealth={onRetryStoryHealth}
+          />
+        </section>
       </Suspense>
 
-      <section className={panelClass(isDark, "overflow-hidden p-4 sm:p-5")} data-testid="author-workspace-tabs">
-        <div className="grid gap-4 border-b border-white/[0.06] pb-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] lg:items-end">
-          <div>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Secondary workspace</p>
-            <h2 className={`mt-2 font-serif text-3xl leading-none ${isDark ? "text-white" : "text-slate-900"}`}>
-              {activeTab === "planning" ? "Plan with intent. Write with momentum." : "Your author command center."}
-            </h2>
-            <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-              {activeTab === "planning"
-                ? "Align goals, schedule sessions, and protect the manuscript from drift."
-                : "Deep tools for planning, structure, and story intelligence."}
-            </p>
-          </div>
-          <div role="tablist" aria-label="Author workspace tabs" className={`grid gap-1 rounded-md border p-1 sm:grid-cols-3 xl:grid-cols-5 ${isDark ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
-            {([
-              ["overview", "Overview"],
-              ["revision", "Revision Hub"],
-              ["planning", "Planning"],
-              ["story-map", "Story Map"],
-              ["stats", "Workspace Stats"],
-            ] as const).map(([tab, label]) => (
+      <details
+        className={panelClass(isDark, "overflow-hidden")}
+        data-testid="author-workspace-details"
+        onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+      >
+        <summary className={`flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 sm:px-5 ${isDark ? "hover:bg-white/[0.03]" : "hover:bg-stone-50"}`}>
+          <span>
+            <span className={`block text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Project details</span>
+            <span className={`mt-1 block text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>Goals, story structure, and writing statistics</span>
+          </span>
+          <span aria-hidden="true" className={`text-lg ${isDark ? "text-slate-400" : "text-stone-500"}`}>{detailsOpen ? "−" : "+"}</span>
+        </summary>
+
+        {detailsOpen ? (
+          <div className={`border-t px-4 pb-5 pt-4 sm:px-5 ${isDark ? "border-white/[0.07]" : "border-stone-200"}`}>
+          <div role="tablist" aria-label="Project details" className={`flex gap-5 overflow-x-auto border-b ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
+            {DETAIL_TABS.map(([tab, label]) => (
               <button
                 key={tab}
                 type="button"
                 role="tab"
+                id={`overview-tab-${tab}`}
+                aria-controls="overview-details-panel"
+                tabIndex={activeTab === tab ? 0 : -1}
                 aria-selected={activeTab === tab}
+                onKeyDown={(event) => {
+                  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+                  event.preventDefault()
+                  const index = DETAIL_TABS.findIndex(([value]) => value === tab)
+                  const next = event.key === "Home" ? 0 : event.key === "End" ? DETAIL_TABS.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + DETAIL_TABS.length) % DETAIL_TABS.length
+                  setActiveTab(DETAIL_TABS[next][0])
+                  document.getElementById(`overview-tab-${DETAIL_TABS[next][0]}`)?.focus()
+                }}
                 onClick={() => setActiveTab(tab)}
-                className={`rounded-xl px-3 py-2.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-teal-500/60 ${
+                className={`border-b-2 px-1 pb-3 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500/60 ${
                   activeTab === tab
-                    ? "bg-teal-800 text-white"
-                    : isDark ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-white"
+                    ? isDark ? "border-teal-300 text-white" : "border-teal-800 text-stone-950"
+                    : isDark ? "border-transparent text-slate-400 hover:text-white" : "border-transparent text-stone-500 hover:text-stone-950"
                 }`}
               >
                 {label}
               </button>
             ))}
           </div>
-        </div>
-
-        <div className="mt-5">
-          {activeTab === "overview" ? (
-            <AuthorOverviewTab
-              isDark={isDark}
-              currentWords={currentWords}
-              targetWords={targetWords}
-              chapterCount={chapterCount}
-              characterCount={characterCount}
-              worldArticleCount={worldArticleCount}
-              percentComplete={percentComplete}
-              dailyWords={dailyWords}
-              dailyTarget={dailyTarget}
-              loginStreakDays={loginStreakDays}
-              weeklyLoginActivity={weeklyLoginActivity}
-              totalRevisionItems={totalRevisionItems}
-              highSeverityItems={highSeverityItems}
-              chapters={chapters}
-              unitTitle={unitTitle}
-              onNavigate={onNavigate}
-              onOpenManuscript={onOpenManuscript}
-              bookId={bookId}
-            />
-          ) : null}
-
-          {activeTab === "revision" ? (
-            <RevisionHubTab
-              bookId={bookId}
-              isDark={isDark}
-              revisionIntelligence={deferredRevisionIntelligence}
-              writerWorkspace={deferredWriterWorkspace}
-              chapters={chapters}
-              storyHealth={deferredStoryHealth}
-              onRevisionChange={onRevisionChange}
-              onWriterWorkspaceChange={onWriterWorkspaceChange}
-              revisionIntelligenceError={revisionIntelligenceError}
-              onRetryRevisionIntelligence={onRetryRevisionIntelligence}
-              writerWorkspaceError={writerWorkspaceError}
-              onRetryWriterWorkspace={onRetryWriterWorkspace}
-              storyHealthError={storyHealthError}
-              onRetryStoryHealth={onRetryStoryHealth}
-            />
-          ) : null}
-
+          <div id="overview-details-panel" role="tabpanel" aria-labelledby={`overview-tab-${activeTab}`} tabIndex={0} className="mt-5">
           {activeTab === "planning" ? (
             <PlanningTab
               isDark={isDark}
@@ -387,8 +310,10 @@ export function AuthorWorkspaceDashboard({
               onOpenManuscript={onOpenManuscript}
             />
           ) : null}
+          </div>
         </div>
-      </section>
+        ) : null}
+      </details>
     </div>
   )
 }

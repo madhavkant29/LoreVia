@@ -8,7 +8,7 @@ import { panelClass } from "./utils"
 export function QuickToolsCard({ isDark, bookId, onNavigate }: { isDark: boolean; bookId: string; onNavigate: (href: string) => void }) {
   const tools = [
     { title: "Story Advisor", body: "Get AI feedback on your story", href: `/${bookId}/advisor`, icon: "graph" as IconName, color: "text-teal-700" },
-    { title: "Ask LoreVia", body: "Ask anything about your story", href: `/${bookId}/ask`, icon: "chat" as IconName, color: "text-blue-400" },
+    { title: "Ask the manuscript", body: "Get an evidence-grounded answer", href: `/${bookId}/advisor?mode=ask`, icon: "chat" as IconName, color: "text-blue-400" },
     { title: "World Gap Detection", body: "Find missing or inconsistent details", href: `/${bookId}/world-gap`, icon: "gap" as IconName, color: "text-amber-400" },
     { title: "Character Bible", body: "Manage your characters", href: `/${bookId}/characters`, icon: "file" as IconName, color: "text-emerald-400" },
     { title: "Voice Inconsistency", body: "Detect character voice drift", href: `/${bookId}/voice`, icon: "voice" as IconName, color: "text-rose-400" },

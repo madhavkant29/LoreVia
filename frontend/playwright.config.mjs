@@ -40,7 +40,7 @@ export default defineConfig({
       NEXT_PUBLIC_E2E_MOCK_API: "1",
     },
     url: e2eOrigin,
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 })

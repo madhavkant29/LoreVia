@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.models.user import Subscription, User
 from app.schemas.billing import (
     BillingConfirmationOut,
+    BillingSubscriptionOut,
     CheckoutAbandonBody,
     CheckoutAbandonOut,
     CheckoutBody,
@@ -23,6 +24,7 @@ from app.services.billing_checkout_service import (
     create_checkout_session,
     get_checkout_preview,
 )
+from app.services.billing_status_service import get_billing_subscription_state
 from app.services.paddle_service import (
     PaddlePriceChangedError,
     PaddlePriceConfigurationError,
@@ -269,6 +271,14 @@ async def get_checkout_confirmation(
         customer_email=summary.customer_email
         or (current_user.email if current_user is not None else None),
     )
+
+
+@router.get("/subscription", response_model=BillingSubscriptionOut)
+async def get_subscription_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await get_billing_subscription_state(db, current_user)
 
 
 @router.post("/portal", dependencies=[Depends(rate_limit_api)])

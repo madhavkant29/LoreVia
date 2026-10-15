@@ -11,16 +11,25 @@ from app.models.book import Book, BookUploadCharge, Series, SeriesBook
 from app.models.intelligence import WorldBuildingDocument
 from app.models.user import SubscriptionEvent, User
 from app.utils.billing_utils import (
+    advisor_daily_limit_message,
     append_billing_confirmation_token,
     build_subscription_metrics_summary,
     calculate_upload_usage_summary,
     consume_billing_confirmation_token_once,
+    continuity_daily_limit_message,
     create_billing_confirmation_token,
     ensure_upload_capacity,
+    format_minor_amount,
+    load_shared_pricing_catalog,
     normalize_tier,
+    paddle_billing_period_bounds,
     paddle_plan_from_event_data,
+    paddle_scheduled_cancellation,
+    plan_price_payload,
     recommended_paddle_default_checkout_url,
     record_book_upload_charge,
+    subscription_auto_renews,
+    subscription_display_state,
     summary_mode_allowed,
     tier_from_plan_code,
     verify_billing_confirmation_token,
@@ -597,3 +606,161 @@ async def test_build_subscription_metrics_summary_reports_trial_conversion_and_p
     assert summary.reactivated_after_cancellation == 1
     assert summary.churned_after_cancellation == 1
     assert summary.post_cancel_churn_rate == 50.0
+
+
+def test_pricing_catalog_keeps_author_19_and_architect_39():
+    catalog = load_shared_pricing_catalog()
+    plans = {plan["code"]: plan for plan in catalog["plans"]}
+
+    assert plans["author_monthly"]["price_usd"] == 19
+    assert plans["author_annual"]["price_usd"] == 190
+    assert plans["architect_monthly"]["price_usd"] == 39
+    assert plans["architect_annual"]["price_usd"] == 390
+    assert not any(plan["price_usd"] in {29, 49} for plan in catalog["plans"])
+
+    tiers = {tier["key"]: tier for tier in catalog["tiers"]}
+    assert tiers["free"]["price_monthly"] == 0
+    assert tiers["author"]["price_monthly"] == 19
+    assert tiers["architect"]["price_monthly"] == 39
+
+    assert "Up to 30 Story Advisor turns per day" in tiers["author"]["bullets"]
+    assert (
+        "Up to 30 continuity and editorial scans per day; AI-intensive features share monthly capacity"
+        in tiers["author"]["bullets"]
+    )
+    assert "Up to 60 Story Advisor turns per day" in tiers["architect"]["bullets"]
+    assert (
+        "Up to 60 continuity and editorial scans per day; AI-intensive features share monthly capacity"
+        in tiers["architect"]["bullets"]
+    )
+
+
+def test_daily_limit_messages_include_the_enforced_limit():
+    assert advisor_daily_limit_message(60) == (
+        "You've reached your daily limit of 60 Story Advisor turns. It refreshes tomorrow."
+    )
+    assert continuity_daily_limit_message(60) == (
+        "You've reached your daily limit of 60 continuity and editorial scans. "
+        "It refreshes tomorrow."
+    )
+    assert advisor_daily_limit_message(30).startswith(
+        "You've reached your daily limit of 30 Story Advisor turns"
+    )
+    assert continuity_daily_limit_message(30).startswith(
+        "You've reached your daily limit of 30 continuity and editorial scans"
+    )
+
+
+@pytest.mark.parametrize(
+    ("plan_code", "amount", "interval"),
+    [
+        ("author_monthly", 19, "month"),
+        ("author_annual", 190, "year"),
+        ("architect_monthly", 39, "month"),
+        ("architect_annual", 390, "year"),
+        ("free", 0, "month"),
+    ],
+)
+def test_plan_price_payload_matches_catalog(plan_code, amount, interval):
+    payload = plan_price_payload(plan_code)
+
+    assert payload == {"amount": amount, "currency": "USD", "interval": interval}
+
+
+@pytest.mark.parametrize(
+    ("status", "cancel_at_period_end", "trial_active", "expected"),
+    [
+        ("active", False, False, "active"),
+        ("active", True, False, "cancellation_scheduled"),
+        ("trialing", True, False, "cancellation_scheduled"),
+        ("past_due", False, False, "past_due"),
+        ("paused", False, False, "paused"),
+        ("canceled", False, False, "canceled"),
+        ("", False, True, "trial"),
+        ("", False, False, "free"),
+    ],
+)
+def test_subscription_display_state_distinguishes_scheduled_cancellation(
+    status,
+    cancel_at_period_end,
+    trial_active,
+    expected,
+):
+    assert (
+        subscription_display_state(
+            status=status,
+            cancel_at_period_end=cancel_at_period_end,
+            trial_active=trial_active,
+        )
+        == expected
+    )
+
+
+def test_paddle_billing_period_and_scheduled_change_parsing():
+    data = {
+        "current_billing_period": {
+            "starts_at": "2026-09-19T00:00:00Z",
+            "ends_at": "2026-10-19T00:00:00Z",
+        },
+        "scheduled_change": {
+            "action": "cancel",
+            "effective_at": "2026-10-19T00:00:00Z",
+            "resume_at": None,
+        },
+    }
+
+    starts_at, ends_at = paddle_billing_period_bounds(data)
+    scheduled_cancel, effective_at = paddle_scheduled_cancellation(data)
+
+    assert starts_at == datetime(2026, 9, 19, tzinfo=UTC)
+    assert ends_at == datetime(2026, 10, 19, tzinfo=UTC)
+    assert scheduled_cancel is True
+    assert effective_at == datetime(2026, 10, 19, tzinfo=UTC)
+
+
+def test_paddle_billing_period_falls_back_to_transaction_billing_period():
+    transaction_data = {
+        "billing_period": {
+            "starts_at": "2026-09-19T00:00:00Z",
+            "ends_at": "2026-10-19T00:00:00Z",
+        }
+    }
+
+    starts_at, ends_at = paddle_billing_period_bounds(transaction_data)
+
+    assert starts_at == datetime(2026, 9, 19, tzinfo=UTC)
+    assert ends_at == datetime(2026, 10, 19, tzinfo=UTC)
+
+
+def test_paddle_scheduled_cancellation_ignores_non_cancel_actions():
+    scheduled_cancel, effective_at = paddle_scheduled_cancellation(
+        {"scheduled_change": {"action": "pause", "effective_at": "2026-10-19T00:00:00Z"}}
+    )
+
+    assert scheduled_cancel is False
+    assert effective_at is None
+
+
+def test_format_minor_amount_uses_currency_code_and_two_decimals():
+    assert format_minor_amount("1900", "usd") == "USD 19.00"
+    assert format_minor_amount("3900", "USD") == "USD 39.00"
+    assert format_minor_amount(None, "USD") is None
+    assert format_minor_amount("1900", None) is None
+    assert format_minor_amount("not-a-number", "USD") is None
+
+
+@pytest.mark.parametrize(
+    ("status", "cancel_at_period_end", "expected"),
+    [
+        ("active", False, True),
+        ("active", True, False),
+        ("past_due", False, False),
+        ("canceled", False, False),
+    ],
+)
+def test_subscription_auto_renews_is_computed_from_cancellation_state(
+    status,
+    cancel_at_period_end,
+    expected,
+):
+    assert subscription_auto_renews(status, cancel_at_period_end) is expected

@@ -31,7 +31,7 @@ export const ManuscriptExportMenu = memo(function ManuscriptExportMenu({
       <button
         type="button"
         onClick={onToggle}
-        className={`rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
+        className={`rounded-sm border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
       >
         Export
       </button>
@@ -42,14 +42,14 @@ export const ManuscriptExportMenu = memo(function ManuscriptExportMenu({
             <select
               value={activePreset}
               onChange={(event) => onPresetChange(event.target.value as PublishingPreset)}
-              className={`mt-2 w-full rounded-xl border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+              className={`mt-2 w-full rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
             >
               <option value="standard_manuscript">Standard manuscript</option>
               <option value="trade_paperback">Trade paperback</option>
               <option value="kdp_paperback">6×9 print paperback</option>
             </select>
           </div>
-          <label className={`mx-1.5 mb-1 flex items-start gap-2 rounded-xl px-3 py-2 text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>
+          <label className={`mx-1.5 mb-1 flex items-start gap-2 rounded-sm px-3 py-2 text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>
             <input
               type="checkbox"
               checked={includeTableOfContents}
@@ -63,11 +63,11 @@ export const ManuscriptExportMenu = memo(function ManuscriptExportMenu({
               </span>
             </span>
           </label>
-          <button onClick={onPrint} className={`block w-full rounded-xl px-3 py-2 text-left text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>Print</button>
-          <button onClick={() => onCompile("docx")} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Compile Word / DOCX"}</button>
-          <button onClick={() => onCompile("pdf")} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Compile submission PDF"}</button>
-          <button onClick={() => onCompile("epub")} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "epub" ? "Exporting EPUB..." : "Compile EPUB"}</button>
-          <button onClick={() => onCompile("vault")} disabled={!!exporting} className={`block w-full rounded-xl px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "vault" ? "Exporting vault..." : "Export vault"}</button>
+          <button onClick={onPrint} className={`block w-full rounded-sm px-3 py-2 text-left text-sm ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>Print</button>
+          <button onClick={() => onCompile("docx")} disabled={!!exporting} className={`block w-full rounded-sm px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "docx" ? "Exporting Word..." : "Compile Word / DOCX"}</button>
+          <button onClick={() => onCompile("pdf")} disabled={!!exporting} className={`block w-full rounded-sm px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "pdf" ? "Exporting PDF..." : "Compile submission PDF"}</button>
+          <button onClick={() => onCompile("epub")} disabled={!!exporting} className={`block w-full rounded-sm px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "epub" ? "Exporting EPUB..." : "Compile EPUB"}</button>
+          <button onClick={() => onCompile("vault")} disabled={!!exporting} className={`block w-full rounded-sm px-3 py-2 text-left text-sm disabled:opacity-40 ${isDark ? "text-slate-200 hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"}`}>{exporting === "vault" ? "Exporting vault..." : "Export vault"}</button>
         </div>
       ) : null}
     </div>

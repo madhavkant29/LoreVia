@@ -258,7 +258,7 @@ describe("books api lifecycle contracts", () => {
         files: [new File(["chapter"], "chapter.txt", { type: "text/plain" })],
       })
       await Promise.resolve()
-      await vi.advanceTimersByTimeAsync(1_000)
+      await vi.advanceTimersByTimeAsync(1_500)
 
       await expect(pending).resolves.toEqual(result)
       expect(getMock).toHaveBeenCalledWith("/books/book-1/manuscript/import/job-1")

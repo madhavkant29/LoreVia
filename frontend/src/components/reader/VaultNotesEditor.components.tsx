@@ -38,8 +38,10 @@ export function FolderList({
             <div className="flex items-center gap-1">
               <button
                 type="button"
+                aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${child.name}`}
+                aria-expanded={!isCollapsed}
                 onClick={() => onToggleFolder(child.path)}
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDark ? "text-slate-500 hover:bg-white/[0.05] hover:text-slate-200" : "text-stone-400 hover:bg-stone-100 hover:text-stone-700"}`}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-sm ${isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-slate-200" : "text-stone-600 hover:bg-stone-100 hover:text-stone-700"}`}
                 style={{ marginLeft: `${depth * 12}px` }}
               >
                 <IconChevron open={!isCollapsed} />
@@ -59,7 +61,7 @@ export function FolderList({
                   event.preventDefault()
                   onDropNote(dragItem.path, child.path)
                 }}
-                className={`flex min-w-0 flex-1 items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition ${
+                className={`flex min-w-0 flex-1 items-center justify-between rounded-sm px-3 py-2 text-left text-sm transition ${
                   active
                     ? isDark
                       ? "bg-emerald-500/12 text-emerald-100"
@@ -71,14 +73,14 @@ export function FolderList({
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <IconFolder />
-                  <span className="truncate font-medium">{child.name}</span>
+                  <span className="break-words font-medium">{child.name}</span>
                 </span>
-                <span className={`text-xs ${active ? (isDark ? "text-emerald-200/80" : "text-emerald-700/80") : isDark ? "text-slate-500" : "text-stone-400"}`}>{child.itemCount}</span>
+                <span className={`text-xs ${active ? (isDark ? "text-emerald-200/80" : "text-emerald-700/80") : isDark ? "text-slate-400" : "text-stone-600"}`}>{child.itemCount}</span>
               </button>
               <button
                 type="button"
                 onClick={() => onCreateFolder(child.path)}
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDark ? "text-slate-500 hover:bg-white/[0.05] hover:text-white" : "text-stone-400 hover:bg-stone-100 hover:text-stone-800"}`}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-sm ${isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-600 hover:bg-stone-100 hover:text-stone-800"}`}
                 title={`Create a folder inside ${child.name}`}
               >
                 <IconPlus />
@@ -122,9 +124,9 @@ export function PanelCard({
   children: ReactNode
 }) {
   return (
-    <section className={`overflow-hidden rounded-lg border p-4 ${isDark ? "border-white/[0.08] bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
+    <section className={`overflow-hidden rounded-sm border p-4 ${isDark ? "border-white/[0.08] bg-[#07101d]/88" : "border-stone-200 bg-white/90"}`}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-stone-600"}`}>{title}</p>
         <div className="flex items-center gap-2 shrink-0">
           {typeof count === "number" ? (
             <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-stone-100 text-stone-700"}`}>
@@ -174,8 +176,8 @@ export function InfoLine({
 
   return (
     <div className="mb-3 flex items-start justify-between gap-3 text-sm">
-      <span className={isDark ? "text-slate-400" : "text-stone-500"}>{label}</span>
-      <span className={`max-w-[10rem] text-right ${valueClass} ${activeDot ? "inline-flex items-center gap-2" : ""}`}>
+      <span className={isDark ? "text-slate-400" : "text-stone-600"}>{label}</span>
+      <span className={`max-w-[10rem] break-words text-right ${valueClass} ${activeDot ? "inline-flex items-center gap-2" : ""}`}>
         {activeDot ? <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> : null}
         {value}
       </span>
@@ -195,7 +197,7 @@ export function RelationStack({
   isDark: boolean
 }) {
   if (!items.length) {
-    return <p className={`text-sm ${isDark ? "text-slate-500" : "text-stone-500"}`}>{emptyLabel}</p>
+    return <p className={`text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>{emptyLabel}</p>
   }
 
   return (
@@ -205,10 +207,10 @@ export function RelationStack({
           key={item.id}
           type="button"
           onClick={() => onOpen(item.reference)}
-          className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left text-sm transition ${isDark ? "bg-white/[0.03] text-slate-100 hover:bg-white/[0.06]" : "bg-stone-50 text-stone-800 hover:bg-stone-100"}`}
+          className={`flex w-full items-center justify-between gap-3 rounded-sm px-3 py-2.5 text-left text-sm transition ${isDark ? "bg-white/[0.03] text-slate-100 hover:bg-white/[0.06]" : "bg-stone-50 text-stone-800 hover:bg-stone-100"}`}
         >
-          <span className="truncate">{item.label}</span>
-          {item.secondary ? <span className={`shrink-0 text-xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>{item.secondary}</span> : null}
+          <span className="min-w-0 break-words">{item.label}</span>
+          {item.secondary ? <span className={`shrink-0 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>{item.secondary}</span> : null}
         </button>
       ))}
     </div>
@@ -233,14 +235,14 @@ export function MiniGraphPreview({
 
   if (!nodes.length) {
     return (
-      <div className={`flex min-h-[13rem] items-center justify-center rounded-md border border-dashed text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-stone-300 text-stone-500"}`}>
+      <div className={`flex min-h-[13rem] items-center justify-center rounded-sm border border-dashed text-sm ${isDark ? "border-white/[0.08] text-slate-400" : "border-stone-300 text-stone-600"}`}>
         Link a few notes to see the mini graph preview.
       </div>
     )
   }
 
   return (
-    <div className={`relative min-h-[13rem] overflow-hidden rounded-md border ${isDark ? "border-white/[0.08] bg-[#091321]" : "border-stone-200 bg-stone-50"}`}>
+    <div className={`relative min-h-[13rem] overflow-hidden rounded-sm border ${isDark ? "border-white/[0.08] bg-[#091321]" : "border-stone-200 bg-stone-50"}`}>
       <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {nodes.map((node, index) => {
           const position = positions[index]

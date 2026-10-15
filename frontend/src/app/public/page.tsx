@@ -46,10 +46,12 @@ export const metadata: Metadata = {
 }
 
 export default async function PublicLibraryPage() {
-  const publicBookPage = process.env.NODE_ENV === "production"
+  const publicBookPage = process.env.NEXT_PUBLIC_E2E_MOCK_API === "1"
+    ? null
+    : process.env.NODE_ENV === "production"
     ? await listPublicBooksPageServer({ limit: 24 }).catch(() => ({ items: [], next_cursor: null, has_more: false }))
-    : { items: [], next_cursor: null, has_more: false }
-  const books = publicBookPage.items
+    : null
+  const books = publicBookPage?.items ?? []
   const collectionJsonLd = buildCollectionPageJsonLd({
     name: "LoreVia Public Library",
     description:
@@ -73,7 +75,7 @@ export default async function PublicLibraryPage() {
       <div className="sr-only">
         LoreVia public library for fiction authors, beta readers, and readers exploring public-domain manuscript demos, author profiles, and surfaced public samples.
       </div>
-      <PublicLibraryPageClient initialPage={publicBookPage} />
+      <PublicLibraryPageClient initialPage={publicBookPage ?? undefined} />
     </>
   )
 }

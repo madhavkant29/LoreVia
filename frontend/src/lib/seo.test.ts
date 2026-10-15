@@ -17,7 +17,7 @@ describe("seo helpers", () => {
       path: "/blog/a-revision-guide",
       datePublished: "2026-05-14",
       dateModified: "2026-08-08",
-      image: "/blog/heroes/a-revision-guide.webp",
+      image: "/blog/editorial/revision-feedback.webp",
       authorName: "LoreVia Editorial",
       wordCount: 1900,
     })).toMatchObject({
@@ -25,7 +25,7 @@ describe("seo helpers", () => {
       datePublished: "2026-05-14",
       dateModified: "2026-08-08",
       wordCount: 1900,
-      image: ["https://getlorevia.com/blog/heroes/a-revision-guide.webp"],
+      image: ["https://getlorevia.com/blog/editorial/revision-feedback.webp"],
       author: { "@type": "Organization", name: "LoreVia Editorial" },
       publisher: { "@type": "Organization", name: "LoreVia" },
     })

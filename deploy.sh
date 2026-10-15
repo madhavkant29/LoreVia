@@ -136,6 +136,16 @@ fi
 
 ${COMPOSE} build --pull
 
+# One-time legacy cutoff cutover (see DEPLOY_AND_FREEZE.md).
+# Stop the application stack BEFORE migrations and cutoff recording so that:
+#   - no queued or retrying job can start a provider call during the window,
+#   - no new manuscript can be uploaded before the cutoff exists.
+# Redis stays up so the one-off migration/record containers can connect.
+echo "Stopping application services for the legacy cutoff cutover."
+${COMPOSE} stop nginx backend \
+  worker-extraction worker-analysis worker-embedding worker-intelligence \
+  worker-maintenance celery-beat >/dev/null 2>&1 || true
+
 run_alembic() {
   local alembic_env_args=()
   if [[ -n "${ALEMBIC_ALLOW_DESTRUCTIVE_UPGRADES:-}" ]]; then
@@ -210,6 +220,20 @@ fi
 
 echo "Verifying runtime schema compatibility."
 verify_runtime_schema
+
+# Record the write-once legacy freeze cutoff BEFORE the API starts accepting
+# requests. The cutoff is the moment the previous deployment stopped processing;
+# any manuscript uploaded after this instant is never touched by the freeze.
+if [[ "${SKIP_LEGACY_CUTOFF_RECORD:-0}" == "1" ]]; then
+  echo "SKIP_LEGACY_CUTOFF_RECORD=1 set; skipping cutoff recording. Record it manually before uploads resume."
+else
+  echo "Recording the one-time legacy freeze cutoff (write-once, no book changes)."
+  ${COMPOSE} run --rm \
+    -e ALEMBIC_DATABASE_URL="${ALEMBIC_DATABASE_URL}" \
+    -e ALEMBIC_CONFIRM_REMOTE="${ALEMBIC_CONFIRM_REMOTE}" \
+    backend python scripts/freeze_legacy_manuscripts.py \
+      --record-cutoff --execute --confirm YES_I_UNDERSTAND
+fi
 
 enable_systemd_unit
 

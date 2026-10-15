@@ -7,10 +7,12 @@ import type { ContentSummary } from "@/content/types"
 export function StoryCard({
   story,
   compact = false,
+  showImage = true,
   trackingEvent,
 }: {
   story: ContentSummary
   compact?: boolean
+  showImage?: boolean
   trackingEvent?: string
 }) {
   const href = `/${story.kind === "blog" ? "blog" : "answers"}/${story.slug}` as Route
@@ -21,16 +23,18 @@ export function StoryCard({
       }
     : {}
   return (
-    <article className={compact ? "editorial-story-card editorial-story-card--compact" : "editorial-story-card"}>
-      <Link href={href} className="editorial-story-card__image" aria-label={story.title} {...trackingAttributes}>
-        <Image
-          src={story.hero.src}
-          alt=""
-          width={story.hero.width}
-          height={story.hero.height}
-          sizes={compact ? "(max-width: 768px) 100vw, 280px" : "(max-width: 768px) 100vw, 420px"}
-        />
-      </Link>
+    <article className={`${compact ? "editorial-story-card editorial-story-card--compact" : "editorial-story-card"}${showImage ? "" : " editorial-story-card--text"}`}>
+      {showImage ? (
+        <Link href={href} className="editorial-story-card__image" aria-label={story.title} {...trackingAttributes}>
+          <Image
+            src={story.hero.src}
+            alt=""
+            width={story.hero.width}
+            height={story.hero.height}
+            sizes={compact ? "(max-width: 768px) 100vw, 280px" : "(max-width: 768px) 100vw, 420px"}
+          />
+        </Link>
+      ) : null}
       <div>
         <p className="editorial-kicker">{story.category}</p>
         <h3><Link href={href} {...trackingAttributes}>{story.title}</Link></h3>

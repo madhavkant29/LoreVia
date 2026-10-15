@@ -335,6 +335,10 @@ class DataDeletionRequest(Base):
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
+    __table_args__ = (
+        Index("ix_subscriptions_current_period_end", "current_period_end"),
+        Index("ix_subscriptions_status_cancel_at_period_end", "status", "cancel_at_period_end"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -350,8 +354,17 @@ class Subscription(Base):
     stripe_sub_id: Mapped[str | None] = mapped_column(String)
     plan: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    cancellation_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_payment_status: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     user = relationship("User", back_populates="subscriptions")
 
@@ -384,6 +397,57 @@ class SubscriptionEvent(Base):
     )
 
     user = relationship("User", back_populates="subscription_events")
+
+
+class SubscriptionEmailEvent(Base):
+    """One row per lifecycle email so retries cannot double-send.
+
+    The unique key is (subscription_id, email_type, billing_period_end), which
+    guarantees a single reminder per renewal period and a single payment-failure
+    notice per billing period even when Paddle sends several related events.
+    """
+
+    __tablename__ = "subscription_email_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "email_type",
+            "billing_period_end",
+            name="uq_subscription_email_events_period",
+        ),
+        Index("ix_subscription_email_events_status_scheduled_for", "status", "scheduled_for"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        __import__("sqlalchemy").ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        __import__("sqlalchemy").ForeignKey("subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    email_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    billing_period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending", server_default="pending", index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class PaddleWebhookEvent(Base):

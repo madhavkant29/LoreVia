@@ -89,12 +89,21 @@ def allowances_enforced() -> bool:
     return settings.PROCESSING_ALLOWANCES_MODE.strip().lower() == "enforce"
 
 
-def ensure_project_writable(book: object) -> None:
+async def ensure_project_writable(db: object, book: object) -> None:
     if getattr(book, "archived_at", None) is not None:
         raise HTTPException(
             409,
             "Archived projects are read-only. Restore the project before making changes.",
         )
+    from app.services.book_freeze_service import (
+        ensure_legacy_processing_allowed,
+        frozen_conflict_message,
+        is_book_frozen,
+    )
+
+    if is_book_frozen(book):
+        raise HTTPException(409, frozen_conflict_message())
+    await ensure_legacy_processing_allowed(db, book)
 
 
 def _tier_limits(user: object) -> tuple[int, int, int]:

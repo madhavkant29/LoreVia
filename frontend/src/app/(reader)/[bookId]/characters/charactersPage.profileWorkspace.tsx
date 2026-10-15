@@ -142,7 +142,7 @@ export function CharacterProfileWorkspace({
   onToggleProtectedFromRepair,
 }: CharacterProfileWorkspaceProps) {
   return (
-    <div className="p-5">
+    <div className="min-w-0 p-4 sm:p-5">
       <CharacterProfileHeader
         activeTab={activeTab}
         character={character}
@@ -155,10 +155,27 @@ export function CharacterProfileWorkspace({
         onShareCharacter={onShareCharacter}
         onTabSelect={onSetActiveTab}
         onToggleCharacterMenu={onToggleCharacterMenu}
+        editing={editing}
+        onEdit={isAuthorMode ? () => { onSetActiveTab("overview"); onSetEditing(true) } : undefined}
       />
 
+      <div role="tabpanel" id="character-profile-panel" aria-labelledby={`character-tab-${activeTab}`} tabIndex={0}>
       {activeTab === "overview" ? (
-        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <div className="mt-4 min-w-0 max-w-4xl">
+          {isAuthorMode && editing ? (
+            <CharacterEditProfileForm
+              actionError={actionError}
+              draft={draft}
+              isDark={isDark}
+              saving={saving}
+              onCancel={() => {
+                onSetEditing(false)
+                onDraftChange(buildDraft(character))
+              }}
+              onDraftChange={onDraftChange}
+              onSave={onSaveCharacter}
+            />
+          ) : null}
           <CharacterOverviewIdentityCards
             character={character}
             chapterAppearanceText={chapterAppearanceText}
@@ -197,20 +214,7 @@ export function CharacterProfileWorkspace({
             />
           ) : null}
 
-          {isAuthorMode && editing ? (
-            <CharacterEditProfileForm
-              actionError={actionError}
-              draft={draft}
-              isDark={isDark}
-              saving={saving}
-              onCancel={() => {
-                onSetEditing(false)
-                onDraftChange(buildDraft(character))
-              }}
-              onDraftChange={onDraftChange}
-              onSave={onSaveCharacter}
-            />
-          ) : null}
+
         </div>
       ) : null}
 
@@ -274,6 +278,7 @@ export function CharacterProfileWorkspace({
           loading={evidenceLoading}
           relationships={connections}
           sentimentLabel={sentimentLabel}
+          onRetry={onOpenEvidence}
         />
       ) : null}
 
@@ -297,7 +302,8 @@ export function CharacterProfileWorkspace({
         />
       ) : null}
 
-      {actionError && !editing ? <p className="mt-4 text-sm text-rose-400">{actionError}</p> : null}
+      </div>
+      {actionError && !editing ? <p role="alert" className={`mt-4 text-sm ${isDark ? "text-rose-300" : "text-rose-700"}`}>{actionError}</p> : null}
     </div>
   )
 }

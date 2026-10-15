@@ -16,9 +16,13 @@ export type NormalizedProcessingStatus = {
   partialReady: boolean
   ready: boolean
   failed: boolean
+  frozen: boolean
   failureKind: "recoverable" | "support_required" | null
-  stateVariant: "processing" | "partial_ready" | "ready" | "recoverable_failure" | "support_required"
+  stateVariant: "processing" | "partial_ready" | "ready" | "recoverable_failure" | "support_required" | "frozen"
 }
+
+const FROZEN_FALLBACK_DETAIL =
+  "Import interrupted - please upload again. Your project and files have been preserved."
 
 const STAGE_LABELS: Record<ProcessingStage, string> = {
   queued: "Queued for processing",
@@ -29,6 +33,7 @@ const STAGE_LABELS: Record<ProcessingStage, string> = {
   analyzing: "Running story analysis",
   ready: "Ready",
   failed: "Processing failed",
+  frozen: "Import interrupted",
 }
 
 const STAGE_ALIASES: Record<string, ProcessingStage> = {
@@ -54,9 +59,11 @@ const STAGE_ALIASES: Record<string, ProcessingStage> = {
   failed: "failed",
   cancelled: "failed",
   canceled: "failed",
+  frozen: "frozen",
 }
 
 export function normalizeProcessingStage(processing?: BookProcessing | null, book?: Pick<Book, "status"> | null): ProcessingStage {
+  if (processing?.frozen) return "frozen"
   const status = clean(processing?.status ?? book?.status)
   const stage = clean(processing?.stage)
   if (processing?.is_fully_ready || status === "ready") return "ready"
@@ -68,6 +75,7 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
   if (!processing && (!book || book.status === "ready")) return null
 
   const stage = normalizeProcessingStage(processing, book)
+  const frozen = stage === "frozen"
   const progressPct = clampProgress(processing?.progress_pct)
   const chaptersCompleted = nonNegativeInt(processing?.chapters_completed)
   const chaptersTotal = nonNegativeInt(processing?.chapters_total)
@@ -79,31 +87,33 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
     || (processing?.pause_reason === "llm_token_limit" && blocker?.auto_resume)
   )
   const nextResumeAt = processing?.next_resume_at || blocker?.next_resume_at || null
-  const retryAvailable = !autoResume && Boolean(
+  const retryAvailable = !frozen && !autoResume && Boolean(
     processing?.retry_available
     || retryActions.some((action) => action !== "wait_for_analysis")
     || (stage === "failed" && !retryExplicitlyDisabled)
     || processing?.last_error
   )
-  const resumeAvailable = !autoResume && Boolean(
+  const resumeAvailable = !frozen && !autoResume && Boolean(
     processing?.resume_available || retryActions.includes("continue_processing")
   )
-  const partialReady = stage !== "ready" && stage !== "failed" && chaptersCompleted !== null && chaptersCompleted > 0
-  const detail = autoResume
-    ? buildAutoResumeDetail(blocker?.kind, nextResumeAt, chaptersCompleted, chaptersTotal)
-    : buildProcessingDetail(stage, chaptersCompleted, chaptersTotal, progressPct, partialReady)
+  const partialReady = stage !== "ready" && stage !== "failed" && stage !== "frozen" && chaptersCompleted !== null && chaptersCompleted > 0
+  const detail = frozen
+    ? FROZEN_FALLBACK_DETAIL
+    : autoResume
+      ? buildAutoResumeDetail(blocker?.kind, nextResumeAt, chaptersCompleted, chaptersTotal)
+      : buildProcessingDetail(stage, chaptersCompleted, chaptersTotal, progressPct, partialReady)
   const failureKind = stage === "failed" ? (retryAvailable ? "recoverable" : "support_required") : null
 
   return {
     stage,
-    label: resumeAvailable || autoResume ? "Processing paused" : processing?.current_step_label || STAGE_LABELS[stage],
+    label: frozen ? "Import interrupted" : resumeAvailable || autoResume ? "Processing paused" : processing?.current_step_label || STAGE_LABELS[stage],
     detail: resumeAvailable
       ? blocker?.detail || "Continue when processing capacity is available"
       : detail,
     progressPct,
     chaptersCompleted,
     chaptersTotal,
-    lastError: autoResume ? null : processing?.last_error || null,
+    lastError: frozen || autoResume ? null : processing?.last_error || null,
     retryAvailable,
     resumeAvailable,
     autoResume,
@@ -112,16 +122,19 @@ export function normalizeProcessingStatus(processing?: BookProcessing | null, bo
     partialReady,
     ready: stage === "ready",
     failed: stage === "failed",
+    frozen,
     failureKind,
     stateVariant: stage === "ready"
       ? "ready"
-      : failureKind === "recoverable"
-        ? "recoverable_failure"
-        : failureKind === "support_required"
-          ? "support_required"
-          : partialReady
-            ? "partial_ready"
-            : "processing",
+      : frozen
+        ? "frozen"
+        : failureKind === "recoverable"
+          ? "recoverable_failure"
+          : failureKind === "support_required"
+            ? "support_required"
+            : partialReady
+              ? "partial_ready"
+              : "processing",
   }
 }
 

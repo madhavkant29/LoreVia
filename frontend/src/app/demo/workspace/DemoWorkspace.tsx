@@ -57,25 +57,88 @@ export function DemoWorkspace() {
     capture("demo_workspace_reset", { fixture: "dracula" })
   }
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#08110f] px-4 py-6 text-[#f4f1ea] sm:px-6 lg:px-10">
+    <main className="min-h-screen overflow-x-hidden bg-[#08110f] px-4 py-5 text-[#f4f1ea] sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
-          <Link href="/" aria-label="LoreVia home"><Image src="/logoandtext.png" alt="LoreVia" width={150} height={42} priority /></Link>
-          <div className="flex gap-3"><button type="button" onClick={reset} className="rounded-md border border-white/15 px-4 py-2 text-sm font-semibold">Reset demo</button><Link href="/register" className="rounded-md bg-[#d6a84f] px-4 py-2 text-sm font-semibold text-[#15120b]">Analyze your manuscript</Link></div>
+          <Link href="/" aria-label="LoreVia home">
+            <Image src="/logoandtext.png" alt="LoreVia" width={640} height={160} className="h-9 w-auto" priority />
+          </Link>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" onClick={reset} className="rounded-md border border-white/15 px-4 py-2 text-sm font-semibold transition hover:bg-white/[0.05]">
+              Reset demo
+            </button>
+            <Link href="/register" className="rounded-md bg-[#d6a84f] px-4 py-2 text-sm font-semibold text-[#15120b] transition hover:bg-[#e1b65f]">
+              Analyze your manuscript
+            </Link>
+          </div>
         </header>
-        <section className="py-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6fae9f]">Interactive workspace · local fixture</p>
-          <h1 className="mt-3 max-w-3xl text-3xl font-semibold sm:text-5xl">Review Dracula continuity findings</h1>
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-[#aeb9b3]">No login, upload, storage, API, or AI call is used. Accept or dismiss evidence-backed findings and watch the revision plan update.</p>
+        <section className="border-b border-white/10 py-8 md:py-10">
+          <p className="text-sm font-semibold text-[#79c8b8]">Interactive sample · Dracula</p>
+          <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-0.03em] sm:text-5xl">Review Dracula continuity findings</h1>
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-[#aeb9b3]">
+            Inspect the cited passage, then add the finding to a revision plan or dismiss it. This sample runs locally and makes no upload, storage, API, or AI request.
+          </p>
         </section>
-        <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.65fr)_minmax(18rem,0.75fr)]">
-          <section className="min-w-0 rounded-lg border border-white/10 bg-[#0b1220] p-4 sm:p-6">
-            <div className="mb-5 flex items-center justify-between gap-4"><h2 className="text-lg font-semibold">Ranked findings</h2><span className="text-sm text-slate-400">{progress}/{fixture.length} reviewed</span></div>
-            {findings.length ? <FindingReviewPanel findings={findings} selectedId={selectedId} isDark onOpen={(finding) => setSelectedId(finding.id)} onDecision={decide} onOpenChapter={(finding) => setChapter(finding.chapter_ref ?? null)} /> : <div className="rounded-md border border-teal-400/20 bg-teal-500/10 p-6" role="status">Review complete. Your revision plan is ready.</div>}
+        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_19rem]">
+          <section data-testid="demo-review-task" className="min-w-0 py-7 lg:pr-8">
+            <div className="mb-5 flex items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <h2 className="text-lg font-semibold">Findings to review</h2>
+              <span className="text-sm text-[#8fa19a]">{progress} of {fixture.length} reviewed</span>
+            </div>
+            {findings.length ? (
+              <FindingReviewPanel
+                findings={findings}
+                selectedId={selectedId}
+                isDark
+                onOpen={(finding) => setSelectedId(finding.id)}
+                onDecision={decide}
+                onOpenChapter={(finding) => setChapter(finding.chapter_ref ?? null)}
+              />
+            ) : (
+              <div className="border-y border-teal-400/20 py-6 text-teal-100" role="status">
+                Review complete. Your revision plan is ready.
+              </div>
+            )}
           </section>
-          <aside className="min-w-0 space-y-5">
-            <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5"><h2 className="font-semibold">Chapter context</h2><p className="mt-3 text-sm leading-7 text-slate-300">{chapter ? `Chapter ${chapter} is open in this simulated context. Evidence remains attached to its source version.` : "Open a chapter from any expanded finding to inspect its simulated context."}</p></section>
-            <section className="rounded-lg border border-white/10 bg-white/[0.04] p-5" aria-live="polite"><h2 className="font-semibold">Revision plan</h2>{revisionPlan.length ? <ol className="mt-4 space-y-3 text-sm text-slate-300">{revisionPlan.map((finding) => <li key={finding.id}>{finding.title}</li>)}</ol> : <p className="mt-3 text-sm text-slate-400">Accepted findings appear here.</p>}</section>
+          <aside data-testid="demo-context-rail" className="min-w-0 border-t border-white/10 py-7 lg:border-l lg:border-t-0 lg:pl-8">
+            <section>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-semibold">Review progress</h2>
+                <span className="text-sm text-[#8fa19a]">{progress}/{fixture.length} reviewed</span>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden bg-white/10" aria-hidden="true">
+                <div className="h-full bg-[#4fb5a3] transition-[width]" style={{ width: `${(progress / fixture.length) * 100}%` }} />
+              </div>
+            </section>
+
+            {chapter ? (
+              <section className="mt-7 border-t border-white/10 pt-6">
+                <h2 className="font-semibold">Chapter context</h2>
+                <p className="mt-3 text-sm leading-7 text-[#c3cdc8]">
+                  Chapter {chapter} is open in this simulated context. Evidence remains attached to its source version.
+                </p>
+              </section>
+            ) : null}
+
+            {revisionPlan.length ? (
+              <section className="mt-7 border-t border-white/10 pt-6" aria-live="polite">
+                <h2 className="font-semibold">Revision plan</h2>
+                <ol className="mt-4 divide-y divide-white/[0.08] text-sm leading-6 text-[#c3cdc8]">
+                  {revisionPlan.map((finding) => (
+                    <li key={finding.id} className="py-3 first:pt-0 last:pb-0">{finding.title}</li>
+                  ))}
+                </ol>
+              </section>
+            ) : (
+              <section className="mt-7 border-t border-white/10 pt-6">
+                <h2 className="font-semibold">How to review</h2>
+                <ol className="mt-4 space-y-3 text-sm leading-6 text-[#8fa19a]">
+                  <li>1. Open the highest-ranked finding.</li>
+                  <li>2. Compare the explanation with its cited passage.</li>
+                  <li>3. Add useful work to the plan or dismiss it.</li>
+                </ol>
+              </section>
+            )}
           </aside>
         </div>
       </div>

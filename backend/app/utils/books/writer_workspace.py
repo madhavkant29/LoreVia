@@ -453,6 +453,9 @@ def normalize_writer_workspace(raw: dict | None) -> dict:
     if isinstance(index_fmt, str) and index_fmt in INDEX_FORMATS:
         payload["index_format"] = index_fmt
 
+    fingerprint = " ".join(str(source.get("source_fingerprint") or "").split()).strip()
+    payload["source_fingerprint"] = fingerprint[:128] or None
+
     return payload
 
 

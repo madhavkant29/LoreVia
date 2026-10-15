@@ -1,290 +1,84 @@
 "use client"
 
 import Link from "next/link"
-import { useQuery } from "@tanstack/react-query"
-import { memo, useEffect, useMemo, useState } from "react"
-
-import { booksApi } from "@/lib/api/books"
-import { readerApi } from "@/lib/api/reader"
+import { isAxiosError } from "axios"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { memo, useId, useMemo, useState } from "react"
 import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { saveContextualVaultNote } from "@/lib/utils/notes"
-import type { PlotThread } from "@/types/reader"
+import type { PlotThread, PlotThreadPageItem } from "@/types/reader"
+import { PlotThreadDetails } from "./PlotTracker.details"
+import { usePlotThreadDraftGuard } from "./PlotTracker.draftGuard"
+import { loadPlotThreadSummaries, threadChapterRange, threadMatches, threadView, THREAD_STATUS_LABELS, THREAD_VIEWS, type ThreadView } from "./PlotTracker.helpers"
 
-interface Props {
-  bookId: string
-  chapter?: number
-  mode?: "compact" | "dashboard"
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  introduced: "Introduced",
-  developing: "Developing",
-  ongoing: "Developing",
-  paused: "Paused",
-  resolved: "Resolved",
-  contradicted: "Contradicted",
-  forgotten: "Forgotten",
-  possibly_abandoned: "Possibly abandoned",
-  abandoned: "Abandoned",
-  unknown: "Unknown",
-}
-
-const STATUS_ORDER = ["developing", "introduced", "paused", "possibly_abandoned", "forgotten", "contradicted", "resolved", "abandoned", "unknown"] as const
-const STATUS_OPTIONS = ["introduced", "developing", "paused", "resolved", "contradicted", "forgotten", "possibly_abandoned", "abandoned", "unknown"] as const
-
-function statusClasses(status: string, isDark: boolean) {
-  const palette: Record<string, string> = {
-    introduced: isDark ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-200" : "border-cyan-200 bg-cyan-50 text-cyan-800",
-    developing: isDark ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-800",
-    ongoing: isDark ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-800",
-    paused: isDark ? "border-amber-400/20 bg-amber-400/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800",
-    resolved: isDark ? "border-stone-300/20 bg-stone-200/10 text-stone-200" : "border-stone-300 bg-stone-100 text-stone-700",
-    contradicted: isDark ? "border-fuchsia-400/20 bg-fuchsia-400/10 text-fuchsia-200" : "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800",
-    forgotten: isDark ? "border-orange-400/20 bg-orange-400/10 text-orange-200" : "border-orange-200 bg-orange-50 text-orange-800",
-    possibly_abandoned: isDark ? "border-rose-300/20 bg-rose-300/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-800",
-    abandoned: isDark ? "border-rose-400/20 bg-rose-400/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-800",
-    unknown: isDark ? "border-slate-400/20 bg-slate-400/10 text-slate-200" : "border-slate-200 bg-slate-100 text-slate-700",
-  }
-  return palette[status] ?? palette.unknown
-}
+interface Props { bookId: string; chapter?: number; mode?: "compact" | "dashboard" }
+const EMPTY_THREADS: PlotThreadPageItem[] = []
+const muted = "text-[rgb(var(--muted-foreground))]"
 
 export const PlotTracker = memo(function PlotTracker({ bookId, chapter, mode = "compact" }: Props) {
-  const [savingId, setSavingId] = useState<string | null>(null)
-  const [vaultSavingId, setVaultSavingId] = useState<string | null>(null)
-  const [draftNotes, setDraftNotes] = useState<Record<string, string>>({})
-  const [draftStatuses, setDraftStatuses] = useState<Record<string, string>>({})
-  const { theme } = usePreferencesStore()
-  const isDark = theme === "dark"
-
-  const {
-    data: threads = [],
-    isLoading: loading,
-    refetch: refetchThreads,
-  } = useQuery<PlotThread[]>({
-    queryKey: asQueryKey(readerCacheKey(bookId, `plot-threads:${chapter ?? "all"}`)),
-    queryFn: () => readerApi.getPlotThreads(bookId, chapter),
-  })
-
-  useEffect(() => {
-    setDraftNotes(Object.fromEntries(threads.map((item) => [item.id, item.note ?? ""])))
-    setDraftStatuses(Object.fromEntries(threads.map((item) => [item.id, item.status ?? "unknown"])))
+  const client = useQueryClient()
+  const id = useId()
+  const [activeView, setActiveView] = useState<ThreadView>("open")
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const [limit, setLimit] = useState(30)
+  const [draftState, setDraftState] = useState({ dirty: false, busy: false })
+  const canLeave = usePlotThreadDraftGuard(draftState.dirty, draftState.busy)
+  const queryKey = asQueryKey(readerCacheKey(bookId, `plot-threads:list:${chapter ?? "all"}`))
+  const result = useQuery({ queryKey, queryFn: () => loadPlotThreadSummaries(bookId, chapter) })
+  const threads = result.data ?? EMPTY_THREADS
+  const counts = useMemo(() => {
+    const values = { open: 0, attention: 0, resolved: 0 }
+    for (const thread of threads) values[threadView(thread.status)]++
+    return values
   }, [threads])
-
-  const grouped = useMemo(() => {
-    const initial = Object.fromEntries(STATUS_ORDER.map((status) => [status, [] as PlotThread[]])) as Record<string, PlotThread[]>
-    for (const thread of threads) {
-      const key = STATUS_ORDER.includes(thread.status as typeof STATUS_ORDER[number]) ? thread.status : "unknown"
-      initial[key].push(thread)
-    }
-    return initial
-  }, [threads])
-
-  const saveNote = async (threadId: string) => {
-    setSavingId(threadId)
-    try {
-      await readerApi.updatePlotThread(bookId, threadId, {
-        note: draftNotes[threadId]?.trim() ? draftNotes[threadId].trim() : null,
-        status: draftStatuses[threadId] ?? null,
-      })
-      await refetchThreads()
-    } finally {
-      setSavingId(null)
-    }
+  const visible = useMemo(() => threads.filter((thread) => threadView(thread.status) === activeView && threadMatches(thread, query)), [threads, activeView, query])
+  const changeView = (view: ThreadView) => {
+    if (view === activeView || !canLeave()) return
+    setActiveView(view); setSelectedId(null); setLimit(30)
+  }
+  const close = () => { if (canLeave()) setSelectedId(null) }
+  const saved = (thread: PlotThread) => {
+    client.setQueryData<PlotThreadPageItem[]>(queryKey, (current) => current?.map((item) => item.id === thread.id ? { ...item, ...thread } : item))
+    client.setQueryData(asQueryKey(readerCacheKey(bookId, `plot-threads:detail:${thread.id}`)), thread)
+    setActiveView(threadView(thread.status))
   }
 
-  const saveToVault = async (thread: PlotThread) => {
-    setVaultSavingId(thread.id)
-    try {
-      const chapterBits = [
-        typeof thread.first_mentioned === "number" ? `First mentioned in chapter ${thread.first_mentioned}.` : null,
-        typeof thread.last_mentioned === "number" ? `Last mentioned in chapter ${thread.last_mentioned}.` : null,
-        typeof thread.resolved_at === "number" ? `Resolved in chapter ${thread.resolved_at}.` : null,
-      ].filter(Boolean)
-      const bodyParts = [
-        thread.description?.trim() || "",
-        chapterBits.length ? chapterBits.join("\n") : "",
-        thread.risk?.trim() ? `## Risk\n\n${thread.risk.trim()}` : "",
-        thread.suggested_action?.trim() ? `## Suggested action\n\n${thread.suggested_action.trim()}` : "",
-        draftNotes[thread.id]?.trim() ? `## Private note\n\n${draftNotes[thread.id].trim()}` : "",
-      ].filter(Boolean)
-
-      await saveContextualVaultNote({
-        bookId,
-        title: thread.title,
-        content: bodyParts.join("\n\n"),
-        context: "plot_threads",
-        folderSegments: [thread.type || "Threads"],
-      })
-    } finally {
-      setVaultSavingId(null)
-      void booksApi.listVaultNotes(bookId).catch(() => null)
-    }
+  if (result.isLoading) return <p role="status" className={`border-y border-[rgb(var(--border))] py-8 text-sm ${muted}`}>Loading plot threads…</p>
+  if (!result.data && result.isError) {
+    const status = isAxiosError(result.error) ? result.error.response?.status : null
+    return <div role="alert" className="border-y border-[rgb(var(--border))] py-6 text-sm"><p>{status === 403 || status === 404 ? "Plot threads are unavailable for this account or manuscript. This tool requires the manuscript owner's author access." : "Plot threads could not be loaded."}</p><button type="button" disabled={result.isFetching} className="app-button-secondary mt-3" onClick={() => void result.refetch()}>Retry plot threads</button></div>
   }
+  const recovery = result.isError ? <p role="alert" className="mb-4 border-l-2 border-amber-600 pl-3 text-sm">Refresh failed. Previously loaded threads remain visible; try Refresh threads again.</p> : null
+  if (!threads.length) return <div className="border-y border-[rgb(var(--border))] py-8">{recovery}<h2 className="text-lg font-semibold">No plot threads yet</h2><p className={`mt-2 text-sm ${muted}`}>Threads appear after manuscript analysis. Check your chapters and their processing status.</p><div className="mt-4 flex flex-wrap gap-4"><Link className="app-button-secondary" href={`/${bookId}/chapters`}>View chapters</Link><button type="button" disabled={result.isFetching} className="app-button-secondary" onClick={() => void result.refetch()}>Refresh threads</button></div></div>
 
-  if (loading) return <div className={`py-4 text-center text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>Loading plot threads...</div>
-  if (threads.length === 0) return <div className={`py-4 text-center text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>No plot threads tracked yet.</div>
+  if (mode === "compact") return <div className="[overflow-wrap:anywhere]">{recovery}<div className="divide-y divide-[rgb(var(--border))] border-y border-[rgb(var(--border))]">{threads.slice(0, 6).map((thread) => <div key={thread.id} className="py-3 text-sm"><p className="font-semibold">{thread.title}</p><p className={`mt-1 ${muted}`}>{THREAD_STATUS_LABELS[thread.status] ?? "Unknown"} · {threadChapterRange(thread)}</p></div>)}</div><Link className="mt-3 inline-block text-sm underline underline-offset-4" href={`/${bookId}/plot-threads`}>View all plot threads</Link></div>
 
-  if (mode === "compact") {
-    return (
-      <div className="space-y-3">
-        {threads.slice(0, 6).map((thread) => (
-          <div key={thread.id} className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-semibold">{thread.title}</p>
-                <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-500"}`}>
-                  First mentioned in chapter {thread.first_mentioned ?? thread.introduced_at ?? "?"}
-                  {thread.last_mentioned ? ` • Last mentioned in chapter ${thread.last_mentioned}` : ""}
-                  {thread.resolved_at ? ` • Resolved in chapter ${thread.resolved_at}` : ""}
-                </p>
-              </div>
-              <span className={`rounded-full border px-2 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
-                {STATUS_LABELS[thread.status] ?? STATUS_LABELS.unknown}
-              </span>
-            </div>
-            {thread.risk ? <p className={`mt-2 text-xs leading-5 ${isDark ? "text-amber-200" : "text-amber-800"}`}>{thread.risk}</p> : null}
-          </div>
-        ))}
-        <Link
-          href={`/${bookId}/plot-threads`}
-          className={`inline-flex rounded-full border px-4 py-2 text-sm font-medium ${isDark ? "border-white/10 bg-white/5 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}
-        >
-          Open full plot thread dashboard
-        </Link>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {STATUS_ORDER.map((status) => (
-          <div key={status} className={`rounded-md border px-4 py-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white/80"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{STATUS_LABELS[status]}</p>
-            <p className={`mt-3 text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{grouped[status].length}</p>
-          </div>
-        ))}
-      </div>
-
-      {STATUS_ORDER.map((status) => {
-        const statusThreads = grouped[status]
-        if (statusThreads.length === 0) return null
-        return (
-          <section key={status}>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>{STATUS_LABELS[status]}</p>
-                <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{statusThreads.length} thread{statusThreads.length === 1 ? "" : "s"}</p>
-              </div>
-              <span className={`rounded-full border px-3 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusClasses(status, isDark)}`}>
-                {STATUS_LABELS[status]}
-              </span>
-            </div>
-            <div className="space-y-3">
-              {statusThreads.map((thread) => (
-                <div key={thread.id} className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/90"}`}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className={`text-base font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{thread.title}</p>
-                        {thread.type ? <span className={`rounded-full px-2.5 py-1 text-3xs uppercase tracking-[0.16em] ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-stone-100 text-stone-600"}`}>{thread.type}</span> : null}
-                      </div>
-                      {thread.description ? <p className={`mt-2 max-w-3xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{thread.description}</p> : null}
-                      <p className={`mt-2 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
-                        First mentioned in chapter {thread.first_mentioned ?? thread.introduced_at ?? "?"}
-                        {thread.last_mentioned ? ` • Last mentioned in chapter ${thread.last_mentioned}` : ""}
-                        {thread.resolved_at ? ` • Resolved in chapter ${thread.resolved_at}` : ""}
-                        {thread.related_characters.length > 0 ? ` • ${thread.related_characters.length} linked characters` : ""}
-                        {thread.mention_count > 0 ? ` • ${thread.mention_count} mentions tracked` : ""}
-                      </p>
-                    </div>
-                    <span className={`rounded-full border px-3 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${statusClasses(thread.status, isDark)}`}>
-                      {STATUS_LABELS[thread.status] ?? STATUS_LABELS.unknown}
-                    </span>
-                  </div>
-
-                  {(thread.related_characters.length > 0 || thread.risk || thread.suggested_action) ? (
-                    <div className="mt-4 grid gap-3 lg:grid-cols-3">
-                      <div className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-                        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Related characters</p>
-                        <p className="mt-2 leading-6">{thread.related_characters.length ? thread.related_characters.join(", ") : "No linked characters yet."}</p>
-                      </div>
-                      <div className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-                        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Risk</p>
-                        <p className="mt-2 leading-6">{thread.risk || "No immediate closure risk flagged."}</p>
-                      </div>
-                      <div className={`rounded-md border px-3 py-3 text-sm ${isDark ? "border-white/10 bg-black/40 text-slate-300" : "border-stone-200 bg-stone-50 text-stone-700"}`}>
-                        <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>Suggested action</p>
-                        <p className="mt-2 leading-6">{thread.suggested_action || "No action suggested yet."}</p>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-4">
-                    <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]">
-                      <div>
-                        <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
-                          Lifecycle status
-                        </label>
-                        <select
-                          value={draftStatuses[thread.id] ?? thread.status}
-                          onChange={(event) => setDraftStatuses((current) => ({ ...current, [thread.id]: event.target.value }))}
-                          className={`w-full rounded-md border px-3 py-3 text-sm outline-none ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
-                        >
-                          {STATUS_OPTIONS.map((value) => (
-                            <option key={value} value={value}>
-                              {STATUS_LABELS[value]}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className={`mb-2 block text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-400" : "text-stone-400"}`}>
-                          Private note
-                        </label>
-                        <textarea
-                          value={draftNotes[thread.id] ?? ""}
-                          onChange={(event) => setDraftNotes((current) => ({ ...current, [thread.id]: event.target.value }))}
-                          rows={3}
-                          className={`w-full rounded-md border px-3 py-3 text-sm leading-6 outline-none ${isDark ? "border-white/10 bg-black text-slate-100" : "border-stone-200 bg-stone-50 text-stone-900"}`}
-                        />
-                        <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Example: Resolve this in arc 5.</p>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between gap-3">
-                      <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Only visible inside your LoreVia workspace.</p>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void saveToVault(thread)}
-                          disabled={vaultSavingId === thread.id}
-                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/[0.08] text-slate-100" : "bg-stone-100 text-stone-700"} disabled:opacity-50`}
-                        >
-                          {vaultSavingId === thread.id ? "Sending..." : "Save to vault"}
-                        </button>
-                        <Link
-                          href={`/${bookId}/notes`}
-                          className={`rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white/[0.08] text-slate-100" : "bg-white text-stone-700"}`}
-                        >
-                          Open notes
-                        </Link>
-                        <button
-                          onClick={() => void saveNote(thread.id)}
-                          disabled={savingId === thread.id}
-                          className="rounded-md bg-[#1f615d] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                        >
-                          {savingId === thread.id ? "Saving..." : "Save thread"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )
-      })}
+  return <div data-plot-tracker className="min-w-0 [overflow-wrap:anywhere]">
+    {recovery}
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+      <label className="block w-full max-w-lg text-sm"><span className="font-medium">Find a thread</span><input type="search" value={query} placeholder="Search title, description, type, or tag" className="mt-2 min-h-11 w-full rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))] px-3" onChange={(event) => { if (canLeave()) { setQuery(event.target.value); setSelectedId(null); setLimit(30) } }} /></label>
+      <button type="button" disabled={result.isFetching || draftState.dirty || draftState.busy} className="app-button-secondary !rounded-sm" onClick={() => void result.refetch()}>{result.isFetching ? "Refreshing…" : "Refresh threads"}</button>
     </div>
-  )
+    <div className="flex flex-wrap border-b border-[rgb(var(--border))]" role="tablist" aria-label="Plot thread groups">
+      {THREAD_VIEWS.map((view, index) => <button key={view.id} id={`${id}-${view.id}`} type="button" role="tab" aria-selected={activeView === view.id} aria-controls={`${id}-panel`} tabIndex={activeView === view.id ? 0 : -1} onClick={() => changeView(view.id)} onKeyDown={(event) => {
+        const next = event.key === "ArrowRight" ? (index + 1) % 3 : event.key === "ArrowLeft" ? (index + 2) % 3 : event.key === "Home" ? 0 : event.key === "End" ? 2 : null
+        if (next === null) return
+        event.preventDefault()
+        if (canLeave()) { setActiveView(THREAD_VIEWS[next].id); setSelectedId(null); setLimit(30); document.getElementById(`${id}-${THREAD_VIEWS[next].id}`)?.focus() }
+      }} className={`min-h-11 border-b-2 px-3 py-3 text-sm font-medium ${activeView === view.id ? "border-[rgb(var(--accent))]" : `border-transparent ${muted}`}`}>{view.label} <span className="ml-1 tabular-nums">{counts[view.id]}</span></button>)}
+    </div>
+    <section role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${activeView}`} tabIndex={0}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 py-4 text-sm ${muted}`}><p>{query.trim() ? `${visible.length} ${visible.length === 1 ? "match" : "matches"} in this group` : `${visible.length} ${visible.length === 1 ? "thread" : "threads"} in this group`}{visible.length > limit ? ` · showing ${limit}` : ""}</p>{query ? <button type="button" className="underline underline-offset-4" onClick={() => { if (canLeave()) { setQuery(""); setSelectedId(null); setLimit(30) } }}>Clear search</button> : null}</div>
+      {!visible.length ? <p className={`border-b border-[rgb(var(--border))] py-6 text-sm ${muted}`}>{query.trim() ? "No threads match this search in the selected group. Clear the search or choose another group." : `No ${activeView === "attention" ? "threads need attention" : `${activeView} threads`}.`}</p> : <div className="divide-y divide-[rgb(var(--border))] border-b border-[rgb(var(--border))]">
+        {visible.slice(0, limit).map((thread) => <article key={thread.id}>
+          <h2><button type="button" aria-expanded={selectedId === thread.id} aria-controls={`${id}-thread-${thread.id}`} disabled={draftState.busy} onClick={() => { if (canLeave()) setSelectedId(selectedId === thread.id ? null : thread.id) }} className={`grid w-full gap-3 py-4 text-left sm:grid-cols-[minmax(0,1fr)_auto] sm:px-3 ${selectedId === thread.id ? "bg-[rgb(var(--muted)/0.5)]" : "hover:bg-[rgb(var(--muted)/0.25)]"}`}>
+            <span className="min-w-0"><span className="flex flex-wrap items-center gap-x-3 gap-y-1"><span className="text-base font-semibold">{thread.title}</span><span className={`text-sm ${threadView(thread.status) === "attention" ? "text-amber-800 dark:text-amber-300" : muted}`}>{THREAD_STATUS_LABELS[thread.status] ?? "Unknown"}</span></span>{thread.description ? <span className={`mt-1 block max-w-3xl text-sm leading-6 ${muted}`}>{thread.description}</span> : null}<span className={`mt-2 block text-sm ${muted}`}>{thread.type || "Unclassified thread"}{thread.tags?.length ? ` · ${thread.tags.join(", ")}` : ""}</span></span>
+            <span className={`flex flex-wrap gap-x-3 gap-y-1 text-sm sm:max-w-64 sm:justify-end ${muted}`}><span>{threadChapterRange(thread)}</span>{thread.mention_count > 0 ? <span>{thread.mention_count} mentions</span> : null}<span className="basis-full sm:text-right">{selectedId === thread.id ? "Hide details ↑" : "View details ↓"}</span></span>
+          </button></h2>
+          <div id={`${id}-thread-${thread.id}`}>{selectedId === thread.id ? <PlotThreadDetails bookId={bookId} threadId={thread.id} onClose={close} onSaved={saved} onDraftState={setDraftState} /> : null}</div>
+        </article>)}
+      </div>}
+      {visible.length > limit ? <button type="button" className="app-button-secondary mt-4" onClick={() => setLimit((value) => value + 30)}>Show more threads</button> : null}
+    </section>
+  </div>
 })

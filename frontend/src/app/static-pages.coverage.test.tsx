@@ -142,6 +142,37 @@ describe("static public pages", () => {
     expect(metadata.title).toBeTruthy()
     expect(container?.textContent).toContain("Where LoreVia is different")
     expect(container?.textContent).toContain("Choose LoreVia if")
+    expect(container?.querySelector("[data-testid='comparison-verdict']")).not.toBeNull()
+    expect(container?.querySelector("[data-testid='comparison-table'] table")).not.toBeNull()
+    expect(container?.querySelectorAll("[data-testid='comparison-differentiators'] article")).toHaveLength(3)
+    expect(container?.querySelector("[data-testid='comparison-differentiators'] .rounded-lg")).toBeNull()
+  })
+
+  it("renders comparison destinations as one editorial index without repeated card labels", async () => {
+    await renderElement(<CompareIndexPage />)
+
+    const index = container?.querySelector("[data-testid='comparison-index-list']")
+    expect(index?.querySelectorAll("a")).toHaveLength(4)
+    expect(index?.textContent).not.toContain("Comparison page")
+    expect(index?.querySelectorAll("h2")).toHaveLength(4)
+  })
+
+  it("renders demos as one source-led catalog without promotional explainer cards", async () => {
+    await renderElement(<DemoIndexPage />)
+
+    const index = container?.querySelector("[data-testid='demo-index-list']")
+    expect(index?.querySelectorAll("article")).toHaveLength(3)
+    expect(index?.textContent).not.toContain("Why these pages matter")
+    expect(container?.textContent).not.toContain("SEO angle")
+    expect(container?.querySelector('a[href="/demo/workspace"]')).not.toBeNull()
+  })
+
+  it("keeps the blog archive complete without repeating artwork in every topic row", async () => {
+    await renderElement(<BlogPage />)
+
+    expect(container?.querySelectorAll(".editorial-latest-grid .editorial-story-card__image")).toHaveLength(4)
+    expect(container?.querySelectorAll(".editorial-topics img")).toHaveLength(0)
+    expect(container?.querySelectorAll(".editorial-archive-list a").length).toBeGreaterThan(0)
   })
 
   it("returns empty metadata and notFound for unknown comparison slugs", async () => {

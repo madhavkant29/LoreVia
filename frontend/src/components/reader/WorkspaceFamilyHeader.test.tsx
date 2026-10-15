@@ -10,6 +10,14 @@ vi.mock("next/link", () => ({
   ),
 }))
 
+vi.mock("@/components/layout/AuthorToolsNav", () => ({
+  AuthorToolsNav: ({ active }: { active: string }) => <nav data-testid="book-workspace-bar">{active}</nav>,
+}))
+
+vi.mock("@/lib/stores/preferencesStore", () => ({
+  usePreferencesStore: (selector: (state: { theme: string }) => unknown) => selector({ theme: "light" }),
+}))
+
 import { WorkspaceFamilyHeader } from "./WorkspaceFamilyHeader"
 
 let container: HTMLDivElement | null = null
@@ -31,28 +39,27 @@ describe("WorkspaceFamilyHeader", () => {
     root = null
   })
 
-  it("renders story bible tabs with the current surface selected", () => {
+  it("renders a story bible heading under the shared book bar", () => {
     const view = renderHeader("story-bible", "plot-threads")
 
     expect(view.textContent).toContain("Story Bible")
-    expect(view.querySelector('a[href="/book-1/characters"]')).not.toBeNull()
-    expect(view.querySelector('a[href="/book-1/cross-book-wiki"]')).not.toBeNull()
-    expect(view.querySelector('a[href="/book-1/plot-threads"]')?.className).toContain("app-family-tab--active")
+    expect(view.querySelector('[data-testid="book-workspace-bar"]')?.textContent).toBe("plot-threads")
+    expect(view.querySelector('a[href="/book-1/characters"]')).toBeNull()
   })
 
-  it("keeps diagnostics inside the review center family", () => {
+  it("labels diagnostics as part of Review without a second route nav", () => {
     const view = renderHeader("review-center", "reports")
 
-    expect(view.textContent).toContain("Review Center")
-    expect(view.querySelector('a[href="/book-1/editorial-review"]')).not.toBeNull()
-    expect(view.querySelector('a[href="/book-1/author-loop"]')).not.toBeNull()
-    expect(view.querySelector('a[href="/book-1/reports"]')?.className).toContain("app-family-tab--active")
+    expect(view.textContent).toContain("Review")
+    expect(view.querySelector('[data-testid="book-workspace-bar"]')?.textContent).toBe("reports")
+    expect(view.querySelector('a[href="/book-1/editorial-review"]')).toBeNull()
   })
 
-  it("links child workspaces home to the book overview", () => {
+  it("renders the supplied title and description", () => {
     const view = renderHeader("story-bible", "characters")
 
-    expect(view.querySelector('[data-testid="workspace-family-home-link"]')?.getAttribute("href")).toBe("/book-1")
+    expect(view.textContent).toContain("Workspace title")
+    expect(view.textContent).toContain("Workspace description")
   })
 })
 

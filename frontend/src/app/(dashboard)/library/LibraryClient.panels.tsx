@@ -69,16 +69,16 @@ export function FirstManuscriptHero({
     <section
       className={`overflow-hidden rounded-sm border px-6 py-10 sm:px-10 sm:py-14 ${
         isDark
-          ? "border-teal-300/15 bg-[linear-gradient(135deg,#101b24_0%,#102a2b_100%)]"
-          : "border-teal-900/10 bg-[linear-gradient(135deg,#ffffff_0%,#edf9f6_100%)]"
+          ? "border-white/15 bg-[rgb(var(--card))]"
+          : "border-stone-200 bg-white"
       }`}
       data-testid="first-manuscript-hero"
     >
       <div className="max-w-3xl">
-        <p className="app-eyebrow text-teal-600">A thoughtful first reader for your draft</p>
-        <h1 className={`mt-4 text-3xl font-semibold tracking-[-0.035em] sm:text-5xl ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>
+        <p className="app-eyebrow text-teal-700 dark:text-teal-300">Start your library</p>
+        <h2 className={`mt-4 font-display text-2xl font-semibold tracking-[-0.025em] sm:text-3xl ${isDark ? "text-[#f5f0e8]" : "text-stone-950"}`}>
           Upload your manuscript for a first read
-        </h1>
+        </h2>
         <p className={`mt-5 max-w-2xl text-base leading-8 sm:text-lg ${isDark ? "text-[#c8c2b8]" : "text-stone-600"}`}>
           LoreVia begins with what is working—your characters, scenes, voice, themes, and emotional core—then moves into evidence-backed revision opportunities.
         </p>
@@ -94,7 +94,7 @@ export function FirstManuscriptHero({
         <Button type="button" onClick={onUpload} className="mt-8 rounded-sm bg-teal-700 px-5 text-white hover:bg-teal-600">
           Upload manuscript
         </Button>
-        <p className={`mt-3 text-xs ${isDark ? "text-[#8e8b85]" : "text-stone-500"}`}>
+        <p className={`mt-3 text-sm ${isDark ? "text-[#aaa69e]" : "text-stone-600"}`}>
           The supportive full-manuscript read begins automatically after extraction. Your draft stays private.
         </p>
       </div>

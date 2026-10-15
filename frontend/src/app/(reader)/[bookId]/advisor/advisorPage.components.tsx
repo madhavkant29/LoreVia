@@ -43,34 +43,26 @@ function severityConfig(severity: string) {
   switch (severity) {
     case "warning":
       return {
-        icon: "WRN",
-        color: "border-amber-500/30 bg-amber-500/8",
+        color: "border-amber-500/40",
         badge: "bg-amber-500/20 text-amber-300",
-        dot: "bg-amber-400",
         label: "Warning",
       }
     case "direction":
       return {
-        icon: "DIR",
-        color: "border-violet-500/30 bg-violet-500/8",
+        color: "border-violet-500/40",
         badge: "bg-violet-500/20 text-violet-300",
-        dot: "bg-violet-400",
         label: "Future Direction",
       }
     case "opportunity":
       return {
-        icon: "OPP",
-        color: "border-teal-500/30 bg-teal-500/8",
+        color: "border-teal-500/40",
         badge: "bg-teal-500/20 text-teal-300",
-        dot: "bg-teal-400",
         label: "Opportunity",
       }
     default:
       return {
-        icon: "INF",
-        color: "border-blue-500/30 bg-blue-500/8",
+        color: "border-blue-500/40",
         badge: "bg-blue-500/20 text-blue-300",
-        dot: "bg-blue-400",
         label: "Info",
       }
   }
@@ -289,48 +281,42 @@ export function StoryAdvisorEmptyState({
 
 export function SuggestionGroup({
   label,
-  icon,
   items,
   isDark,
   onAsk,
   onSaveNote,
   onMarkIntentional,
   onDismiss,
+  saving = false,
 }: {
   label: string
-  icon: string
   items: AdvisorSuggestion[]
   isDark: boolean
   onAsk: (p: string) => void
   onSaveNote: (payload: { chapterNumber: number | null; title: string | null; body: string }) => void
   onMarkIntentional: (id: string) => void
   onDismiss: (id: string) => void
+  saving?: boolean
 }) {
   if (items.length === 0) return null
-  const tone = items[0]?.severity ?? "info"
-  const sectionTone = tone === "opportunity" ? "teal" : tone === "info" || tone === "direction" ? "violet" : tone === "warning" ? "amber" : "slate"
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2">
-        <span className={`text-sm ${sectionTone === "teal" ? "text-teal-300" : sectionTone === "violet" ? "text-violet-300" : sectionTone === "amber" ? "text-amber-300" : isDark ? "text-slate-300" : "text-stone-500"}`}>{icon}</span>
-        <StoryAdvisorSectionLabel tone={sectionTone === "slate" ? "slate" : sectionTone}>{label}</StoryAdvisorSectionLabel>
-        <span className={`rounded-full px-1.5 py-0.5 text-3xs font-semibold ${isDark ? "bg-white/[0.08] text-slate-400" : "bg-stone-100 text-stone-500"}`}>{items.length}</span>
+      <div className="mb-2 flex items-baseline gap-2">
+        <h2 className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-stone-900"}`}>{label}</h2>
+        <span className={`text-xs tabular-nums ${isDark ? "text-slate-500" : "text-stone-500"}`}>{items.length}</span>
       </div>
-      <div className="space-y-3">
+      <div className={`divide-y border-y ${isDark ? "divide-white/10 border-white/10" : "divide-stone-200 border-stone-200"}`}>
         {items.map(s => {
           const cfg = severityConfig(s.severity)
           return (
             <div
               key={s.id}
-              className={`rounded-lg border px-4 py-4 transition-all duration-300 ${cfg.color}`}
-              style={{ animationName: "fadeSlideIn", animationDuration: "0.3s", animationFillMode: "both" }}
+              className="py-4"
             >
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-stretch xl:gap-5">
-                <div className={`flex shrink-0 items-center border-l pl-3 xl:min-w-[5.75rem] xl:items-start xl:pl-4 ${isDark ? "border-white/10" : "border-stone-200"}`}>
-                  <span className={`text-[1.85rem] font-semibold tracking-tight ${s.severity === "opportunity" ? "text-teal-300" : s.severity === "info" || s.severity === "direction" ? "text-violet-300" : s.severity === "warning" ? "text-amber-300" : isDark ? "text-slate-200" : "text-stone-700"}`}>{cfg.icon}</span>
-                </div>
-                <div className="min-w-0 flex-1">
+              <div className={`border-l-2 pl-4 ${cfg.color}`}>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between xl:gap-6">
+                  <div className="min-w-0 flex-1">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className={`text-3xs font-semibold uppercase tracking-[0.22em] px-2 py-0.5 rounded-full ${cfg.badge}`}>
                       {s.type.replace(/_/g, " ")}
@@ -348,8 +334,8 @@ export function SuggestionGroup({
                   <p className={`max-w-3xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
                     {s.description}
                   </p>
-                </div>
-                <div className="flex shrink-0 flex-wrap items-start gap-2 xl:max-w-[22rem] xl:justify-end">
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 xl:max-w-[24rem] xl:justify-end">
                     <button
                       onClick={() => onAsk(s.ask_prompt)}
                       className={`rounded-sm px-3.5 py-2 text-xs font-semibold transition ${s.severity === "opportunity"
@@ -360,9 +346,10 @@ export function SuggestionGroup({
                             ? "bg-white/[0.12] text-slate-100 hover:bg-white/[0.16]"
                             : "bg-stone-900 text-white hover:bg-stone-800"}`}
                     >
-                      {s.action_label} &rarr;
+                      {s.action_label}
                     </button>
                     <button
+                      disabled={saving}
                       onClick={() => onSaveNote({
                         chapterNumber: typeof s.chapter_ref === "number" ? s.chapter_ref : null,
                         title: `Scan: ${s.title}`.slice(0, 120),
@@ -374,23 +361,24 @@ export function SuggestionGroup({
                           s.description,
                         ].filter(Boolean).join("\n"),
                       })}
-                      className={`rounded-sm border px-3.5 py-2 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/[0.08] text-slate-200 hover:bg-white/[0.12]" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
+                      className={`text-xs font-medium underline decoration-transparent underline-offset-4 hover:decoration-current ${isDark ? "text-slate-300" : "text-stone-600"}`}
                     >
                       Save note
                     </button>
                     <button
                       onClick={() => onMarkIntentional(s.id)}
-                      className={`rounded-sm border px-3.5 py-2 text-xs font-medium transition ${isDark ? "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10" : "border-stone-200 bg-white text-stone-500 hover:bg-stone-50"}`}
-                      title="Mark as a deliberate authorial choice that will not reappear"
+                      className={`text-xs font-medium underline decoration-transparent underline-offset-4 hover:decoration-current ${isDark ? "text-slate-400" : "text-stone-500"}`}
+                      title="Hide this finding as an intentional choice on this browser"
                     >
                       Mark as intentional
                     </button>
                     <button
                       onClick={() => onDismiss(s.id)}
-                      className={`rounded-sm px-3 py-2 text-xs font-medium transition ${isDark ? "text-slate-600 hover:bg-white/5 hover:text-slate-300" : "text-stone-400 hover:bg-stone-50 hover:text-stone-600"}`}
+                      className={`text-xs font-medium underline decoration-transparent underline-offset-4 hover:decoration-current ${isDark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-600"}`}
                     >
                       Dismiss
                     </button>
+                  </div>
                   </div>
                 </div>
               </div>

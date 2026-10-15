@@ -102,6 +102,7 @@ describe("UX primitives", () => {
           partialReady: false,
           ready: false,
           failed: true,
+          frozen: false,
           failureKind: "recoverable",
           stateVariant: "recoverable_failure",
         }}
@@ -132,6 +133,7 @@ describe("UX primitives", () => {
           partialReady: true,
           ready: false,
           failed: false,
+          frozen: false,
           failureKind: null,
           stateVariant: "partial_ready",
         }}
@@ -159,6 +161,7 @@ describe("UX primitives", () => {
           partialReady: true,
           ready: false,
           failed: false,
+          frozen: false,
           failureKind: null,
           stateVariant: "partial_ready",
         }}

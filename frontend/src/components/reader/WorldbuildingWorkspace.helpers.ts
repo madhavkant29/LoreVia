@@ -131,6 +131,15 @@ export function formatElementType(type: string) {
   return (type || "element").replaceAll("_", " ")
 }
 
+export function worldRecordText(record: Record<string, unknown> | string) {
+  if (typeof record === "string") return record
+  const keys = ["title", "label", "name", "element_name", "description", "summary", "message", "reason", "excerpt", "chapter_title", "source", "source_scope", "element_type", "suggested_fix", "suggestions"]
+  return [...new Set(keys.flatMap((key) => {
+    const value = record[key]
+    return typeof value === "string" && value.trim() ? [value.trim()] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()) : []
+  }))].join("\n\n") || "No readable details were supplied."
+}
+
 export function severityClass(severity: string, isDark: boolean) {
   const normalized = severity.toLowerCase()
   if (normalized === "critical") {

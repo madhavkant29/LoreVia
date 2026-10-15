@@ -74,7 +74,7 @@ async def start_manual_manuscript_reprocess(
 ) -> ManuscriptReprocessOut:
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
     user_id = current_user.id
     resolved_book_id = book.id
 
@@ -86,7 +86,7 @@ async def start_manual_manuscript_reprocess(
 
     await _lock_book_reprocessing(db, resolved_book_id)
     await db.refresh(book)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
 
     from app.services.editor_project_service import (
         dispatch_rebuild,
@@ -204,11 +204,11 @@ async def start_manual_chapter_reprocess(
 ) -> ManuscriptReprocessOut:
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
 
     await _lock_book_reprocessing(db, book.id)
     await db.refresh(book)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
 
     from app.services.editor_project_service import (
         get_rebuild_run_id,

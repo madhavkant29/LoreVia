@@ -259,7 +259,7 @@ describe("intelligence api", () => {
     expect(postMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/whats-the-word", { description: "a guarded expression", previous_word: "scowl" })
     expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/continuity-report", expect.objectContaining({ responseType: "blob" }))
     expect(getMock).toHaveBeenCalledWith("/intelligence/book-1/advisor/synopsis", { params: { spoiler_level: "none" } })
-    expect(postMock).toHaveBeenCalledWith("/intelligence/series/series-1/continuity-check", { book_id: "book-1", text: "Passage", chapter_num: 4 })
+    expect(postMock).toHaveBeenCalledWith("/intelligence/series/series-1/continuity-check", { messages: [], book_id: "book-1", text: "Passage", chapter_num: 4 })
   })
 
   it("returns immediate advisor replies and reports failed async tasks", async () => {

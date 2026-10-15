@@ -13,7 +13,7 @@ test("critical public and authenticated routes have no serious accessibility vio
   await expect(page.getByRole("heading", { name: /^sign in$/i })).toBeVisible()
   expect(await criticalAccessibilityViolations(page)).toEqual([])
 
-  await installMockApi(page)
+  await installMockApi(page, { userTier: "trial" })
   for (const path of ["/library", "/upgrade", BOOK_ROUTE, `${BOOK_ROUTE}/manuscript`]) {
     await page.goto(path)
     await expect(page.locator("h1, h2").filter({ visible: true }).first()).toBeVisible()
@@ -23,7 +23,7 @@ test("critical public and authenticated routes have no serious accessibility vio
 
 test("critical dialogs are labelled, focus-contained, and keyboard dismissible", async ({ page }) => {
   test.setTimeout(120_000)
-  await installMockApi(page)
+  await installMockApi(page, { userTier: "trial" })
 
   await page.goto("/library")
   await page.getByRole("button", { name: /^new project$/i }).first().click()
@@ -38,7 +38,7 @@ test("critical dialogs are labelled, focus-contained, and keyboard dismissible",
   const authorCard = page.locator("article").filter({
     has: page.getByRole("heading", { name: "Author", exact: true }),
   })
-  await authorCard.getByRole("button", { name: "Upgrade to Author" }).click()
+  await authorCard.getByRole("button", { name: /^(Upgrade to Author|View payment details)$/ }).click()
   const billingDialog = page.getByRole("dialog")
   await expect(billingDialog).toBeVisible()
   await expect(billingDialog.locator(":focus")).toHaveCount(1)
@@ -46,6 +46,7 @@ test("critical dialogs are labelled, focus-contained, and keyboard dismissible",
   await page.keyboard.press("Escape")
   await expect(billingDialog).toHaveCount(0)
 
+  await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/manuscript`)
   await page.getByRole("button", { name: "Reprocess manuscript" }).click()
   const reprocessDialog = page.getByRole("dialog", { name: "Reprocess manuscript?" })

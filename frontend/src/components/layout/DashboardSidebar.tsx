@@ -15,7 +15,6 @@ import { ChatLauncher } from "@/components/layout/ChatLauncher"
 import { NotificationBell } from "@/components/layout/NotificationBell"
 import { asQueryKey, booksSelectorCacheKey } from "@/lib/query/cacheKeys"
 import { queryClient } from "@/lib/query/queryClient"
-import { prefetchChatsSidebarData, prefetchNotificationsSidebarData } from "@/lib/query/sidebarPrefetch"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
@@ -76,9 +75,9 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   const [desktopNav, setDesktopNav] = useState(false)
   const [badgeQueriesEnabled, setBadgeQueriesEnabled] = useState(false)
   const [communityUrl, setCommunityUrl] = useState<string | null>(null)
-  const sidebarPrefetchedRef = useRef(false)
   const libraryPrefetchedRef = useRef(false)
   const pathname = usePathname()
+  const focusedBilling = pathname === "/upgrade"
   const isDark = theme === "dark"
   const showUserChrome = authHydrated && !!user
   const navItems = useMemo<NavItem[]>(() => {
@@ -118,7 +117,7 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (!user || !authHydrated || badgeQueriesEnabled) return
+    if (focusedBilling || !user || !authHydrated || badgeQueriesEnabled) return
 
     const scheduleEnablement =
       typeof window.requestIdleCallback === "function"
@@ -132,18 +131,13 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
 
     const handle = scheduleEnablement(() => {
       setBadgeQueriesEnabled(true)
-      if (!sidebarPrefetchedRef.current) {
-        sidebarPrefetchedRef.current = true
-        void prefetchNotificationsSidebarData()
-        void prefetchChatsSidebarData()
-      }
     })
 
     return () => cancelEnablement(handle)
-  }, [authHydrated, badgeQueriesEnabled, user])
+  }, [authHydrated, badgeQueriesEnabled, focusedBilling, user])
 
   useEffect(() => {
-    if (!showUserChrome) return
+    if (!showUserChrome || focusedBilling) return
     let cancelled = false
     void supportApi.config().then((config) => {
       if (!cancelled) setCommunityUrl(config.community_url)
@@ -153,7 +147,7 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [showUserChrome])
+  }, [focusedBilling, showUserChrome])
 
   const profileInitial = useMemo(() => {
     const source = user?.username || user?.email || "?"
@@ -171,6 +165,37 @@ export function DashboardSidebar({ children }: { children: ReactNode }) {
       queryFn: () => booksApi.listSelector(true),
     })
   }, [])
+
+  if (focusedBilling) {
+    return (
+      <div className="min-h-screen bg-[#f4f6f8] text-stone-950 transition-colors duration-150 dark:bg-[rgb(20,24,27)] dark:text-[#efe9df]">
+        <header className="border-b border-stone-200 px-4 py-4 dark:border-white/[0.12] sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[1160px] items-center justify-between gap-4">
+            <Link href="/library" aria-label="Return to LoreVia workspace">
+              <BrandLockup size="lg" />
+            </Link>
+            <div className="flex items-center gap-3">
+              <Link href="/library" className="text-sm font-semibold text-stone-600 hover:text-stone-950 dark:text-slate-300 dark:hover:text-white">
+                Back to workspace
+              </Link>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={toggleTheme}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full px-0 py-0"
+                aria-label="Toggle theme"
+              >
+                {isDark ? <SunIcon /> : <MoonIcon />}
+              </Button>
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[1160px] px-4 pb-16 pt-10 sm:px-6 lg:px-8 lg:pt-14">
+          {children}
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-[#f4f6f8] text-stone-950 transition-colors duration-150 dark:bg-[rgb(20,24,27)] dark:text-[#efe9df]">

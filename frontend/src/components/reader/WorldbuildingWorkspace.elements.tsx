@@ -9,7 +9,7 @@ import {
   mutedTextClass,
   secondaryButtonClass,
   softPanelClass,
-  summarizeRecord,
+  worldRecordText,
   titleTextClass,
 } from "./WorldbuildingWorkspace.helpers"
 
@@ -21,6 +21,7 @@ export function ElementSuggestionsCard({
   initialSuggestionCount,
   onAcceptElementSuggestion,
   onToggleShowAllSuggestions,
+  accepting,
 }: {
   isDark: boolean
   suggestionElements: WorldElement[]
@@ -29,6 +30,7 @@ export function ElementSuggestionsCard({
   initialSuggestionCount: number
   onAcceptElementSuggestion: (element: WorldElement, suggestion: Record<string, unknown> | string) => void
   onToggleShowAllSuggestions: () => void
+  accepting?: boolean
 }) {
   return (
     <WorkspaceCard
@@ -48,13 +50,14 @@ export function ElementSuggestionsCard({
               <div className="mt-3 grid gap-2">
                 {element.suggestions.map((suggestion, index) => (
                   <div key={`${element.id}-${index}`} className={`rounded-xl border p-3 text-sm ${softPanelClass(isDark)}`}>
-                    <p className={bodyTextClass(isDark)}>{summarizeRecord(suggestion)}</p>
+                    <p className={bodyTextClass(isDark)}>{worldRecordText(suggestion)}</p>
                     <button
                       type="button"
+                      disabled={accepting}
                       onClick={() => onAcceptElementSuggestion(element, suggestion)}
                       className={`mt-3 rounded-full px-3 py-1.5 text-xs font-semibold ${isDark ? "bg-amber-300 text-stone-950" : "bg-stone-900 text-white"}`}
                     >
-                      Mark implemented
+                      {accepting ? "Updating…" : "Mark implemented"}
                     </button>
                   </div>
                 ))}

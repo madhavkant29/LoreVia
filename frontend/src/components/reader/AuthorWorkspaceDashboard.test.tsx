@@ -36,36 +36,61 @@ describe("AuthorWorkspaceDashboard", () => {
     root = null
   })
 
-  it("renders the hero, compact story pulse, and author overview by default", () => {
-    const view = renderDashboard()
-
-    expect(view.textContent).toContain("Current project")
-    expect(view.textContent).toContain("Story pulse")
-    expect(view.textContent).toContain("Revision preview")
-    expect(view.textContent).toContain("Your author command center")
-    expect(view.textContent).not.toContain("Add planning item")
+  it("distinguishes zero findings from unavailable findings without inventing queued work", () => {
+    const view = renderDashboard({ continuityIssueCount: 0, worldGapCount: null, timelineIssueCount: 2 })
+    expect(view.textContent).toContain("No findings reported")
+    expect(view.textContent).toContain("Open to check findings")
+    expect(view.textContent).toContain("2 issues detected")
+    expect(view.textContent).not.toContain("review targets queued")
   })
 
-  it("switches between planning, story map, and workspace stats tabs", async () => {
+  it("renders one primary overview and keeps project details collapsed by default", () => {
     const view = renderDashboard()
 
-    await clickButton(view, "Planning")
+    expect(view.textContent).toContain("Book overview")
+    expect(view.textContent).toContain("Current project")
+    expect(view.textContent).toContain("Story health")
+    expect(view.textContent).toContain("Revision preview")
+    expect(view.textContent).toContain("Project details")
+    expect(view.textContent).not.toContain("Add planning item")
+    expect(view.textContent).not.toContain("Secondary workspace")
+    expect(view.textContent).not.toContain("Workspace links")
+  })
+
+  it("mounts project details on demand and switches between its focused tabs", async () => {
+    const view = renderDashboard()
+
+    await openProjectDetails(view)
     expect(view.textContent).toContain("Add planning item")
 
     await clickButton(view, "Story Map")
     expect(view.textContent).toContain("Memory map")
     expect(view.textContent).toContain("Story map details")
 
-    await clickButton(view, "Workspace Stats")
+    await clickButton(view, "Statistics")
     expect(view.textContent).toContain("Workspace stats")
-    expect(view.textContent).toContain("Writing streak")
+    expect(view.textContent).toContain("Sign-in streak")
     expect(view.textContent).toContain("Daily goal")
   })
 
-  it("renders all workspace stat metrics in the stats tab", async () => {
+  it("supports arrow-key navigation and a labelled panel in project details", async () => {
+    const view = renderDashboard()
+    await openProjectDetails(view)
+    const firstTab = view.querySelector<HTMLButtonElement>('[role="tab"]')!
+    await act(async () => {
+      firstTab.focus()
+      firstTab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }))
+    })
+    expect(document.activeElement?.textContent).toBe("Story Map")
+    expect(view.querySelector('[role="tabpanel"]')?.getAttribute("aria-labelledby")).toBe("overview-tab-story-map")
+    expect(view.querySelectorAll('[role="tab"][tabindex="0"]')).toHaveLength(1)
+  })
+
+  it("renders all workspace stat metrics after details are requested", async () => {
     const view = renderDashboard()
 
-    await clickButton(view, "Workspace Stats")
+    await openProjectDetails(view)
+    await clickButton(view, "Statistics")
 
     expect(view.textContent).toContain("Total words")
     expect(view.textContent).toContain("62,000")
@@ -77,7 +102,7 @@ describe("AuthorWorkspaceDashboard", () => {
     expect(view.textContent).toContain("1")
   })
 
-  it("keeps the full report link and hero CTAs wired to existing handlers", async () => {
+  it("keeps the report link and primary manuscript action wired", async () => {
     const onOpenManuscript = vi.fn()
     const onNavigate = vi.fn()
     const onOpenRelationships = vi.fn()
@@ -89,64 +114,17 @@ describe("AuthorWorkspaceDashboard", () => {
     await clickButton(view, "Open Manuscript Editor")
     expect(onOpenManuscript).toHaveBeenCalledOnce()
 
-    await clickButton(view, "Open relationship map")
-    expect(onOpenRelationships).toHaveBeenCalledOnce()
-
-    await clickButton(view, "Open summaries")
-    expect(onNavigate).toHaveBeenCalledWith("/book-1/summaries")
   })
 
-  it("opens revision focus findings when a focus card is clicked", async () => {
-    const view = renderDashboard()
-
-    await clickButton(view, "Revision")
-    await clickButton(view, "Continuity & logic")
-
-    expect(view.textContent).toContain("Selected findings")
-    expect(view.textContent).toContain("Fix archive key sequence")
-
-    await clickButton(view, "Fix archive key sequence")
-    expect(view.textContent).toContain("What LoreVia found")
-    expect(view.textContent).toContain("Status: pending")
-    expect(view.textContent).toContain("Category: continuity")
-  })
-
-  it("opens chapter findings and respects the severity filter", async () => {
-    const view = renderDashboard()
-
-    await clickButton(view, "Revision")
-    await clickButton(view, "High")
-    await act(async () => {
-      const chapterButtons = Array.from(view.querySelectorAll("button")).filter((node) => node.textContent?.includes("Chapter 8"))
-      chapterButtons.at(-1)?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-      await Promise.resolve()
-    })
-
-    expect(view.textContent).toContain("Chapter findings")
-    expect(view.textContent).toContain("Archive key timing")
-    expect(view.textContent).not.toContain("Lore terms need re-anchoring")
-  })
-
-  it("makes story pulse metrics and readiness severity rows clickable", async () => {
+  it("makes story health metrics inspectable without navigating away", async () => {
     const onNavigate = vi.fn()
     const view = renderDashboard({ onNavigate })
 
-    await clickButton(view, "Continuity")
+    await clickAriaButton(view, "Continuity: 82%")
     expect(view.textContent).toContain("Continuity: 82%")
     expect(view.textContent).toContain("Good continuity")
     expect(onNavigate).not.toHaveBeenCalled()
 
-    await clickButton(view, "Revision")
-    await clickButton(view, "Medium severity")
-
-    const chapterButtons = Array.from(view.querySelectorAll("button"))
-    const chapterEightButton = chapterButtons.filter((node) => node.textContent?.includes("Chapter 8")).at(-1)
-    const chapterSevenButton = chapterButtons.filter((node) => node.textContent?.includes("Chapter 7")).at(-1)
-    const bookWideButton = chapterButtons.filter((node) => node.textContent?.includes("Book-wide findings")).at(-1)
-
-    expect(chapterEightButton?.textContent).toContain("0 issues")
-    expect(chapterSevenButton?.textContent).toContain("1 issue")
-    expect(bookWideButton?.textContent).toContain("1 issue")
   })
 })
 
@@ -154,10 +132,16 @@ function renderDashboard({
   onOpenManuscript = vi.fn(),
   onNavigate = vi.fn(),
   onOpenRelationships = vi.fn(),
+  continuityIssueCount = 3,
+  worldGapCount = 2,
+  timelineIssueCount = 1,
 }: {
   onOpenManuscript?: () => void
   onNavigate?: (href: string) => void
   onOpenRelationships?: () => void
+  continuityIssueCount?: number | null
+  worldGapCount?: number | null
+  timelineIssueCount?: number | null
 } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -184,9 +168,9 @@ function renderDashboard({
         preWritingCheck={buildPreWritingCheck()}
         revisionIntelligence={buildRevisionIntelligence()}
         writerWorkspace={buildWorkspace()}
-        continuityIssueCount={3}
-        worldGapCount={2}
-        timelineIssueCount={1}
+        continuityIssueCount={continuityIssueCount}
+        worldGapCount={worldGapCount}
+        timelineIssueCount={timelineIssueCount}
         processingSummary="draft is syncing"
         chapterCount={12}
         characterCount={18}
@@ -214,11 +198,32 @@ function renderDashboard({
 }
 
 async function clickButton(view: HTMLDivElement, label: string) {
-  const button = Array.from(view.querySelectorAll("button")).find((node) => node.textContent?.includes(label))
+  const button = Array.from(view.querySelectorAll("button")).find((node) => node.textContent?.trim() === label)
   expect(button).toBeTruthy()
 
   await act(async () => {
     button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    await Promise.resolve()
+  })
+}
+
+async function clickAriaButton(view: HTMLDivElement, label: string) {
+  const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+  expect(button).toBeTruthy()
+
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    await Promise.resolve()
+  })
+}
+
+async function openProjectDetails(view: HTMLDivElement) {
+  const details = view.querySelector("details")
+  expect(details).toBeTruthy()
+
+  await act(async () => {
+    if (details) details.open = true
+    details?.dispatchEvent(new Event("toggle", { bubbles: false }))
     await Promise.resolve()
   })
 }

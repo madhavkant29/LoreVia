@@ -31,7 +31,7 @@ type AuthorToolsNavProps = {
   description?: string
   currentChapter?: number
   mode?: BookMode
-  variant?: "panel" | "rail"
+  variant?: "panel" | "rail" | "bar"
   railSize?: "default" | "compact"
 }
 
@@ -76,7 +76,7 @@ type NavSection = {
   processingDependent?: boolean
 }
 
-const READER_SHELL_ITEM_IDS = new Set(["overview", "read", "chapters", "summaries", "search", "timeline", "beta-feedback"])
+const READER_SHELL_ITEM_IDS = new Set(["overview", "read", "chapters", "search", "timeline", "beta-feedback"])
 const FREE_OWNER_AUTHOR_ITEM_IDS = new Set(["overview", "read", "chapters", "advisor", "export", "visibility"])
 const BOOK_PRESET_OPTIONS: Array<{ value: BookPreset; label: string }> = [
   { value: "draft", label: "Draft" },
@@ -85,6 +85,40 @@ const BOOK_PRESET_OPTIONS: Array<{ value: BookPreset; label: string }> = [
   { value: "share", label: "Share" },
   { value: "all", label: "All" },
 ]
+const BOOK_HUBS: Array<{ value: Exclude<BookPreset, "all">; label: string; entry: string }> = [
+  { value: "draft", label: "Draft", entry: "overview" },
+  { value: "story_bible", label: "Story Bible", entry: "characters" },
+  { value: "review", label: "Review", entry: "advisor" },
+  { value: "share", label: "Share", entry: "collaboration" },
+]
+const HUB_BY_ITEM_ID: Record<string, Exclude<BookPreset, "all">> = {
+  overview: "draft",
+  read: "draft",
+  chapters: "draft",
+  manuscript: "draft",
+  scenes: "draft",
+  notes: "draft",
+  characters: "story_bible",
+  relationships: "story_bible",
+  timeline: "story_bible",
+  "plot-threads": "story_bible",
+  foreshadowing: "story_bible",
+  "world-gap": "story_bible",
+  "cross-book-wiki": "story_bible",
+  advisor: "review",
+  "editorial-review": "review",
+  "ai-beta-reader": "review",
+  voice: "review",
+  reports: "review",
+  search: "review",
+  summaries: "review",
+  analysis: "review",
+  "author-loop": "review",
+  collaboration: "share",
+  "beta-feedback": "share",
+  export: "share",
+  visibility: "share",
+}
 const NAV_TOOL_IDS: Record<string, string> = {
   "plot-threads": "book.plot_threads",
   "world-gap": "book.world_gap",
@@ -108,7 +142,6 @@ function canSeeCollaboratorItem(itemId: string, permissions: CollaborationPermis
     case "advisor":
     case "editorial-review":
     case "voice":
-    case "ask":
     case "analysis":
     case "reports":
       return permissions.can_run_ai_scans
@@ -155,7 +188,7 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
       { id: "relationships", label: "Relationships", href: `/${bookId}/graph` as Route, tone: "Network", helper: "Map connections between characters so alliances, conflicts, and ties stay clear.", icon: "links" },
       { id: "timeline", label: "Timeline", href: `/${bookId}/timeline` as Route, tone: "Sequence", helper: "Review character presence, thread duration, and relationship shifts across the manuscript.", icon: "events" },
       { id: "plot-threads", label: "Plot Threads", href: `/${bookId}/plot-threads` as Route, tone: "Arc tracking", helper: "Follow open arcs and see which plot threads are moving, drifting, or unresolved.", icon: "threads" },
-      { id: "foreshadowing", label: "Foreshadowing", href: `/${bookId}/foreshadowing` as Route, tone: "Signals", helper: "Review planted details, early clues, and hints that carry later narrative weight.", icon: "spark", advanced: true },
+      { id: "foreshadowing", label: "Setup & Payoff", href: `/${bookId}/foreshadowing` as Route, tone: "Structure", helper: "Trace planted details to their intended returns and isolate setups that still need a payoff.", icon: "spark", advanced: true },
       { id: "world-gap", label: "World Gaps", href: `/${bookId}/world-gap` as Route, tone: "Lore cleanup", helper: "Spot missing lore, weak canon links, and worldbuilding details that need support.", icon: "gap", advanced: true },
       { id: "cross-book-wiki", label: "Series Wiki", href: `/${bookId}/cross-book-wiki` as Route, tone: "Cross-book", helper: "Compare recurring people and lore entries across books in the same series.", icon: "book", advanced: true },
     ],
@@ -165,14 +198,11 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     processingDependent: true,
     items: [
       { id: "advisor", label: "Story Advisor", href: `/${bookId}/advisor` as Route, tone: "Continuity", helper: "Review continuity risks, unresolved threads, and high-priority story pressure points.", icon: "spark" },
+      { id: "analysis", label: "Findings", href: `/${bookId}/analysis` as Route, tone: "Review queue", helper: "Triage current evidence and choose the focused review that matches the decision you need to make.", icon: "analysis" },
       { id: "editorial-review", label: "Editorial Review", href: `/${bookId}/editorial-review` as Route, tone: "Line edit", helper: "Run an editorial pass that calls out clarity, pacing, and prose-level friction.", icon: "quill" },
       { id: "ai-beta-reader", label: "AI Beta Reader", href: `/${bookId}/ai-beta-reader` as Route, tone: "Reader pass", helper: "Find repeated language, compare character voices, and turn reader reactions into revision priorities.", icon: "analysis" },
       { id: "voice", label: "Voice Consistency", href: `/${bookId}/voice` as Route, tone: "Dialogue drift", helper: "Check whether character voice stays consistent across scenes and revisions.", icon: "voice" },
-      { id: "ask", label: "Ask LoreVia", href: `/${bookId}/ask` as Route, tone: "Questions", helper: "Ask direct questions about the manuscript and get answers grounded in the current draft.", icon: "chat" },
-      { id: "reports", label: "Chapter Reports", href: `/${bookId}/reports` as Route, tone: "Evidence", helper: "Review chapter-level continuity evidence, new characters, and thread movement.", icon: "analysis" },
-      { id: "search", label: "Search Passages", href: `/${bookId}/search` as Route, tone: "Find", helper: "Search the manuscript for names, lines, or moments without manually scanning chapters.", icon: "search", advanced: true },
-      { id: "summaries", label: "Recaps", href: `/${bookId}/summaries` as Route, tone: "Recap", helper: "Read chapter and story recaps when you need context fast before editing.", icon: "summary", advanced: true },
-      { id: "analysis", label: "Analysis", href: `/${bookId}/analysis` as Route, tone: "Advanced", helper: "Open deeper analysis views for broader manuscript diagnostics and story signals.", icon: "analysis", advanced: true },
+      { id: "reports", label: "Chapter Reports", href: `/${bookId}/analysis?view=chapters` as Route, tone: "Evidence", helper: "Review chapter-level continuity evidence, new characters, and thread movement within Findings.", icon: "analysis" },
     ],
   },
   {
@@ -180,9 +210,8 @@ const NAV_SECTIONS = (bookId: string, currentChapter = 1): NavSection[] => [
     items: [
       { id: "collaboration", label: "Collaborators", href: `/${bookId}/collaboration` as Route, tone: "Invite", helper: "Manage who can access the book and what each collaborator is allowed to do.", icon: "users" },
       { id: "beta-feedback", label: "Beta Feedback", href: `/${bookId}/beta-feedback` as Route, tone: "Review", helper: "Review chapter comments and assignment feedback.", icon: "users" },
-      { id: "export", label: "Import & Export", href: `/${bookId}/export` as Route, tone: "Files", helper: "Bring files in, send drafts out, and package the manuscript for other workflows.", icon: "files" },
-      { id: "visibility", label: "Visibility Center", href: `/${bookId}/visibility` as Route, tone: "Recovery", helper: "Review private, shared, beta, and public status and restore hidden workspace tools.", icon: "settings" },
-      { id: "author-loop", label: "Author Lens", href: `/${bookId}/author-loop` as Route, tone: "Advanced", helper: "Move through LoreVia's guided author workflow for revision and decision-making.", icon: "spark", advanced: true },
+      { id: "export", label: "Files & Export", href: `/${bookId}/export` as Route, tone: "Files", helper: "Prepare a manuscript, reader edition, reference package, or portable backup.", icon: "files" },
+      { id: "visibility", label: "Access & Visibility", href: `/${bookId}/visibility` as Route, tone: "Access", helper: "See who can access this book and whether a public page is active.", icon: "settings" },
     ],
   },
 ]
@@ -199,7 +228,11 @@ export function AuthorToolsNav({
   variant = "panel",
   railSize = "default",
 }: AuthorToolsNavProps) {
-  const tier = useAuthStore((state) => state.user?.tier)
+  const cachedTier = useAuthStore((state) => state.user?.tier)
+  const [clientReady, setClientReady] = useState(false)
+  useEffect(() => setClientReady(true), [])
+  // Session-cached access can differ from the server's initial anonymous snapshot.
+  const tier = clientReady ? cachedTier : undefined
   const preferenceBookId = normalizeBookRouteId(bookId)
   const { data: cachedBook = null } = useCachedBookDetail(bookId)
   const book = bookData ?? cachedBook
@@ -294,8 +327,10 @@ export function AuthorToolsNav({
         .filter((section) => section.items.length > 0),
     [active, bookId, bookPreference, collaborationPermissions, collaborationRole, currentChapter, currentShell, hasOwnAuthorAccess, isLimitedFreeOwner, isOwnerSession, resolverBook, showAdvanced, showAuthorSections, uiPreferences]
   )
+  const bar = variant === "bar"
   const rail = variant === "rail"
   const [isPinnedOpen, setIsPinnedOpen] = useState(false)
+  const [allToolsOpen, setAllToolsOpen] = useState(false)
   const collapsedRailWidth = railSize === "compact" ? "xl:w-[4.35rem]" : "xl:w-[4.9rem]"
   const expandedRailWidth = railSize === "compact" ? "xl:w-[16.5rem]" : "xl:w-[18.5rem]"
   const hoverExpandedRailWidth = railSize === "compact" ? "xl:group-hover/navwrap:w-[16.5rem] xl:group-focus-within/navwrap:w-[16.5rem]" : "xl:group-hover/navwrap:w-[18.5rem] xl:group-focus-within/navwrap:w-[18.5rem]"
@@ -314,6 +349,167 @@ export function AuthorToolsNav({
       ? "max-h-20 translate-y-0 opacity-100"
       : "max-h-20 translate-y-0 opacity-100 xl:max-h-0 xl:translate-y-1 xl:opacity-0 xl:group-hover/navwrap:max-h-20 xl:group-hover/navwrap:translate-y-0 xl:group-hover/navwrap:opacity-100 xl:group-focus-within/navwrap:max-h-20 xl:group-focus-within/navwrap:translate-y-0 xl:group-focus-within/navwrap:opacity-100"
     : "max-h-0 opacity-0"
+
+  if (bar) {
+    const activeHub = HUB_BY_ITEM_ID[active] ?? "draft"
+    const itemById = new Map(NAV_SECTIONS(bookId, currentChapter).flatMap((section) => section.items.map((item) => [item.id, item])))
+    const localItems = sections
+      .flatMap((section) => section.items)
+      .filter((item) => currentShell !== "author" || allToolsOpen || HUB_BY_ITEM_ID[item.id] === activeHub)
+    const visibleHubs = currentShell === "reader"
+      ? []
+      : BOOK_HUBS.filter((hub) => hub.value !== "story_bible" || activeHub === "story_bible" || (!isLimitedFreeOwner && showAuthorSections))
+
+    return (
+      <nav
+        aria-label="Book workspace"
+        className={`overflow-hidden border-y ${isDark ? "border-white/[0.08] bg-[#111719] text-white" : "border-stone-200 bg-white/85 text-stone-950"}`}
+        data-testid="author-tools-nav-bar"
+      >
+        <div className="flex min-h-16 items-center gap-3 px-3 sm:px-4">
+          <Link
+            href={active === "overview" ? "/library" : `/${bookId}` as Route}
+            prefetch={false}
+            data-testid="author-nav-home-link"
+            className={`flex min-w-0 items-center gap-3 rounded-sm px-1 py-2 ${isDark ? "hover:text-white" : "hover:text-stone-950"}`}
+          >
+            <ThemeBrandImage variant="icon" mode={clientReady ? isDark ? "dark" : "light" : "auto"} className="h-7 w-7 shrink-0 object-contain" />
+            <span className="min-w-0">
+              <span className={`block text-[0.68rem] font-medium ${isDark ? "text-slate-400" : "text-stone-500"}`}>
+                {active === "overview" ? "Back to library" : "Book overview"}
+              </span>
+              <span className="block max-w-44 truncate text-sm font-semibold sm:max-w-60">
+                {book?.title || title}
+              </span>
+            </span>
+          </Link>
+
+          {currentShell === "author" ? (
+            <div className="app-scroll ml-auto hidden min-w-0 items-stretch self-stretch overflow-x-auto md:flex" aria-label="Book workspace hubs">
+              {visibleHubs.map((hub) => {
+                const hubItem = itemById.get(hub.entry)
+                if (!hubItem) return null
+                const selected = activeHub === hub.value && !allToolsOpen
+                return (
+                  <Link
+                    key={hub.value}
+                    href={hubItem.href}
+                    prefetch={false}
+                    aria-current={selected ? "page" : undefined}
+                    onClick={() => {
+                      setAllToolsOpen(false)
+                      void setBookPreset(preferenceBookId, hub.value)
+                    }}
+                    className={`flex items-center border-b-2 px-4 text-sm font-medium transition-colors duration-150 ${
+                      selected
+                        ? isDark ? "border-teal-300 text-white" : "border-teal-800 text-stone-950"
+                        : isDark ? "border-transparent text-slate-400 hover:text-white" : "border-transparent text-stone-500 hover:text-stone-950"
+                    }`}
+                  >
+                    {hub.label}
+                  </Link>
+                )
+              })}
+            </div>
+          ) : null}
+
+          <Link
+            href={`/${bookId}/search` as Route}
+            prefetch={false}
+            aria-label="Search this book"
+            className={`ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border md:ml-2 ${
+              active === "search"
+                ? isDark ? "border-teal-300/30 bg-teal-500/10 text-teal-200" : "border-teal-700 bg-teal-50 text-teal-800"
+                : isDark ? "border-white/[0.08] text-slate-300 hover:bg-white/[0.05]" : "border-stone-200 text-stone-600 hover:bg-stone-50"
+            }`}
+          >
+            <NavSvg icon="search" />
+          </Link>
+
+          {currentShell === "author" ? (
+            <button
+              type="button"
+              aria-expanded={allToolsOpen}
+              onClick={() => {
+                const nextOpen = !allToolsOpen
+                setAllToolsOpen(nextOpen)
+                if (nextOpen) void setBookPreset(preferenceBookId, "all")
+              }}
+              className={`flex h-10 shrink-0 items-center gap-2 rounded-sm border px-3 text-sm font-medium transition-colors duration-150 ${
+                allToolsOpen
+                  ? isDark ? "border-teal-300/30 bg-teal-500/10 text-white" : "border-teal-700 bg-teal-50 text-teal-900"
+                  : isDark ? "border-white/[0.08] text-slate-300 hover:bg-white/[0.05]" : "border-stone-200 text-stone-600 hover:bg-stone-50"
+              }`}
+            >
+              <span>More</span>
+              <span className={`transition-transform duration-150 ${allToolsOpen ? "rotate-90" : ""}`}><NavSvg icon="chevron-right" /></span>
+            </button>
+          ) : null}
+        </div>
+
+        <div className={`border-t px-3 sm:px-4 ${isDark ? "border-white/[0.06]" : "border-stone-200/80"}`}>
+          <div className="app-scroll flex min-h-12 items-center gap-1 overflow-x-auto py-1.5">
+            {currentShell === "author" ? (
+              <div className="flex shrink-0 gap-1 md:hidden" aria-label="Book workspace hubs">
+                {visibleHubs.map((hub) => {
+                  const hubItem = itemById.get(hub.entry)
+                  if (!hubItem) return null
+                  const selected = activeHub === hub.value && !allToolsOpen
+                  return (
+                    <Link
+                      key={hub.value}
+                      href={hubItem.href}
+                      prefetch={false}
+                      onClick={() => {
+                        setAllToolsOpen(false)
+                        void setBookPreset(preferenceBookId, hub.value)
+                      }}
+                      className={`rounded-sm px-3 py-2 text-xs font-medium ${selected ? (isDark ? "bg-white/[0.08] text-white" : "bg-stone-100 text-stone-950") : (isDark ? "text-slate-400" : "text-stone-500")}`}
+                    >
+                      {hub.label}
+                    </Link>
+                  )
+                })}
+                <span className={`mx-1 w-px ${isDark ? "bg-white/[0.08]" : "bg-stone-200"}`} />
+              </div>
+            ) : null}
+            <div className="flex min-w-0 items-center gap-1">
+              {localItems.map((item) => {
+                const selected = item.id === active
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    prefetch={false}
+                    aria-current={selected ? "page" : undefined}
+                    data-testid={`author-nav-item-${item.id}`}
+                    onMouseEnter={() => prefetchByNavId(item.id)}
+                    onFocus={() => prefetchByNavId(item.id)}
+                    className={`shrink-0 rounded-sm px-3 py-2 text-xs font-medium transition-colors duration-150 ${
+                      selected
+                        ? isDark ? "bg-white/[0.09] text-white" : "bg-stone-100 text-stone-950"
+                        : isDark ? "text-slate-400 hover:bg-white/[0.04] hover:text-white" : "text-stone-500 hover:bg-stone-50 hover:text-stone-950"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+            {currentShell === "author" && allToolsOpen ? (
+              <button
+                type="button"
+                onClick={toggleAdvancedTools}
+                className={`ml-auto shrink-0 rounded-sm px-3 py-2 text-xs font-medium ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-950"}`}
+              >
+                {showAdvanced ? "Hide advanced" : "Show advanced"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </nav>
+    )
+  }
 
   if (rail) {
     return (
@@ -363,6 +559,7 @@ export function AuthorToolsNav({
                       <Link
                         key={item.id}
                         href={item.href}
+                        prefetch={false}
                         aria-current={selected ? "page" : undefined}
                         title={item.label}
                         data-testid={`author-nav-item-${item.id}`}
@@ -465,6 +662,7 @@ export function AuthorToolsNav({
                   <Link
                     key={item.id}
                     href={item.href}
+                    prefetch={false}
                     aria-current={selected ? "page" : undefined}
                     title={item.label}
                     data-testid={`author-nav-item-${item.id}`}
@@ -558,7 +756,8 @@ function NavHeader({
       <div className={`min-w-0 transition-opacity duration-200 ${labelVisibility}`}>
         <h2 className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>{title}</h2>
         <Link
-          href={homeHref}
+          href={homeHref as Route}
+          prefetch={false}
           data-testid="author-nav-home-link"
           className={`mt-1 inline-flex items-center rounded-sm text-3xs font-semibold uppercase tracking-[0.18em] hover:text-teal-600 ${isDark ? "text-slate-500" : "text-stone-500"}`}
         >

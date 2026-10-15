@@ -50,6 +50,10 @@ def update_character_embedding_task(self, character_id: str, execution_id: str |
             book = await db.get(Book, char.book_id)
             if book is None:
                 return
+            from app.services.book_freeze_service import is_book_frozen
+
+            if is_book_frozen(book):
+                return
             embedding_work_started = True
             emb = await embed_character(
                 char.name,

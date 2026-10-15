@@ -29,6 +29,22 @@ function AddChapterPageInner() {
   const { theme } = usePreferencesStore()
   const isDark = theme === "dark"
   const initialBookId = searchParams.get("book") ?? ""
+  const initialBookTitle = searchParams.get("title")?.trim() || "selected project"
+
+  if (!initialBookId) {
+    return (
+      <main className={`min-h-[70vh] ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>
+        <div className="mx-auto max-w-2xl py-16">
+          <p className="app-eyebrow">Library</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em]">Choose a project first</h1>
+          <p className={`mt-4 text-sm leading-7 ${isDark ? "text-[#A0A0A0]" : "text-stone-600"}`}>
+            Chapters are added inside an existing project so LoreVia can preserve chapter order, characters, and continuity context.
+          </p>
+          <Link href="/library" className="app-button-primary mt-6">Return to Library</Link>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <div
@@ -39,22 +55,13 @@ function AddChapterPageInner() {
       }`}
     >
       <div className="mx-auto w-full px-3 pb-16 pt-6 sm:px-6 lg:px-8 xl:max-w-7xl">
-        <section
-          className={`overflow-hidden rounded-lg border ${
-            isDark
-              ? "border-white/10 bg-[#0D0D0D]"
-              : "border-stone-200 bg-white"
-          }`}
-        >
-          <div className="flex flex-col gap-6 px-6 py-7 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-10 lg:py-10">
+        <section className={`border-b pb-7 ${isDark ? "border-white/10" : "border-stone-300"}`}>
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
-              <p className={`text-3xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-[#A0A0A0]" : "text-indigo-600"}`}>Author Workflow</p>
-              <h1 className={`mt-3 font-serif text-4xl tracking-tight sm:text-5xl ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>Add New Chapter</h1>
+              <p className="app-eyebrow">{initialBookTitle}</p>
+              <h1 className={`mt-3 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl ${isDark ? "text-[#E0E0E0]" : "text-stone-950"}`}>Add a chapter</h1>
               <p className={`mt-4 max-w-2xl text-base leading-7 ${isDark ? "text-[#A0A0A0]" : "text-stone-600"}`}>
-                Drop into LoreVia&apos;s incremental ingest flow, update character memory and plot threads, then review fresh continuity flags before you move on.
-              </p>
-              <p className={`mt-3 max-w-2xl text-sm leading-6 ${isDark ? "text-[#8C8C8C]" : "text-stone-500"}`}>
-                Standalone scenes live in the manuscript workspace so they stay separate from chapter imports and can be linked later only if you want.
+                Import the next chapter into this project. Existing chapters remain in place, and analysis updates after processing.
               </p>
             </div>
 
@@ -80,7 +87,7 @@ function AddChapterPageInner() {
                     : "border border-stone-200 bg-stone-50 text-stone-800 hover:bg-stone-100"
                 }`}
               >
-                Reset Flow
+                Clear form
               </button>
               {initialBookId ? (
                 <Link
@@ -91,7 +98,7 @@ function AddChapterPageInner() {
                       : "border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
                   }`}
                 >
-                  Open Scene Workspace
+                  Open manuscript
                 </Link>
               ) : null}
             </div>

@@ -33,6 +33,7 @@ vi.mock("@/lib/query/cacheKeys", () => ({
   booksSelectorCacheKey: () => "books:selector",
 }))
 vi.mock("@/lib/hooks/useReader", () => ({ useReader: useReaderMock }))
+vi.mock("@/lib/hooks/useBookDetail", () => ({ useBookDetail: () => ({ data: { access_class: "owner", mode: "author" } }) }))
 vi.mock("@/lib/stores/authStore", () => ({
   useAuthStore: (selector: (state: typeof authState) => unknown) => selector(authState),
 }))

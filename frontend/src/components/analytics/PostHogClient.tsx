@@ -10,9 +10,11 @@ import {
 } from "@/lib/analytics/browserTelemetry"
 import {
   ANALYTICS_CONSENT_COOKIE,
+  ANALYTICS_CONSENT_EVENT,
   getAnalyticsConsentValue,
   hasAnalyticsConsent,
   shouldShowAnalyticsConsentBanner,
+  writeAnalyticsConsentCookie,
 } from "@/lib/analytics/posthogConsent"
 
 const CookieConsent = dynamic(
@@ -25,27 +27,31 @@ function isBrowserAnalyticsEnabled() {
 }
 
 let posthogInitPromise: Promise<void> | null = null
-
-function writeAnalyticsConsentCookie(value: "true" | "false") {
-  document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${value}; Max-Age=31536000; Path=/; SameSite=Lax`
-}
+let posthogClient: typeof import("posthog-js").default | null = null
 
 async function initPostHog() {
-  if (!isBrowserAnalyticsEnabled()) return
+  if (!isBrowserAnalyticsEnabled() || !hasAnalyticsConsent(getAnalyticsConsentValue(document.cookie))) return
   if (!posthogInitPromise) {
     posthogInitPromise = import("posthog-js").then(({ default: posthog }) => {
+      // Consent may have been withdrawn while the SDK was loading.
+      if (!hasAnalyticsConsent(getAnalyticsConsentValue(document.cookie))) { posthogInitPromise = null; return }
       posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY as string, {
         api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.posthog.com",
+        autocapture: false,
         ip: false,
         capture_pageview: true,
         capture_pageleave: true,
         persistence: "localStorage",
         disable_session_recording: true,
       })
-      window.__loreviaPosthog = posthog
-    })
+      posthogClient = posthog
+    }).catch(() => { posthogInitPromise = null })
   }
   await posthogInitPromise
+  if (posthogClient && hasAnalyticsConsent(getAnalyticsConsentValue(document.cookie))) {
+    posthogClient.opt_in_capturing({ captureEventName: false })
+    window.__loreviaPosthog = posthogClient
+  } else posthogClient?.opt_out_capturing()
 }
 
 export function PostHogClient() {
@@ -60,18 +66,20 @@ export function PostHogClient() {
   })
 
   React.useEffect(() => {
-    if (!analyticsKey) {
-      setHydrated(true)
-      return
+    const updateConsent = () => {
+      const consent = getAnalyticsConsentValue(document.cookie)
+      setConsentValue(consent)
+      if (hasAnalyticsConsent(consent)) {
+        if (analyticsKey) void initPostHog()
+      } else {
+        window.__loreviaPosthog?.opt_out_capturing?.()
+        delete window.__loreviaPosthog
+      }
     }
-
-    const consent = getAnalyticsConsentValue(document.cookie)
-    setConsentValue(consent)
+    updateConsent()
     setHydrated(true)
-
-    if (hasAnalyticsConsent(consent)) {
-      void initPostHog()
-    }
+    window.addEventListener(ANALYTICS_CONSENT_EVENT, updateConsent)
+    return () => window.removeEventListener(ANALYTICS_CONSENT_EVENT, updateConsent)
   }, [analyticsKey])
 
   React.useEffect(() => {
@@ -81,13 +89,10 @@ export function PostHogClient() {
 
   const enable = () => {
     writeAnalyticsConsentCookie("true")
-    void initPostHog()
-    setConsentValue("true")
   }
 
   const dismiss = () => {
     writeAnalyticsConsentCookie("false")
-    setConsentValue("false")
   }
 
   const showBanner = shouldShowAnalyticsConsentBanner({

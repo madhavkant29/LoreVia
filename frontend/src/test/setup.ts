@@ -3,6 +3,26 @@ import { afterEach, beforeEach, vi } from "vitest"
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+// jsdom does not implement matchMedia. Several production components use it
+// directly (responsive panels, reduced-motion checks), so provide a neutral
+// stub unless a test overrides it with its own behavior.
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
+}
+
 vi.mock("next/link", () => ({
   default: ({
     href,

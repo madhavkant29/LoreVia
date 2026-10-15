@@ -1,68 +1,58 @@
 "use client"
 
-import { useRef, useState } from "react"
-import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, FileSearch, RefreshCw } from "lucide-react"
-
+import { useEffect, useRef, useState } from "react"
 import { booksApi } from "@/lib/api/books"
+import { downloadExportBlob, exportErrorMessage, safeFileBase } from "@/lib/utils/exportFiles"
 import type { WorkflowBridgePreview } from "@/types/book"
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-export function WorkflowBridgePanel({ bookId, bookTitle, isDark }: { bookId: string; bookTitle: string; isDark: boolean }) {
+export function WorkflowBridgePanel({ bookId, bookTitle, isDark, disabled = false, onBusyChange }: { bookId: string; bookTitle: string; isDark: boolean; disabled?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const locked = useRef(false)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<WorkflowBridgePreview | null>(null)
   const [confirmed, setConfirmed] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-
-  const inspect = async (nextFile: File) => {
-    setFile(nextFile)
-    setPreview(null)
-    setConfirmed(false)
-    setBusy(true)
-    setMessage(null)
-    try { setPreview(await booksApi.previewWorkflowBridge(bookId, nextFile)) } catch { setMessage("That file could not be previewed. Use a DOCX or zipped Scrivener project.") } finally { setBusy(false) }
+  const [busy, setBusy] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null)
+  useEffect(() => { onBusyChange?.(!!busy) }, [busy, onBusyChange])
+  const run = async (label: string, failure: string, action: () => Promise<string>) => {
+    if (locked.current || disabled) return
+    locked.current = true; setBusy(label); setMessage(null)
+    try { setMessage({ error: false, text: await action() }) }
+    catch (error) { setMessage({ error: true, text: await exportErrorMessage(error, failure) }) }
+    finally { locked.current = false; setBusy(null) }
   }
-
-  const apply = async () => {
-    if (!file || !confirmed || !preview) return
-    setBusy(true)
-    setMessage(null)
-    try {
-      const result = await booksApi.applyWorkflowBridge(bookId, file, preview.preview_token)
-      setMessage(`Updated ${result.imported_chapters.length} chapter(s). Existing chapters missing from the file were preserved.`)
-      setPreview(null)
-      setFile(null)
-      setConfirmed(false)
-    } catch { setMessage("The import could not be applied. LoreVia kept the current draft unchanged.") } finally { setBusy(false) }
+  const inspect = (nextFile: File) => {
+    if (locked.current || disabled) return
+    setFile(nextFile); setPreview(null); setConfirmed(false)
+    if (!nextFile.size || !/\.(docx|scrivzip|scriv\.zip)$/i.test(nextFile.name)) { setMessage({ error: true, text: "Choose a non-empty DOCX or zipped Scrivener project (.scrivzip or .scriv.zip)." }); return }
+    void run("Inspecting incoming draft…", "That file could not be previewed. Try again.", async () => { setPreview(await booksApi.previewWorkflowBridge(bookId, nextFile)); return "Preview ready. Review the chapter changes before applying." })
   }
-
-  const exportScrivener = async () => {
-    setBusy(true)
-    try {
-      const blob = await booksApi.exportScrivenerProject(bookId)
-      downloadBlob(blob, `${bookTitle.replace(/[^A-Za-z0-9_-]+/g, "-") || "LoreVia-Project"}.scrivzip`)
-    } catch { setMessage("The Scrivener project could not be generated.") } finally { setBusy(false) }
+  const apply = () => {
+    if (!file || !confirmed || !preview?.preview_token) return
+    void run("Applying reviewed changes…", "The import could not be confirmed. Check the manuscript, then create a fresh preview before applying again.", async () => {
+      try {
+        const result = await booksApi.applyWorkflowBridge(bookId, file, preview.preview_token)
+        setFile(null); if (inputRef.current) inputRef.current.value = ""
+        return `Updated ${result.imported_chapters.length} chapter(s). Chapters absent from the file were preserved.`
+      } finally { setPreview(null); setConfirmed(false) }
+    })
   }
-
-  return (
-    <section className={`border p-5 ${isDark ? "border-violet-300/20 bg-violet-300/[0.05]" : "border-violet-200 bg-violet-50/70"}`}>
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div><p className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-violet-300" : "text-violet-700"}`}>Workflow Bridge</p><h2 className="mt-2 text-xl font-semibold">Round-trip with Word or Scrivener</h2><p className={`mt-2 max-w-2xl text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>Preview chapter-level changes before applying them. Updated chapters receive automatic pre-replace snapshots; chapters absent from the incoming file stay untouched.</p></div>
-        <button type="button" disabled={busy} onClick={() => void exportScrivener()} className={`inline-flex items-center gap-2 border px-4 py-2.5 text-sm font-semibold ${isDark ? "border-white/10 bg-white/5" : "border-violet-200 bg-white"}`}><ArrowDownToLine className="h-4 w-4" /> Export Scrivener</button>
-      </div>
-      <input ref={inputRef} type="file" aria-label="Choose manuscript or Scrivener archive" accept=".docx,.scrivzip,.scriv.zip,application/zip" className="sr-only" onChange={(event) => { const nextFile = event.target.files?.[0]; if (nextFile) void inspect(nextFile) }} />
-      <div className="mt-5 flex flex-wrap items-center gap-3"><button type="button" disabled={busy} onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-2 bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white"><FileSearch className="h-4 w-4" /> Preview incoming draft</button>{file ? <span className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{file.name}</span> : null}{busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}</div>
-      {preview ? <div className={`mt-5 border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-white bg-white"}`}><div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-full bg-amber-500/10 px-3 py-1.5">{preview.changed_count} changed</span><span className="rounded-full bg-emerald-500/10 px-3 py-1.5">{preview.new_count} new</span><span className="rounded-full bg-slate-500/10 px-3 py-1.5">{preview.unchanged_count} unchanged</span><span className="rounded-full bg-violet-500/10 px-3 py-1.5">{preview.preserved_chapter_numbers.length} preserved</span></div><div className="mt-4 max-h-64 space-y-2 overflow-auto">{preview.chapters.map((chapter) => <div key={`${chapter.incoming_number}:${chapter.incoming_title}`} className={`flex items-center justify-between gap-3 border-b py-2 text-sm ${isDark ? "border-white/[0.06]" : "border-stone-100"}`}><span>{chapter.incoming_title}</span><span className={chapter.status === "changed" ? "text-amber-600" : chapter.status === "new" ? "text-emerald-600" : "text-slate-500"}>{chapter.status}</span></div>)}</div><label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1" /><span>I reviewed this preview and want to replace matching chapter numbers. Missing current chapters remain preserved.</span></label><button type="button" disabled={!confirmed || busy} onClick={() => void apply()} className="mt-4 inline-flex items-center gap-2 bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"><ArrowUpFromLine className="h-4 w-4" /> Apply reviewed changes</button></div> : null}
-      {message ? <p className="mt-4 flex items-center gap-2 text-sm"><CheckCircle2 className="h-4 w-4" />{message}</p> : null}
-    </section>
-  )
+  return <section className={`min-w-0 ${isDark ? "text-slate-100" : "text-stone-950"}`}>
+    <h2 className="text-xl font-semibold">Round-trip with Word or Scrivener</h2>
+    <p className="mt-2 max-w-3xl text-sm leading-6 text-[rgb(var(--muted-foreground))]">Preview chapter changes before replacing matching chapter numbers. Updated chapters receive pre-replace snapshots; chapters absent from the incoming file stay untouched.</p>
+    <fieldset disabled={disabled || !!busy} className="mt-4 min-w-0">
+      <div className="flex flex-wrap gap-3"><button type="button" className="app-button-secondary" onClick={() => void run("Preparing Scrivener project…", "The Scrivener project could not be generated. Try again.", async () => { downloadExportBlob(await booksApi.exportScrivenerProject(bookId), `${safeFileBase(bookTitle, "LoreVia-Project")}.scrivzip`); return "Downloaded Scrivener project." })}>Export Scrivener</button><button type="button" className="app-button-secondary" onClick={() => inputRef.current?.click()}>Preview incoming draft</button></div>
+      <input ref={inputRef} type="file" aria-label="Choose manuscript or Scrivener archive" accept=".docx,.scrivzip,.scriv.zip" className="hidden" onChange={(event) => { const nextFile = event.target.files?.[0]; if (nextFile) inspect(nextFile); event.target.value = "" }} />
+      {file ? <div className="mt-3 flex flex-wrap items-center gap-3 text-sm"><span>{file.name}</span><button type="button" className="underline underline-offset-4" onClick={() => inspect(file)}>Refresh preview</button><button type="button" className="underline underline-offset-4" onClick={() => { setFile(null); setPreview(null); setConfirmed(false); setMessage(null) }}>Clear incoming draft</button></div> : null}
+      {preview ? <div className="mt-5 border-y border-[rgb(var(--border))] py-4">
+        <p className="text-sm">{preview.changed_count} changed · {preview.new_count} new · {preview.unchanged_count} unchanged · {preview.preserved_chapter_numbers.length} preserved</p>
+        <ul aria-label="Incoming chapter changes" tabIndex={0} className="mt-3 max-h-72 overflow-auto divide-y divide-[rgb(var(--border))]">{preview.chapters.map((chapter, index) => <li key={`${chapter.incoming_number}-${index}`} className="flex items-start justify-between gap-4 py-3 text-sm"><span className="min-w-0 [overflow-wrap:anywhere]">Chapter {chapter.incoming_number} — {chapter.incoming_title}</span><span className="shrink-0">{chapter.status}</span></li>)}</ul>
+        <label className="mt-4 flex items-start gap-3 text-sm leading-6"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1" /><span>I reviewed this preview and want to replace matching chapter numbers. Missing current chapters remain preserved.</span></label>
+        <button type="button" disabled={!confirmed || !preview.preview_token || preview.changed_count + preview.new_count === 0} className="app-button-primary mt-4" onClick={apply}>Apply reviewed changes</button>
+        {preview.changed_count + preview.new_count === 0 ? <p className="mt-2 text-sm">No changes to apply.</p> : null}
+      </div> : null}
+    </fieldset>
+    {busy ? <p role="status" className="mt-4 text-sm">{busy} Keep this page open.</p> : null}
+    {message ? <p role={message.error ? "alert" : "status"} className={`mt-4 border-l-2 pl-3 text-sm leading-6 ${message.error ? "border-rose-600" : "border-[rgb(var(--accent))]"}`}>{message.text}</p> : null}
+  </section>
 }

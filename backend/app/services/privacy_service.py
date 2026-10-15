@@ -60,6 +60,7 @@ from app.services.paddle_service import cancel_subscription_at_period_end
 from app.services.public_asset_service import revoke_public_book_assets
 from app.services.supabase_auth_service import delete_supabase_auth_user
 from app.utils.auth_utils import next_token_version, verify_password_safely
+from app.utils.billing_utils import paddle_billing_period_bounds
 from app.utils.books.manuscript import (
     deserialize_manuscript_content,
 )
@@ -531,7 +532,15 @@ async def request_account_deletion(
                     "response": provider_response,
                 }
             )
+            # Account deletion revokes app access immediately and separately from
+            # normal cancellation. The Paddle subscription is turned off at the
+            # period boundary so a deleted account cannot be renewed again.
             subscription.status = "cancelling"
+            subscription.cancel_at_period_end = True
+            _period_start, period_end = paddle_billing_period_bounds(provider_response)
+            if period_end is not None:
+                subscription.current_period_end = period_end
+            subscription.cancellation_scheduled_at = subscription.cancellation_scheduled_at or now
         except PADDLE_PROVIDER_EXCEPTIONS as exc:
             followup_required = True
             provider_actions["paddle"].append(

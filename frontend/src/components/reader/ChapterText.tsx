@@ -1,5 +1,5 @@
 "use client"
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { parsePublishedTextBlocks } from "@/lib/utils/publishedLayout"
 import { resolveReaderFontStack } from "@/lib/utils/readerTypography"
 import { renderRichTextHtml } from "@/lib/utils/richText"
@@ -29,12 +29,13 @@ interface Props {
   quoteModeEnabled: boolean
   canUseQuoteMode: boolean
   canCopyManuscript: boolean
+  onReady?: (ready: boolean) => void
+  onWordCount?: (count: number) => void
 }
 
 export function ChapterText({
   chapterNum,
   chapterTitle,
-  totalChapters,
   textUrl,
   textContent,
   htmlContent,
@@ -49,11 +50,17 @@ export function ChapterText({
   quoteModeEnabled,
   canUseQuoteMode,
   canCopyManuscript,
+  onReady,
+  onWordCount,
 }: Props) {
-  const [text, setText] = useState("")
+  const [text, setText] = useState(textContent ?? "")
+  const [textLoading, setTextLoading] = useState(Boolean(!textContent && textUrl && !htmlContent))
+  const [textError, setTextError] = useState(false)
+  const [textAttempt, setTextAttempt] = useState(0)
+  const richTextRef = useRef<HTMLDivElement>(null)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
 
-  const handleMentionClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+  const handleMentionClick = useCallback((event: { target: EventTarget; preventDefault: () => void }) => {
     const target = event.target
     if (!(target instanceof Element)) return
 
@@ -66,13 +73,26 @@ export function ChapterText({
   }, [onTap])
 
   useEffect(() => {
+    const controller = new AbortController()
+    setTextError(false)
     if (textContent) {
       setText(textContent)
+      setTextLoading(false)
       return
     }
-    if (!textUrl) return
-    fetch(textUrl).then((r) => r.text()).then(setText).catch(() => setText(""))
-  }, [textUrl, textContent])
+    setText("")
+    if (!textUrl || htmlContent) { setTextLoading(false); return }
+    setTextLoading(true)
+    fetch(textUrl, { signal: controller.signal }).then((response) => {
+      if (!response.ok) throw new Error("Chapter text unavailable")
+      return response.text()
+    }).then((value) => { if (!controller.signal.aborted) setText(value) })
+      .catch(() => { if (!controller.signal.aborted) setTextError(true) })
+      .finally(() => { if (!controller.signal.aborted) setTextLoading(false) })
+    return () => controller.abort()
+  }, [textUrl, textContent, htmlContent, textAttempt])
+
+  useEffect(() => { onReady?.(!textLoading && !textError && Boolean(text || htmlContent)) }, [textLoading, textError, text, htmlContent, onReady])
 
   const handleMouseUp = useCallback(() => {
     if (!canUseQuoteMode || !quoteModeEnabled) return
@@ -102,6 +122,14 @@ export function ChapterText({
     [htmlContent],
   )
   const shouldRenderHtml = Boolean(htmlContent && (hasHtmlImages || !text))
+  useEffect(() => {
+    for (const mention of richTextRef.current?.querySelectorAll<HTMLElement>("[data-mention]") ?? []) {
+      mention.setAttribute("role", "button")
+      mention.tabIndex = 0
+    }
+    const plainText = shouldRenderHtml ? new DOMParser().parseFromString(htmlContent ?? "", "text/html").body.textContent ?? "" : text
+    onWordCount?.(countWords(plainText))
+  }, [shouldRenderHtml, htmlContent, text, onWordCount])
 
   const blocks = useMemo(
     () => annotateWithMedia(text, characters, media, isPublishedLayout),
@@ -149,7 +177,7 @@ export function ChapterText({
     [fontFamily, displayStyle],
   )
 
-  if (!text && !htmlContent) {
+  if (textLoading) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-12" role="status" aria-label="Loading chapter text" aria-busy="true">
         <span className="sr-only">Loading chapter text</span>
@@ -163,8 +191,17 @@ export function ChapterText({
     )
   }
 
+  if (textError || (!text && !htmlContent)) {
+    return <section className={`mx-auto w-full max-w-[960px] border-y px-5 py-10 ${cardTone.shell}`}>
+      <h1 className="text-2xl">{chapterTitle || `Chapter ${chapterNum}`}</h1>
+      <p role={textError ? "alert" : "status"} className="mt-4 text-base">{textError ? "The chapter text could not be loaded." : "This chapter does not contain reading text yet."}</p>
+      {textError ? <button type="button" className={`mt-5 min-h-11 rounded-sm border px-4 ${cardTone.nav}`} onClick={() => setTextAttempt((attempt) => attempt + 1)}>Retry chapter text</button> : <p className="mt-3 text-sm">Choose another chapter or return to the project overview.</p>}
+    </section>
+  }
+
   return (
     <div
+      data-chapter-content
       className={`mx-auto w-full max-w-[960px] px-1 pb-20 pt-2 sm:px-2 lg:px-3 ${isPublishedLayout ? "reader-display-published" : "reader-display-relaxed"}`}
       onMouseUp={handleMouseUp}
       onCopyCapture={handleProtectedCopy}
@@ -177,7 +214,7 @@ export function ChapterText({
               <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4">
                 <path d="M8 1.75v3.1M8 11.15v3.1M1.75 8h3.1M11.15 8h3.1M3.25 3.25l2.2 2.2M10.55 10.55l2.2 2.2M12.75 3.25l-2.2 2.2M5.45 10.55l-2.2 2.2" />
               </svg>
-              <span>Tap any word or select text for instant context</span>
+              <span>{quoteModeEnabled ? "Select a passage to save a line bookmark." : "Select an underlined character name for context."}</span>
             </p>
             {!canCopyManuscript ? (
               <p className={`reader-nonprint mt-3 text-center text-3xs font-semibold uppercase tracking-[0.18em] ${theme === "dark" ? "text-amber-300" : "text-amber-700"}`} style={{ fontFamily: "var(--reader-label)" }}>
@@ -193,7 +230,7 @@ export function ChapterText({
 
           <header className={isPublishedLayout ? "book-layout__chapter-heading chapter-title" : "mb-14 mt-6"}>
             <p className="text-3xs uppercase tracking-[0.36em] text-stone-400" style={{ fontFamily: "var(--reader-label)" }}>
-              Chapter {chapterNum}{totalChapters ? ` of ${totalChapters}` : ""}
+              Chapter {chapterNum}
             </p>
             <h1 className={`mt-4 text-5xl font-light leading-tight sm:text-6xl ${cardTone.heading}`} style={{ fontFamily: isPublishedLayout ? fontStack : "var(--reader-display)" }}>
               {chapterTitle || `Chapter ${chapterNum}`}
@@ -203,15 +240,17 @@ export function ChapterText({
 
           {shouldRenderHtml ? (
             <div
+              ref={richTextRef}
               className={`reader-text note-rich-content ${isPublishedLayout ? "book-layout__body" : ""} ${cardTone.prose}`}
               onClick={handleMentionClick}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") handleMentionClick(event) }}
               style={{
                 fontFamily: fontStack,
                 fontSize: `${fontSize}px`,
                 lineHeight: isPublishedLayout ? "1.78" : fontFamily === "sans" ? "1.9" : "1.98",
                 maxWidth: "100%",
                 wordBreak: "normal",
-                overflowWrap: "normal",
+                overflowWrap: "anywhere",
                 hyphens: "none",
               }}
               dangerouslySetInnerHTML={{ __html: renderRichTextHtml(htmlContent || text) }}
@@ -225,7 +264,7 @@ export function ChapterText({
                 lineHeight: isPublishedLayout ? "1.78" : fontFamily === "sans" ? "1.9" : "1.98",
                 maxWidth: "100%",
                 wordBreak: "normal",
-                overflowWrap: "normal",
+                overflowWrap: "anywhere",
                 hyphens: "none",
               }}
             >
@@ -384,14 +423,15 @@ function renderSegments(
     segment.type === "text" ? (
       <span key={`text-${blockIndex}-${segmentIndex}`}>{segment.content}</span>
     ) : (
-      <span
+      <button
+        type="button"
         key={`mention-${blockIndex}-${segmentIndex}`}
-        className={mentionClass}
+        className={`${mentionClass} text-left [font:inherit]`}
         onClick={() => onTap(segment.content)}
         title={`Tap for context: ${segment.content}`}
       >
         {segment.content}
-      </span>
+      </button>
     )
   )
 }

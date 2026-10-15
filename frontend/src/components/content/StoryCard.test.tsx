@@ -29,7 +29,7 @@ const story: BlogSummary = {
   publishedLabel: "August 9, 2026",
   updatedLabel: "August 11, 2026",
   authorId: "lorevia-editorial",
-  hero: { src: "/blog/heroes/scene-list.webp", alt: "Editorial scene cards", width: 1600, height: 900 },
+  hero: { src: "/blog/editorial/scene-structure-pacing.webp", alt: "Editorial scene structure", width: 1600, height: 900 },
   relatedSlugs: [],
   sources: [],
   order: 1,

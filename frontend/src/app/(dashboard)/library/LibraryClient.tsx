@@ -8,27 +8,20 @@ import type { Route } from "next"
 import { useRouter } from "next/navigation"
 
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
-import { MobileActionBar } from "@/components/ui/MobileActionBar"
-import { RecentActivityList } from "@/components/ui/RecentActivityList"
 import { LibraryWorkspaceHeader } from "@/components/library/LibraryWorkspaceHeader"
 import { booksApi } from "@/lib/api/books"
 import { canUseAuthorFeatures } from "@/lib/billing/plans"
 import { asQueryKey, bookCacheKey, booksPageCacheKey } from "@/lib/query/cacheKeys"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import { useUiPreferencesStore } from "@/lib/stores/uiPreferencesStore"
 import { getBookHref } from "@/lib/utils/bookRoutes"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
 import type { Book } from "@/types/book"
 import type { BookPage } from "@/lib/api/books"
 import {
   EMPTY_BOOKS,
-  buildLibraryNextBestActions,
-  buildRecentLibraryActivityItems,
   deriveLibraryCollections,
-  deriveLibraryMetrics,
   getVisibleLibraryBooks,
-  libraryFilterSummary,
   type ModeFilter,
   type SortOption,
   type StatusFilter,
@@ -41,7 +34,7 @@ import {
   FolderIcon,
   PinIcon,
 } from "./LibraryClient.icons"
-import { FirstManuscriptHero, MetricStrip, NextActionPanel } from "./LibraryClient.panels"
+import { FirstManuscriptHero } from "./LibraryClient.panels"
 import { LibraryProjectSection } from "./LibraryClient.sections"
 import { LibraryAuthLoadingState, LibraryErrorState } from "./LibraryClient.states"
 
@@ -57,9 +50,6 @@ export function LibraryClient() {
   const queryClient = useQueryClient()
   const confirm = useConfirmDialog()
   const { theme } = usePreferencesStore()
-  const recommendationSnoozes = useUiPreferencesStore(
-    (state) => state.preferences.recommendation_snoozes,
-  )
   const authUser = useAuthStore((s) => s.user)
   const authReady = useAuthStore((s) => s.hydrated)
   const isDark = theme === "dark"
@@ -80,11 +70,13 @@ export function LibraryClient() {
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [showArchived, setShowArchived] = useState(false)
-  const [filterOpen, setFilterOpen] = useState(false)
   const [menuBookId, setMenuBookId] = useState<string | null>(null)
   const [pinnedIds, setPinnedIds] = usePinnedLibraryProjects()
   const [additionalBookPages, setAdditionalBookPages] = useState<BookPage[]>([])
   const [loadingMoreBooks, setLoadingMoreBooks] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [publishError, setPublishError] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const {
@@ -100,7 +92,12 @@ export function LibraryClient() {
     refetchInterval: (query) => {
       const page = query.state.data as BookPage | Book[] | undefined
       const items = Array.isArray(page) ? page : page?.items ?? []
-      const hasProcessingBook = items.some((book) => book.status === "processing" || (!book.cover_url && book.format === "pdf"))
+      const hasProcessingBook = items.some(
+        (book) =>
+          book.status === "processing" ||
+          book.status === "pending" ||
+          (!book.cover_url && book.format === "pdf"),
+      )
       const canPoll = typeof document === "undefined" || document.visibilityState === "visible"
       return canPoll && hasProcessingBook ? 5_000 : false
     },
@@ -117,22 +114,25 @@ export function LibraryClient() {
     () => [firstBookPage, ...additionalBookPages].flatMap((page) => page.items),
     [firstBookPage, additionalBookPages],
   )
-  const nextBookCursor = additionalBookPages.at(-1)?.next_cursor ?? firstBookPage.next_cursor
+  const nextBookCursor = (additionalBookPages.at(-1) ?? firstBookPage).next_cursor
 
   async function loadMoreBooks() {
     if (!nextBookCursor || loadingMoreBooks) return
     setLoadingMoreBooks(true)
+    setLoadMoreError(false)
     try {
       const page = await booksApi.listPage(true, nextBookCursor)
       setAdditionalBookPages((current) => [...current, page])
+    } catch {
+      setLoadMoreError(true)
     } finally {
       setLoadingMoreBooks(false)
     }
   }
 
   async function refreshLibrary() {
-    setAdditionalBookPages([])
-    await refetch()
+    const result = await refetch()
+    if (!result.isError) setAdditionalBookPages([])
   }
 
   useLibrarySearchShortcut(searchInputRef)
@@ -156,37 +156,28 @@ export function LibraryClient() {
     [visibleBooks, showArchived, modeFilter, statusFilter, normalizedSearch, sortBy, pinnedIds],
   )
 
-  const libraryMetrics = useMemo(
-    () => deriveLibraryMetrics(visibleBooks),
-    [visibleBooks],
-  )
   const hasAnyProjects = visibleBooks.length > 0
+  const hasOnlyArchivedProjects = hasAnyProjects && visibleBooks.every((book) => Boolean(book.archived_at))
+  const hasActiveProjectFilters = Boolean(normalizedSearch) || modeFilter !== "all" || statusFilter !== "all" || showArchived
   const canStartAuthorProject = canUseAuthorFeatures(authUser?.tier) || Boolean(authUser?.trial_active)
-  const showFirstManuscriptHero = !loading && !hasAnyProjects && canStartAuthorProject
-  const recentActivityItems = useMemo(
-    () => buildRecentLibraryActivityItems(visibleBooks),
-    [visibleBooks],
-  )
-  const nextBestActions = buildLibraryNextBestActions({
-    visibleBooks,
-    hasAnyProjects,
-    onCreateProject: startCreateProject,
-    recommendationSnoozes,
-  })
-  const filterSummary = libraryFilterSummary({ modeFilter, statusFilter, showArchived })
+  const showFirstManuscriptHero = !loading && !hasAnyProjects && !nextBookCursor && canStartAuthorProject
 
   async function handleArchive(bookId: string, archived: boolean) {
+    setActionError(null)
     setBusyBookId(bookId)
     try {
       await booksApi.archive(bookId, archived)
       await refreshLibrary()
       setMenuBookId(null)
+    } catch {
+      setActionError(`Could not ${archived ? "archive" : "restore"} this project. Please try again from its actions menu.`)
     } finally {
       setBusyBookId(null)
     }
   }
 
   async function handleRemove(bookId: string) {
+    setActionError(null)
     const confirmed = await confirm({
       title: "Remove project from library view?",
       body: "Remove this project from your library view? It will stay counted for usage.",
@@ -200,6 +191,8 @@ export function LibraryClient() {
       await booksApi.hide(bookId, true)
       await refreshLibrary()
       setMenuBookId(null)
+    } catch {
+      setActionError("Could not remove this project. Please try again from its actions menu.")
     } finally {
       setBusyBookId(null)
     }
@@ -226,14 +219,15 @@ export function LibraryClient() {
       setDeleteBook(null)
       setDeleteConfirmation("")
       setDeleteError(null)
+    } catch {
+      setDeleteError("Could not delete this project. Your confirmation is saved; please try again.")
     } finally {
       setBusyBookId(null)
     }
   }
 
-  function handleAddChapter(bookId?: string) {
-    const href = bookId ? (`/library/add-chapter?book=${bookId}` as Route) : ("/library/add-chapter" as Route)
-    router.push(href)
+  function handleAddChapter(book: Book) {
+    router.push(`/library/add-chapter?book=${book.id}&title=${encodeURIComponent(book.title)}` as Route)
   }
 
   function openBook(book: Book) {
@@ -258,6 +252,7 @@ export function LibraryClient() {
   async function handlePublish(book: Book) {
     if (!publishConfirmed || !publishSlug.trim()) return
     setBusyBookId(book.id)
+    setPublishError(null)
     try {
       await booksApi.publishPublicly(book.id, {
         publicSlug: publishSlug.trim(),
@@ -269,23 +264,29 @@ export function LibraryClient() {
       setPublishSlug("")
       setPublishDescription("")
       await refreshLibrary()
+    } catch {
+      setPublishError("Could not publish this project. Check the public URL slug and try again.")
     } finally {
       setBusyBookId(null)
     }
   }
 
   async function handleUnpublish(bookId: string) {
+    setActionError(null)
     setBusyBookId(bookId)
     try {
       await booksApi.unpublishPublicly(bookId)
       await refreshLibrary()
       setMenuBookId(null)
+    } catch {
+      setActionError("Could not unpublish this project. Please try again from its actions menu.")
     } finally {
       setBusyBookId(null)
     }
   }
 
   async function handleRetryProcessing(bookId: string) {
+    setActionError(null)
     setBusyBookId(bookId)
     try {
       const targetBook = books.find((book) => book.id === bookId)
@@ -296,6 +297,8 @@ export function LibraryClient() {
         await booksApi.retryProcessing(bookId)
       }
       await refreshLibrary()
+    } catch {
+      setActionError("Could not restart processing. Please try the processing action again.")
     } finally {
       setBusyBookId(null)
     }
@@ -307,6 +310,7 @@ export function LibraryClient() {
   }
 
   function openPublishDialog(book: Book) {
+    setPublishError(null)
     setPublishBook(book)
     setPublishSlug(book.public_slug ?? book.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
     setPublishDescription(book.public_description ?? "")
@@ -330,7 +334,7 @@ export function LibraryClient() {
     onRestore: (book: Book) => void handleArchive(book.id, false),
     onRemove: (book: Book) => void handleRemove(book.id),
     onPermanentDelete: (book: Book) => void handlePermanentDelete(book),
-    onAddChapter: (book: Book) => handleAddChapter(book.id),
+    onAddChapter: (book: Book) => handleAddChapter(book),
     onPublish: openPublishDialog,
     onUnpublish: (book: Book) => void handleUnpublish(book.id),
   }
@@ -350,7 +354,7 @@ export function LibraryClient() {
     return <LibraryAuthLoadingState isDark={isDark} pageBackground={pageBackground} />
   }
 
-  if (booksError) {
+  if (booksError && !booksData) {
     return (
       <LibraryErrorState
         isDark={isDark}
@@ -363,7 +367,7 @@ export function LibraryClient() {
   return (
     <div className={`min-h-screen transition-colors duration-300 ${pageBackground}`}>
       <div className="w-full pb-20">
-        <section className="space-y-7">
+        <section className="space-y-5" data-testid="library-workspace">
           <LibraryWorkspaceHeader
             createDisabled={!interactiveReady}
             isDark={isDark}
@@ -371,51 +375,38 @@ export function LibraryClient() {
             onCreate={startCreateProject}
           />
 
+          {actionError || booksError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-l-2 border-rose-400 bg-rose-500/10 p-4 text-sm text-rose-800 dark:text-rose-200">
+            <p>{actionError ?? "Could not refresh your library. Your last loaded projects are still shown."}</p>
+            <button type="button" className="min-h-11 underline underline-offset-4" onClick={() => actionError ? setActionError(null) : void refreshLibrary()}>{actionError ? "Dismiss" : "Retry"}</button>
+          </div> : null}
+
           {showFirstManuscriptHero ? (
             <FirstManuscriptHero isDark={isDark} onUpload={startCreateProject} />
           ) : (
           <>
-          <MetricStrip
-            isDark={isDark}
-            loading={loading}
-            totalProjects={libraryMetrics.totalProjects}
-            activeDrafts={libraryMetrics.activeDrafts}
-            processing={libraryMetrics.processing}
-          />
-
           <LibraryProjectControls
             isDark={isDark}
             searchInputRef={searchInputRef}
             search={search}
-            filterSummary={filterSummary}
-            filterOpen={filterOpen}
             modeFilter={modeFilter}
             statusFilter={statusFilter}
             showArchived={showArchived}
             sortBy={sortBy}
             viewMode={viewMode}
-            surfaceClass={surfaceClass}
             controlClass={controlClass}
             mutedText={mutedText}
-            headingText={headingText}
             onSearchChange={setSearch}
-            onFilterToggle={() => setFilterOpen((current) => !current)}
             onModeFilterChange={setModeFilter}
             onStatusFilterChange={setStatusFilter}
             onShowArchivedToggle={() => setShowArchived((current) => !current)}
             onSortChange={setSortBy}
             onViewModeChange={setViewMode}
+            onResetFilters={resetProjectFilters}
           />
 
-          <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <RecentActivityList
-              items={recentActivityItems}
-              emptyLabel="Start writing or importing to build a project activity trail."
-            />
-            <NextActionPanel isDark={isDark} actions={nextBestActions} />
-          </section>
+          {!loading ? <p role="status" className={`text-sm ${mutedText}`}>{filteredBooks.length} {filteredBooks.length === 1 ? "project" : "projects"}{hasActiveProjectFilters ? " match this view" : " in this view"}{nextBookCursor ? " · More projects available below. Search and filters apply to loaded projects." : ""}</p> : null}
 
-          <LibraryProjectSection
+          {pinnedBooks.length > 0 ? <LibraryProjectSection
             isDark={isDark}
             loading={loading}
             viewMode={viewMode}
@@ -427,21 +418,15 @@ export function LibraryClient() {
             pinnedIds={pinnedIds}
             menuBookId={menuBookId}
             skeletonLabel="Loading pinned projects"
-            emptyState={{
-              show: pinnedBooks.length === 0,
-              title: "Nothing pinned yet",
-              body: "Use a project menu to keep your current manuscripts close at hand.",
-              actionLabel: "New Project",
-              onAction: startCreateProject,
-            }}
+            emptyState={{ show: false, title: "", body: "" }}
             handlers={projectSectionHandlers}
-          />
+          /> : null}
 
-          <LibraryProjectSection
+          {allProjectBooks.length > 0 || pinnedBooks.length === 0 ? <LibraryProjectSection
             isDark={isDark}
             loading={loading}
             viewMode={viewMode}
-            title="All projects"
+            title={pinnedBooks.length ? "Other projects" : "All projects"}
             icon={<FolderIcon className={isDark ? "text-[#d7d0c6]" : "text-stone-700"} />}
             books={allProjectBooks}
             busyBookId={busyBookId}
@@ -450,26 +435,27 @@ export function LibraryClient() {
             skeletonLabel="Loading all projects"
             emptyState={{
               show: allProjectBooks.length === 0 && filteredBooks.length === 0,
-              title: hasAnyProjects ? "No projects match this view" : "No projects yet",
-              body: hasAnyProjects
+              title: hasOnlyArchivedProjects && !hasActiveProjectFilters ? "Your projects are archived" : hasAnyProjects ? "No projects match this view" : "No projects yet",
+              body: hasOnlyArchivedProjects && !hasActiveProjectFilters
+                ? "Include archived projects to open or restore them."
+                : hasAnyProjects
                 ? "Try a different search or filter to bring projects back into view."
                 : "Start a new project to keep your ideas organized.",
-              actionLabel: hasAnyProjects ? "Reset filters" : "New Project",
-              onAction: hasAnyProjects ? resetProjectFilters : startCreateProject,
+              actionLabel: hasOnlyArchivedProjects && !hasActiveProjectFilters ? "Show archived projects" : hasAnyProjects ? undefined : "New Project",
+              onAction: hasOnlyArchivedProjects && !hasActiveProjectFilters ? () => setShowArchived(true) : hasAnyProjects ? resetProjectFilters : startCreateProject,
             }}
-            showCreateProject
-            onCreateProject={startCreateProject}
             handlers={projectSectionHandlers}
-          />
+          /> : null}
           {nextBookCursor ? (
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-3">
+              {loadMoreError ? <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">Could not load more projects. Your current projects are still available.</p> : null}
               <button
                 type="button"
                 className={`rounded-md border px-4 py-2 text-sm font-semibold ${controlClass}`}
                 disabled={loadingMoreBooks}
                 onClick={() => void loadMoreBooks()}
               >
-                {loadingMoreBooks ? "Loading projects..." : "Load more projects"}
+                {loadingMoreBooks ? "Loading projects..." : loadMoreError ? "Retry loading projects" : "Load more projects"}
               </button>
             </div>
           ) : null}
@@ -477,8 +463,6 @@ export function LibraryClient() {
           )}
         </section>
       </div>
-
-      <MobileActionBar actions={nextBestActions} />
 
       {showUpload ? (
         <UploadModal
@@ -501,6 +485,7 @@ export function LibraryClient() {
           publishSlug={publishSlug}
           publishDescription={publishDescription}
           publishConfirmed={publishConfirmed}
+          error={publishError}
           busy={busyBookId === publishBook.id}
           onSlugChange={setPublishSlug}
           onDescriptionChange={setPublishDescription}

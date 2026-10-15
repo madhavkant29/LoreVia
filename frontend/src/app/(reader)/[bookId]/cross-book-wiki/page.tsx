@@ -1,248 +1,70 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-
-import { intelligenceApi } from "@/lib/api/intelligence"
-import { booksApi } from "@/lib/api/books"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
-import { WorkspacePage } from "@/components/ui/Workspace"
-import { asQueryKey, booksSelectorCacheKey } from "@/lib/query/cacheKeys"
-import { usePreferencesStore } from "@/lib/stores/preferencesStore"
-import type { BookSelector } from "@/types/book"
-import type { CrossBookIntelligence, CrossBookMatch } from "@/types/intelligence"
-
-type MatchMode = "all" | "characters" | "wiki"
-
-type MatchWithBooks = CrossBookMatch & {
-  source: "characters" | "wiki"
-  left_book_title?: string
-  right_book_title?: string
-}
+import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
+import { booksApi } from "@/lib/api/books"
+import { intelligenceApi } from "@/lib/api/intelligence"
+import { useBookDetail } from "@/lib/hooks/useBookDetail"
+import { useAuthStore } from "@/lib/stores/authStore"
+import { canUseAuthorFeatures } from "@/lib/billing/plans"
+import { asQueryKey, bookCacheKey, booksSelectorCacheKey } from "@/lib/query/cacheKeys"
+import { normalizeBookRouteId } from "@/lib/utils/bookRoutes"
+import { SeriesReferenceList } from "./seriesWikiPage.components"
+import { filterSeriesReferences, seriesComparisonIds, seriesReferences, type ReferenceType } from "./seriesWikiPage.helpers"
 
 export default function CrossBookWikiPage() {
   const { bookId } = useParams<{ bookId: string }>()
-  const { theme } = usePreferencesStore()
-  const isDark = theme === "dark"
-  const { data: intelligenceData = null, isLoading: intelligenceLoading } = useQuery<CrossBookIntelligence | null>({
-    queryKey: asQueryKey(`cross-book-wiki:${bookId}`),
-    queryFn: () => intelligenceApi.getCrossBookIntelligence(bookId),
-  })
-  const { data: booksData = [], isLoading: booksLoading } = useQuery<BookSelector[]>({
-    queryKey: asQueryKey(booksSelectorCacheKey()),
-    queryFn: () => booksApi.listSelector(),
-  })
-  const [mode, setMode] = useState<MatchMode>("all")
-  const [threshold, setThreshold] = useState(60)
+  return <SeriesWikiWorkspace key={bookId} bookId={bookId} />
+}
+
+function SeriesWikiWorkspace({ bookId }: { bookId: string }) {
+  const bookQuery = useBookDetail(bookId)
+  const book = bookQuery.data
+  const user = useAuthStore(state => state.user)
+  const owner = book?.access_class === "owner"
+  const paid = canUseAuthorFeatures(user?.tier)
+  const enabled = owner && paid
+  const intelligence = useQuery({ queryKey: asQueryKey(bookCacheKey(bookId, "cross-book-wiki")), queryFn: () => intelligenceApi.getCrossBookIntelligence(bookId), enabled, retry: false, staleTime: 20_000 })
+  const titles = useQuery({ queryKey: asQueryKey(booksSelectorCacheKey()), queryFn: () => booksApi.listSelector(), enabled, retry: false, staleTime: 60_000 })
+  const [mode, setMode] = useState<"all" | ReferenceType>("all")
+  const [scope, setScope] = useState<"current" | "series">("current")
+  const [threshold, setThreshold] = useState(90)
   const [query, setQuery] = useState("")
-  const loading = intelligenceLoading || booksLoading
-  const books = useMemo(() => new Map(booksData.map((book) => [book.id, book])), [booksData])
-
-  const matches = useMemo(() => {
-    const allMatches: MatchWithBooks[] = [
-      ...((intelligenceData?.character_matches ?? []).map((item) => ({
-        ...item,
-        source: "characters" as const,
-        left_book_title: books.get(item.left_book_id)?.title,
-        right_book_title: books.get(item.right_book_id)?.title,
-      }))),
-      ...((intelligenceData?.wiki_matches ?? []).map((item) => ({
-        ...item,
-        source: "wiki" as const,
-        left_book_title: books.get(item.left_book_id)?.title,
-        right_book_title: books.get(item.right_book_id)?.title,
-      }))),
-    ]
-    const normalizedQuery = query.trim().toLowerCase()
-    return allMatches
-      .filter((item) => mode === "all" || item.source === mode)
-      .filter((item) => Math.round(item.similarity * 100) >= threshold)
-      .filter((item) => {
-        if (!normalizedQuery) return true
-        return [
-          item.left_name,
-          item.right_name,
-          item.left_book_title ?? "",
-          item.right_book_title ?? "",
-          item.entry_type ?? "",
-        ].some((value) => value.toLowerCase().includes(normalizedQuery))
-      })
-      .sort((a, b) => b.similarity - a.similarity)
-  }, [intelligenceData, mode, query, threshold, books])
-
-  return (
-    <WorkspacePage className={isDark ? "text-stone-100" : "text-slate-950"}>
-      <div className="mx-auto max-w-6xl space-y-6 px-0 pb-16 pt-6 sm:px-2 lg:px-4">
-        <WorkspaceFamilyHeader
-          active="cross-book-wiki"
-          bookId={bookId}
-          family="story-bible"
-          title="Series wiki connections"
-          description="Compare similar characters and wiki entries across books in the same series to spot recurring identities, themes, and continuity points."
-          actions={(
-            <>
-              <Link href="/series" className="app-button-secondary">Series</Link>
-              <Link href={`/${bookId}`} className="app-button-secondary">Home</Link>
-            </>
-          )}
-        />
-
-        <section className="app-panel p-5 sm:p-6">
-          <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
-            <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-black/20" : "border-slate-200 bg-white/85"}`}>
-              <label className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-stone-400" : "text-slate-500"}`}>Search matches</label>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label="Search matches"
-                className={`mt-3 w-full rounded-md border px-4 py-3 text-sm outline-none transition ${isDark ? "border-white/10 bg-white/5 text-white focus:border-teal-300/40" : "border-slate-200 bg-white text-slate-950 focus:border-teal-700"}`}
-              />
-              <div className={`mt-4 flex flex-wrap gap-2`}>
-                {(["all", "characters", "wiki"] as MatchMode[]).map((value) => (
-                  <button
-                    key={value}
-                    onClick={() => setMode(value)}
-                    className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-                      mode === value
-                        ? "bg-[#1f615d] text-white"
-                        : (isDark ? "border border-white/10 bg-white/5 text-stone-300 hover:bg-white/10" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50")
-                    }`}
-                  >
-                    {value === "all" ? "All matches" : value === "characters" ? "Characters" : "Wiki entries"}
-                  </button>
-                ))}
-              </div>
-
-              <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-slate-50"}`}>
-                <div className="flex items-center justify-between">
-                  <label className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-stone-400" : "text-slate-500"}`}>Similarity threshold: {threshold}%</label>
-                  <span className={`text-xs ${isDark ? "text-stone-500" : "text-slate-500"}`}>Only show matches above this score</span>
-                </div>
-                <div className="mt-2 flex items-center gap-4">
-                  <input
-                    type="range"
-                    aria-label="Similarity threshold"
-                    min={40}
-                    max={95}
-                    value={threshold}
-                    onChange={(event) => setThreshold(Number(event.target.value))}
-                    className="w-full"
-                  />
-                  <span className={`min-w-[3rem] text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{threshold}%</span>
-                </div>
-                <div className={`mt-2 flex justify-between text-xs ${isDark ? "text-stone-500" : "text-slate-500"}`}>
-                  <span>40% (loose)</span>
-                  <span>95% (strict)</span>
-                </div>
-              </div>
-            </div>
-
-            <div className={`grid grid-cols-1 gap-3 text-sm ${isDark ? "text-stone-300" : "text-slate-600"} lg:w-[18rem]`}>
-              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
-                <p className="text-xs uppercase tracking-[0.2em] opacity-70">Series</p>
-                <p className="mt-2 font-semibold">{intelligenceData?.series_name ?? "Unassigned"}</p>
-              </div>
-              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
-                <p className="text-xs uppercase tracking-[0.2em] opacity-70">Matches found</p>
-                <p className="mt-2 font-semibold">{matches.length}</p>
-              </div>
-              <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
-                <p className="text-xs uppercase tracking-[0.2em] opacity-70">Books compared</p>
-                <p className="mt-2 font-semibold">{intelligenceData?.comparison_book_ids.length ?? 0}</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {loading ? (
-          <div className={`rounded-lg border border-dashed py-20 text-center ${isDark ? "border-white/10 text-stone-400" : "border-slate-300 text-slate-500"}`}>Loading cross-book connections...</div>
-        ) : matches.length === 0 ? (
-          <div className={`rounded-lg border p-8 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/85"}`}>
-            <h2 className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>No matches found</h2>
-            <p className={`mt-3 max-w-2xl text-sm leading-7 ${isDark ? "text-stone-300" : "text-slate-600"}`}>
-              {intelligenceData?.comparison_book_ids.length === 0 || (intelligenceData?.comparison_book_ids.length ?? 0) < 2
-                ? "You need at least 2 books in the same series to find cross-book connections. Add more books to your series and try again."
-                : "Try lowering the similarity threshold or clearing the search filters to see more results."
-              }
-            </p>
-          </div>
-        ) : (
-          <section className={`overflow-hidden rounded-lg border ${isDark ? "border-white/10 bg-white/[0.04]" : "border-slate-200 bg-white/85"}`}>
-            <div className={`grid grid-cols-[1fr_1fr_auto] gap-3 px-5 py-4 text-sm ${isDark ? "border-b border-white/10 text-stone-300" : "border-b border-slate-200 text-slate-600"}`}>
-              <p className="font-semibold uppercase tracking-[0.22em]">This book</p>
-              <p className="font-semibold uppercase tracking-[0.22em]">Connected to</p>
-              <p className="font-semibold uppercase tracking-[0.22em] text-right">Similarity</p>
-            </div>
-            <div className={`divide-y ${isDark ? "divide-white/10" : "divide-slate-200"}`}>
-              {matches.slice(0, 120).map((match) => {
-                const score = Math.round(match.similarity * 100)
-                const scoreColor = score >= 80
-                  ? (isDark ? "bg-emerald-500/20 text-emerald-300" : "bg-emerald-100 text-emerald-700")
-                  : score >= 60
-                    ? (isDark ? "bg-amber-500/20 text-amber-300" : "bg-amber-100 text-amber-700")
-                    : (isDark ? "bg-slate-500/20 text-slate-300" : "bg-slate-100 text-slate-600")
-                const isCurrentBook = match.left_book_id === bookId
-                const currentBookName = isCurrentBook ? match.left_name : match.right_name
-                const currentBookTitle = isCurrentBook ? match.left_book_title : match.right_book_title
-                const otherBookName = isCurrentBook ? match.right_name : match.left_name
-                const otherBookTitle = isCurrentBook ? match.right_book_title : match.left_book_title
-                const otherBookId = isCurrentBook ? match.right_book_id : match.left_book_id
-
-                return (
-                  <div key={`${match.source}:${match.left_book_id}:${match.left_name}:${match.right_book_id}:${match.right_name}`} className={`px-5 py-4 ${isDark ? "bg-transparent" : "bg-transparent"}`}>
-                    <div className="flex items-start gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${match.source === "wiki" ? (isDark ? "text-sky-200" : "text-sky-700") : (isDark ? "text-amber-200" : "text-amber-700")}`}>
-                            {match.source === "wiki" ? "Wiki" : "Character"}
-                          </p>
-                          {match.entry_type && (
-                            <p className={`text-xs ${isDark ? "text-stone-500" : "text-slate-500"}`}>
-                              · {match.entry_type}
-                            </p>
-                          )}
-                        </div>
-                        <p className={`mt-2 truncate text-base font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>
-                          {currentBookName}
-                        </p>
-                        <p className={`mt-1 text-xs ${isDark ? "text-stone-400" : "text-slate-500"}`}>
-                          {currentBookTitle || "Unknown book"}
-                        </p>
-                      </div>
-                      <div className={`flex-1 min-w-0`}>
-                        <p className={`mt-6 truncate text-base font-semibold ${isDark ? "text-white" : "text-slate-950"}`}>
-                          {otherBookName}
-                        </p>
-                        <p className={`mt-1 text-xs ${isDark ? "text-stone-400" : "text-slate-500"}`}>
-                          {otherBookTitle || "Unknown book"}
-                        </p>
-                        {otherBookId && (
-                          <Link
-                            href={`/${otherBookId}`}
-                            className={`mt-2 inline-block text-xs font-medium ${isDark ? "text-sky-300 hover:text-sky-200" : "text-sky-600 hover:text-sky-700"}`}
-                          >
-                            View book →
-                          </Link>
-                        )}
-                      </div>
-                      <div className={`shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${scoreColor}`}>
-                        {score}%
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            {matches.length > 120 ? (
-              <div className={`px-5 py-4 text-sm ${isDark ? "border-t border-white/10 text-stone-400" : "border-t border-slate-200 text-slate-500"}`}>
-                Showing top 120 of {matches.length} matches. Use filters to narrow results.
-              </div>
-            ) : null}
-          </section>
-        )}
+  const [limit, setLimit] = useState(25)
+  const [selectedKey, setSelectedKey] = useState<string | null | undefined>(undefined)
+  const ids = seriesComparisonIds(intelligence.data)
+  const normalizedId = normalizeBookRouteId(bookId)
+  const result = seriesReferences(intelligence.data, [...(titles.data ?? []), ...(book ? [book] : [])], normalizedId)
+  const references = filterSeriesReferences(result.references, { mode, scope, threshold, query })
+  const selected = selectedKey === undefined ? references[0] ?? null : references.find(item => item.key === selectedKey) ?? null
+  const resetSelection = () => { setSelectedKey(undefined); setLimit(25) }
+  const clearFilters = () => { setQuery(""); setMode("all"); setThreshold(90); setScope("current"); resetSelection() }
+  const refresh = () => Promise.all([intelligence.refetch(), titles.refetch()])
+  if (bookQuery.isLoading) return <div role="status" className="p-6">Loading series workspace…</div>
+  if (!book) return <div className="p-6"><h1 className="text-2xl font-semibold">Series wiki</h1><p role="alert" className="my-4">This project could not be loaded.</p><button className="app-button-secondary" disabled={bookQuery.isFetching} onClick={() => void bookQuery.refetch()}>Retry project</button></div>
+  if (!owner) return <div className="p-6"><h1 className="text-2xl font-semibold">Series wiki</h1><p className="my-4">Only the project owner can compare references across their books.</p><Link href={`/${bookId}`} className="app-button-secondary">Return to project</Link></div>
+  if (!paid) return <div className="p-6"><h1 className="text-2xl font-semibold">Series wiki</h1><p className="my-4">Series comparisons require an Author or Architect plan.</p><Link href="/upgrade" className="app-button-secondary">View plans</Link></div>
+  return <main data-series-wiki-workspace className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <WorkspaceFamilyHeader active="cross-book-wiki" bookId={bookId} family="story-bible" title="Series wiki" description={`Compare recurring characters and lore across ${book.title} and the other books in its primary series.`} actions={<><Link href="/series" className="app-button-secondary">Manage series</Link><button className="app-button-secondary" disabled={intelligence.isFetching || titles.isFetching} onClick={() => void refresh()}>{intelligence.isFetching ? "Refreshing…" : "Refresh references"}</button><button className="app-button-secondary" onClick={() => window.dispatchEvent(new CustomEvent(SUPPORT_HELP_EVENT))}>Help</button></>} />
+    {bookQuery.isError ? <p role="alert" className="mt-4 text-sm leading-6">Project details could not be refreshed. <button className="min-h-11 underline" disabled={bookQuery.isFetching} onClick={() => void bookQuery.refetch()}>Retry project</button></p> : null}
+    {intelligence.isError ? <div role="alert" className="mt-5 border-y py-4 text-sm leading-6"><p>Series references could not be loaded.{intelligence.data ? " The last loaded comparison is still shown and may be out of date." : " No comparison result is available yet."}</p><button className="app-button-secondary mt-3" disabled={intelligence.isFetching} onClick={() => void intelligence.refetch()}>Retry references</button></div> : null}
+    {titles.isError ? <p role="alert" className="mt-4 text-sm leading-6">Book titles could not be loaded. References remain available using book identifiers or last loaded titles. <button className="min-h-11 underline" disabled={titles.isFetching} onClick={() => void titles.refetch()}>Retry book titles</button></p> : null}
+    {intelligence.isLoading ? <p role="status" className="py-8 text-sm">Loading series references…</p> : null}
+    {intelligence.data ? <>
+      <section aria-label="Comparison scope" className="mt-6 border-b pb-5"><h2 className="text-xl font-semibold">{intelligence.data.series_name || "No primary series assigned"}</h2><p className="mt-2 text-sm leading-6 text-[rgb(var(--muted-foreground))]">{ids.length} books in this comparison · {result.references.length} returned reference pairs. Only books you own in this project’s primary series are compared.</p><p className="mt-2 max-w-4xl text-sm leading-6 text-[rgb(var(--muted-foreground))]">The service returns up to 20 character pairs and 20 wiki pairs with at least 90% similarity. It compares stored descriptions; missing matches do not prove that a reference is absent. Refresh reloads the comparison and may use stored results.</p><details className="mt-3"><summary className="min-h-11 cursor-pointer text-sm font-semibold">Books included ({ids.length})</summary><ul className="divide-y border-y">{ids.map(id => <li className="py-3 text-sm" key={id}><Link className="inline-flex min-h-11 items-center underline" href={`/${encodeURIComponent(id)}`}>{id === normalizedId ? book.title : titles.data?.find(item => normalizeBookRouteId(item.id) === id)?.title || `Book ${id}`}</Link>{id === normalizedId ? " · Current book" : ""}</li>)}</ul></details></section>
+      {result.omitted ? <p role="status" className="mt-4 text-sm leading-6">{result.omitted} incomplete or invalid comparison records were omitted. Refresh references to check for an updated result.</p> : null}
+      <div className="mt-5 grid gap-4 border-b pb-5 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="grid gap-2 text-sm">Search references<input type="search" aria-label="Search references" placeholder="Name, book, or entry type" className="app-input" value={query} onChange={event => { setQuery(event.target.value); resetSelection() }} /></label>
+        <label className="grid gap-2 text-sm">Reference type<select aria-label="Reference type" className="app-input" value={mode} onChange={event => { setMode(event.target.value as "all" | ReferenceType); resetSelection() }}><option value="all">All references</option><option value="characters">Characters</option><option value="wiki">Wiki entries</option></select></label>
+        <label className="grid gap-2 text-sm">Book scope<select className="app-input" value={scope} onChange={event => { setScope(event.target.value as "current" | "series"); resetSelection() }}><option value="current">Involving this book</option><option value="series">Whole series</option></select></label>
+        <label className="grid gap-2 text-sm">Minimum similarity<select aria-label="Minimum similarity" className="app-input" value={threshold} onChange={event => { setThreshold(Number(event.target.value)); resetSelection() }}><option value={90}>90% and above</option><option value={95}>95% and above</option><option value={98}>98% and above</option><option value={100}>100%</option></select></label>
       </div>
-    </WorkspacePage>
-  )
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-sm text-[rgb(var(--muted-foreground))]">Showing {Math.min(limit, references.length)} of {references.length} matching pairs</p><button className="app-button-secondary" onClick={clearFilters}>Reset filters</button></div>
+      {references.length ? <><SeriesReferenceList references={references.slice(0, limit)} selected={selected} onSelect={setSelectedKey} onToggle={key => setSelectedKey(selected?.key === key ? null : key)} />{references.length > limit ? <button className="app-button-secondary mt-4" onClick={() => setLimit(value => value + 25)}>Show more references ({references.length - limit} remaining)</button> : null}</> : <section className="mt-5 border-y py-8"><h2 className="text-xl font-semibold">No matches found</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-[rgb(var(--muted-foreground))]">{ids.length < 2 ? "Add at least two of your books to the same primary series before comparing references." : !result.references.length ? "No indexed reference pairs were returned at the service’s 90% minimum. Confirm that the books have processed characters and wiki entries. This comparison is not an exhaustive canon check." : "No returned pairs match these filters. Reset the filters or choose Whole series to inspect pairs between other books."}</p><div className="mt-4 flex flex-wrap gap-3"><Link href="/series" className="app-button-secondary">Review series membership</Link>{result.references.length ? <button className="app-button-secondary" onClick={() => { clearFilters(); setScope("series") }}>Show whole series</button> : null}</div></section>}
+    </> : !intelligence.isLoading && !intelligence.isError ? <p role="alert" className="py-6">No comparison response is available. Use Refresh references to try again.</p> : null}
+  </main>
 }

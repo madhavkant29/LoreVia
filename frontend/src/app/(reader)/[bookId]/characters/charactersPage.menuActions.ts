@@ -122,6 +122,7 @@ export function buildCharacterMenuActions({
   return [
     {
       label: editing ? "Close edit details" : "Edit details",
+      disabled: !isAuthorMode || saving,
       onClick: () => {
         onSetEditing((current) => !current)
         onCloseCharacterMenu()
@@ -129,6 +130,7 @@ export function buildCharacterMenuActions({
     },
     {
       label: "Add alias",
+      disabled: !isAuthorMode || saving,
       onClick: () => {
         onSetEditing(true)
         onCloseCharacterMenu()

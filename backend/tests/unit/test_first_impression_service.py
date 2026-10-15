@@ -282,7 +282,11 @@ async def test_automatic_queue_returns_quietly_for_ineligible_manuscripts(change
     )
 
     assert result is None
-    assert db.rollbacks == 1
+    # A rollback would expire every ORM object the caller has loaded and the
+    # next synchronous attribute access would raise MissingGreenlet in async
+    # workers. Quiet exits must release locks with a commit instead.
+    assert db.rollbacks == 0
+    assert db.commits == 1
 
 
 @pytest.mark.asyncio
@@ -304,7 +308,8 @@ async def test_automatic_queue_returns_quietly_for_ineligible_plan(monkeypatch):
     )
 
     assert result is None
-    assert db.rollbacks == 1
+    assert db.rollbacks == 0
+    assert db.commits == 1
 
 
 @pytest.mark.asyncio

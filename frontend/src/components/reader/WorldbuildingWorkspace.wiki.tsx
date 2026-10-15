@@ -11,7 +11,7 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
   softPanelClass,
-  summarizeRecord,
+  worldRecordText,
   titleTextClass,
 } from "./WorldbuildingWorkspace.helpers"
 
@@ -20,6 +20,8 @@ export function AutoWikiCard({
   logicQuery,
   logicLoading,
   logicResult,
+  submittedQuery,
+  logicStale,
   wikiEntries,
   wikiEntriesLoading,
   wikiGenerating,
@@ -37,6 +39,8 @@ export function AutoWikiCard({
   logicQuery: string
   logicLoading: boolean
   logicResult: WorldQueryResponse | null
+  submittedQuery?: string
+  logicStale?: boolean
   wikiEntries: WikiEntry[]
   wikiEntriesLoading: boolean
   wikiGenerating: boolean
@@ -94,6 +98,8 @@ export function AutoWikiCard({
 
           {logicResult ? (
             <div className={`mt-4 rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-white bg-white"}`}>
+              {submittedQuery ? <p className="mb-3 text-sm"><strong>Submitted question:</strong> {submittedQuery}{logicQuery.trim() !== submittedQuery ? " — the editor now contains a different question." : ""}</p> : null}
+              {logicStale ? <p className="mb-3 border-l-2 border-amber-500 pl-3 text-sm" role="status">Canon sources or aliases have changed since this query began. Run the question again to use the latest context.</p> : null}
               <div className="flex flex-wrap gap-2">
                 <span className={accentBadgeClass("teal", isDark)}>{logicResult.mode === "gap_detection" ? "Canon stress test" : "Story integration"}</span>
                 {logicResult.logic_alerts.length > 0 ? <span className={accentBadgeClass("amber", isDark)}>{logicResult.logic_alerts.length} alerts</span> : null}
@@ -113,7 +119,7 @@ export function AutoWikiCard({
                   <p className={eyebrowClass(isDark)}>Logic alerts</p>
                   {logicResult.logic_alerts.map((alert, index) => (
                     <div key={`alert-${index}`} className={`rounded-xl border px-3 py-2 text-sm ${isDark ? "border-rose-400/20 bg-rose-500/10 text-rose-100" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
-                      {summarizeRecord(alert)}
+                      {worldRecordText(alert)}
                     </div>
                   ))}
                 </div>
@@ -123,7 +129,7 @@ export function AutoWikiCard({
                   <p className={eyebrowClass(isDark)}>Suggested next moves</p>
                   {logicResult.suggestions.map((suggestion, index) => (
                     <div key={`suggestion-${index}`} className={`rounded-xl border px-3 py-2 text-sm ${softPanelClass(isDark)}`}>
-                      {summarizeRecord(suggestion)}
+                      {worldRecordText(suggestion)}
                     </div>
                   ))}
                 </div>
@@ -131,9 +137,9 @@ export function AutoWikiCard({
               {logicResult.citations.length > 0 ? (
                 <div className="mt-4 space-y-2">
                   <p className={eyebrowClass(isDark)}>Source citations</p>
-                  {logicResult.citations.slice(0, 4).map((citation, index) => (
+                  {logicResult.citations.map((citation, index) => (
                     <div key={`citation-${index}`} className={`rounded-xl border px-3 py-2 text-sm ${softPanelClass(isDark)}`}>
-                      {summarizeRecord(citation)}
+                      {worldRecordText(citation)}
                     </div>
                   ))}
                 </div>

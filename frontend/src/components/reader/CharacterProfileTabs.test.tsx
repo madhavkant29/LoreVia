@@ -29,6 +29,20 @@ describe("CharacterProfileTabs", () => {
     })
     expect(onSelect).toHaveBeenCalledWith("overview")
   })
+
+  it("moves focus with arrows and Home/End while keeping a single tab stop", () => {
+    const onSelect = vi.fn()
+    const view = renderTabs(onSelect)
+    expect(view.querySelectorAll('button[tabindex="0"]')).toHaveLength(1)
+    const evidence = view.querySelector<HTMLButtonElement>('#character-tab-evidence')!
+    act(() => evidence.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })))
+    expect(onSelect).toHaveBeenLastCalledWith("notes")
+    expect(document.activeElement?.id).toBe("character-tab-notes")
+    act(() => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })))
+    expect(onSelect).toHaveBeenLastCalledWith("overview")
+    act(() => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })))
+    expect(onSelect).toHaveBeenLastCalledWith("notes")
+  })
 })
 
 function renderTabs(onSelect: (tab: CharacterProfileTab) => void) {

@@ -84,7 +84,11 @@ async def queue_first_impression(
     except HTTPException:
         if strict:
             raise
-        await db.rollback()
+        # Not an error path: release the advisory/row locks without rolling
+        # back. A rollback would expire every ORM object already loaded in the
+        # caller's session, and the caller's next synchronous attribute access
+        # would then raise MissingGreenlet in async workers.
+        await db.commit()
         return None
 
     workspace = writer_workspace.normalize_writer_workspace(
@@ -104,7 +108,8 @@ async def queue_first_impression(
     if allow_retry and state["status"] != "failed":
         if strict:
             raise HTTPException(409, "The first read is not in a retryable state.")
-        await db.rollback()
+        # Release locks with a commit so the caller's session state stays valid.
+        await db.commit()
         return None
 
     body = first_impression_request()
@@ -112,7 +117,8 @@ async def queue_first_impression(
     if not prepared["chapters"]:
         if strict:
             raise HTTPException(409, "No analyzed manuscript chapters are available yet.")
-        await db.rollback()
+        # Release locks with a commit so the caller's session state stays valid.
+        await db.commit()
         return None
 
     now_text = _now_text()
@@ -312,7 +318,9 @@ async def _update_first_impression_state(
     )
     state = normalize_first_impression_state(workspace.get("first_impression"))
     if state.get("job_id") != str(job_id):
-        await db.rollback()
+        # Stale update for a replaced job; release the lock without expiring
+        # the caller's loaded ORM state.
+        await db.commit()
         return
     state.update(updates)
     workspace["first_impression"] = state

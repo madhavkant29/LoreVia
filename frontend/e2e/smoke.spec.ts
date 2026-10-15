@@ -20,6 +20,19 @@ function watchBrowserSignals(page: Page) {
   return { consoleMessages, pageErrors }
 }
 
+async function hideNonProductCaptureOverlays(page: Page) {
+  await page.locator("nextjs-portal").evaluateAll((elements) => {
+    for (const element of elements) {
+      if (element instanceof HTMLElement) element.style.display = "none"
+    }
+  })
+  await page.getByRole("button", { name: "Help", exact: true }).evaluateAll((elements) => {
+    for (const element of elements) {
+      if (element instanceof HTMLElement) element.style.display = "none"
+    }
+  })
+}
+
 test("marketing home page renders the core value proposition", async ({ page }) => {
   await page.goto("/")
 
@@ -29,6 +42,23 @@ test("marketing home page renders the core value proposition", async ({ page }) 
   await expect(page.getByRole("link", { name: /^see a sample finding$/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^see a sample finding$/i })).toHaveAttribute("href", "/demo/workspace")
   await expect(page.getByText("Includes a 10-day Author trial. No payment required.").first()).toBeVisible()
+})
+
+test("homepage limits the product walkthrough to three evidence stories", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/")
+
+  await expect(page.locator("[data-showcase-step]")).toHaveCount(3)
+  await expect(page.getByRole("heading", { name: "From manuscript evidence to a revision decision." })).toBeVisible()
+  await expect(page.locator("#features figure button")).toHaveCount(0)
+  await expect(page.locator("#features img")).toHaveCount(4)
+  await page.screenshot({ path: testInfo.outputPath("homepage-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(page.locator("[data-showcase-step]")).toHaveCount(3)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("homepage-mobile.png"), fullPage: true })
 })
 
 test("pricing and upgrade share current monthly and annual prices", async ({ page }) => {
@@ -59,6 +89,11 @@ test("pricing and upgrade share current monthly and annual prices", async ({ pag
   await expect(publicArchitectCard).toContainText("Save $78 with yearly billing")
 
   await page.goto("/upgrade")
+  await expect(page.getByRole("link", { name: "Return to LoreVia workspace" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Back to workspace" })).toBeVisible()
+  await expect(page.locator("aside")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Help", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Choose the plan that matches your work" })).toBeVisible()
   const upgradeAuthorCard = page.locator("article").filter({
     has: page.getByRole("heading", { name: "Author", exact: true }),
   })
@@ -88,6 +123,78 @@ test("pricing and upgrade share current monthly and annual prices", async ({ pag
     "author_annual",
     "architect_annual",
   ])
+})
+
+test("public pricing uses marketing navigation and one plan marker", async ({ page }, testInfo) => {
+  await installMockApi(page, { session: "guest" })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/pricing")
+
+  await expect(page.getByRole("link", { name: "LoreVia home" })).toBeVisible()
+  await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Choose the plan that matches your work" })).toBeVisible()
+  await expect(page.locator("article")).toHaveCount(3)
+  await expect(page.getByText("Recommended", { exact: true })).toHaveCount(1)
+  await expect(page.getByText("Core plan", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Paid plan", { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("pricing-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("pricing-mobile.png"), fullPage: true })
+})
+
+test("comparison pages use an editorial index and one evidence matrix", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/compare")
+
+  await expect(page.getByRole("heading", { name: /pick the writing workspace/i })).toBeVisible()
+  const comparisonIndex = page.getByTestId("comparison-index-list")
+  await expect(comparisonIndex.getByRole("link")).toHaveCount(4)
+  await expect(comparisonIndex.getByText("Comparison page")).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("compare-index-desktop.png"), fullPage: true })
+
+  await Promise.all([
+    page.waitForURL(/\/compare\/scrivener$/, { timeout: 60_000 }),
+    comparisonIndex.getByRole("link", { name: /LoreVia vs Scrivener/i }).click(),
+  ])
+  await expect(page.getByRole("heading", { name: "LoreVia vs Scrivener" })).toBeVisible()
+  await expect(page.getByTestId("comparison-verdict")).toBeVisible()
+  await expect(page.getByTestId("comparison-table").getByRole("table")).toBeVisible()
+  await expect(page.getByTestId("comparison-differentiators").locator("article")).toHaveCount(3)
+  await page.screenshot({ path: testInfo.outputPath("compare-detail-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("heading", { name: "LoreVia vs Scrivener" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("compare-detail-mobile.png"), fullPage: true })
+})
+
+test("demo catalog and case study keep source evidence ahead of promotion", async ({ page }, testInfo) => {
+  await page.context().addCookies([{ name: "lorevia_analytics_consent", value: "false", domain: "localhost", path: "/" }])
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/demo")
+
+  await expect(page.getByRole("heading", { name: /see how manuscript evidence becomes an editorial decision/i })).toBeVisible()
+  const demoIndex = page.getByTestId("demo-index-list")
+  await expect(demoIndex.locator("article")).toHaveCount(3)
+  await expect(page.getByText(/SEO angle/i)).toHaveCount(0)
+  await expect(page.getByText(/Why these pages matter/i)).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("demo-index-desktop.png"), fullPage: true })
+
+  await Promise.all([
+    page.waitForURL(/\/demo\/gregor-samsa-character-tracker$/, { timeout: 60_000 }),
+    demoIndex.getByRole("link", { name: /tracking gregor samsa/i }).click(),
+  ])
+  await expect(page.getByRole("heading", { name: /tracking gregor samsa/i })).toBeVisible()
+  await expect(page.getByTestId("demo-case-study").locator(":scope > section")).toHaveCount(3)
+  await expect(page.getByText("Why this page exists")).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("demo-case-study-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("demo-case-study-mobile.png"), fullPage: true })
 })
 
 test("active trial checkout defaults to continuing free and requires charge confirmation", async ({ page }) => {
@@ -145,16 +252,19 @@ test("paid accounts can manage their current plan and refund options from pricin
   await page.goto("/upgrade")
   await expect(page.getByText("Your current plan")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Author", exact: true }).first()).toBeVisible()
-  await expect(page.getByRole("button", { name: "Manage billing / cancel subscription" })).toBeVisible()
+  await expect(page.getByText(/Next renewal/).first()).toBeVisible()
+  const currentPlanSection = page.locator('[aria-labelledby="current-plan-heading"]')
+  await expect(currentPlanSection.getByRole("button", { name: "Manage subscription" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Refund policy" })).toHaveAttribute("href", "/refund")
   await expect(page.getByRole("link", { name: "Request a refund" })).toHaveAttribute("href", /mailto:support@getlorevia\.com/)
 
-  await page.getByRole("button", { name: "Manage billing / cancel subscription" }).click()
+  await currentPlanSection.getByRole("button", { name: "Manage subscription" }).click()
   await portalRequest
   await expect(page).toHaveURL(/\?mock_billing_portal=1$/)
 
   await page.goto("/settings")
-  await expect(page.getByRole("button", { name: "Manage billing / cancel subscription" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Manage subscription" })).toBeVisible()
+  await expect(page.getByText(/Next renewal/).first()).toBeVisible()
   await expect(page.getByRole("link", { name: "Refund policy" })).toHaveAttribute("href", "/refund")
   await expect(page.getByRole("link", { name: "Request a refund" })).toHaveAttribute("href", /mailto:support@getlorevia\.com/)
 })
@@ -178,6 +288,12 @@ test("support assistant answers navigation questions with a direct workspace act
   await installMockApi(page)
   await page.goto(BOOK_ROUTE)
 
+  await expect(page.getByTestId("author-tools-nav-bar")).toBeVisible()
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.isVisible().catch(() => false)) {
+    await dismissCookies.click()
+  }
+  await expect(page.getByRole("button", { name: "Help", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Help", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "LoreVia Support" })
   await expect(dialog).toBeVisible()
@@ -191,7 +307,337 @@ test("support assistant answers navigation questions with a direct workspace act
   await expect(dialog).toHaveClass(/border-0/)
 })
 
-test("interactive demo reviews findings without API calls or mobile overflow", async ({ page }) => {
+test("book workspace uses one stable job-based bar without the hover rail", async ({ page }, testInfo) => {
+  await installMockApi(page)
+  await page.goto(BOOK_ROUTE)
+
+  const bookBar = page.getByTestId("author-tools-nav-bar")
+  await expect(bookBar).toHaveCount(1)
+  await expect(bookBar.getByText("Draft", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(bookBar.getByText("Story Bible", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(bookBar.getByText("Review", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(bookBar.getByText("Share", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(page.getByTestId("author-tools-nav-rail")).toHaveCount(0)
+
+  await page.goto(`${BOOK_ROUTE}/timeline`)
+  await expect(page.getByTestId("author-tools-nav-bar")).toHaveCount(1)
+  await expect(page.getByRole("heading", { name: "Arc timeline" })).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(page.getByTestId("author-tools-nav-bar")).toBeVisible()
+  await expect(page.getByTestId("author-tools-nav-bar").getByText("Story Bible", { exact: true }).filter({ visible: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("book-workspace-mobile.png"), fullPage: true })
+})
+
+test("timeline uses desktop lanes and a dense mobile event list", async ({ page }) => {
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BOOK_ROUTE}/timeline`)
+
+  await expect(page.getByRole("heading", { name: "Arc timeline" })).toBeVisible()
+  await expect(page.getByText("Timeline lanes")).toBeVisible()
+  await expect(page.getByText("Gregor and Grete break trust").last()).toBeVisible()
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: test.info().outputPath("timeline-lanes-desktop.png"), fullPage: true })
+
+  await page.getByLabel("Show").selectOption("relationships")
+  await expect(page.getByText("Family survival")).toHaveCount(0)
+  await expect(page.getByText("Gregor and Grete break trust").last()).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByText("Timeline lanes")).toBeHidden()
+  await expect(page.getByText("Relationship shift").first()).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("timeline-list-mobile.png"), fullPage: true })
+})
+
+test("plot threads use focused work queues with details on demand", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BOOK_ROUTE}/plot-threads`)
+
+  await expect(page.getByRole("heading", { name: "Plot threads" })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Open 2" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByText("Who opened the gate?", { exact: true })).toBeVisible()
+  await expect(page.getByText("Thread details")).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath("plot-threads-open-desktop.png"), fullPage: true })
+
+  await page.getByRole("tab", { name: "Needs attention 1" }).click()
+  await page.getByRole("button", { name: /The vanished map clue/ }).click()
+  await expect(page.getByRole("heading", { name: "Thread details" })).toBeVisible()
+  await expect(page.getByText("Return the map in chapter 6 or remove its setup.")).toBeVisible()
+  await expect(page.getByLabel("Private note")).toHaveValue("Restore near the archive scene.")
+  await page.screenshot({ path: test.info().outputPath("plot-threads-attention-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("heading", { name: "Thread details" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("plot-threads-attention-mobile.png"), fullPage: true })
+  expect(pageErrors).toEqual([])
+  expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
+})
+
+test("setup and payoff uses a compact evidence ledger", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BOOK_ROUTE}/foreshadowing`)
+
+  await expect(page.getByRole("heading", { name: "Setup and payoff" })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "All setups 3" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByText("The gate key is warm before the alarm sounds.")).toBeVisible()
+  await expect(page.getByText("No linked payoff yet")).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("setup-payoff-ledger-desktop.png"), fullPage: true })
+
+  await page.getByRole("tab", { name: "Unlinked 1" }).click()
+  await expect(page.getByText("A silver bell rings beneath the river.")).toBeVisible()
+  await expect(page.getByText("The gate key is warm before the alarm sounds.")).toHaveCount(0)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("setup-payoff-unresolved-mobile.png"), fullPage: true })
+  expect(pageErrors).toEqual([])
+  expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
+})
+
+test("world gaps prioritize evidence and defer source editing", async ({ page }) => {
+  test.setTimeout(120_000)
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  const documentBodyRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/world-building/documents/world-doc-1")) documentBodyRequests.push(request.url())
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BOOK_ROUTE}/world-gap`)
+
+  await expect(page.getByRole("heading", { name: "World gaps" })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Review gaps" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByText("Northreach needs a clearer canon note")).toBeVisible()
+  await expect(page.getByText("Northreach is a desert capital.")).toHaveCount(0)
+  await page.getByRole("button", { name: /Northreach needs a clearer canon note.*Review evidence/ }).click()
+  await expect(page.getByText("Northreach is a desert capital.")).toBeVisible()
+  expect(documentBodyRequests).toHaveLength(0)
+  await page.screenshot({ path: test.info().outputPath("world-gaps-evidence-desktop.png"), fullPage: true })
+
+  await page.getByRole("tab", { name: "Canon sources" }).click()
+  await expect(page.getByText("Core World Notes", { exact: true }).first()).toBeVisible()
+  await expect.poll(() => documentBodyRequests.length).toBeGreaterThan(0)
+
+  await page.getByRole("tab", { name: "Review gaps" }).click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByText("Manuscript evidence").first()).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("world-gaps-evidence-mobile.png"), fullPage: true })
+  expect(pageErrors).toEqual([])
+  expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
+})
+
+test("series wiki uses a reference list and selected detail", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page, { seriesBooks: true })
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BOOK_ROUTE}/cross-book-wiki`)
+
+  await expect(page.getByRole("heading", { name: "Series wiki" })).toBeVisible()
+  await expect(page.getByText("Nora Vale", { exact: true }).first()).toBeVisible()
+  const desktopDetail = page.getByLabel("Selected series reference")
+  await expect(desktopDetail.getByRole("heading", { name: "Nora Vale ↔ Nora Veyl" })).toBeVisible()
+  await expect(desktopDetail.getByRole("link", { name: "Open connected book" })).toHaveAttribute("href", "/book-2")
+  await page.screenshot({ path: test.info().outputPath("series-wiki-list-detail-desktop.png"), fullPage: true })
+
+  await page.getByLabel("Reference type").selectOption("wiki")
+  await expect(page.getByText("Glass Road", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("Kael Arden", { exact: true })).toHaveCount(0)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("heading", { name: "Glass Road ↔ The Glassway" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("series-wiki-reference-mobile.png"), fullPage: true })
+  expect(pageErrors).toEqual([])
+  expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
+})
+
+test("draft outline and notes stay compact and defer secondary note data", async ({ page }, testInfo) => {
+  await installMockApi(page)
+  await page.context().addCookies([{ name: "lorevia_analytics_consent", value: "false", domain: "localhost", path: "/" }])
+  const inspectorRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/workspace/tree") || request.url().includes("/notes/vault/relations")) {
+      inspectorRequests.push(request.url())
+    }
+  })
+
+  await page.goto(`${BOOK_ROUTE}/chapters`)
+  await expect(page.getByRole("heading", { name: "Chapters", exact: true, level: 1 })).toBeVisible()
+  await expect(page.locator("article").filter({ hasText: "The Ember Gate" })).toContainText("Processed · Marked as read · Indexed and ready")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("chapter-outline-desktop.png"), fullPage: true })
+
+  await page.goto(`${BOOK_ROUTE}/notes`)
+  await expect(page.getByRole("heading", { name: "Notes", exact: true })).toBeVisible()
+  const detailsButton = page.getByRole("button", { name: "Details", exact: true })
+  await expect(detailsButton).toBeVisible()
+  await expect(detailsButton).toBeEnabled()
+  expect(inspectorRequests).toHaveLength(0)
+
+  await detailsButton.click()
+  await expect.poll(() => inspectorRequests.length).toBeGreaterThan(0)
+  await page.getByRole("button", { name: /Chapter-linked notes/ }).click()
+  await expect(page.getByRole("article").getByRole("heading", { name: "Gate imagery", exact: true })).toBeVisible()
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: testInfo.outputPath("notes-workspace-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("button", { name: "Close", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(page.getByLabel("Note details")).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("notes-mobile.png"), fullPage: true })
+})
+
+test("recaps stay contextual to overview and chapters and load on intent", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const recapRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/reader/book-1/summary-collection")) recapRequests.push(request.url())
+  })
+  await installMockApi(page)
+  await page.context().addCookies([{ name: "lorevia_analytics_consent", value: "false", domain: "localhost", path: "/" }])
+
+  await page.goto(`${BOOK_ROUTE}/chapters`)
+  await expect(page.getByRole("heading", { name: "Chapters", exact: true, level: 1 })).toBeVisible()
+  expect(recapRequests).toEqual([])
+  await page.getByRole("button", { name: "Show chapter recaps" }).click()
+  await expect(page.getByRole("button", { name: "Hide chapter recaps" })).toBeVisible()
+  expect(recapRequests).toHaveLength(1)
+  await page.getByText("Read chapter recap").first().click()
+  await expect(page.getByText("Nora leaves the ash road and reaches the city wall.")).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("chapter-recaps-desktop.png"), fullPage: true })
+
+  await page.goto(BOOK_ROUTE)
+  await expect(page.getByText("Manuscript recap", { exact: true }).first()).toBeVisible()
+  await page.getByText("Manuscript recap", { exact: true }).first().click()
+  await expect(page.getByText("Nora leaves the ash road and reaches the city wall. The ember gate opens and Nora steps into the city under watch.")).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("manuscript-recap-mobile.png"), fullPage: true })
+
+  await page.goto(`${BOOK_ROUTE}/summaries`)
+  await expect(page).toHaveURL(new RegExp(`${BOOK_ROUTE}$`))
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("chapter reading keeps navigation and evidence tools contextual", async ({ page }, testInfo) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const chapterRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/reader/book-1/chapter/2")) chapterRequests.push(request.url())
+  })
+  await installMockApi(page)
+  await page.context().addCookies([{ name: "lorevia_analytics_consent", value: "false", domain: "localhost", path: "/" }])
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BOOK_ROUTE}/chapter/2`)
+
+  await expect(page.getByRole("heading", { name: "The Ember Gate", exact: true })).toBeVisible()
+  await expect(page.getByText(/Nora crossed the ember gate/)).toBeVisible()
+  expect(chapterRequests.length).toBeLessThanOrEqual(1)
+  await expect(page.getByRole("button", { name: "Recap", exact: true })).toBeVisible()
+  await expect(page.getByText("Graph", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Old Style Serif", { exact: true })).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Chapter tools", exact: true }).click()
+  await expect(page.getByRole("link", { name: "Ask with citations", exact: true })).toHaveAttribute("href", `${BOOK_ROUTE}/ask`)
+  await expect(page.getByRole("link", { name: "Search this chapter", exact: true })).toHaveAttribute("href", `${BOOK_ROUTE}/search?chapter=2`)
+  await expect(page.getByRole("link", { name: "Chapter notes", exact: true })).toHaveAttribute("href", `${BOOK_ROUTE}/notes?chapter=2`)
+
+  await page.getByRole("button", { name: "Text", exact: true }).click()
+  await expect(page.getByRole("group", { name: "Typeface" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Use Old Style Serif font" })).toBeVisible()
+  const themeButton = page.getByRole("button", { name: /^(Light|Dark)$/ }).first()
+  const initialThemeAction = await themeButton.textContent()
+  await themeButton.click()
+  await expect(page.getByRole("button", { name: initialThemeAction === "Light" ? "Dark" : "Light", exact: true })).toBeVisible()
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: testInfo.outputPath("chapter-reader-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 768, height: 900 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("chapter-reader-tablet.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(page.getByRole("button", { name: "Menu", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Recap", exact: true }).last()).toBeVisible()
+  await page.getByRole("button", { name: "Menu", exact: true }).click()
+  await expect(page.getByRole("link", { name: "Search this chapter", exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Chapter notes", exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: testInfo.outputPath("chapter-reader-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("scene workspace keeps outline and details on demand", async ({ page }, testInfo) => {
+  await installMockApi(page)
+  await page.context().addCookies([{ name: "lorevia_analytics_consent", value: "false", domain: "localhost", path: "/" }])
+  await page.goto(`${BOOK_ROUTE}/scenes`)
+
+  await expect(page.getByRole("heading", { name: "Scenes", exact: true })).toBeVisible()
+  await expect(page.getByLabel("Scene title")).toHaveValue("Gate Crossing")
+  await expect(page.getByText("Nora crosses into the city.", { exact: true })).toBeVisible()
+  const outlineButton = page.getByRole("button", { name: "Outline", exact: true })
+  const detailsButton = page.getByRole("button", { name: "Details", exact: true })
+  await expect(outlineButton).toHaveAttribute("aria-pressed", "false")
+  await expect(detailsButton).toHaveAttribute("aria-pressed", "false")
+  await page.screenshot({ path: testInfo.outputPath("scenes-focused-desktop.png"), fullPage: true })
+
+  await outlineButton.click()
+  await expect(page.getByLabel("Search scenes")).toBeVisible()
+  await outlineButton.click()
+  await detailsButton.click()
+  await expect(page.getByRole("heading", { name: "Metadata", exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("scenes-details-desktop.png"), fullPage: true })
+  await detailsButton.click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(page.getByLabel("Scene title")).toHaveValue("Gate Crossing")
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
+  await expect(page.getByText("Scene outline", { exact: true })).toBeVisible()
+  await page.getByRole("dialog", { name: "Scene outline" }).getByRole("button", { name: "Close", exact: true }).click()
+  await page.getByRole("button", { name: "Details", exact: true }).click()
+  await expect(page.getByText("Scene details", { exact: true }).first()).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("scenes-details-mobile.png"), fullPage: true })
+  await page.getByRole("dialog", { name: "Scene details" }).getByRole("button", { name: "Close", exact: true }).click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("scenes-focused-mobile.png"), fullPage: true })
+})
+
+test("interactive demo reviews findings without API calls or mobile overflow", async ({ page }, testInfo) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   const apiRequests: string[] = []
   page.on("request", (request) => {
@@ -200,8 +646,11 @@ test("interactive demo reviews findings without API calls or mobile overflow", a
   await page.goto("/demo/workspace")
 
   await expect(page.getByRole("heading", { name: "Review Dracula continuity findings" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Chapter context" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Revision plan" })).toHaveCount(0)
   const desktopOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
   expect(desktopOverflow).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("demo-workspace-desktop.png"), fullPage: true })
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()
@@ -209,6 +658,7 @@ test("interactive demo reviews findings without API calls or mobile overflow", a
   await page.getByRole("button", { name: "Add to revision plan" }).click()
   await expect(page.getByText("1/3 reviewed")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Revision plan" })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("demo-workspace-mobile.png"), fullPage: true })
   await page.getByRole("button", { name: "Reset demo" }).click()
   await expect(page.getByText("0/3 reviewed")).toBeVisible()
 
@@ -219,7 +669,7 @@ test("interactive demo reviews findings without API calls or mobile overflow", a
   expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
 })
 
-test("editorial hubs and articles work without auth on desktop and mobile", async ({ page, context }) => {
+test("editorial hubs and articles work without auth on desktop and mobile", async ({ page, context }, testInfo) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   const apiRequests: string[] = []
   page.on("request", (request) => {
@@ -233,6 +683,9 @@ test("editorial hubs and articles work without auth on desktop and mobile", asyn
   const hubHero = page.locator(".editorial-feature img")
   await expect(hubHero).toBeVisible()
   expect(await hubHero.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0)
+  await expect(page.locator(".editorial-latest-grid .editorial-story-card__image")).toHaveCount(4)
+  await expect(page.locator(".editorial-topics img")).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("blog-index-desktop.png"), fullPage: true })
 
   await page.goto("/blog/how-to-build-a-scene-list-for-novel-revision")
   await expect(page.getByRole("heading", { name: /how to build a scene list that actually helps you revise/i })).toBeVisible()
@@ -241,21 +694,25 @@ test("editorial hubs and articles work without auth on desktop and mobile", asyn
   await expect(page.locator('p[aria-live="polite"]')).toHaveText("Link copied")
   await page.getByRole("button", { name: "Switch to dark mode" }).click()
   await expect(page.locator("html")).toHaveClass(/dark/)
+  await page.screenshot({ path: testInfo.outputPath("blog-article-desktop.png"), fullPage: true })
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/answers")
   await expect(page.getByRole("heading", { name: /start with the question on your desk/i })).toBeVisible()
   await page.getByRole("searchbox", { name: "Search answers" }).fill("character arcs")
   await expect(page.getByRole("link", { name: /how do i track character arcs/i })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("answers-index-mobile.png"), fullPage: true })
 
   await page.goto("/answers/how-do-i-track-character-arcs")
   await expect(page.getByRole("heading", { name: /how do i track character arcs/i })).toBeVisible()
   await expect(page.getByText("Short answer", { exact: true })).toBeVisible()
+  await expect(page.locator(".editorial-hero")).toHaveCount(0)
   await expect(page.locator(".editorial-mobile-toc")).toBeVisible()
   await page.locator(".editorial-mobile-toc summary").click()
   await expect(page.locator('.editorial-mobile-toc a[href="#define-the-starting-logic"]')).toBeVisible()
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
   expect(mobileOverflow).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("answer-article-mobile.png"), fullPage: true })
 
   await page.goto("/demo/gregor-samsa-character-tracker")
   await expect(page.getByRole("heading", { name: /tracking gregor samsa/i })).toBeVisible()
@@ -264,8 +721,9 @@ test("editorial hubs and articles work without auth on desktop and mobile", asyn
   expect(consoleMessages.filter((message) => message.startsWith("[error]"))).toEqual([])
 })
 
-test("public forum surfaces reputation and writer profile details", async ({ page }) => {
+test("public forum surfaces reputation and writer profile details", async ({ page }, testInfo) => {
   await installMockApi(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/public/forum")
 
   await expect(page.getByRole("heading", { name: /beta novel rankings worth opening/i })).toBeVisible()
@@ -275,22 +733,28 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await page.locator("select").nth(1).selectOption("weekly")
   await expect(page.getByText("Top Rated Weekly").first()).toBeVisible()
   await expect(page.getByText("Showing 1-12 of 12 threads")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("public-forum-desktop.png"), fullPage: true })
   await page.getByRole("button", { name: "General discussion" }).click()
   await page.getByLabel(/general discussion headline/i).fill("How do you raise tension without chaos?")
   await page.getByLabel(/discussion body/i).fill("I want craft advice on building pressure in quiet scenes.")
   await page.getByRole("button", { name: "Open general thread" }).click()
   await expect(page).toHaveURL(/\/public\/forum\/forum-post-\d+$/)
 
-  await expect(page.getByRole("heading", { name: /how do you raise tension without chaos/i })).toBeVisible()
+  // The new mock post only exists in the browser process; use a seeded post for
+  // the server-rendered thread interaction that follows.
+  await page.goto("/public/forum/forum-post-1")
+  await expect(page.getByRole("heading", { name: /looking for sharp beta readers/i })).toBeVisible()
   await expect(page.getByRole("link", { name: /^library$/i })).toBeVisible()
   await page.getByLabel(/public comment/i).fill("Happy to review pacing and clarity.")
   await page.getByRole("button", { name: "Post comment" }).click()
   await expect(page.getByText("Happy to review pacing and clarity.")).toBeVisible()
   await page.getByRole("button", { name: "Reply" }).first().click()
-  await page.getByLabel(/reply to @author/i).fill("That is exactly the section I would start with too.")
+  await page.getByLabel(/^reply to @/i).fill("That is exactly the section I would start with too.")
   await page.getByRole("button", { name: "Post reply" }).click()
   await expect(page.getByText("That is exactly the section I would start with too.")).toBeVisible()
   await expect(page.getByRole("link", { name: "@author" }).first()).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("public-forum-thread-desktop.png"), fullPage: true })
   await page.goto("/public/writers/author")
 
   await expect(page.getByRole("heading", { name: "@author", exact: true })).toBeVisible()
@@ -299,10 +763,14 @@ test("public forum surfaces reputation and writer profile details", async ({ pag
   await expect(page.getByRole("button", { name: /Comments \(1\)/i })).toBeVisible()
   await page.getByRole("button", { name: /Comments \(1\)/i }).click()
   await expect(page.getByText(/how do you keep second acts from flattening out/i)).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("public-writer-mobile.png"), fullPage: true })
 })
 
-test("public uploads support ranking and window selection", async ({ page }) => {
+test("public uploads support ranking and window selection", async ({ page }, testInfo) => {
   await installMockApi(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/public/uploads")
 
   await expect(page.getByRole("heading", { name: /browse creator-published books from lorevia authors/i })).toBeVisible()
@@ -313,14 +781,25 @@ test("public uploads support ranking and window selection", async ({ page }) => 
   await page.getByLabel("Search creator-published books").fill("ash")
   await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
   await expect(page.getByText(/mock ranking feed for local smoke coverage/i).first()).toBeVisible()
+  await expect(page.getByTestId("creator-upload-list").locator("article")).toHaveCount(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("public-uploads-desktop.png"), fullPage: true })
+  await page.goto("/public/analytics")
+  await expect(page.getByRole("heading", { name: /see how creator-published books are surfacing/i })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("public-upload-analytics-mobile.png"), fullPage: true })
 })
 
-test("public library cross-links safe samples and writer trust", async ({ page }) => {
+test("public library cross-links safe samples and writer trust", async ({ page }, testInfo) => {
   await installMockApi(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/public")
 
   await expect(page.getByRole("heading", { name: /published work for focused reading/i })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
+  await expect(page.getByTestId("public-book-list").locator("article")).toHaveCount(1)
+  await page.screenshot({ path: testInfo.outputPath("public-library-desktop.png"), fullPage: true })
   const ashGateCard = page
     .locator("article")
     .filter({ has: page.getByRole("heading", { name: "Ash Gate Sample" }) })
@@ -343,10 +822,22 @@ test("public library cross-links safe samples and writer trust", async ({ page }
   await expect(page).toHaveURL(/\/public\/public-book-1$/)
   await expect(page.getByRole("heading", { name: "Ash Gate Sample" })).toBeVisible()
   await expect(page.getByRole("link", { name: "@author" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Start reading" })).toBeVisible()
+  await expect(page.getByTestId("public-book-activity")).not.toHaveAttribute("open", "")
+  await page.screenshot({ path: testInfo.outputPath("public-book-desktop.png"), fullPage: true })
+
+  await page.getByRole("link", { name: "Start reading" }).click()
+  await expect(page).toHaveURL(/\/public\/public-book-1\/chapter\/1$/)
+  await expect(page.getByRole("heading", { name: "The Gate Opens" })).toBeVisible()
+  await expect(page.getByTestId("public-chapter-reader")).toContainText("Ash Gate Sample")
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("public-chapter-mobile.png"), fullPage: true })
 })
 
-test("login surfaces an invalid-credentials error", async ({ page }) => {
+test("login surfaces an invalid-credentials error", async ({ page }, testInfo) => {
   await installMockApi(page, { session: "guest", login: "unauthorized" })
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/login")
 
   await page.getByLabel("Email", { exact: true }).fill("reader@example.com")
@@ -354,6 +845,16 @@ test("login surfaces an invalid-credentials error", async ({ page }) => {
   await page.getByRole("button", { name: /^sign in$/i }).click()
 
   await expect(page.getByText("Invalid email or password.")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("login-error-desktop.png"), fullPage: true })
+  await page.goto("/register")
+  await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("register-mobile.png"), fullPage: true })
+  await page.goto("/forgot-password")
+  await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
 })
 
 test("auth redirects protect private pages and skip login for active sessions", async ({ page }) => {
@@ -364,6 +865,63 @@ test("auth redirects protect private pages and skip login for active sessions", 
   await page.goto("/login")
   await expect(page).toHaveURL(/\/library$/)
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
+})
+
+test("checkout and confirmation keep a focused transaction shell", async ({ page }, testInfo) => {
+  await installMockApi(page, { session: "guest" })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/checkout")
+
+  await expect(page.getByRole("heading", { name: "Complete your secure checkout." })).toBeVisible()
+  await expect(page.getByRole("navigation")).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("checkout-desktop.png"), fullPage: true })
+
+  await page.goto("/checkout/success")
+  await expect(page.getByRole("heading", { name: "Your subscription checkout is complete." })).toBeVisible()
+  await expect(page.getByText(/missing transaction reference/i)).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("checkout-success-mobile.png"), fullPage: true })
+})
+
+test("legal and contact pages use a restrained prose shell", async ({ page }, testInfo) => {
+  await installMockApi(page, { session: "guest" })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/contact")
+
+  await expect(page.getByRole("heading", { name: "We're here to help." })).toBeVisible()
+  await expect(page.getByText("This page is operational, not decorative.")).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("contact-desktop.png"), fullPage: true })
+
+  await page.goto("/privacy")
+  await expect(page.getByRole("heading", { name: "Privacy Policy" })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("privacy-mobile.png"), fullPage: true })
+})
+
+test("system states present one clear recovery action", async ({ page }, testInfo) => {
+  await installMockApi(page, { session: "guest" })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/status")
+
+  await expect(page.getByRole("heading", { name: "No active incident is posted." })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Contact support" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("status-desktop.png"), fullPage: true })
+
+  await page.goto("/offline")
+  await expect(page.getByRole("heading", { name: "You are offline." })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("offline-mobile.png"), fullPage: true })
+
+  await page.goto("/unsubscribe")
+  await expect(page.getByRole("heading", { name: "We could not unsubscribe you" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Manage preferences" })).toBeVisible()
 })
 
 test("admin route returns 404 when the request is not allowed", async ({ page }) => {
@@ -399,8 +957,13 @@ test("admin session accepts owner admins in the E2E mock", async ({ page }) => {
   expect(response.body.scopes).toEqual(["moderation_admin", "billing_admin", "super_admin"])
 })
 
-test("admin route loads the operations console for owner admins", async ({ page }) => {
+test("admin route loads scoped table-first work areas for owner admins", async ({ page }, testInfo) => {
   await installMockApi(page, { admin: "owner" })
+  const adminRequests: string[] = []
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname
+    if (pathname.startsWith("/api/v1/admin/") && request.method() === "GET") adminRequests.push(pathname)
+  })
   await page.route("**/api/v1/admin/session", async (route) => {
     await route.fulfill({
       status: 200,
@@ -446,31 +1009,235 @@ test("admin route loads the operations console for owner admins", async ({ page 
       sameSite: "Lax",
     },
   ])
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto(`/admin?e2e=${Date.now()}`)
 
   await expect(page.getByRole("heading", { name: "Operations Console" })).toBeVisible()
-  await expect(page.getByText("Billing setup")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Platform Overview" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Moderation" })).toHaveCount(0)
+  await expect.poll(() => adminRequests).toContain("/api/v1/admin/metrics")
+  expect(adminRequests).not.toContain("/api/v1/admin/billing/status")
+  expect(adminRequests).not.toContain("/api/v1/admin/public-shares/pending")
+  await page.screenshot({ path: testInfo.outputPath("admin-overview-desktop.png"), fullPage: true })
+
+  await page.getByRole("button", { name: "Moderation", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Moderation" })).toBeVisible()
+  await expect(page.getByRole("table")).toHaveCount(2)
+  await expect.poll(() => adminRequests).toContain("/api/v1/admin/public-shares/pending")
+  expect(adminRequests).not.toContain("/api/v1/admin/billing/status")
+  await page.screenshot({ path: testInfo.outputPath("admin-moderation-desktop.png"), fullPage: true })
+
+  await page.getByRole("button", { name: "Billing", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Refunds" })).toBeVisible()
+  await expect(page.getByText(/Billing configuration/)).toBeVisible()
+
+  await page.getByRole("button", { name: "Reliability", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Rate Limits" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Reliability and Unit Economics" })).toBeVisible()
+
+  await page.getByRole("button", { name: "Access & audit", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Admin Access" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible()
+  await expect(page.getByRole("table")).toHaveCount(2)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("admin-access-mobile.png"), fullPage: true })
 })
 
 test("library renders a mocked project and opens the upload modal", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
   await page.goto("/library")
 
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
   await expect(page.getByTestId("first-manuscript-hero")).toHaveCount(0)
+  await expect(page.getByRole("searchbox", { name: "Search projects" })).toBeVisible()
+  await expect(page.getByText("Next best action")).toHaveCount(0)
+  await expect(page.getByText("Recent activity")).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Open Sky of Ash" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("library-desktop.png"), fullPage: true })
   await page.keyboard.press("Control+K")
   await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible()
   await page.getByLabel("Search commands").fill("manuscript")
   await expect(page.getByRole("option", { name: /manuscript editor: sky of ash/i })).toBeVisible()
   await page.keyboard.press("Escape")
 
-  await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
   await page.getByRole("button", { name: /^new project$/i }).click()
   await expect(page.getByRole("dialog", { name: "Upload manuscript" })).toBeVisible()
+  await page.getByRole("button", { name: "Close upload modal" }).click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/library")
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("library-mobile.png"), fullPage: true })
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("account notes and quotes use compact searchable rows", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+
+  await page.goto("/notes")
+  await expect(page.getByRole("heading", { name: "Notes", exact: true })).toBeVisible()
+  await expect(page.getByText("Gate oath continuity")).toBeVisible()
+  await expect(page.getByText("Visible notes")).toHaveCount(0)
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("silver key")
+  await expect(page.getByText("Gate oath continuity")).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("account-notes-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/quotes")
+  await expect(page.getByRole("heading", { name: "Quotes", exact: true })).toBeVisible()
+  await expect(page.getByText("The gate remembers every oath.")).toBeVisible()
+  await expect(page.getByText("Visible quotes")).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("account-quotes-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("writing stats keeps one trend, one progress summary, and a compact breakdown", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.goto("/stats")
+
+  await expect(page.getByRole("heading", { name: "Writing progress" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Heatmap of saved writing" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Progress summary" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Breakdown" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Entries today" })).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath("writing-stats-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/stats")
+  await expect(page.getByRole("heading", { name: "Writing progress" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("writing-stats-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled|Hydration failed/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("series management uses one selected detail and a contextual Ask workspace", async ({ page }) => {
+  const requestedSeriesAnalysis: string[] = []
+  await installMockApi(page, { seriesBooks: true })
+  page.on("request", (request) => {
+    if (request.url().includes("/world-building/series-analysis")) requestedSeriesAnalysis.push(request.url())
+  })
+
+  await page.goto("/series")
+  await page.getByRole("button", { name: /decline cookies|not now/i }).click({ timeout: 5000 }).catch(() => {})
+  await expect(page.getByRole("heading", { name: "Series management" })).toBeVisible()
+  await expect(page.getByRole("complementary", { name: "Series list" })).toContainText("Ash Cycle")
+  await expect(page.getByRole("complementary", { name: "Series list" })).toContainText("North Road")
+  await expect(page.getByRole("region", { name: "Selected series details" })).toContainText("Sky of Ash")
+  await expect(page.getByRole("region", { name: "Selected series details" })).toContainText("Embers Beyond the Gate")
+  expect(requestedSeriesAnalysis).toHaveLength(0)
+
+  await page.getByRole("button", { name: "World analysis" }).click()
+  await expect(page.getByText("Ash Gate")).toBeVisible()
+  expect(requestedSeriesAnalysis).toHaveLength(1)
+  await page.screenshot({ path: test.info().outputPath("series-master-detail-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("combobox", { name: "Selected series" })).toBeVisible()
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).resolves.toBe(true)
+  await page.screenshot({ path: test.info().outputPath("series-master-detail-mobile.png"), fullPage: true })
+
+  await page.getByRole("link", { name: "Ask about this series" }).click()
+  await expect(page.getByRole("heading", { name: "Ask about Ash Cycle" })).toBeVisible()
+  await expect(page.getByText("Series Ask · 2 projects")).toBeVisible()
+  await page.getByText("Suggested questions", { exact: true }).click()
+  await page.getByRole("button", { name: "Which character changes most across the series?" }).click()
+  await expect(page.getByText(/Nora changes most across the series/)).toBeVisible()
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).resolves.toBe(true)
+  await page.screenshot({ path: test.info().outputPath("series-ask-mobile.png"), fullPage: true })
+})
+
+test("messages uses a deferred two-pane conversation layout with mobile drill-in", async ({ page }) => {
+  const messageRequests: string[] = []
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  page.on("request", (request) => {
+    if (request.url().includes("/social/conversations/conversation-1/messages/page")) messageRequests.push(request.url())
+  })
+
+  await page.goto("/chats")
+  await expect(page.getByRole("heading", { name: "Messages" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /@theo/i })).toBeVisible()
+  await expect(page.getByText(/select a conversation to read and reply/i)).toBeVisible()
+  expect(messageRequests).toHaveLength(0)
+
+  await page.getByRole("button", { name: /@theo/i }).click()
+  await expect(page.getByText("Can you read chapter two?", { exact: true }).last()).toBeVisible()
+  await expect.poll(() => messageRequests.length).toBe(1)
+  await page.getByRole("textbox", { name: "Message", exact: true }).fill("I’ll send line notes after dinner.")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page.getByText("I’ll send line notes after dinner.")).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("messages-two-pane-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/chats")
+  await expect(page.getByRole("button", { name: /@theo/i })).toBeVisible()
+  await expect(page.getByText(/select a conversation to read and reply/i)).toBeHidden()
+  await page.screenshot({ path: test.info().outputPath("messages-list-mobile.png"), fullPage: true })
+  await page.getByRole("button", { name: /@theo/i }).click()
+  await expect(page.getByRole("button", { name: "Back", exact: true })).toBeVisible()
+  await expect(page.getByText("Can you read chapter two?", { exact: true }).last()).toBeVisible()
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).resolves.toBe(true)
+  await page.screenshot({ path: test.info().outputPath("messages-thread-mobile.png"), fullPage: true })
+})
+
+test("notifications uses chronological rows with restrained unread emphasis", async ({ page }) => {
+  const revisionRequests: string[] = []
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  page.on("request", (request) => {
+    if (request.url().includes("/revision-intelligence")) revisionRequests.push(request.url())
+  })
+
+  await page.goto("/notifications")
+  await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible()
+  await expect(page.getByText("1 unread update")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "2 revision risks surfaced in Sky of Ash" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Sky of Ash is ready" })).toBeVisible()
+  await expect(page.locator('span[aria-label="Unread"]')).toHaveCount(1)
+  expect(revisionRequests).toHaveLength(0)
+
+  await page.getByRole("button", { name: "View details" }).first().click()
+  await expect(page.getByRole("heading", { name: "Revision Details" })).toBeVisible()
+  await expect(page.getByText("Chapter 2 assumption may break later payoff").last()).toBeVisible()
+  await expect.poll(() => revisionRequests.length).toBe(1)
+  await page.screenshot({ path: test.info().outputPath("notifications-rows-desktop.png"), fullPage: true })
+
+  await page.getByRole("button", { name: "Mark read", exact: true }).click()
+  await expect(page.getByText("You’re up to date")).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => {
+    document.documentElement.scrollLeft = 0
+    document.body.scrollLeft = 0
+    window.scrollTo(0, 0)
+  })
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).resolves.toBe(true)
+  await page.screenshot({ path: test.info().outputPath("notifications-rows-mobile.png"), fullPage: true })
 })
 
 test("help stays clear of profile and mobile actions while support input keeps question marks", async ({ page }) => {
@@ -498,7 +1265,7 @@ test("help stays clear of profile and mobile actions while support input keeps q
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()
   const mobileHelp = page.getByRole("button", { name: "Help", exact: true })
-  const mobileActions = page.getByRole("navigation", { name: "Primary actions" })
+  const mobileActions = page.getByRole("button", { name: "Open navigation" })
   await expect(mobileHelp).toBeVisible()
   await expect(mobileActions).toBeVisible()
   const mobileBoxes = await Promise.all([mobileHelp.boundingBox(), mobileActions.boundingBox()])
@@ -525,7 +1292,9 @@ test("settings page updates the public username", async ({ page }) => {
   const usernameInput = page.locator('input[autocomplete="username"]')
   await expect(usernameInput).toHaveValue("author")
   await usernameInput.fill("storysmith")
-  await page.getByRole("button", { name: /change username/i }).click()
+  const changeUsernameButton = page.getByRole("button", { name: /change username/i })
+  await changeUsernameButton.focus()
+  await page.keyboard.press("Enter")
 
   await expect(page.getByText("Public username updated.")).toBeVisible()
   await expect(page.locator("#identity").getByText("@storysmith")).toBeVisible()
@@ -550,7 +1319,7 @@ test("email unsubscribe link suppresses promotional email", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "You are unsubscribed" })).toBeVisible()
   await expect(page.getByText("author@getlorevia.com")).toBeVisible()
   await expect(page.getByText(/product updates or marketing emails/i)).toBeVisible()
-  await expect(page.getByRole("link", { name: "Manage preferences" })).toHaveAttribute("href", "/settings#emails")
+  await expect(page.getByRole("link", { name: "Return to LoreVia" })).toHaveAttribute("href", "/")
 })
 
 test("settings data export triggers a download request", async ({ page }) => {
@@ -573,6 +1342,10 @@ test("settings account deletion requires confirmation and redirects to login", a
   await expect(page.getByRole("button", { name: "Delete account" })).toBeDisabled()
   await page.getByLabel("Type DELETE MY ACCOUNT").fill("DELETE MY ACCOUNT")
   await page.getByLabel("Current password").fill("StrongPass123!@#")
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.isVisible().catch(() => false)) {
+    await dismissCookies.click()
+  }
   await page.getByRole("button", { name: "Delete account" }).click()
 
   await expect(page).toHaveURL(/\/login$/)
@@ -594,6 +1367,26 @@ test("settings sidebar follows the current section while scrolling", async ({ pa
   })
   await page.evaluate(() => window.dispatchEvent(new Event("scroll")))
   await expect(page.getByRole("link", { name: "Session" })).toHaveAttribute("aria-current", "location")
+})
+
+test("settings uses one scannable form surface with explicit workspace controls", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto("/settings")
+
+  await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible()
+  await expect(page.getByPlaceholder(/Search account, visibility/i)).toBeVisible()
+  await expect(page.locator(".settings-summary-grid")).toHaveCount(0)
+  await expect(page.locator(".settings-stack")).toHaveCount(1)
+  await expect(page.locator("#workspace").getByRole("button", { name: "Hide from workspace" }).first()).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => {
+    document.documentElement.scrollLeft = 0
+    document.body.scrollLeft = 0
+    window.scrollTo(0, 0)
+  })
+  await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
 })
 
 test("library permanent book deletion requires confirmation and removes the project", async ({ page }) => {
@@ -622,36 +1415,58 @@ test("author uploads default the manuscript byline from the public username", as
   await expect(page.getByText("different pen name or byline")).toBeVisible()
 })
 
-test("beta reads page shows active and missed assignments without reader analysis tools", async ({ page }) => {
+test("beta reads separates assigned, in-progress, and completed work without eager detail requests", async ({ page }) => {
+  const detailRequests: string[] = []
   await installMockApi(page)
+  page.on("request", (request) => {
+    if (/\/api\/v1\/beta-reads\/beta-[^/]+$/.test(new URL(request.url()).pathname)) detailRequests.push(request.url())
+  })
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
   await page.goto("/beta-reads")
 
-  await expect(page.getByRole("heading", { name: "Upcoming Beta Reads" })).toBeVisible()
-  await expect(page.getByText("Track assigned beta reads, deadlines, and review requirements from one place.")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Reading assignments" })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "In progress" })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByText("Chapter 12 feedback")).toBeVisible()
   await expect(page.getByText("The Lost Heir")).toBeVisible()
-  await expect(page.getByRole("button", { name: /^submit feedback$/i }).first()).toBeVisible()
-  await expect(page.getByText(/story health|continuity scan|plot analysis|character analysis|ai story advisor/i)).toHaveCount(0)
+  expect(detailRequests).toHaveLength(0)
 
-  await page.getByRole("button", { name: "Missed" }).click()
+  await page.getByRole("button", { name: "View details" }).first().click()
+  await expect(page.getByRole("heading", { name: "Author questions" })).toBeVisible()
+  await expect.poll(() => detailRequests.length).toBe(1)
+  await expect(page.getByText(/story health|continuity scan|plot analysis|character analysis|ai story advisor/i)).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath("beta-reads-in-progress-desktop.png"), fullPage: true })
+
+  await page.getByRole("tab", { name: "Assigned" }).click()
+  await expect(page.getByText("Skyward Hollow")).toBeVisible()
+  await expect(page.getByText("Review Chapter 3")).toBeVisible()
+
+  await page.getByRole("tab", { name: "Completed" }).click()
+  await expect(page.getByText("The Glass Orchard")).toBeVisible()
   await expect(page.getByText("Act two beta read")).toBeVisible()
-  await expect(page.getByText("Counted toward your consecutive missed beta reads")).toBeVisible()
+  await page.getByRole("button", { name: "View details" }).last().click()
+  await expect(page.getByText(/missed 2 beta reads in a row/i)).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("tab", { name: "Completed" })).toBeVisible()
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).resolves.toBe(true)
+  await page.screenshot({ path: test.info().outputPath("beta-reads-completed-mobile.png"), fullPage: true })
 })
 
-test("stats page shows the writing dashboard and todays entries", async ({ page }) => {
+test("stats page shows one writing trend, progress summary, and compact breakdown", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/stats")
 
-  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  const dismissCookies = page.getByRole("button", { name: /decline cookies|not now/i })
   await dismissCookies.click({ timeout: 5000 }).catch(() => {})
 
-  await expect(page.getByRole("heading", { name: "Writing momentum, not just account totals." })).toBeVisible()
-  await page.getByText("This Week", { exact: true }).first().scrollIntoViewIfNeeded()
-  await expect(page.getByText("1,202 words")).toBeVisible()
-  await expect(page.getByText(/2,565/).first()).toBeVisible()
-  await expect(page.getByText("Chapter XXXVI")).toBeVisible()
-  await expect(page.getByText("+763 words")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Writing progress" })).toBeVisible()
   await expect(page.getByText("Heatmap of saved writing")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Progress summary" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Breakdown" })).toBeVisible()
+  await expect(page.getByText("This Week", { exact: true })).toBeVisible()
+  await expect(page.getByText("Upload units used")).toBeVisible()
 })
 
 test("book overview opens the manuscript editor", async ({ page }) => {
@@ -659,23 +1474,14 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await page.goto(BOOK_ROUTE)
 
   await expect(page.getByText("Open Manuscript Editor")).toBeVisible()
-  await expect(page.getByText("Your author command center.")).toBeVisible()
-  await expect(page.getByRole("button", { name: /create revision checklist/i })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Book overview" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Revision pressure at a glance." })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Create checklist" })).toBeVisible()
 
-  const sidebarRail = page.locator('[data-testid="author-tools-nav-rail"]')
-  await expect(sidebarRail).toBeVisible()
-  await sidebarRail.hover()
-  await expect(sidebarRail.locator('[data-testid="author-nav-helper-overview"]')).toContainText("See progress, next steps, and the latest signals around this book.")
-  await sidebarRail.getByRole("button", { name: "Show advanced tools" }).click()
-  await expect(sidebarRail.locator('[data-testid="author-nav-item-scenes"]')).toContainText("Scene Workspace")
-  await expect(sidebarRail.locator('[data-testid="author-nav-item-notes"]')).toContainText("Notes Workspace")
-  await expect.poll(async () => {
-    return sidebarRail.evaluate((rail) => {
-      const scenes = rail.querySelector('[data-testid="author-nav-item-scenes"]')
-      const notes = rail.querySelector('[data-testid="author-nav-item-notes"]')
-      return Boolean(scenes && notes && scenes.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING)
-    })
-  }).toBe(true)
+  const workspaceBar = page.locator('[data-testid="author-tools-nav-bar"]')
+  await expect(workspaceBar).toBeVisible()
+  await expect(workspaceBar.getByRole("link", { name: "Scene Workspace" })).toBeVisible()
+  await expect(workspaceBar.getByRole("link", { name: "Notes Workspace" })).toBeVisible()
 
   const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
@@ -685,8 +1491,8 @@ test("book overview opens the manuscript editor", async ({ page }) => {
   await page.getByRole("button", { name: /open manuscript editor/i }).click()
 
   await expect(page).toHaveURL(/\/(?:[^/]+--)?book-1\/manuscript$/, { timeout: 15000 })
-  await expect(page.getByText("Story manuscript")).toBeVisible()
-  await expect(page.getByText("Manuscript progress")).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Write" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("textbox", { name: "Chapter title" })).toBeVisible()
 })
 
 test("analysis-complete overview starts with the supportive first read before critique", async ({ page }) => {
@@ -809,12 +1615,31 @@ test("expired free owners are redirected away from author-only book routes", asy
 })
 
 test("export studio saves a novel preface and downloads a novel export", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const writerWorkspaceRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/books/book-1/writer-workspace") && request.method() === "GET") {
+      writerWorkspaceRequests.push(request.url())
+    }
+  })
   await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
   await page.goto(`${BOOK_ROUTE}/export`)
 
+  await expect(page.getByRole("heading", { name: "Files & Export" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Export a manuscript" })).toBeVisible()
+  expect(writerWorkspaceRequests).toEqual([])
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: test.info().outputPath("files-export-desktop.png"), fullPage: true })
+
+  await page.getByRole("tab", { name: /Reader edition Publication files/ }).click()
   const novelCard = page.getByTestId("novel-export-card")
   await expect(novelCard.getByText("Novel export")).toBeVisible()
+  await expect.poll(() => writerWorkspaceRequests.length).toBe(1)
   await expect(novelCard.getByLabel("Preface")).toHaveValue("A short note before the ash gates open.")
+  await novelCard.getByText("Publishing details", { exact: true }).click()
   await novelCard.getByLabel("Preface").fill("A new preface for early readers.")
   await novelCard.getByLabel("Dedication").fill("For the first readers.")
   await novelCard.getByLabel("Publisher").fill("LoreVia Press")
@@ -829,6 +1654,49 @@ test("export studio saves a novel preface and downloads a novel export", async (
 
   expect(download.suggestedFilename()).toBe("Sky-of-Ash-novel-preview.epub")
   await expect(page.getByText("Downloaded first 2-chapter sample as EPUB.")).toBeVisible()
+
+  await novelCard.getByText("Publishing details", { exact: true }).click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("files-export-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("access and visibility separates sharing status from navigation recovery", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.goto(`${BOOK_ROUTE}/visibility`)
+
+  await expect(page.getByRole("heading", { name: "Access & Visibility" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Private workspace" })).toBeVisible()
+  await expect(page.getByText("Not public", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Manage collaborators" })).toBeVisible()
+  await expect(page.getByText("Hidden and visible tools")).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath("access-visibility-desktop.png"), fullPage: true })
+
+  await page.getByText("Advanced: workspace navigation", { exact: true }).click()
+  await expect(page.getByText("Hidden and visible tools")).toBeVisible()
+  await expect(page.getByText("This does not change who can access the book.")).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("access-visibility-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("book compliance opens the global legal context", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto(`${BOOK_ROUTE}/compliance`)
+
+  await expect(page).toHaveURL(/\/compliance$/)
+  await expect(page.getByRole("heading", { name: "Security & Compliance" })).toBeVisible()
 })
 
 test("book overview shows the nav panel on mobile", async ({ page }) => {
@@ -836,10 +1704,10 @@ test("book overview shows the nav panel on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(BOOK_ROUTE)
 
-  const mobileNavPanel = page.locator('[data-testid="author-tools-nav-panel"]')
-  await expect(mobileNavPanel).toBeVisible()
-  await expect(mobileNavPanel.locator('[data-testid="author-nav-item-overview"]')).toContainText("Overview")
-  await expect(mobileNavPanel.locator('[data-testid="author-nav-item-read"]')).toContainText("Preview Draft")
+  const mobileNav = page.getByRole("navigation", { name: "Book workspace" })
+  await expect(mobileNav).toBeVisible()
+  await expect(mobileNav.getByRole("link", { name: "Overview" })).toBeVisible()
+  await expect(mobileNav.getByRole("link", { name: "Preview Draft" })).toBeVisible()
 })
 
 test("book overview keeps world-gap issue language constructive", async ({ page }) => {
@@ -853,10 +1721,15 @@ test("notifications surface revision digest guidance", async ({ page }) => {
   await installMockApi(page)
   await page.goto("/notifications")
 
-  await expect(page.getByRole("heading", { name: "Updates from your writing workspace" })).toBeVisible()
-  await expect(page.getByText("Know what your edit breaks before your readers do.")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible()
+  await expect(page.getByText("1 unread update")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "2 revision risks surfaced in Sky of Ash" })).toBeVisible()
+  await expect(page.getByText(/2 downstream logic risks need attention first\. Top issue:/)).toBeVisible()
+  const revisionNotification = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "2 revision risks surfaced in Sky of Ash" }) })
+  await revisionNotification.getByRole("button", { name: "View details" }).click()
+  await expect(page.getByRole("heading", { name: "Revision Details" })).toBeVisible()
   await expect(page.getByText("2 downstream logic risks need attention first.", { exact: true })).toBeVisible()
-  await expect(page.getByRole("link", { name: /open revision command center/i })).toBeVisible()
+  await expect(revisionNotification.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", "/book-1")
   await expect(page.getByRole("button", { name: /toggle notifications, 1 unread/i })).toBeVisible()
 
   await page.getByRole("button", { name: "Mark read" }).click()
@@ -870,7 +1743,10 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/manuscript`)
 
-  await expect(page.getByRole("heading", { name: "Sky of Ash" }).first()).toBeVisible()
+  await expect(page.getByRole("button", { name: /Sky of Ash/ }).first()).toBeVisible()
+  await expect(page.getByLabel("Search chapters")).toHaveCount(0)
+  await expect(page.getByRole("tablist", { name: "Writing context panels" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
   await expect(page.getByLabel("Search chapters")).toBeVisible()
   await expect(page.getByRole("link", { name: /open workspace/i })).toBeVisible()
   const workspaceModes = page.getByRole("tablist", { name: "Manuscript workspace modes" })
@@ -879,6 +1755,7 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await expect(workspaceModes.getByRole("tab", { name: "Analysis" })).toBeVisible()
   await expect(workspaceModes.getByRole("tab", { name: "Characters" })).toHaveCount(0)
   await expect(page.getByText(/^Gate Crossing$/)).toBeVisible()
+  await page.getByRole("button", { name: "Inspector", exact: true }).click()
   const writingContextPanels = page.getByRole("tablist", { name: "Writing context panels" })
   await expect(writingContextPanels.getByRole("tab", { name: "Context" })).toBeVisible()
   await expect(page.getByText("Who opened the gate?", { exact: true })).toBeVisible()
@@ -902,9 +1779,38 @@ test("manuscript workspace loads core drafting surfaces", async ({ page }) => {
   await expect(analysisPanels.getByRole("tab", { name: "Characters" })).toBeVisible()
 })
 
+test("manuscript keeps outline and inspector contextual on desktop and mobile", async ({ page }, testInfo) => {
+  await installMockApi(page)
+  await page.context().addCookies([{ name: "lorevia_analytics_consent", value: "false", domain: "localhost", path: "/" }])
+  await page.goto(`${BOOK_ROUTE}/manuscript`)
+
+  const outlineButton = page.getByRole("button", { name: "Outline", exact: true })
+  const inspectorButton = page.getByRole("button", { name: "Inspector", exact: true })
+  await expect(outlineButton).toHaveAttribute("aria-pressed", "false")
+  await expect(inspectorButton).toHaveAttribute("aria-pressed", "false")
+  await page.screenshot({ path: testInfo.outputPath("manuscript-focused-desktop.png"), fullPage: true })
+  await inspectorButton.click()
+  await expect(page.getByRole("tablist", { name: "Writing context panels" })).toBeVisible()
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: testInfo.outputPath("manuscript-inspector-desktop.png"), fullPage: true })
+  await inspectorButton.click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
+  await expect(page.getByText("Manuscript outline", { exact: true })).toBeVisible()
+  await page.getByText("Manuscript outline", { exact: true }).locator("..").getByRole("button", { name: "Close" }).click()
+  await page.getByRole("button", { name: "Inspector", exact: true }).click()
+  await expect(page.getByText("Writing inspector", { exact: true })).toBeVisible()
+  await page.getByText("Writing inspector", { exact: true }).locator("..").getByRole("button", { name: "Close" }).click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath("manuscript-focused-mobile.png"), fullPage: true })
+})
+
 test("manuscript scene metadata insertion requires confirmation", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/manuscript`)
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
 
   const insertMetadata = page.getByLabel("Insert metadata")
   await expect(insertMetadata).not.toBeChecked()
@@ -932,6 +1838,7 @@ test("manuscript workspace removes a chapter from the editor rail", async ({ pag
   })
 
   await page.goto(`${BOOK_ROUTE}/manuscript`)
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
   const removeChapterButton = page.getByRole("button", { name: "Remove Chapter 2" })
   await expect(removeChapterButton).toBeVisible()
 
@@ -1006,7 +1913,6 @@ test("manuscript processing state refreshes back into a reprocess action", async
 
   await page.goto(`${BOOK_ROUTE}/manuscript`)
 
-  await expect(page.getByRole("button", { name: "Processing 53% ~3min left" })).toBeDisabled()
   await expect(page.getByRole("button", { name: "Reprocess manuscript" })).toBeEnabled({ timeout: 8000 })
 })
 
@@ -1053,12 +1959,16 @@ test("manual chapter reprocess marks saved edits pending and starts without uplo
 
   await page.goto(`${BOOK_ROUTE}/manuscript`)
 
+  const manuscriptHeader = page.getByRole("banner").filter({ has: page.getByTestId("manuscript-home-link") })
+  await manuscriptHeader.getByText("More", { exact: true }).click()
   const autoReprocessToggle = page.getByLabel("Auto reprocess edits")
   await expect(autoReprocessToggle).toBeChecked()
   await autoReprocessToggle.click()
   await expect(autoReprocessToggle).not.toBeChecked()
+  await manuscriptHeader.getByText("More", { exact: true }).click()
   await expect(page.getByText("Turning this off stops LoreVia from reprocessing saved edits automatically. To update story memory, open each edited chapter and click Reprocess. This adds extra steps, but can reduce token usage.")).toBeVisible()
 
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
   await page.getByRole("button", { name: /Chapter 1 Ashfall/ }).click()
   await page.locator('[contenteditable="true"]').first().fill("A new sentence for the saved chapter.")
   await page.getByRole("button", { name: "Save now" }).click()
@@ -1125,6 +2035,7 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
     await dismissCookies.click()
   }
 
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
   const sceneCards = page.locator("[data-scene-id]")
   await expect(sceneCards).toHaveCount(2)
   const firstSceneCopy = page.getByTestId("scene-copy-scene-1")
@@ -1155,6 +2066,7 @@ test("manuscript workspace reorders chapter scenes within the sidebar", async ({
 test("manuscript workspace surfaces chapter annotations in the notes rail", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/manuscript`)
+  await page.getByRole("button", { name: "Outline", exact: true }).click()
   await page.getByRole("button", { name: /Chapter 2 The Ember Gate/i }).click()
   await expect(page.locator('[data-editor-key="chapter-2"]')).toBeVisible()
 
@@ -1172,49 +2084,110 @@ test("manuscript workspace surfaces chapter annotations in the notes rail", asyn
 })
 
 test("collaboration workspace creates a story-scoped share", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const activityRequests: string[] = []
+  page.on("request", (request) => {
+    if (/\/collaborators\/[^/]+\/activity/.test(request.url())) activityRequests.push(request.url())
+  })
   await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
   await page.goto(`${BOOK_ROUTE}/collaboration`)
 
-  await expect(page.getByRole("heading", { name: /collaborators$/i })).toBeVisible()
-  await expect(page.getByRole("combobox")).toHaveValue("beta_reader")
-  await expect(page.getByText("Feedback-focused role for reader response.")).toBeVisible()
-  await expect(page.getByText("Can edit manuscript")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Collaborators" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "People with access" })).toBeVisible()
+  expect(activityRequests).toEqual([])
 
   const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
   if (await dismissCookies.isVisible().catch(() => false)) {
     await dismissCookies.click()
   }
 
+  await page.getByRole("button", { name: "Invite collaborator" }).click()
+  await expect(page.getByRole("combobox", { name: "Role", exact: true })).toHaveValue("commenter")
+  await expect(page.getByText("Can read and leave notes without editing.")).toBeVisible()
+
   const emailField = page.getByLabel("Email", { exact: true })
-  const nameField = page.getByLabel("Display name", { exact: true })
+  const nameField = page.getByLabel(/^Display name/)
   await nameField.fill("Dev Editor")
-  await page.getByLabel("Role", { exact: true }).selectOption("developmental_editor")
-  await expect(page.getByText("Structure, continuity, and arc partner.")).toBeVisible()
-  const selectedChaptersOnly = page.getByLabel("Can view selected chapters only")
-  await selectedChaptersOnly.uncheck()
+  await page.getByRole("combobox", { name: "Role" }).selectOption("developmental_editor")
+  await expect(page.getByText("Can edit structure, continuity, and story arcs.")).toBeVisible()
+  await page.getByText("Advanced permissions and scope").click()
+  const selectedChaptersOnly = page.getByLabel("Limit to selected chapters")
   await expect(selectedChaptersOnly).not.toBeChecked()
   await expect(emailField).toBeEnabled()
   await emailField.fill("editor@example.com")
   await expect(emailField).toHaveValue("editor@example.com")
-  await expect(page.getByRole("button", { name: /save share/i })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Grant access", exact: true })).toBeEnabled()
   
   // Wait for the save request to complete
   const savePromise = page.waitForResponse(response => 
     response.url().includes('/collaborators') && response.request().method() === 'POST'
   )
-  await page.getByRole("button", { name: /save share/i }).click()
+  await page.getByRole("button", { name: "Grant access", exact: true }).click()
   await savePromise
 
-  await expect(page.getByText("Share saved.")).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText("Access granted.")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Dev Editor")).toBeVisible()
-  await expect(page.getByText("edit manuscript / story bible / AI scans / export / comment", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("Edit · Story bible · Reviews · Export · Comments", { exact: true }).first()).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("collaborators-desktop.png"), fullPage: true })
+
+  await page.getByRole("button", { name: "View activity" }).first().click()
+  await expect(page.getByText("Recent collaboration activity")).toBeVisible()
+  await expect.poll(() => activityRequests.length).toBeGreaterThan(0)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("collaborators-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("beta feedback shows assignments before intent-loaded responses", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const detailRequests: string[] = []
+  const readerQueueRequests: string[] = []
+  page.on("request", (request) => {
+    const url = request.url()
+    if (/\/books\/[^/]+\/beta-reads\/[^/?]+$/.test(url)) detailRequests.push(url)
+    if (/\/api\/v1\/beta-reads(?:\?|$)/.test(url)) readerQueueRequests.push(url)
+  })
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.goto(`${BOOK_ROUTE}/beta-feedback`)
+
+  await expect(page.getByRole("heading", { name: "Beta feedback" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Assignments" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "New assignment" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Create beta read" })).toHaveCount(0)
+  expect(detailRequests).toEqual([])
+  expect(readerQueueRequests).toEqual([])
+
+  await page.getByRole("button", { name: /reader@example.com chapter 12 feedback/i }).click()
+  await expect(page.getByText("Selected assignment")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Responses" })).toBeVisible()
+  await expect(page.getByText("The setup is strong, but the reveal takes one paragraph too long.")).toBeVisible()
+  expect(detailRequests.length).toBeGreaterThan(0)
+  await page.screenshot({ path: test.info().outputPath("beta-feedback-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("beta-feedback-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
 })
 
 test("reader published layout applies book typography without mobile overflow", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/chapter/2`)
 
-  await expect(page.getByRole("button", { name: "Published" })).toHaveAttribute("aria-pressed", "true")
+  await page.getByRole("button", { name: "Text", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Use published reading mode" })).toHaveAttribute("aria-pressed", "true")
   await expect(page.locator(".book-layout__body")).toBeVisible()
 
   const firstParagraph = page.locator(".book-block--paragraph").nth(0)
@@ -1286,7 +2259,8 @@ test("character review surfaces unresolved relationship candidates in duplicate 
 
   await page.goto(`${BOOK_ROUTE}/characters`)
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
-  await page.getByRole("button", { name: /^Review duplicates$/i }).click()
+  await page.getByRole("button", { name: "Open menu" }).first().click()
+  await page.getByRole("button", { name: "Review duplicate suggestions" }).click()
   await expect(page.getByText("Relationship review")).toBeVisible()
   await expect(page.getByText("Grete <-> Gregor's father")).toBeVisible()
 
@@ -1312,36 +2286,178 @@ test("character bible follows the persisted dark theme", async ({ page }) => {
   await page.goto(`${BOOK_ROUTE}/characters`)
 
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
-  const characterBibleShell = page.locator("xpath=//div[contains(@class, 'bg-[#11191a]') and contains(@class, 'text-slate-100')]").first()
-  await expect(characterBibleShell).toBeVisible()
+  const characterBibleShell = page.locator("[data-character-workspace]")
+  await expect(characterBibleShell).toHaveClass(/bg-\[#11191a\]/)
+})
+
+test("character bible keeps the roster compact and details on demand", async ({ page }) => {
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`${BOOK_ROUTE}/characters`)
+  const dismissCookies = page.getByRole("button", { name: /decline cookies|not now/i })
+  if (await dismissCookies.isVisible().catch(() => false)) await dismissCookies.click()
+
+  await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
+  await expect(page.getByText("Gregor", { exact: true }).first()).toBeVisible()
+  const detailsButton = page.getByRole("button", { name: "Details", exact: true })
+  await expect(detailsButton).toHaveAttribute("aria-expanded", "false")
+  await page.screenshot({ path: test.info().outputPath("characters-profile-desktop.png"), fullPage: true })
+
+  await detailsButton.click()
+  await expect(detailsButton).toHaveAttribute("aria-expanded", "true")
+  await expect(page.getByRole("tab", { name: "Insights" })).toBeVisible()
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: test.info().outputPath("characters-details-desktop.png"), fullPage: true })
+  await detailsButton.click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const castButton = page.getByRole("button", { name: "Cast", exact: true })
+  await expect(castButton).toBeVisible()
+  await castButton.click()
+  await expect(page.getByText("Character roster", { exact: true })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("characters-roster-mobile.png"), fullPage: true })
+  await page.getByRole("button", { name: "Close", exact: true }).click()
+
+  await detailsButton.click()
+  await expect(page.getByText("Character details", { exact: true })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("characters-details-mobile.png"), fullPage: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
 })
 
 test("world gap workspace surfaces consistency flags and the coverage watchlist", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/world-gap`)
 
-  await expect(page.getByRole("heading", { name: "Grouped inconsistencies and cleanup notes" })).toBeVisible()
-  await expect(page.getByText("Consistency flags")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "World gaps" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Canon conflicts" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Source consistency" })).toBeVisible()
   await expect(page.getByText("Conflicting definition for Northreach")).toBeVisible()
-  await expect(page.getByText("Coverage watchlist")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Coverage watchlist" })).toBeVisible()
   await expect(page.getByText("Northreach needs a clearer canon note")).toBeVisible()
 })
 
-test("advisor continuity scan shows metadata and proactive audit cards", async ({ page }) => {
+test("story advisor keeps the question flow quiet and presents checks as evidence rows", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/advisor`)
 
+  await expect(page.locator("#advisor-tab-scan")).toBeVisible()
   const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
-  if (await dismissCookies.isVisible().catch(() => false)) {
+  if (await dismissCookies.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) {
     await dismissCookies.click()
   }
 
+  await expect(page.getByText("Ask the manuscript", { exact: true })).toBeVisible()
+  await expect(page.getByText("What aspect of your story feels unsolved right now?", { exact: true })).toBeVisible()
+  await expect(page.getByText("Retrieved Passages", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Response Types", { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath("advisor-ask-desktop.png"), fullPage: true })
+
   await page.locator("#advisor-tab-scan").click()
 
-  await expect(page.getByText("Data sources:")).toBeVisible()
-  await expect(page.getByText("Proactive audit added")).toBeVisible()
+  await expect(page.getByText(/Evidence sources: characters, character_states, plot_threads/)).toBeVisible()
+  await expect(page.getByText(/1 heuristic finding · Proactive audit included/)).toBeVisible()
   await expect(page.getByText('Unresolved thread: "Who opened the gate?"')).toBeVisible()
   await expect(page.getByText("The gate mystery is still carrying the highest proactive risk in the current draft.")).toBeVisible()
+  await expect(page.getByText("Warnings", { exact: true })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("advisor-checks-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByText('Unresolved thread: "Who opened the gate?"')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("advisor-checks-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("author Ask route resolves into the Story Advisor question mode", async ({ page }) => {
+  await installMockApi(page)
+  await page.goto(`${BOOK_ROUTE}/ask`)
+
+  await expect(page).toHaveURL(new RegExp(`${BOOK_ROUTE}/advisor\\?mode=ask$`))
+  await expect(page.getByText("Ask the manuscript", { exact: true })).toBeVisible()
+  await expect(page.getByText("Ask about the story", { exact: true })).toHaveCount(0)
+})
+
+test("reader Ask stays spoiler-scoped and uses a quiet question workspace", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  await installMockApi(page, { bookMode: "reader" })
+  await page.goto(`${BOOK_ROUTE}/ask`)
+
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) {
+    await dismissCookies.click()
+  }
+
+  await expect(page.getByRole("heading", { name: "Ask about the story" })).toBeVisible()
+  await expect(page.getByText("Up to Chapter 2", { exact: true })).toBeVisible()
+  await expect(page.getByText("Suggested questions", { exact: true })).toBeVisible()
+  await expect(page.getByLabel("Ask LoreVia a grounded question about the story")).toBeVisible()
+  await expect(page.getByText("Natural Language Query", { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath("reader-ask-desktop.png"), fullPage: true })
+
+  await page.getByText("Suggested questions", { exact: true }).click()
+  await page.getByRole("button", { name: "Use question: When did this character last appear?" }).click()
+  await page.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect(page.getByText("Nora last appears at the end of Chapter 2, where she leaves the ember gate with Kael.")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Jump to chapter 2" })).toHaveAttribute("href", `${BOOK_ROUTE}/chapter/2`)
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: test.info().outputPath("reader-ask-answer-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("heading", { name: "Ask about the story" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("reader-ask-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("editorial review keeps source, session runs, and findings in one workspace", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const editorialRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("editorial-review-stream")) editorialRequests.push(request.url())
+  })
+  await installMockApi(page)
+  await page.goto(`${BOOK_ROUTE}/editorial-review`)
+
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) {
+    await dismissCookies.click()
+  }
+
+  await expect(page.getByRole("heading", { name: "Editorial review", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Passage" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Runs this session" })).toBeVisible()
+  await expect(page.getByText("Manuscript import", { exact: true })).toHaveCount(0)
+  expect(editorialRequests).toEqual([])
+
+  await page.getByLabel("Chapter number").fill("1")
+  await page.getByLabel("Passage text").fill("The gate opened, Nora ran. She spoke the blood oath before Kael could stop her.")
+  await page.getByRole("button", { name: "Run review" }).click()
+
+  await expect(page.getByText("The scene has a strong conflict turn, but Nora's gate knowledge needs earlier support.")).toBeVisible()
+  await expect(page.getByText("Gate knowledge arrives after Nora uses it", { exact: true })).toBeVisible()
+  await expect(page.getByText("Seed the oath before the gate", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Cross-referenced passages" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Chapter 1" })).toHaveAttribute("aria-pressed", "true")
+  expect(editorialRequests).toHaveLength(1)
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: test.info().outputPath("editorial-review-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByText("Seed the oath before the gate", { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("editorial-review-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
 })
 
 test("voice consistency runs without the max-depth console loop", async ({ page }) => {
@@ -1358,7 +2474,7 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
   // Wait for the loading state to complete by checking the button text changes back
   await expect(page.getByRole("button", { name: /run voice review/i })).toBeVisible({ timeout: 15000 })
 
-  await expect(page.getByRole("heading", { name: "Character voice consistency" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Verdict" })).toBeVisible()
   await expect(page.getByText("Reviewed: Nora Vale")).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Nora sounds more formal than her baseline")).toBeVisible()
 
@@ -1366,28 +2482,184 @@ test("voice consistency runs without the max-depth console loop", async ({ page 
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
 })
 
+test("findings overview surfaces live evidence without loading every review tool", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const reviewApiRequests: string[] = []
+  page.on("request", (request) => {
+    const url = request.url()
+    if (/advisor|ai-beta-reader|voice-consistency/.test(url)) reviewApiRequests.push(url)
+  })
+  await installMockApi(page, { activationPending: true })
+  await page.goto(`${BOOK_ROUTE}/analysis`)
+
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) {
+    await dismissCookies.click()
+  }
+
+  await expect(page.getByRole("heading", { name: "Findings", exact: true })).toBeVisible()
+  await expect(page.getByText("Nora may use gate knowledge before learning it", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Chapter 1" })).toHaveAttribute("href", `${BOOK_ROUTE}/chapter/1`)
+  await expect(page.getByRole("heading", { name: "Manuscript review" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Structure and canon" })).toBeVisible()
+  expect(reviewApiRequests).toEqual([])
+  await page.screenshot({ path: test.info().outputPath("findings-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByText("Nora may use gate knowledge before learning it", { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("findings-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("chapter reports live inside Findings and suppress empty evidence groups", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const continuityRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("continuity-findings")) continuityRequests.push(request.url())
+  })
+  await installMockApi(page, { chapterReports: true })
+  await page.goto(`${BOOK_ROUTE}/reports`)
+
+  await expect(page).toHaveURL(new RegExp(`${BOOK_ROUTE}/analysis\\?view=chapters$`))
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) {
+    await dismissCookies.click()
+  }
+
+  await expect(page.getByRole("tab", { name: "Chapter reports" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("heading", { name: "Chapter 1 — Ashfall" })).toBeVisible()
+  await expect(page.getByText("Nora and Kael move from suspicion to a reluctant alliance.")).toBeVisible()
+  await expect(page.getByText("Nora appears to know the gate rule before Chapter 2 explains how she learned it.")).toBeVisible()
+  expect(continuityRequests).toEqual([])
+  await page.screenshot({ path: test.info().outputPath("chapter-reports-desktop.png"), fullPage: true })
+
+  await page.getByLabel("Filter chapter reports").selectOption("2")
+  await expect(page.getByRole("heading", { name: "Chapter 2 — The Ember Gate" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Chapter 1 — Ashfall" })).toHaveCount(0)
+  await expect(page.getByText("Threads resolved", { exact: true })).toBeVisible()
+  await expect(page.getByText("New characters", { exact: true })).toHaveCount(0)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("chapter-reports-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
+test("revision workflow resumes by step and loads each work area on intent", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const secondaryRequests: string[] = []
+  page.on("request", (request) => {
+    const url = request.url()
+    if (/characters|story-health|chapter-reports|revision-intelligence|writer-workspace|beta-reads|revision-rounds/.test(url)) {
+      secondaryRequests.push(url)
+    }
+  })
+  await installMockApi(page, { activationPending: true, chapterReports: true })
+  await page.goto(`${BOOK_ROUTE}/author-loop`)
+
+  const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
+  if (await dismissCookies.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) {
+    await dismissCookies.click()
+  }
+
+  await expect(page.getByRole("heading", { name: "Revision workflow" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Current manuscript" })).toBeVisible()
+  expect(secondaryRequests).toEqual([])
+
+  await page.getByRole("button", { name: /2 of 6 characters/i }).click()
+  await expect(page.getByRole("heading", { name: "Character review" })).toBeVisible()
+  await expect(page.getByText("Gregor", { exact: true }).first()).toBeVisible()
+  expect(secondaryRequests.some((url) => url.includes("/characters"))).toBe(true)
+
+  await page.getByRole("button", { name: /4 of 6 revision queue/i }).click()
+  await expect(page.getByRole("heading", { name: "Revision queue", level: 2 })).toBeVisible()
+  await expect(page.getByText("Chapter 2 assumption may break later payoff", { exact: true })).toBeVisible()
+  expect(secondaryRequests.some((url) => url.includes("revision-intelligence"))).toBe(true)
+  expect(secondaryRequests.some((url) => url.includes("writer-workspace"))).toBe(true)
+  await page.screenshot({ path: test.info().outputPath("revision-workflow-desktop.png"), fullPage: true })
+
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("lorevia:author-loop:sky-of-ash--book-1:step"))).toBe("issues")
+
+  await page.getByRole("button", { name: /6 of 6 reader feedback/i }).click()
+  await expect(page.getByRole("heading", { name: "Reader feedback", level: 2 })).toBeVisible()
+  await expect(page.getByLabel("Reader assignment")).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("revision-workflow-mobile.png"), fullPage: true })
+
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
 test("AI Beta Reader runs chapter and manuscript checks and bridges results into revision work", async ({ page }) => {
+  test.setTimeout(120_000)
+  const apiRequests: string[] = []
+  const consoleMessages: string[] = []
+  const pageErrors: string[] = []
+  page.on("request", (request) => {
+    if (/\/api\/.*(?:chapters|characters|ai-beta-reader)/.test(request.url())) apiRequests.push(request.url())
+  })
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleMessages.push(message.text())
+  })
+  page.on("pageerror", (error) => pageErrors.push(error.message))
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/analysis`)
 
-  await page.getByRole("link", { name: /AI Beta Reader/i }).click()
+  await page.locator(`a[href="${BOOK_ROUTE}/ai-beta-reader"]`).filter({ hasText: "Check reader experience" }).click()
   await expect(page.getByRole("heading", { name: /Sky of Ash AI Beta Reader/i })).toBeVisible()
-  await page.getByRole("button", { name: "Run again" }).click()
+  await expect(page.getByRole("heading", { name: "Reader report" })).toBeVisible()
+  expect(apiRequests.some((url) => /\/chapters(?:\?|$)/.test(url))).toBe(false)
+  expect(apiRequests.some((url) => /\/characters(?:\?|$)/.test(url))).toBe(false)
+  await page.getByRole("button", { name: "New run" }).click()
+  await expect(page.getByRole("heading", { name: "Configure a reader pass" })).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const configureOverflow = await page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth
+    const elements = Array.from(document.querySelectorAll<HTMLElement>("body *"))
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          className: element.className,
+          right: Math.round(rect.right),
+          tag: element.tagName.toLowerCase(),
+          text: element.innerText?.slice(0, 80) ?? "",
+          width: Math.round(rect.width),
+        }
+      })
+      .filter((element) => element.right > viewportWidth + 1)
+      .slice(0, 10)
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      elements,
+      viewportWidth,
+    }
+  })
+  expect(configureOverflow.documentWidth, JSON.stringify(configureOverflow.elements)).toBeLessThanOrEqual(configureOverflow.viewportWidth)
+  await page.screenshot({ path: test.info().outputPath("ai-beta-reader-configure.png"), fullPage: true })
+  await page.getByRole("button", { name: "Run reader pass" }).click()
   await expect(page.getByText("Reading manuscript batch 2 of 2...")).toBeVisible()
-  await expect(page.getByText("Report complete.")).toBeVisible({ timeout: 15000 })
+  await page.screenshot({ path: test.info().outputPath("ai-beta-reader-running.png"), fullPage: true })
+  await expect(page.getByRole("heading", { name: "Reader report" })).toBeVisible({ timeout: 15000 })
 
-  await page.getByRole("tab", { name: "Overused Language" }).click()
+  await page.getByRole("tab", { name: "Overused language" }).click()
   await expect(page.getByRole("heading", { name: "“silver gate”" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Open chapter 2" })).toHaveAttribute(
     "href",
     /ai_beta_finding=term-silver-gate/,
   )
 
-  await page.getByRole("tab", { name: "Character Voices" }).click()
+  await page.getByRole("tab", { name: "Character voices" }).click()
   await expect(page.getByRole("heading", { name: "Gregor" })).toBeVisible()
   await expect(page.getByText("42%", { exact: false }).first()).toBeVisible()
 
-  await page.getByRole("tab", { name: "Revision Priorities" }).click()
+  await page.getByRole("tab", { name: "Revision priorities" }).click()
   await page.getByRole("button", { name: "Save note" }).click()
   await expect(page.getByText(/Saved finding to AI Beta Reader/i)).toBeVisible()
   await page.getByRole("button", { name: "Create revision task" }).click()
@@ -1395,9 +2667,19 @@ test("AI Beta Reader runs chapter and manuscript checks and bridges results into
   await page.getByRole("button", { name: "Create revision task" }).click()
   await expect(page.getByText("That revision task already exists.")).toBeVisible()
 
-  await page.getByRole("radio", { name: "Full manuscript" }).click()
-  await page.getByRole("button", { name: "Run again" }).click()
-  await expect(page.getByText("Report complete.")).toBeVisible({ timeout: 15000 })
+  await page.getByRole("button", { name: "New run" }).click()
+  await page.getByRole("radio", { name: /Full manuscript/ }).click()
+  await page.getByRole("button", { name: "Run reader pass" }).click()
+  await expect(page.getByRole("heading", { name: "Reader report" })).toBeVisible({ timeout: 15000 })
+
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("ai-beta-reader-desktop.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("ai-beta-reader-mobile.png"), fullPage: true })
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
 })
 
 test("AI Beta Reader preserves and marks reports stale after manuscript changes", async ({ page }) => {
@@ -1405,17 +2687,22 @@ test("AI Beta Reader preserves and marks reports stale after manuscript changes"
   await page.goto(`${BOOK_ROUTE}/ai-beta-reader`)
 
   await expect(page.getByText("This report is from an earlier manuscript version.", { exact: false })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Human Beta Feedback" })).toHaveAttribute("href", `${BOOK_ROUTE}/beta-feedback`)
-  await expect(page.getByRole("link", { name: "Voice Consistency" })).toHaveAttribute("href", `${BOOK_ROUTE}/voice`)
+  await expect(page.locator(`a.app-button-secondary[href="${BOOK_ROUTE}/beta-feedback"]`)).toHaveText("Human Beta Feedback")
+  await expect(page.locator(`a.app-button-secondary[href="${BOOK_ROUTE}/voice"]`)).toHaveText("Voice Consistency")
 })
 
 test("voice consistency can target a selected character", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const workspaceTreeRequests: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/books/book-1/workspace/tree")) workspaceTreeRequests.push(request.url())
+  })
   await installMockApi(page, { voiceConsistency: "selected-character" })
   await page.goto(`${BOOK_ROUTE}/voice`)
 
   await expect(page.getByRole("heading", { name: /sky of ash voice consistency/i })).toBeVisible()
   await expect(page.locator("textarea")).toContainText("Nora crossed the ember gate")
-  await page.locator('label:has-text("Character focus") select').selectOption({ label: "Gregor" })
+  await page.getByLabel("Character focus", { exact: true }).selectOption({ label: "Gregor" })
   await expect(page.getByText("Focused review: Gregor")).toBeVisible()
   await page.getByRole("button", { name: /run voice review/i }).click()
 
@@ -1426,6 +2713,17 @@ test("voice consistency can target a selected character", async ({ page }) => {
   await expect(page.getByText("Gregor slips into abstract explanation")).toBeVisible()
   await expect(page.getByText("74% match")).toBeVisible()
   await expect(page.getByText("Closest alternate voice: Grete (38% match)")).toBeVisible()
+  expect(workspaceTreeRequests).toEqual([])
+
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("voice-consistency-desktop.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await expect(page.getByRole("heading", { name: "Character voice" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("voice-consistency-mobile.png"), fullPage: true })
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
 })
 
 test("voice consistency warns when selected-character attribution is weak", async ({ page }) => {
@@ -1461,15 +2759,52 @@ test("voice consistency surfaces backend errors instead of failing silently", as
   await expect(page.getByText("Voice review is temporarily unavailable.")).toBeVisible({ timeout: 15000 })
 })
 
+test("book search stays behind the global search affordance and returns flat evidence", async ({ page }) => {
+  const { consoleMessages, pageErrors } = watchBrowserSignals(page)
+  const searchRequests: string[] = []
+  page.on("request", (request) => {
+    if (/\/api\/v1\/reader\/book-1\/(?:search|thematic-search)/.test(request.url())) searchRequests.push(request.url())
+  })
+  await installMockApi(page)
+  await page.goto(`${BOOK_ROUTE}/analysis`)
+
+  await page.getByRole("link", { name: "Search this book" }).click()
+  await expect(page.getByRole("heading", { name: "Search the manuscript" })).toBeVisible()
+  expect(searchRequests).toEqual([])
+  await page.getByLabel("Search manuscript").fill("the gatekeeper warning")
+  await page.getByRole("button", { name: "Search manuscript" }).click()
+  await expect(page.getByRole("heading", { name: "Chapter 2 — The Ember Gate" })).toBeVisible()
+  await expect(page.getByText("Match 1", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Open chapter 2" })).toHaveAttribute("href", `${BOOK_ROUTE}/manuscript?chapter=2`)
+
+  await page.getByRole("tab", { name: "Themes" }).click()
+  await page.getByLabel("Search manuscript").fill("inherited obligation")
+  await page.getByRole("button", { name: "Search manuscript" }).click()
+  await expect(page.getByText("The ash road returns as a warning about inherited obligation.")).toBeVisible()
+
+  await page.getByRole("button", { name: "More" }).click()
+  await expect(page.getByText("Search Passages", { exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "More" }).click()
+
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("book-search-desktop.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("book-search-mobile.png"), fullPage: true })
+  expect(searchRequests).toHaveLength(2)
+  expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
+  expect(pageErrors).toEqual([])
+})
+
 test("character bible exposes manual merge without duplicate-key warnings", async ({ page }) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/characters`)
 
   await expect(page.getByRole("heading", { name: "Character Bible" })).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Review duplicates$/i })).toBeVisible()
-
-  await page.getByRole("button", { name: /^Review duplicates$/i }).click()
+  await page.getByRole("button", { name: "Open menu" }).first().click()
+  await page.getByRole("button", { name: "Review duplicate suggestions" }).click()
 
   const startManualMergeButton = page.getByRole("button", { name: /^start manual merge$/i }).first()
   const beginManualMergeButton = page.getByRole("button", { name: /^begin manual merge$/i }).first()
@@ -1551,6 +2886,9 @@ test("character bible exposes held candidates when no visible profiles were save
 test("relationship graph inspector responds to node and edge selection", async ({ page }) => {
   const { consoleMessages, pageErrors } = watchBrowserSignals(page)
   await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
   await page.goto(`${BOOK_ROUTE}/graph`)
 
   const dismissCookies = page.getByRole("button", { name: /decline cookies/i })
@@ -1558,8 +2896,10 @@ test("relationship graph inspector responds to node and edge selection", async (
     await dismissCookies.click()
   }
 
-  await expect(page.getByRole("heading", { name: "Relationship graph", exact: true })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Read the map", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Relationships", exact: true })).toBeVisible()
+  await expect(page.getByText("Graph details", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /arrange mode/i })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("relationship-graph-canvas-desktop.png"), fullPage: true })
 
   await page.waitForFunction(() => {
     const graph = (window as Window & {
@@ -1576,8 +2916,11 @@ test("relationship graph inspector responds to node and edge selection", async (
   })
 
   await expect(page.getByRole("heading", { name: "Gregor", exact: true })).toBeVisible()
+  await expect(page.getByText("Graph details", { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: /center node/i })).toBeVisible()
   await expect(page.getByText("Protect his family")).toBeVisible()
+  await hideNonProductCaptureOverlays(page)
+  await page.screenshot({ path: test.info().outputPath("relationship-graph-node-desktop.png"), fullPage: true })
 
   await page.evaluate(() => {
     const graph = (window as Window & {
@@ -1593,20 +2936,45 @@ test("relationship graph inspector responds to node and edge selection", async (
   await expect(page.getByRole("textbox", { name: "Relationship note" })).toHaveValue("Sibling bond under pressure.")
   await expect(page.getByRole("button", { name: /save correction/i })).toBeVisible()
 
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("dialog", { name: "Graph details" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("relationship-graph-edge-mobile.png"), fullPage: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+
   expect(consoleMessages.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
   expect(pageErrors.some((message) => /Maximum update depth exceeded/i.test(message))).toBe(false)
+})
+
+test("relationship evolution is a dense local graph view", async ({ page }) => {
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    document.cookie = "lorevia_analytics_consent=false; Path=/; SameSite=Lax"
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BOOK_ROUTE}/graph?view=evolution`)
+
+  await expect(page.getByRole("link", { name: "Evolution", exact: true })).toHaveAttribute("aria-current", "page")
+  await expect(page.getByRole("heading", { name: "Gregor ↔ Grete" })).toBeVisible()
+  await expect(page.getByText("Their trust breaks under the family's mounting pressure.")).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("relationship-evolution-desktop.png"), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("heading", { name: "Gregor ↔ Mr. Samsa" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.screenshot({ path: test.info().outputPath("relationship-evolution-mobile.png"), fullPage: true })
+
+  await page.goto(`${BOOK_ROUTE}/relationship-evolution`)
+  await expect(page).toHaveURL(new RegExp(`${BOOK_ROUTE}/graph\\?view=evolution$`))
 })
 
 test("character bible repair workspace renders preview controls without overflow", async ({ page }) => {
   await installMockApi(page)
   await page.goto(`${BOOK_ROUTE}/characters`)
 
-  const repairWorkspaceButton = page.getByRole("button", { name: /^repair workspace$/i })
-  await expect(repairWorkspaceButton).toBeVisible()
+  await page.getByRole("button", { name: "Open menu" }).first().click()
+  const repairWorkspaceButton = page.getByRole("button", { name: /^open repair workspace$/i })
   await expect(repairWorkspaceButton).toBeEnabled()
   await repairWorkspaceButton.click()
-
-  await expect(repairWorkspaceButton).toHaveAttribute("aria-pressed", "true", { timeout: 15000 })
   await expect(page.getByRole("heading", { name: "Book reprocess preview" })).toBeVisible({ timeout: 15000 })
   await expect(page.getByText("Repair controls")).toBeVisible()
   await expect(page.getByRole("button", { name: /^refresh preview$/i })).toBeVisible()

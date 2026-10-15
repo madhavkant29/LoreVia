@@ -16,6 +16,14 @@ import {
 const blogs = getBlogSummaries()
 const answers = getAnswerSummaries()
 const allContent = getAllContentSummaries()
+const editorialHeroSystem = new Set([
+  "/blog/editorial/character-voice-relationships.webp",
+  "/blog/editorial/continuity-timeline-canon.webp",
+  "/blog/editorial/revision-feedback.webp",
+  "/blog/editorial/scene-structure-pacing.webp",
+  "/blog/editorial/story-bible-worldbuilding.webp",
+  "/blog/editorial/writing-tools-workflows.webp",
+])
 const publicPaths = new Set([
   "/blog",
   "/answers",
@@ -115,7 +123,8 @@ describe("editorial content catalogue", () => {
     expect(new Set(blogs.map((entry) => entry.title)).size).toBe(blogs.length)
     expect(new Set(blogs.map((entry) => entry.description)).size).toBe(blogs.length)
     expect(new Set(blogs.map((entry) => entry.keywords[0])).size).toBe(blogs.length)
-    expect(new Set(blogs.map((entry) => entry.hero.src)).size).toBe(blogs.length)
+    expect(new Set(blogs.map((entry) => entry.hero.src))).toEqual(editorialHeroSystem)
+    expect(allContent.every((entry) => editorialHeroSystem.has(entry.hero.src))).toBe(true)
 
     const paragraphOwners = new Map<string, string>()
     for (const article of blogs) {

@@ -167,6 +167,8 @@ class FakeCy {
 
   fit() {}
 
+  resize() {}
+
   animate() {}
 
   width() {
@@ -370,6 +372,7 @@ export function graphHandle() {
 }
 
 beforeEach(() => {
+  Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: localStorageMock,

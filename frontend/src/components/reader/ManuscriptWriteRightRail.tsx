@@ -57,7 +57,6 @@ export function buildQuickVaultNoteFolder(scope: "chapter" | "book", chapterNumb
 type ManuscriptWriteRightRailProps = {
   isDark: boolean
   bookId: string
-  totalChapters: number | null
   activeRightPane: "context" | "advisor" | "notes" | "arcs" | "insights" | "character"
   onOpenRightPane: (pane: "context" | "advisor" | "notes" | "arcs" | "insights" | "character") => void
   selectedCharCard: Character | null
@@ -85,7 +84,6 @@ type ManuscriptWriteRightRailProps = {
 export function ManuscriptWriteRightRail({
   isDark,
   bookId,
-  totalChapters,
   activeRightPane,
   onOpenRightPane,
   selectedCharCard,
@@ -239,7 +237,7 @@ export function ManuscriptWriteRightRail({
     } finally {
       setAdvisorLoading(false)
     }
-  }, [activeChapterNumber, advisorLoading, advisorMessages, bookId, totalChapters])
+  }, [advisorLoading, advisorMessages, bookId])
 
   const handleAdvisorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {

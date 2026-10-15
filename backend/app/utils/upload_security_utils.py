@@ -145,9 +145,14 @@ def _validate_text_upload(filename: str, raw: bytes) -> None:
     if b"\x00" in raw:
         raise HTTPException(400, f"{filename} must be a text-based file.")
     try:
-        raw.decode("utf-8")
+        decoded = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise HTTPException(400, f"{filename} must be UTF-8 encoded.") from exc
+    if not decoded.strip():
+        raise HTTPException(
+            400,
+            f"{filename} is empty. Choose a file that contains manuscript text.",
+        )
 
 
 def _validate_zip_container(

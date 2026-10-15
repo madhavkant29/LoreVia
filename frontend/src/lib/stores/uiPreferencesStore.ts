@@ -47,7 +47,7 @@ interface UiPreferencesStore {
   pendingGlobalOperations: UiPreferenceOperation[]
   pendingBookOperations: Record<string, UiPreferenceOperation[]>
   hydrateForUser: (userId: string) => Promise<void>
-  hydrateBook: (bookId: string) => Promise<void>
+  hydrateBook: (bookId: string) => Promise<boolean>
   clearActiveUser: () => void
   retrySync: () => Promise<void>
   patchGlobal: (operations: UiPreferenceOperation[]) => Promise<void>
@@ -525,7 +525,7 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
       const bookId = normalizeBookRouteId(rawBookId)
       const userId = get().activeUserId
       const generation = accountGeneration
-      if (!userId) return
+      if (!userId) return false
       if (!get().bookPreferences[bookId]) {
         set((state) => ({
           bookPreferences: {
@@ -536,7 +536,7 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
       }
       try {
         const serverPreference = await uiPreferencesApi.getBook(bookId)
-        if (!accountIsCurrent(userId, generation)) return
+        if (!accountIsCurrent(userId, generation)) return false
         set((state) => ({
           bookPreferences: {
             ...state.bookPreferences,
@@ -549,9 +549,11 @@ export const useUiPreferencesStore = create<UiPreferencesStore>()((set, get) => 
           syncMessage: null,
         }))
         persistForUser(userId, get)
+        return true
       } catch {
-        if (!accountIsCurrent(userId, generation)) return
+        if (!accountIsCurrent(userId, generation)) return false
         set({ syncState: "sync_pending", syncMessage: "Saved on this device; sync pending" })
+        return false
       }
     },
 

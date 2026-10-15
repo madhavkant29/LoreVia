@@ -72,7 +72,6 @@ type BuildManuscriptRightRailPropsParams = {
   setSelectedCharCard: Dispatch<SetStateAction<ManuscriptWriteRailProps["selectedCharCard"]>>
   suggestions: ManuscriptWriteRailProps["suggestions"]
   synopsis: ManuscriptAnalysisRailProps["synopsis"]
-  totalChapters: number | null
   vaultNotes: ManuscriptWriteRailProps["vaultNotes"]
   warningSummary: ManuscriptWriteRailProps["warningSummary"]
   onBackToCharacters: ManuscriptAnalysisRailProps["onBackToCharacters"]
@@ -167,7 +166,6 @@ export function buildManuscriptRightRailProps({
   setSelectedCharCard,
   suggestions,
   synopsis,
-  totalChapters,
   vaultNotes,
   warningSummary,
   onBackToCharacters,
@@ -215,7 +213,6 @@ export function buildManuscriptRightRailProps({
     review,
     selectedCharCard,
     suggestions,
-    totalChapters,
     vaultNotes,
     warningSummary,
     onBookNoteSaved: (note) => {

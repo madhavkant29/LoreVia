@@ -1,432 +1,99 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { zipSync, strToU8 } from "fflate"
 import { booksApi } from "@/lib/api/books"
-import type { VaultPreview, VaultPreviewFile } from "@/types/book"
+import { downloadExportBlob, safeFileBase } from "@/lib/utils/exportFiles"
+import type { VaultPreview as VaultPreviewData } from "@/types/book"
 
-function cleanSegment(value: string) {
-  return value.replace(/\.[^.]+$/, "").replace(/^\d+\s*-\s*/, "").trim()
-}
-
-function noteTitle(file: VaultPreviewFile) {
-  return cleanSegment(file.path.split("/").pop() ?? file.path)
-}
-
-function folderLabel(file: VaultPreviewFile, rootFolder: string) {
-  const relative = file.path.replace(`${rootFolder}/`, "")
-  const folder = relative.includes("/") ? relative.split("/").slice(0, -1).join("/") : "Root"
-  return folder || "Root"
-}
-
-function searchBlob(value: string) {
-  return value.toLowerCase()
-}
-
-function safeSlug(value: string) {
-  return value
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .toLowerCase() || "vault-export"
-}
-
-export function VaultPreview({
-  bookId,
-  preview,
-  isDark,
-}: {
-  bookId: string
-  preview: VaultPreview
-  isDark: boolean
-}) {
+export function VaultPreview({ bookId, preview, isDark, disabled = false, onStateChange }: { bookId: string; preview: VaultPreviewData; isDark: boolean; disabled?: boolean; onStateChange?: (state: { dirty: boolean; busy: boolean }) => void }) {
+  const files = useMemo(() => [...preview.files].sort((a, b) => a.path.localeCompare(b.path)), [preview.files])
   const [query, setQuery] = useState("")
-  const [selectedPath, setSelectedPath] = useState<string>("")
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [selectedPath, setSelectedPath] = useState(files[0]?.path ?? "")
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => Object.fromEntries(files.map((file) => [file.path, file.content])))
+  const [saved, setSaved] = useState(drafts)
+  const [busy, setBusy] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [status, setStatus] = useState<string | null>(null)
-  const saveTimersRef = useRef<Record<string, number>>({})
-  const latestDraftRef = useRef<Record<string, string>>({})
-
-  const files = useMemo(
-    () => [...preview.files].sort((a, b) => a.path.localeCompare(b.path)),
-    [preview.files]
-  )
-
-  const filteredFiles = useMemo(() => {
-    const trimmed = query.trim()
-    if (!trimmed) return files
-    const term = searchBlob(trimmed)
-    return files.filter((file) => {
-      const relPath = file.path.replace(`${preview.root_folder}/`, "")
-      const content = drafts[file.path] ?? file.content
-      return (
-        searchBlob(file.path).includes(term) ||
-        searchBlob(relPath).includes(term) ||
-        searchBlob(content).includes(term)
-      )
-    })
-  }, [drafts, files, preview.root_folder, query])
-
-  const selectedFile = useMemo(
-    () => files.find((file) => file.path === selectedPath) ?? files[0] ?? null,
-    [files, selectedPath]
-  )
-
+  const latest = useRef(drafts)
+  const queue = useRef(new Map<string, string>())
+  const saving = useRef(false)
+  const timers = useRef<Record<string, number>>({})
+  const alive = useRef(true)
+  const selected = files.find((file) => file.path === selectedPath) ?? files[0]
+  const content = selected ? drafts[selected.path] ?? selected.content : ""
+  const dirty = files.some((file) => drafts[file.path] !== saved[file.path])
+  const selectedDirty = !!selected && drafts[selected.path] !== saved[selected.path]
+  const filtered = files.filter((file) => `${file.path} ${drafts[file.path] ?? file.content}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const relative = (path: string) => path.startsWith(`${preview.root_folder}/`) ? path.slice(preview.root_folder.length + 1) : path
+  useEffect(() => { onStateChange?.({ dirty, busy }) }, [dirty, busy, onStateChange])
   useEffect(() => {
-    if (!selectedFile) return
-    if (!selectedPath) {
-      setSelectedPath(selectedFile.path)
-    }
-  }, [selectedFile, selectedPath])
-
-  useEffect(() => {
-    if (!selectedFile) return
-    setDrafts((current) => {
-      if (current[selectedFile.path] !== undefined) return current
-      return { ...current, [selectedFile.path]: selectedFile.content }
-    })
-  }, [selectedFile])
-
-  useEffect(() => {
-    if (!selectedFile) return
-    if (filteredFiles.length > 0 && !filteredFiles.some((file) => file.path === selectedPath)) {
-      setSelectedPath(filteredFiles[0].path)
-    }
-  }, [filteredFiles, selectedFile, selectedPath])
-
-  const selectedContent = selectedFile ? drafts[selectedFile.path] ?? selectedFile.content : ""
-  const selectedHasChanges = selectedFile ? selectedContent !== selectedFile.content : false
-  const editedCount = files.filter((file) => (drafts[file.path] ?? file.content) !== file.content).length
-  const noteCount = files.length
-
-  useEffect(() => {
-    const saveTimers = saveTimersRef.current
-    return () => {
-      for (const timer of Object.values(saveTimers)) {
-        window.clearTimeout(timer)
-      }
-      saveTimersRef.current = {}
-    }
+    alive.current = true
+    const pending = timers.current
+    return () => { alive.current = false; Object.values(pending).forEach(window.clearTimeout) }
   }, [])
-
-  const saveDraft = useCallback(async (path: string, content: string) => {
-    latestDraftRef.current[path] = content
-    const pending = saveTimersRef.current[path]
-    if (pending) {
-      window.clearTimeout(pending)
-      delete saveTimersRef.current[path]
-    }
-    const relative = path.replace(`${preview.root_folder}/`, "")
-    setStatus(`Saving ${relative}...`)
-    try {
-      const result = await booksApi.saveCharacterBibleVaultNote(bookId, { path, content })
-      if (latestDraftRef.current[path] !== result.content) {
-        return
-      }
-      setDrafts((current) => ({ ...current, [path]: result.content }))
-      setStatus(result.persisted ? `Saved ${relative}` : `Reset ${relative} to the generated version`)
-    } catch {
-      setStatus(`Could not save ${relative}`)
-    }
-  }, [bookId, preview.root_folder])
-
   useEffect(() => {
-    if (!selectedFile) return
-    const path = selectedFile.path
-    const timer = saveTimersRef.current[path]
-    if (!selectedHasChanges) {
-      if (timer) {
-        window.clearTimeout(timer)
-        delete saveTimersRef.current[path]
+    const unload = (event: BeforeUnloadEvent) => { if (dirty || busy) { event.preventDefault(); event.returnValue = "" } }
+    window.addEventListener("beforeunload", unload)
+    return () => window.removeEventListener("beforeunload", unload)
+  }, [dirty, busy])
+
+  const save = async (path: string, value: string) => {
+    window.clearTimeout(timers.current[path]); delete timers.current[path]
+    queue.current.set(path, value)
+    if (saving.current) return
+    saving.current = true; setBusy(true)
+    try {
+      while (queue.current.size) {
+        const [nextPath, nextContent] = queue.current.entries().next().value as [string, string]
+        queue.current.delete(nextPath)
+        if (alive.current) setStatus(`Saving ${relative(nextPath)}…`)
+        try {
+          const result = await booksApi.saveCharacterBibleVaultNote(bookId, { path: nextPath, content: nextContent })
+          if (!alive.current) continue
+          setSaved((current) => ({ ...current, [nextPath]: result.content }))
+          if (latest.current[nextPath] === nextContent) { latest.current = { ...latest.current, [nextPath]: result.content }; setDrafts(latest.current) }
+          setErrors((current) => { const next = { ...current }; delete next[nextPath]; return next })
+          setStatus(`Saved ${relative(nextPath)}`)
+        } catch {
+          if (alive.current) { setErrors((current) => ({ ...current, [nextPath]: `Could not save ${relative(nextPath)}. Your draft is preserved; select it and retry Save note.` })); setStatus(null) }
+        }
       }
-      return
-    }
-    if (timer) {
-      window.clearTimeout(timer)
-    }
-    saveTimersRef.current[path] = window.setTimeout(() => {
-      delete saveTimersRef.current[path]
-      void saveDraft(path, selectedContent)
-    }, 700)
-  }, [saveDraft, selectedContent, selectedFile, selectedHasChanges])
-
-  const handleSelect = (path: string) => {
-    setSelectedPath(path)
-    setStatus(null)
+    } finally { saving.current = false; if (alive.current) setBusy(false) }
   }
-
-  const handleResetCurrent = () => {
-    if (!selectedFile) return
-    const path = selectedFile.path
-    latestDraftRef.current[path] = selectedFile.content
-    setDrafts((current) => ({
-      ...current,
-      [path]: selectedFile.content,
-    }))
-    setStatus(`Reset ${selectedFile.path.replace(`${preview.root_folder}/`, "")}`)
-    void saveDraft(path, selectedFile.content)
+  const edit = (path: string, value: string) => {
+    latest.current = { ...latest.current, [path]: value }; setDrafts(latest.current); setStatus(null)
+    window.clearTimeout(timers.current[path])
+    timers.current[path] = window.setTimeout(() => void save(path, value), 700)
   }
-
-  const handleResetAll = () => {
-    const next: Record<string, string> = {}
-    for (const file of files) {
-      latestDraftRef.current[file.path] = file.content
-      next[file.path] = file.content
-    }
-    setDrafts(next)
-    setStatus("Reset all notes")
-    void Promise.all(files.map((file) => saveDraft(file.path, file.content)))
+  const restore = (all: boolean) => {
+    if (!window.confirm(all ? "Restore every file to the version loaded in this preview? This replaces current edits and saved overrides with those versions." : "Restore this file to the version loaded in this preview?")) return
+    for (const file of all ? files : selected ? [selected] : []) { latest.current = { ...latest.current, [file.path]: file.content }; setDrafts(latest.current); void save(file.path, file.content) }
   }
-
-  const handleSaveCurrent = () => {
-    if (!selectedFile) return
-    void saveDraft(selectedFile.path, selectedContent)
+  const download = () => {
+    try {
+      const archive = zipSync(Object.fromEntries(files.map((file) => [file.path, strToU8(drafts[file.path] ?? file.content)])), { level: 6 })
+      downloadExportBlob(new Blob([archive as unknown as BlobPart], { type: "application/zip" }), `${safeFileBase(preview.root_folder, "vault-export").toLowerCase()}-edited.zip`)
+      setStatus("Downloaded edited vault. The ZIP includes current drafts, including any unsaved edits.")
+    } catch { setStatus("The edited vault could not be downloaded. Your drafts are still here; try again.") }
   }
-
-  const handleDownloadEditedVault = () => {
-    const archive = zipSync(
-      Object.fromEntries(
-        files.map((file) => [file.path, strToU8(drafts[file.path] ?? file.content)])
-      ),
-      { level: 6 }
-    )
-    const blob = new Blob([archive as unknown as BlobPart], { type: "application/zip" })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = `${safeSlug(preview.root_folder)}-edited.zip`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
-    setStatus("Downloaded edited vault")
-  }
-
-  return (
-    <div className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-[#071211]" : "border-stone-200 bg-white"}`}>
-      <div className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-3xl">
-            <p className={`text-3xs font-semibold uppercase tracking-[0.34em] ${isDark ? "text-sky-300" : "text-sky-600"}`}>Vault export</p>
-            <h3 className={`mt-2 font-serif text-3xl tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Vault preview and editor</h3>
-            <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
-              Browse every exported note, edit the markdown in-app, and export a fresh vault ZIP when you're done.
-            </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <StatPill label="Files" value={String(noteCount)} isDark={isDark} />
-          <StatPill label="Edited" value={String(editedCount)} isDark={isDark} />
-          <StatPill label="Root" value={preview.root_folder} isDark={isDark} wide />
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-4 xl:grid-cols-[20rem_minmax(0,1fr)]">
-        <aside className={`rounded-lg border p-3 ${isDark ? "border-white/10 bg-black/20" : "border-stone-200 bg-white/80"}`}>
-          <div className="flex items-center justify-between gap-3 px-1 py-1.5">
-            <div>
-              <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Vault Map</p>
-              <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>{filteredFiles.length} notes visible</p>
-            </div>
-            <button
-              type="button"
-              onClick={handleResetAll}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-            >
-              Reset all
-            </button>
-          </div>
-
-          <label className={`mt-3 flex items-center gap-2 rounded-md border px-3 py-2 ${isDark ? "border-white/10 bg-white/5" : "border-stone-200 bg-white"}`}>
-            <svg className={`h-4 w-4 ${isDark ? "text-slate-500" : "text-stone-400"}`} viewBox="0 0 20 20" fill="none">
-              <path d="M8.5 15a6.5 6.5 0 1 1 4.56-11.1A6.5 6.5 0 0 1 8.5 15Z" stroke="currentColor" strokeWidth="1.6" />
-              <path d="m13.5 13.5 3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              aria-label="Search notes or content"
-              className={`w-full bg-transparent text-sm outline-none ${isDark ? "text-slate-100" : "text-stone-900"}`}
-            />
-          </label>
-
-          <div className="mt-3 max-h-[34rem] space-y-2 overflow-auto pr-1">
-            {filteredFiles.length === 0 ? (
-              <div className={`rounded-md border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
-                No notes match that search.
-              </div>
-            ) : filteredFiles.map((file) => {
-              const active = file.path === selectedFile?.path
-              const draft = drafts[file.path] ?? file.content
-              const changed = draft !== file.content
-              return (
-                <button
-                  key={file.path}
-                  type="button"
-                  onClick={() => handleSelect(file.path)}
-                  className={`group w-full rounded-md border px-4 py-3 text-left transition ${
-                    active
-                      ? isDark
-                        ? "border-sky-400/35 bg-sky-500/10"
-                        : "border-sky-300 bg-sky-50 shadow-sm"
-                      : isDark
-                        ? "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
-                        : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className={`truncate text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{noteTitle(file)}</p>
-                      <p className={`mt-1 truncate text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{file.path.replace(`${preview.root_folder}/`, "")}</p>
-                    </div>
-                    {changed ? (
-                      <span className={`rounded-full px-2 py-1 text-3xs font-bold uppercase tracking-[0.16em] ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-100 text-amber-700"}`}>Edited</span>
-                    ) : null}
-                  </div>
-                  <p className={`mt-2 text-3xs ${isDark ? "text-slate-600" : "text-stone-400"}`}>{folderLabel(file, preview.root_folder)}</p>
-                </button>
-              )
-            })}
-          </div>
-        </aside>
-
-        <section className={`rounded-lg border p-4 ${isDark ? "border-white/10 bg-black/25" : "border-stone-200 bg-white"}`}>
-          {selectedFile ? (
-            <div className="flex h-full min-h-[42rem] flex-col">
-              <div className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
-                <div className="min-w-0">
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Editing</p>
-                  <h4 className={`mt-2 truncate font-serif text-2xl ${isDark ? "text-white" : "text-stone-950"}`}>{noteTitle(selectedFile)}</h4>
-                  <p className={`mt-1 truncate text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>{selectedFile.path.replace(`${preview.root_folder}/`, "")}</p>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <StatPill label="Words" value={String(selectedContent.trim() ? selectedContent.trim().split(/\s+/).length : 0)} isDark={isDark} compact />
-                  <StatPill label="Chars" value={String(selectedContent.length)} isDark={isDark} compact />
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
-                <div className="space-y-3">
-                  <div className={`rounded-md border p-3 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className={`text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                        {selectedHasChanges ? "You have unsaved edits for this note." : "This note matches the exported file."}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                        onClick={() => {
-                          const writeText = navigator.clipboard?.writeText
-                          if (!writeText) return
-                          writeText.call(navigator.clipboard, selectedContent).catch(() => {})
-                        }}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-                        >
-                          Copy text
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSaveCurrent}
-                          className="rounded-md bg-[#1f615d] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
-                        >
-                          Save note
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleResetCurrent}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"}`}
-                        >
-                          Reset file
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleDownloadEditedVault}
-                          className="rounded-md bg-[#1f615d] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
-                        >
-                          Download edited Vault ZIP
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <textarea
-                    value={selectedContent}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      latestDraftRef.current[selectedFile.path] = value
-                      setDrafts((current) => ({ ...current, [selectedFile.path]: value }))
-                      setStatus(null)
-                    }}
-                    spellCheck={false}
-                    aria-label="Vault note content"
-                    className={`min-h-[30rem] w-full resize-y rounded-md border px-4 py-4 font-mono text-sm leading-7 outline-none transition ${isDark ? "border-white/10 bg-[#050816] text-slate-100 focus:border-sky-400/40" : "border-stone-200 bg-white text-stone-900 focus:border-sky-300"}`}
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                    <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Note Info</p>
-                    <div className="mt-3 space-y-3 text-sm">
-                      <InfoRow label="Folder" value={folderLabel(selectedFile, preview.root_folder)} isDark={isDark} />
-                      <InfoRow label="Path" value={selectedFile.path.replace(`${preview.root_folder}/`, "")} isDark={isDark} />
-                      <InfoRow label="Changes" value={selectedHasChanges ? "Edited" : "Synced"} isDark={isDark} />
-                    </div>
-                  </div>
-
-                  <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-                      <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes</p>
-                      <ul className={`mt-3 space-y-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>
-                        <li>Use the search box to jump between any exported note.</li>
-                        <li>Edit notes directly here, then export the updated vault ZIP.</li>
-                        <li>Your notes app will open the edited archive the same way as the original export.</li>
-                      </ul>
-                  </div>
-
-                  {status ? (
-                    <div className={`rounded-md border px-4 py-3 text-sm ${isDark ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
-                      {status}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className={`flex min-h-[42rem] items-center justify-center rounded-lg border border-dashed ${isDark ? "border-white/10 text-slate-400" : "border-stone-300 text-stone-500"}`}>
-              <p>Select a note to start editing.</p>
-            </div>
-          )}
-        </section>
-      </div>
-    </div>
-  )
-}
-
-function InfoRow({ label, value, isDark }: { label: string; value: string; isDark: boolean }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <span className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</span>
-      <span className={`max-w-[60%] text-right text-xs leading-5 ${isDark ? "text-slate-200" : "text-stone-700"}`}>{value}</span>
-    </div>
-  )
-}
-
-function StatPill({
-  label,
-  value,
-  isDark,
-  compact = false,
-  wide = false,
-}: {
-  label: string
-  value: string
-  isDark: boolean
-  compact?: boolean
-  wide?: boolean
-}) {
-  return (
-    <div className={`rounded-md border px-3 py-2 ${wide ? "min-w-[12rem]" : ""} ${isDark ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{label}</p>
-      <p className={`${compact ? "mt-1 text-xs" : "mt-1.5 text-sm"} truncate font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{value}</p>
-    </div>
-  )
+  return <section className={`min-w-0 border-t border-[rgb(var(--border))] pt-6 ${isDark ? "text-slate-100" : "text-stone-950"}`}>
+    <h2 className="text-xl font-semibold">Vault preview and editor</h2><p className="mt-2 text-sm leading-6 text-[rgb(var(--muted-foreground))]">Edit Markdown overrides for character-bible Vault ZIP exports. Changes save automatically. Reset restores the version loaded in this preview.</p>
+    <p className="mt-2 text-sm">{files.length} files · {preview.root_folder}</p>
+    {Object.values(errors).map((message) => <p key={message} role="alert" className="mt-3 border-l-2 border-rose-600 pl-3 text-sm">{message}</p>)}
+    {status ? <p role="status" className="mt-3 text-sm">{status}</p> : null}
+    <fieldset disabled={disabled} className="mt-4 grid min-w-0 gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <aside className="min-w-0"><label className="block text-sm font-medium">Search notes or content<input aria-label="Search notes or content" type="search" value={query} onChange={(event) => setQuery(event.target.value)} className="export-field mt-2 min-h-11 w-full border border-[rgb(var(--border))] px-3" /></label><p className="my-3 text-sm">{filtered.length} notes visible</p>
+        {!filtered.length ? <div className="py-3 text-sm"><p>No notes match that search.</p><button type="button" onClick={() => setQuery("")} className="mt-2 underline">Clear search</button></div> : <div className="max-h-64 overflow-auto border-y border-[rgb(var(--border))] lg:max-h-[34rem]">{filtered.map((file) => <button type="button" key={file.path} aria-pressed={selected?.path === file.path} onClick={() => setSelectedPath(file.path)} className={`block w-full border-b border-[rgb(var(--border))] px-3 py-3 text-left text-sm [overflow-wrap:anywhere] ${selected?.path === file.path ? "bg-[rgb(var(--card))] font-semibold underline underline-offset-4" : ""}`}>{relative(file.path)}{drafts[file.path] !== saved[file.path] ? " · unsaved" : ""}</button>)}</div>}
+        <button type="button" disabled={busy || !files.length} onClick={() => restore(true)} className="app-button-secondary mt-3">Reset all</button>
+      </aside>
+      <div className="min-w-0">{selected ? <>
+        <h3 className="text-base font-semibold [overflow-wrap:anywhere]">{relative(selected.path)}</h3>
+        <p className="mt-2 text-sm">{selectedDirty ? "You have unsaved edits for this note." : "This note is saved."}{busy ? " Saving…" : ""}</p>
+        <div className="my-3 flex flex-wrap gap-2"><button type="button" disabled={!selectedDirty || busy} onClick={() => void save(selected.path, content)} className="app-button-primary">Save note</button><button type="button" className="app-button-secondary" onClick={async () => { try { await navigator.clipboard.writeText(content); setStatus("Copied note text.") } catch { setStatus("Could not copy. Select and copy the note text manually.") } }}>Copy text</button><button type="button" disabled={busy} onClick={() => restore(false)} className="app-button-secondary">Reset file</button><button type="button" className="app-button-secondary" onClick={download}>Download edited Vault ZIP</button></div>
+        <textarea aria-label="Vault note content" value={content} onChange={(event) => edit(selected.path, event.target.value)} spellCheck={false} className="export-field min-h-80 w-full resize-y border border-[rgb(var(--border))] p-3 font-mono text-sm leading-7 lg:min-h-[30rem]" />
+        <p className="mt-2 text-sm text-[rgb(var(--muted-foreground))]">{content.trim() ? content.trim().split(/\s+/).length : 0} words · {content.length} characters</p>
+      </> : <p className="py-6 text-sm">No files are available in this preview.</p>}</div>
+    </fieldset>
+  </section>
 }

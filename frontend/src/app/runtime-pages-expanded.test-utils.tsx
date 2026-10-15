@@ -41,7 +41,7 @@ const saveContextualVaultNoteMock = vi.hoisted(() => vi.fn())
 const useBookDetailMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
+  default: ({ children, href, prefetch: _prefetch, ...props }: { children: ReactNode; href: string; prefetch?: boolean | null }) => <a href={href} {...props}>{children}</a>,
 }))
 
 vi.mock("next/dynamic", () => ({
@@ -148,7 +148,7 @@ vi.mock("@/components/modals/UploadModal", () => ({
 
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/api/betaReads", () => ({ betaReadsApi: betaReadsApiMock }))
-vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock }))
+vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock, MAX_ADVISOR_PASSAGE_CHARS: 12_000 }))
 vi.mock("@/lib/hooks/useBookDetail", () => ({ useBookDetail: useBookDetailMock }))
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
@@ -471,7 +471,7 @@ beforeEach(() => {
   querySetMock.mockReset()
   queryRefetchMock.mockClear()
   useParamsMock.mockReturnValue({ bookId: "book-1" })
-  useQueryClientMock.mockReturnValue({ setQueryData: querySetMock, clear: vi.fn() })
+  useQueryClientMock.mockReturnValue({ setQueryData: querySetMock, getQueryData: vi.fn(), clear: vi.fn() })
   useBookDetailMock.mockReturnValue(defaultQueryResult(bookFixture))
   booksApiMock.get.mockResolvedValue(bookFixture)
   booksApiMock.getReaderBootstrap.mockResolvedValue({

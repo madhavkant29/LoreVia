@@ -51,7 +51,7 @@ export function VaultNotePropertiesPanel({
         <button
           type="button"
           onClick={onSwitchToEdit}
-          className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${isDark ? "bg-white/[0.05] text-slate-300 hover:bg-white/[0.08] hover:text-white" : "bg-stone-100 text-stone-700 hover:bg-stone-200"}`}
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-sm ${isDark ? "bg-white/[0.05] text-slate-300 hover:bg-white/[0.08] hover:text-white" : "bg-stone-100 text-stone-700 hover:bg-stone-200"}`}
           title="Edit note"
         >
           <IconPencil />
@@ -66,37 +66,39 @@ export function VaultNotePropertiesPanel({
 
       <div className="mt-4 grid gap-3">
         <label className="space-y-2">
-          <span className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Folder path</span>
+          <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-stone-600"}`}>Folder path</span>
           <input
+            disabled={busy}
             value={editedFolder}
             onChange={(event) => onEditedFolderChange(event.target.value)}
-            className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+            className={`w-full rounded-sm border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
           />
         </label>
         <label className="space-y-2">
-          <span className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>File title</span>
+          <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-stone-600"}`}>File title</span>
           <input
+            disabled={busy}
             value={editedTitle}
             onChange={(event) => onEditedTitleChange(event.target.value)}
-            className={`w-full rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+            className={`w-full rounded-sm border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-white/[0.03] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
           />
         </label>
         <div className="flex gap-2">
-          <button type="button" onClick={onMoveCurrent} disabled={busy || !selectedNote} className="min-w-0 flex-1 rounded-md bg-[#1f615d] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+          <button type="button" onClick={onMoveCurrent} disabled={busy || !selectedNote || !editedTitle.trim()} className="min-w-0 flex-1 rounded-sm bg-[#1f615d] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
             Update path
           </button>
-          <button type="button" onClick={onDeleteCurrent} disabled={busy || !selectedNote} className={`shrink-0 rounded-md px-3 py-2.5 text-sm font-medium ${isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
+          <button type="button" onClick={onDeleteCurrent} disabled={busy || !selectedNote} className={`shrink-0 rounded-sm px-3 py-2.5 text-sm font-medium ${isDark ? "bg-rose-500/12 text-rose-200" : "bg-rose-50 text-rose-700"}`}>
             Delete
           </button>
         </div>
-        <div className={`overflow-hidden rounded-md border p-3 ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Send to scenes</p>
+        <div className={`overflow-hidden rounded-sm border p-3 ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-stone-200 bg-stone-50"}`}>
+          <p className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-slate-400" : "text-stone-600"}`}>Send to scenes</p>
           <div className="mt-3 flex gap-2">
             <select
               aria-label="Scene destination"
               value={sceneChapterNumber ?? ""}
               onChange={(event) => onSceneChapterNumberChange(event.target.value ? Number(event.target.value) : null)}
-              className={`min-w-0 flex-1 rounded-md border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-[#09111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
+              className={`min-w-0 flex-1 rounded-sm border px-3 py-2.5 text-sm outline-none ${isDark ? "border-white/[0.08] bg-[#09111f] text-slate-100" : "border-stone-200 bg-white text-stone-900"}`}
             >
               <option value="">Scenes inbox</option>
               {sceneChapters.map((chapter) => (
@@ -109,7 +111,7 @@ export function VaultNotePropertiesPanel({
               type="button"
               onClick={onSendToScene}
               disabled={!selectedNote || sceneSending}
-              className="shrink-0 rounded-md bg-[#1f615d] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              className="shrink-0 rounded-sm bg-[#1f615d] px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
               {sceneSending ? "Sending..." : "Send"}
             </button>

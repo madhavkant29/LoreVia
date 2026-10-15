@@ -1,8 +1,8 @@
 import type { Metadata } from "next"
 
 import { QueryProvider } from "@/components/app/QueryProvider"
-import { SiteFooter } from "@/components/layout/SiteFooter"
 import { PublicContextChrome } from "@/components/public/PublicContextChrome"
+import { PublicSiteFooter } from "@/components/public/PublicSiteFooter"
 
 export const metadata: Metadata = {
   robots: {
@@ -18,7 +18,7 @@ export default function PublicContentLayout({ children }: { children: React.Reac
         <PublicContextChrome />
         {children}
       </div>
-      <SiteFooter />
+      <PublicSiteFooter />
     </QueryProvider>
   )
 }

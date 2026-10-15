@@ -50,6 +50,11 @@ class _FakeDb:
         self.statements.append(statement)
         return self.results.pop(0)
 
+    async def scalar(self, statement):
+        # No scripted scalar values; notably no legacy-freeze cutoff marker.
+        self.statements.append(statement)
+        return None
+
     def add(self, value):
         self.added.append(value)
 

@@ -14,7 +14,7 @@ export function ComparisonCTA({
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-12 md:px-8 md:pb-20">
-      <div className="rounded-lg border border-white/10 bg-[#0d1715] px-6 py-8 md:px-10 md:py-10">
+      <div className="border-y border-white/10 py-8 md:py-10">
         <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
             <h2 className="font-display text-4xl font-semibold leading-tight text-white md:text-5xl">{title}</h2>

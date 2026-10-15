@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process"
 
 function findListeningPids(port) {
-  const output = execFileSync("netstat", ["-ano", "-p", "tcp"], {
+  // Next binds localhost on IPv6 on Windows; `-p tcp` omits that listener.
+  const output = execFileSync("netstat", ["-ano"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
   })
@@ -53,9 +54,9 @@ class WindowsExitReporter {
     setTimeout(() => {
       try {
         for (const pid of findListeningPids(port)) {
-          execFileSync("taskkill", ["/pid", pid, "/T", "/F"], {
-            stdio: "ignore",
-          })
+          // Stop the owned listener directly; taskkill /T requires process-tree
+          // enumeration that restricted Windows sessions may not permit.
+          process.kill(Number(pid))
         }
       } catch {
         process.exitCode = exitCode

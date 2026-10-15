@@ -4,7 +4,7 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { ShortcutHelp } from "./ShortcutHelp"
+import { ShortcutHelp, SUPPORT_HELP_EVENT } from "./ShortcutHelp"
 
 const askMock = vi.hoisted(() => vi.fn())
 const configMock = vi.hoisted(() => vi.fn())
@@ -13,8 +13,10 @@ const guidesMock = vi.hoisted(() => vi.fn())
 const dismissGuidanceMock = vi.hoisted(() => vi.fn())
 const restartGuidanceMock = vi.hoisted(() => vi.fn())
 
+const pathnameMock = vi.hoisted(() => vi.fn())
+
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/book-1/manuscript",
+  usePathname: pathnameMock,
 }))
 
 vi.mock("@/lib/api/support", () => ({
@@ -55,6 +57,7 @@ async function flush() {
 
 describe("ShortcutHelp support assistant", () => {
   beforeEach(() => {
+    pathnameMock.mockReturnValue("/book-1/chapters")
     configMock.mockResolvedValue({
       assistant_enabled: true,
       community_url: "https://discord.gg/mjuWtTWSh",
@@ -93,6 +96,18 @@ describe("ShortcutHelp support assistant", () => {
     vi.clearAllMocks()
   })
 
+  it("opens manuscript help from the editor menu without a floating launcher", async () => {
+    pathnameMock.mockReturnValue("/book-1/manuscript")
+    renderShortcutHelp()
+    expect(document.body.querySelector('button[aria-label="Help"]')).toBeNull()
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(SUPPORT_HELP_EVENT))
+      await Promise.resolve()
+    })
+    await flush()
+    expect(document.body.textContent).toContain("LoreVia Support")
+  })
+
   it("answers product-support questions from the support corpus without manuscript text", async () => {
     renderShortcutHelp()
 
@@ -122,7 +137,7 @@ describe("ShortcutHelp support assistant", () => {
     expect(askMock).toHaveBeenCalledWith(
       "I pasted a chapter and save did not work",
       expect.objectContaining({
-        route: "/book-1/manuscript",
+        route: "/book-1/chapters",
         account_tier: "author",
         device_class: expect.any(String),
       }),

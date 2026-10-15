@@ -73,6 +73,39 @@ class BillingPlanStatusOut(BaseModel):
     price_id_present: bool
 
 
+class BillingSubscriptionPriceOut(BaseModel):
+    amount: int
+    currency: str
+    interval: Literal["month", "year"]
+
+
+BillingDisplayState = Literal[
+    "free",
+    "trial",
+    "active",
+    "cancellation_scheduled",
+    "past_due",
+    "paused",
+    "canceled",
+]
+
+
+class BillingSubscriptionOut(BaseModel):
+    plan: str
+    plan_tier: str
+    status: str
+    display_state: BillingDisplayState
+    price: BillingSubscriptionPriceOut
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool = False
+    cancellation_scheduled_at: datetime | None = None
+    next_charge_at: datetime | None = None
+    auto_renew: bool = False
+    last_payment_status: str | None = None
+    has_paddle_subscription: bool = False
+
+
 class BillingStatusOut(BaseModel):
     billing_enabled: bool
     payments_ready: bool

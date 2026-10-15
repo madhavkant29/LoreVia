@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { Dialog } from "@/components/ui/Dialog"
-import { billingApi, type BillingCheckoutPreview } from "@/lib/api/billing"
+import { billingApi, type BillingCheckoutPreview, type BillingSubscription } from "@/lib/api/billing"
 import { capture } from "@/lib/analytics/posthog"
 import {
   getBillingConfirmationTokenFromCheckoutUrl,
@@ -18,7 +18,6 @@ import {
   type PaddleCheckoutEvent,
 } from "@/lib/billing/paddle"
 import {
-  pricingTierAccessLabel,
   pricingTierAnnualSavings,
   pricingTierGuestCtaLabel,
   pricingTierPrice,
@@ -38,6 +37,17 @@ type PricingPlansProps = {
   surface?: "public" | "app"
 }
 
+export function PricingPageIntro() {
+  return (
+    <div className="max-w-3xl">
+      <p className="text-xs font-semibold text-[#1f615d]">Plans and billing</p>
+      <h1 className="mt-3 font-display text-[2.75rem] leading-[0.98] tracking-[-0.045em] text-foreground sm:text-[3.75rem]">
+        Choose the plan that matches your work
+      </h1>
+    </div>
+  )
+}
+
 export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
   const router = useRouter()
   const { user } = useAuthStore()
@@ -53,6 +63,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
   const [checkoutPreview, setCheckoutPreview] = useState<BillingCheckoutPreview | null>(null)
   const [chargeConfirmed, setChargeConfirmed] = useState(false)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [subscriptionState, setSubscriptionState] = useState<BillingSubscription | null>(null)
   const pendingConfirmationTokenRef = useRef<string | null>(null)
   const pendingTransactionIdRef = useRef<string | null>(null)
   const completedTransactionIdRef = useRef<string | null>(null)
@@ -64,6 +75,25 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
     promptViewedRef.current = true
     capture("upgrade_prompt_viewed", { surface })
   }, [surface])
+
+  useEffect(() => {
+    if (!user) {
+      setSubscriptionState(null)
+      return
+    }
+    let cancelled = false
+    void billingApi
+      .subscription()
+      .then((state) => {
+        if (!cancelled) setSubscriptionState(state)
+      })
+      .catch(() => {
+        if (!cancelled) setSubscriptionState(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   function redirectToSuccess(transactionId: string, confirmationToken: string | null) {
     const params = new URLSearchParams({ txn: transactionId })
@@ -303,6 +333,25 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
     : user
       ? tierLabel(user.plan_tier)
       : null
+  const subscriptionDisplayState = subscriptionState?.display_state
+  const subscriptionPlanLabel = tierLabel(subscriptionState?.plan_tier ?? user?.plan_tier)
+  const subscriptionPriceLabel = subscriptionState
+    ? `$${subscriptionState.price.amount}${subscriptionState.price.interval === "year" ? "/year" : "/month"}`
+    : null
+  const subscriptionRenewalLabel = subscriptionState?.next_charge_at
+    ? formatBillingDate(subscriptionState.next_charge_at)
+    : null
+  const subscriptionEndLabel = subscriptionState?.current_period_end
+    ? formatBillingDate(subscriptionState.current_period_end)
+    : null
+  const paidSubscriptionCopy =
+    subscriptionDisplayState === "cancellation_scheduled"
+      ? `Cancellation scheduled. Your ${subscriptionPlanLabel} plan remains active until ${subscriptionEndLabel ?? "the end of the current billing period"}. You won't be charged again.`
+      : subscriptionDisplayState === "past_due"
+        ? "Payment issue. Update your billing details in the portal to keep your plan active. Paddle may retry the payment automatically."
+        : subscriptionRenewalLabel && subscriptionPriceLabel
+          ? `${subscriptionPlanLabel} — ${subscriptionPriceLabel}. Next renewal ${subscriptionRenewalLabel}. Your subscription renews automatically until canceled.`
+          : "Manage cancellation, payment details, invoices, and plan changes in the billing portal. Refund requests are reviewed by support."
   const refundRequestHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("LoreVia refund request")}`
 
   const bodyCopyClass = isDark ? "text-slate-300" : "text-stone-600"
@@ -363,7 +412,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
           </div>
         </div>
 
-        <div className={`mt-7 rounded-md border px-5 py-4 ${noticeClass}`}>
+        <div className={`mt-7 border-y px-1 py-4 ${noticeClass}`}>
           <div className="flex items-start gap-3">
             <span className={`mt-0.5 ${isDark ? "text-slate-300" : "text-[#1f615d]"}`} aria-hidden="true">
               <InfoIcon />
@@ -378,7 +427,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
         </div>
 
         {user?.trial_active ? (
-          <div className={`mt-4 rounded-md border px-5 py-4 ${messageClass}`} role="status">
+          <div className={`mt-4 border-y px-1 py-4 ${messageClass}`} role="status">
             <p className="text-sm font-semibold">Your free trial is already active.</p>
             <p className="mt-1 text-sm leading-7">
               {user.trial_ends_at
@@ -398,7 +447,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
         {user && activePlanLabel ? (
           <section
             aria-labelledby="current-plan-heading"
-            className={`mt-4 rounded-md border px-5 py-4 ${noticeClass}`}
+            className={`mt-4 border-y px-1 py-4 ${noticeClass}`}
           >
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -414,7 +463,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                   </p>
                 ) : isPaidSubscriber ? (
                   <p className={`mt-1 text-sm leading-6 ${bodyCopyClass}`}>
-                    Manage cancellation, payment details, invoices, and plan changes in the billing portal. Refund requests are reviewed by support.
+                    {paidSubscriptionCopy}
                   </p>
                 ) : (
                   <p className={`mt-1 text-sm leading-6 ${bodyCopyClass}`}>
@@ -431,7 +480,7 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                     disabled={billingPortalBusy}
                     className="rounded-sm bg-[#1f615d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#174c49] disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {billingPortalBusy ? "Opening billing..." : "Manage billing / cancel subscription"}
+                    {billingPortalBusy ? "Opening billing..." : "Manage subscription"}
                   </button>
                   <a href="/refund" className={`text-sm font-semibold underline underline-offset-4 ${isDark ? "text-[#9ed9cf]" : "text-[#1f615d]"}`}>
                     Refund policy
@@ -446,12 +495,12 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
         ) : null}
 
         {message ? (
-          <div className={`mt-6 rounded-md border px-4 py-3 text-sm leading-6 ${messageClass}`}>
+          <div className={`mt-6 border-y px-1 py-3 text-sm leading-6 ${messageClass}`}>
             {message}
           </div>
         ) : null}
 
-        <div className="mt-6 grid gap-4 xl:grid-cols-3">
+        <div className={`mt-6 grid overflow-hidden border xl:grid-cols-3 ${isDark ? "border-white/[0.12]" : "border-[#d9e1e6]"}`}>
           {pricingTiers.map((tier) => {
             const price = pricingTierPrice(tier, billingCycle)
             const unit = pricingTierPriceSuffix(tier, billingCycle)
@@ -477,6 +526,11 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
             const priceCopyClass = isDark ? "text-white" : "text-stone-950"
             const textCopyClass = isDark ? "text-slate-300" : "text-stone-700"
             const subCopyClass = isDark ? "text-slate-400" : "text-stone-500"
+            const planMarker = isPaidSubscriber && tier.key === user?.plan_tier
+              ? "Current plan"
+              : tier.highlight
+                ? "Recommended"
+                : null
             const buttonClass = tier.highlight
               ? "border-transparent bg-[#1f615d] text-white hover:bg-[#174c49]"
               : isDark
@@ -486,39 +540,18 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
             return (
               <article
                 key={tier.name}
-                className={`relative flex min-h-[42rem] flex-col rounded-lg border p-6 ${cardClass} ${highlightClass}`.trim()}
+                className={`relative flex min-w-0 flex-col border-b p-6 last:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0 ${cardClass} ${highlightClass}`.trim()}
               >
-                {tier.highlight ? (
-                  <div className="absolute inset-x-0 -top-0.5 flex justify-center">
-                    <span className={`rounded-b-xl px-5 py-1.5 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "bg-[#24544d] text-[#d3f2ec]" : "bg-[#1f615d] text-white"}`}>
-                      Recommended
-                    </span>
-                  </div>
-                ) : null}
-
-                {isPaidSubscriber && tier.key === user?.plan_tier ? (
-                  <span className={`absolute right-5 ${tier.highlight ? "top-14" : "top-5"} rounded-full px-3 py-1 text-3xs font-semibold uppercase tracking-[0.16em] ${isDark ? "bg-[#24544d] text-[#d3f2ec]" : "bg-[#e5f4f0] text-[#1f615d]"}`}>
-                    Current plan
-                  </span>
-                ) : null}
-
-                <div className={`flex items-start justify-between gap-4 ${tier.highlight ? "pt-4" : ""}`}>
-                  <div>
-                    <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>{tier.badge}</p>
-                    <h3 className={`mt-4 font-display text-[2.15rem] tracking-[-0.04em] ${priceCopyClass}`}>{tier.name}</h3>
-                  </div>
-                  {tier.highlight ? (
-                    <span className={`pt-7 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>
-                      Core plan
+                <div className="flex min-h-12 items-start justify-between gap-4">
+                  <h3 className={`font-display text-[2.15rem] tracking-[-0.04em] ${priceCopyClass}`}>{tier.name}</h3>
+                  {planMarker ? (
+                    <span className={`border px-2.5 py-1 text-xs font-semibold ${isDark ? "border-[#4ba391] text-[#9ed9cf]" : "border-[#2b7a73] text-[#1f615d]"}`}>
+                      {planMarker}
                     </span>
                   ) : null}
                 </div>
 
-                <p className={`mt-4 text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`}>
-                  {pricingTierAccessLabel(tier)}
-                </p>
-
-                <div className="mt-4 min-h-[7.25rem]">
+                <div className="mt-3 min-h-[6.5rem]">
                   <p className={`text-[1rem] leading-8 ${textCopyClass}`}>{tier.subtitle}.</p>
                 </div>
 
@@ -536,9 +569,9 @@ export function PricingPlans({ nonce, surface = "public" }: PricingPlansProps) {
                   )}
                 </div>
 
-                <ul className={`mt-6 flex-1 space-y-3 text-[0.98rem] leading-7 ${textCopyClass}`}>
+                <ul className={`mt-6 flex-1 divide-y text-[0.94rem] leading-6 ${isDark ? "divide-white/[0.08]" : "divide-[#e4e7eb]"} ${textCopyClass}`}>
                   {tier.bullets.map((bullet) => (
-                    <li key={bullet} className="flex items-start gap-3">
+                    <li key={bullet} className="flex items-start gap-3 py-2.5 first:pt-0">
                       <span className={`mt-[5px] ${isDark ? "text-[#7ec8b7]" : "text-[#1f615d]"}`} aria-hidden="true">
                         <CheckIcon />
                       </span>
@@ -664,6 +697,10 @@ function DisclosureRow({ label, value }: { label: string; value: string }) {
 
 function formatTrialEndDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short" }).format(new Date(value))
+}
+
+function formatBillingDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" }).format(new Date(value))
 }
 
 function InfoIcon() {

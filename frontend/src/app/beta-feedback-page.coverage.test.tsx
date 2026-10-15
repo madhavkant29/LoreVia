@@ -154,6 +154,7 @@ function setFieldValue(field: HTMLInputElement | HTMLSelectElement | HTMLTextAre
 }
 
 beforeEach(() => {
+  vi.spyOn(window, "confirm").mockReturnValue(true)
   booksApiMock.get.mockResolvedValue({
     id: "book-1",
     title: "The Ember Gate",
@@ -166,13 +167,13 @@ beforeEach(() => {
   betaReadsApiMock.listMine.mockResolvedValue([assignment])
   betaReadsApiMock.getBookAssignmentDetail.mockResolvedValue(assignmentDetail)
   betaReadsApiMock.getMineDetail.mockResolvedValue(assignmentDetail)
-  betaReadsApiMock.createAssignment.mockResolvedValue({ id: "assign-2" })
-  betaReadsApiMock.appendQuestions.mockResolvedValue({})
-  betaReadsApiMock.revokeAssignment.mockResolvedValue({})
-  betaReadsApiMock.start.mockResolvedValue({})
-  betaReadsApiMock.createFeedbackItem.mockResolvedValue({})
-  betaReadsApiMock.deleteFeedbackItem.mockResolvedValue({})
-  betaReadsApiMock.submitReview.mockResolvedValue({})
+  betaReadsApiMock.createAssignment.mockResolvedValue({ ...assignment, id: "assign-2" })
+  betaReadsApiMock.appendQuestions.mockResolvedValue(assignmentDetail.author_questions)
+  betaReadsApiMock.revokeAssignment.mockResolvedValue({ ...assignment, state: "revoked", view_bucket: "completed" })
+  betaReadsApiMock.start.mockResolvedValue({ ...assignment, state: "in_progress" })
+  betaReadsApiMock.createFeedbackItem.mockResolvedValue(assignmentDetail)
+  betaReadsApiMock.deleteFeedbackItem.mockResolvedValue(assignmentDetail)
+  betaReadsApiMock.submitReview.mockResolvedValue({ ...assignment, state: "submitted" })
 })
 
 afterEach(() => {
@@ -191,15 +192,40 @@ afterEach(() => {
 })
 
 describe("BetaFeedbackPage", () => {
+  it("keeps confirmed questions when an older detail refresh completes after saving", async () => {
+    await renderPage(<BetaFeedbackPage />)
+    await waitForText("Assignments")
+    await click("reader@example.com")
+    await waitForText("Selected assignment")
+    let resolveRefresh!: (value: typeof assignmentDetail) => void
+    betaReadsApiMock.getBookAssignmentDetail.mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve }))
+    await act(async () => {
+      void queryClient?.refetchQueries({ queryKey: ["beta-feedback:book-1:author-detail:assign-1"] })
+      await Promise.resolve()
+    })
+    betaReadsApiMock.appendQuestions.mockResolvedValueOnce([...assignmentDetail.author_questions, { id: "q-new", prompt: "Why the signal?", answer_count: 0 }])
+    await act(async () => {
+      setFieldValue(container!.querySelector('textarea[aria-label="Additional author questions"]')!, "Why the signal?")
+      await Promise.resolve()
+    })
+    await click("Add questions")
+    await waitForText("Questions added.")
+    await act(async () => { resolveRefresh(assignmentDetail); await Promise.resolve() })
+    expect(text()).toContain("Why the signal?")
+  })
+
   it("drives author assignment creation, question append, navigation, and revoke actions", async () => {
     await renderPage(<BetaFeedbackPage />)
-    await waitForText("Create beta read")
+    await waitForText("Assignments")
 
-    expect(text()).toContain("The Ember Gate beta feedback")
+    expect(text()).toContain("Beta feedback")
     expect(text()).toContain("reader@example.com")
+    expect(text()).not.toContain("Selected assignment")
+    expect(betaReadsApiMock.listMine).not.toHaveBeenCalled()
+    await click("reader@example.com")
     await waitForText("Selected assignment")
+    expect(text()).toContain("Responses")
 
-    const readerEmail = container?.querySelector('input[aria-label="Reader email"]') as HTMLInputElement
     const extraQuestions = container?.querySelector('textarea[aria-label="Additional author questions"]') as HTMLTextAreaElement
     await act(async () => {
       setFieldValue(extraQuestions, "Which scene dragged?")
@@ -207,7 +233,12 @@ describe("BetaFeedbackPage", () => {
     })
     await click("Add questions")
     expect(betaReadsApiMock.appendQuestions).toHaveBeenCalledWith("book-1", "assign-1", ["Which scene dragged?"])
+    await click("Revoke")
+    expect(betaReadsApiMock.revokeAssignment).toHaveBeenCalledWith("book-1", "assign-1")
 
+    await click("New assignment")
+    await waitForText("Create beta read")
+    const readerEmail = container?.querySelector('input[aria-label="Reader email"]') as HTMLInputElement
     await act(async () => {
       setFieldValue(readerEmail, "new-reader@example.com")
       await Promise.resolve()
@@ -220,12 +251,6 @@ describe("BetaFeedbackPage", () => {
       chapterEnd: null,
     }))
     expect(text()).toContain("Beta read assignment created.")
-
-    await click("View feedback")
-    expect(pushMock).toHaveBeenCalledWith("/book-1/collaboration")
-
-    await click("Revoke")
-    expect(betaReadsApiMock.revokeAssignment).toHaveBeenCalledWith("book-1", "assign-1")
   })
 
   it("drives reader feedback, requirement modal, removal, start, and final review submission", async () => {
@@ -269,7 +294,7 @@ describe("BetaFeedbackPage", () => {
     }))
     expect(text()).toContain("Feedback saved")
 
-    await click("Got it")
+
     await click("Remove")
     expect(betaReadsApiMock.deleteFeedbackItem).toHaveBeenCalledWith("assign-1", "feedback-1")
 

@@ -25,22 +25,28 @@ export function ProcessingStatusStrip({ status, onRetry, retrying = false, class
           <p className="truncate text-sm font-semibold text-[rgb(var(--foreground))]">{status.label}</p>
           {status.detail ? <p className="mt-1 text-xs text-[rgb(var(--muted-foreground))]">{status.detail}</p> : null}
         </div>
-        {status.retryAvailable && onRetry ? (
+        {status.frozen ? (
+          <a href="/library" className="app-button-secondary inline-flex min-h-9 items-center px-3 text-xs">
+            Upload again
+          </a>
+        ) : status.retryAvailable && onRetry ? (
           <button type="button" className="app-button-secondary min-h-9 px-3 text-xs" onClick={onRetry} disabled={retrying}>
             {retrying ? pendingLabel : actionLabel}
           </button>
         ) : null}
       </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn(
-            "h-full rounded-full",
-            status.failed ? "bg-amber-400" : "bg-[rgb(var(--accent))]",
-            status.progressPct === null ? "w-1/3 animate-pulse" : "",
-          )}
-          style={status.progressPct === null ? undefined : { width: `${status.progressPct}%` }}
-        />
-      </div>
+      {!status.frozen ? (
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className={cn(
+              "h-full rounded-full",
+              status.failed ? "bg-amber-400" : "bg-[rgb(var(--accent))]",
+              status.progressPct === null ? "w-1/3 animate-pulse" : "",
+            )}
+            style={status.progressPct === null ? undefined : { width: `${status.progressPct}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -56,30 +62,38 @@ export function ProcessingStatusPanel({ status, onRetry, retrying = false, class
         <div className="min-w-0">
           <p className="text-sm font-semibold text-[rgb(var(--foreground))]">{status.label}</p>
           <p className="mt-1 text-sm leading-6 text-[rgb(var(--muted-foreground))]">
-            {status.autoResume
+            {status.frozen
               ? status.detail
-              : status.partialReady
-                ? "First chapters ready. Character extraction may still be running. You can start reading/editing now."
-                : status.detail}
+              : status.autoResume
+                ? status.detail
+                : status.partialReady
+                  ? "First chapters ready. Character extraction may still be running. You can start reading/editing now."
+                  : status.detail}
           </p>
           {status.lastError ? <p className="mt-2 text-xs text-amber-500">{status.lastError}</p> : null}
         </div>
-        {status.retryAvailable && onRetry ? (
+        {status.frozen ? (
+          <a href="/library" className="app-button-secondary inline-flex shrink-0 items-center">
+            Upload again
+          </a>
+        ) : status.retryAvailable && onRetry ? (
           <button type="button" className="app-button-secondary shrink-0" onClick={onRetry} disabled={retrying}>
             {retrying ? pendingLabel : actionLabel}
           </button>
         ) : null}
       </div>
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn(
-            "h-full rounded-full",
-            status.failed ? "bg-amber-400" : "bg-[rgb(var(--accent))]",
-            status.progressPct === null ? "w-1/3 animate-pulse" : "",
-          )}
-          style={status.progressPct === null ? undefined : { width: `${status.progressPct}%` }}
-        />
-      </div>
+      {!status.frozen ? (
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className={cn(
+              "h-full rounded-full",
+              status.failed ? "bg-amber-400" : "bg-[rgb(var(--accent))]",
+              status.progressPct === null ? "w-1/3 animate-pulse" : "",
+            )}
+            style={status.progressPct === null ? undefined : { width: `${status.progressPct}%` }}
+          />
+        </div>
+      ) : null}
     </section>
   )
 }

@@ -191,6 +191,16 @@ describe("UploadModal", () => {
     document.body.innerHTML = ""
   })
 
+  it("reports empty and edited chapter drafts to the host workspace", () => {
+    const onDraftChange = vi.fn()
+    const view = renderUploadModal({ initialMode: "author", initialExistingBookId: "book-1", presentation: "inline", onDraftChange })
+    expect(onDraftChange).toHaveBeenLastCalledWith(false)
+    setInputValue(view, 'input[aria-label="Chapter title"]', "The signal")
+    expect(onDraftChange).toHaveBeenLastCalledWith(true)
+    setInputValue(view, 'input[aria-label="Chapter title"]', "")
+    expect(onDraftChange).toHaveBeenLastCalledWith(false)
+  })
+
   it("prefills author mode uploads from the account username and explains the manuscript-only byline", async () => {
     const view = renderUploadModal({ initialMode: "author" })
 
@@ -385,7 +395,85 @@ describe("UploadModal", () => {
     await clickButton(view, "Download continuity report")
     expect(intelligenceApi.continuityReport).toHaveBeenCalled()
   })
+  it("rejects unsupported, legacy, and oversized files locally before uploading", async () => {
+    const view = renderUploadModal({ initialMode: "author" })
+    setInputValue(view, 'input[aria-label="Title"]', "Big Draft")
+
+    await chooseFile(view, makeSizedFile("photo.png", 2048))
+    expect(view.textContent).toContain("isn't a supported format")
+
+    await chooseFile(view, makeSizedFile("manuscript.doc", 2048))
+    expect(view.textContent).toContain(".docx")
+
+    await chooseFile(view, makeSizedFile("novel.pdf", 101 * 1024 * 1024))
+    expect(view.textContent).toContain("100 MB")
+
+    const submitButton = view.querySelector('button[type="submit"]') as HTMLButtonElement | null
+    await act(async () => {
+      submitButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(uploadMock).not.toHaveBeenCalled()
+  })
+
+  it("shows the specific server-side failure message when an upload is rejected", async () => {
+    uploadMock.mockRejectedValue(
+      new Error("We couldn't read this manuscript. The file may be corrupted or partially saved."),
+    )
+    const view = renderUploadModal({ initialMode: "author" })
+    setInputValue(view, 'input[aria-label="Title"]', "Broken Draft")
+    await chooseFile(view, makeSizedFile("novel.pdf", 2048))
+
+    const submitButton = view.querySelector('button[type="submit"]') as HTMLButtonElement | null
+    await act(async () => {
+      submitButton?.click()
+      await Promise.resolve()
+    })
+    await waitForText(view, "We couldn't read this manuscript")
+
+    expect(view.textContent).not.toContain("Upload failed. Please try again.")
+  })
+
+  it("renders the processing progress bar under 100% while queued", async () => {
+    const importMock = vi.mocked(booksApi.importManuscript)
+    let releaseProgress: (() => void) | null = null
+    importMock.mockImplementation(async (_bookId, payload) => {
+      payload.onProgress?.(1, 4)
+      await new Promise<void>((resolve) => {
+        releaseProgress = resolve
+      })
+      return importResponseFixture() as never
+    })
+    useQueryMock.mockImplementation(({ queryKey }: { queryKey: unknown }) => {
+      if (queryKey === "books:selector") {
+        return {
+          data: [{ id: "book-1", title: "Gate Draft", mode: "author", hidden_at: null, total_chapters: 3, work_type: "novel" }],
+          refetch: vi.fn(),
+        }
+      }
+      return { data: undefined, refetch: vi.fn() }
+    })
+    const view = renderUploadModal({ initialMode: "author", initialExistingBookId: "book-1", presentation: "inline" })
+
+    await clickButton(view, "Upload file")
+    await chooseFile(view, makeSizedFile("chapter.pdf", 2048))
+    await clickButton(view, "Add Chapter & Process")
+    await waitForText(view, "Handing off for processing")
+
+    const bar = view.querySelector(".h-full.rounded-full.bg-indigo-600") as HTMLElement | null
+    expect(bar?.style.width).toBe("25%")
+    await act(async () => {
+      releaseProgress?.()
+      await Promise.resolve()
+    })
+  })
 })
+
+function makeSizedFile(name: string, size: number, type = "application/octet-stream"): File {
+  const file = new File(["x"], name, { type })
+  Object.defineProperty(file, "size", { configurable: true, value: size })
+  return file
+}
 
 function renderUploadModal(props?: Partial<React.ComponentProps<typeof UploadModal>>) {
   container = document.createElement("div")

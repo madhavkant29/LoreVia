@@ -41,16 +41,18 @@ export function ArticleShell({
           </div>
         </div>
 
-        <div className="editorial-hero">
-          <Image
-            src={summary.hero.src}
-            alt={summary.hero.alt}
-            width={summary.hero.width}
-            height={summary.hero.height}
-            sizes="(max-width: 1024px) 100vw, 1120px"
-            priority
-          />
-        </div>
+        {summary.kind === "blog" ? (
+          <div className="editorial-hero">
+            <Image
+              src={summary.hero.src}
+              alt={summary.hero.alt}
+              width={summary.hero.width}
+              height={summary.hero.height}
+              sizes="(max-width: 1024px) 100vw, 1120px"
+              priority
+            />
+          </div>
+        ) : null}
       </header>
 
       <div className="editorial-article-layout">
@@ -98,11 +100,12 @@ export function ArticleShell({
           <p className="editorial-kicker">Continue reading</p>
           <h2 id="related-reading-title">Related stories</h2>
         </div>
-        <div className="editorial-related-grid">
+        <div className={`editorial-related-grid${summary.kind === "answer" ? " editorial-related-grid--text" : ""}`}>
           {related.map((story) => (
             <StoryCard
               key={`${story.kind}-${story.slug}`}
               story={story}
+              showImage={summary.kind === "blog"}
               trackingEvent="editorial_related_opened"
             />
           ))}

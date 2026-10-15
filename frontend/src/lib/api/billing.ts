@@ -33,6 +33,22 @@ export type BillingCheckoutPreview = {
   message: string | null
 }
 
+export type BillingSubscription = {
+  plan: string
+  plan_tier: string
+  status: string
+  display_state: "free" | "trial" | "active" | "cancellation_scheduled" | "past_due" | "paused" | "canceled"
+  price: { amount: number; currency: string; interval: "month" | "year" }
+  current_period_start: string | null
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  cancellation_scheduled_at: string | null
+  next_charge_at: string | null
+  auto_renew: boolean
+  last_payment_status: string | null
+  has_paddle_subscription: boolean
+}
+
 export const billingApi = {
   checkoutPreview: (plan: PaidPlanCode) =>
     apiClient.post<BillingCheckoutPreview>("/billing/checkout/preview", { plan }).then((r) => r.data),
@@ -55,4 +71,6 @@ export const billingApi = {
     }).then((r) => r.data),
   portal: () =>
     apiClient.post<{ portal_url: string | null; billing_enabled: boolean; message?: string }>("/billing/portal").then((r) => r.data),
+  subscription: () =>
+    apiClient.get<BillingSubscription>("/billing/subscription").then((r) => r.data),
 }

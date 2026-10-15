@@ -14,19 +14,19 @@ export function EvidenceLinks({
   findingId: string
   evidence: BetaReaderEvidence[]
 }) {
-  if (!evidence.length) return null
+  if (!evidence.length) return <p className="mt-3 text-sm text-[rgb(var(--muted-foreground))]">No source excerpts were returned for this finding.</p>
   return (
-    <div className="mt-3 space-y-2">
+    <div className="mt-4 divide-y divide-[rgb(var(--border))] border-y border-[rgb(var(--border))]">
       {evidence.map((item, index) => (
         <div
           key={`${item.chapter_number}-${index}`}
-          className="rounded-md border border-[rgb(var(--border))] bg-[rgba(var(--foreground),0.025)] p-3 text-sm"
+          className="py-3 text-sm"
         >
           <p className="leading-6">“{item.excerpt}”</p>
-          {item.chapter_number ? (
+          {item.chapter_number !== null && Number.isInteger(item.chapter_number) && item.chapter_number > 0 ? (
             <Link
               href={`/${bookId}/manuscript?chapter=${item.chapter_number}&ai_beta_finding=${encodeURIComponent(findingId)}` as Route}
-              className="mt-2 inline-block text-xs font-semibold text-[rgb(var(--accent))]"
+              className="mt-2 inline-block min-h-10 py-2 text-sm font-semibold text-[rgb(var(--accent))]"
             >
               Open chapter {item.chapter_number}
             </Link>
@@ -41,21 +41,23 @@ export function FindingCard({
   bookId,
   finding,
   onSave,
+  saving = false,
 }: {
   bookId: string
   finding: BetaReaderFinding
   onSave: () => void
-}) {
+  saving?: boolean
+  }) {
   return (
-    <article className="rounded-md border border-[rgb(var(--border))] p-4">
+    <article className="border-t border-[rgb(var(--border))] py-5 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="app-eyebrow">
+          <p className="text-xs font-medium text-[rgb(var(--muted-foreground))]">
             {finding.severity} · {finding.category.replaceAll("_", " ")}
           </p>
-          <h3 className="mt-2 text-lg font-semibold">{finding.title}</h3>
+          <h3 className="mt-1 text-lg font-semibold">{finding.title}</h3>
         </div>
-        <button type="button" onClick={onSave} className="app-button-secondary">
+        <button type="button" onClick={onSave} disabled={saving} className="min-h-10 text-sm font-semibold text-[rgb(var(--accent))] underline underline-offset-4 hover:underline">
           Save finding
         </button>
       </div>

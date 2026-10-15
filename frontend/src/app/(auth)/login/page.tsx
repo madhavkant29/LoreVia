@@ -116,9 +116,7 @@ function LoginInner() {
   if (validatingSession) {
     return (
       <main>
-        <div className={`rounded-lg border p-8 ${
-          isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
-        }`}>
+        <div className={`border-y py-8 ${isDark ? "border-white/10" : "border-stone-200"}`}>
           <div className="flex items-center justify-center py-12">
             <div className={`text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>
               Checking session...
@@ -131,10 +129,8 @@ function LoginInner() {
 
   return (
     <main>
-      <div className={`rounded-lg border p-8 ${
-        isDark ? "border-white/10 bg-white/5" : "border-white/80 bg-white/92"
-      }`}>
-        <div className="mb-8 text-center">
+      <div className={`border-y py-8 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+        <div className="mb-8">
           <h1 className={`text-3xl font-semibold ${isDark ? "text-white" : "text-stone-950"}`}>Sign in</h1>
           <p className={`mt-2 text-sm ${isDark ? "text-slate-300" : "text-stone-600"}`}>
             Enter your email and password to return to your author workspace.
@@ -142,13 +138,13 @@ function LoginInner() {
         </div>
 
         <GoogleOAuthButton onError={setError} />
-        <p className={`mt-2 text-center text-xs ${isDark ? "text-slate-300" : "text-stone-600"}`}>
+        <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
           First time with Google? Use <Link href="/register" className="font-medium underline-offset-2 hover:underline">Create one</Link> so you can accept the required terms first.
         </p>
 
         <div className="relative my-6 flex items-center">
           <div className={`h-px flex-1 ${isDark ? "bg-white/[0.07]" : "bg-stone-200"}`} />
-          <span className={`px-3 text-3xs font-medium uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-stone-600"}`}>
+          <span className={`px-3 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>
             or
           </span>
           <div className={`h-px flex-1 ${isDark ? "bg-white/[0.07]" : "bg-stone-200"}`} />
@@ -156,7 +152,7 @@ function LoginInner() {
 
         <form onSubmit={submit} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1.5">
-            <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Email</span>
+            <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Email</span>
             <input
               type="email"
               value={email}
@@ -169,7 +165,7 @@ function LoginInner() {
 
           <div className="flex flex-col gap-1.5">
             <label className="flex flex-col gap-1.5">
-              <span className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-300" : "text-stone-600"}`}>Password</span>
+              <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-stone-700"}`}>Password</span>
               <input
                 type="password"
                 value={password}

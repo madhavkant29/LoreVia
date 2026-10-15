@@ -30,6 +30,7 @@ from app.models.book import Book, Chapter
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, Notification, PlotThread
 from app.models.user import User
+from app.services.book_freeze_service import book_is_frozen, is_book_frozen
 from app.services.email_service import send_processing_complete_with_stats
 from app.services.event_linking_service import link_summary_events
 from app.services.reader_event_service import sync_reader_events_for_chapter
@@ -110,6 +111,9 @@ async def _analyse_chapter_in_generation(
         book = await db.get(Book, chapter.book_id)
         if book is None:
             return {"error": "book not found"}
+        if is_book_frozen(book):
+            log.info("Skipping analysis for frozen book %s", book.id)
+            return {"skipped": "frozen"}
         from app.services.editor_project_service import get_rebuild_run_id
 
         active_rebuild_run_id = get_rebuild_run_id(book)
@@ -124,6 +128,7 @@ async def _analyse_chapter_in_generation(
             log.info("Skipping stale editor-project analysis chapter_id=%s", chapter_id)
             return {"error": "stale_editor_project_run"}
         source_content_version = int(getattr(chapter, "content_version", 1) or 1)
+        chapter_number_value = int(getattr(chapter, "number", 0) or 0)
         log.info(
             "analysis_timing stage=db_load chapter_id=%s elapsed_ms=%s",
             chapter_id,
@@ -164,6 +169,14 @@ async def _analyse_chapter_in_generation(
                 await cache_del(key_analysis_queued(chapter_id))
                 return {"error": "book not found"}
             book = locked_book
+            # Capture plain values before the providers run. Later sections
+            # commit, and post-commit helpers are allowed to roll back the
+            # session; reading ORM attributes after that raises MissingGreenlet
+            # in async workers.
+            book_id_value = book.id
+            book_user_id_value = book.user_id
+            book_title_value = str(book.title or "")
+            author_mode_value = str(getattr(book, "mode", "") or "").strip().lower() == "author"
             await _refresh_book_analysis_pipeline(db, book)
             await db.commit()
         except FATAL_TASK_BOUNDARY_EXCEPTIONS:
@@ -218,6 +231,9 @@ async def _analyse_chapter_in_generation(
             await db.commit()
 
             llm_started = time.perf_counter()
+            if await book_is_frozen(db, book.id):
+                log.info("Aborting analysis for frozen book %s", book.id)
+                return {"skipped": "frozen"}
             client = get_openai_client() if settings.OPENAI_API_KEY else None
             if "detailed" in pending_modes:
                 try:
@@ -258,6 +274,9 @@ async def _analyse_chapter_in_generation(
                     if mode in pending_modes:
                         summary_payloads[mode] = derived_payloads[mode]
 
+            if await book_is_frozen(db, book.id):
+                log.info("Aborting plot-thread analysis for frozen book %s", book.id)
+                return {"skipped": "frozen"}
             threads = await extract_plot_threads(
                 chapter_text,
                 chapter.number,
@@ -386,14 +405,18 @@ async def _analyse_chapter_in_generation(
             db_commit_started = time.perf_counter()
             await db.commit()
             if ready_stats.analysis_complete:
-                await enqueue_world_analysis_refresh(scope="book", target_id=book.id)
+                await enqueue_world_analysis_refresh(scope="book", target_id=book_id_value)
             if rebuild_run_id is not None:
                 # Staging summaries must never leak through Redis before the
                 # atomic database promotion. After promotion, evict every
                 # chapter/mode so readers repopulate from the new generation.
                 if rebuild_promoted:
                     chapter_ids = list(
-                        (await db.execute(select(Chapter.id).where(Chapter.book_id == book.id)))
+                        (
+                            await db.execute(
+                                select(Chapter.id).where(Chapter.book_id == book_id_value)
+                            )
+                        )
                         .scalars()
                         .all()
                     )
@@ -409,10 +432,17 @@ async def _analyse_chapter_in_generation(
                     )
             from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 
-            await invalidate_advisor_caches_for_book(db, book_id=book.id)
+            await invalidate_advisor_caches_for_book(db, book_id=book_id_value)
+            if ready_stats.analysis_complete:
+                # Promote the book as soon as the final analysis succeeds. This
+                # must happen before the first read is queued because that flow
+                # requires book.status == "ready".
+                from app.services.pipeline_state_service import complete_book_after_analysis
+
+                await complete_book_after_analysis(db, book_id=book_id_value)
             completion_email: str | None = None
             if ready_stats.analysis_complete and not prior_ready_state:
-                user = await db.get(User, book.user_id)
+                user = await db.get(User, book_user_id_value)
                 if user and user.email:
                     completion_email = user.email
                 if user is not None:
@@ -423,41 +453,41 @@ async def _analyse_chapter_in_generation(
 
                         await queue_first_impression(
                             db,
-                            book_id=book.id,
+                            book_id=book_id_value,
                             user_id=user.id,
                             strict=False,
                         )
                     except FATAL_TASK_BOUNDARY_EXCEPTIONS:
                         log.warning(
                             "first_impression_dispatch_failed book_id=%s",
-                            book.id,
+                            book_id_value,
                             exc_info=True,
                         )
-                        await db.rollback()
-            # Cache invalidation and the optional user lookup open a new read
-            # transaction after the result commit. Release that connection
-            # before email/network I/O and before returning to the worker.
+                        await _rollback_quietly(db, context="first_impression")
+            # Ensure the connection opened by cache invalidation/user lookup is
+            # released before email/network I/O and before returning to the worker.
             await db.commit()
             try:
                 from app.services.continuity.scan_service import (
                     run_live_canon_guard_if_needed,
                 )
 
-                await run_live_canon_guard_if_needed(
-                    db,
-                    book_id=book.id,
-                    user_id=book.user_id,
-                    chapter_number=chapter.number,
-                    content_version=int(getattr(chapter, "content_version", 1) or 1),
-                    author_mode=getattr(book, "mode", None) == "author",
-                )
+                if not await book_is_frozen(db, book_id_value):
+                    await run_live_canon_guard_if_needed(
+                        db,
+                        book_id=book_id_value,
+                        user_id=book_user_id_value,
+                        chapter_number=chapter_number_value,
+                        content_version=source_content_version,
+                        author_mode=author_mode_value,
+                    )
             except SQLAlchemyError:
                 log.warning(
                     "live_canon_guard_dispatch_failed chapter_id=%s",
                     chapter_id,
                     exc_info=True,
                 )
-                await db.rollback()
+                await _rollback_quietly(db, context="live_canon_guard")
             log.info(
                 "analysis_timing stage=db_commit chapter_id=%s elapsed_ms=%s summaries=%s threads=%s",
                 chapter_id,
@@ -468,7 +498,7 @@ async def _analyse_chapter_in_generation(
             if completion_email:
                 await send_processing_complete_with_stats(
                     completion_email,
-                    book_title=book.title,
+                    book_title=book_title_value,
                     character_count=ready_stats.character_count,
                     relationship_count=ready_stats.relationship_count,
                     plot_thread_count=ready_stats.plot_thread_count,
@@ -522,6 +552,14 @@ async def _analyse_chapter_in_generation(
         finally:
             await cache_del(inflight_key)
             await cache_del(key_analysis_queued(chapter_id))
+
+
+async def _rollback_quietly(db, *, context: str) -> None:
+    """Best-effort rollback that never masks the original post-commit failure."""
+    try:
+        await db.rollback()
+    except Exception:
+        log.warning("analysis_rollback_failed context=%s", context, exc_info=True)
 
 
 async def _upsert_plot_threads(

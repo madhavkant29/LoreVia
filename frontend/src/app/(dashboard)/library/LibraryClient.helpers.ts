@@ -180,21 +180,13 @@ export function deriveLibraryCollections({
     .sort((left, right) => compareBooks(left, right, sortBy))
 
   const explicitPinned = filteredBooks.filter((book) => pinnedIds[book.id] && !book.archived_at)
-  const fallbackPinned = [...filteredBooks]
-    .filter((book) => !book.archived_at)
-    .sort((left, right) => {
-      const leftScore = (left.mode === "author" ? 3 : 0) + (left.status === "ready" ? 2 : left.status === "processing" ? 1 : 0) + clampProgress(left.progress_pct)
-      const rightScore = (right.mode === "author" ? 3 : 0) + (right.status === "ready" ? 2 : right.status === "processing" ? 1 : 0) + clampProgress(right.progress_pct)
-      return rightScore - leftScore
-    })
-  const pinnedBooks = explicitPinned.length > 0 ? explicitPinned.slice(0, 3) : fallbackPinned.slice(0, 3)
+  const pinnedBooks = explicitPinned
   const pinnedBookIds = new Set(pinnedBooks.map((book) => book.id))
   const allProjectBooks = filteredBooks.filter((book) => !pinnedBookIds.has(book.id))
 
   return {
     filteredBooks,
     explicitPinned,
-    fallbackPinned,
     pinnedBooks,
     pinnedBookIds,
     allProjectBooks,

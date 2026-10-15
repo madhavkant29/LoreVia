@@ -18,7 +18,7 @@ const saveNoteMock = vi.hoisted(() => vi.fn())
 const captureMock = vi.hoisted(() => vi.fn())
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
+  default: ({ children, href, prefetch: _prefetch, ...props }: { children: ReactNode; href: string; prefetch?: boolean | null }) => <a href={href} {...props}>{children}</a>,
 }))
 
 vi.mock("next/navigation", () => ({ useParams: () => ({ bookId: "book-1" }) }))
@@ -155,6 +155,7 @@ function button(label: string) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear()
   for (const mock of [getBookMock, getCharactersMock, getChapterListMock, getReportsMock, runBetaReaderMock, getJobMock, createTaskMock, saveNoteMock, captureMock]) mock.mockReset()
   getBookMock.mockResolvedValue({
     id: "book-1",
@@ -189,15 +190,15 @@ describe("AiBetaReaderPage", () => {
     expect(container?.textContent).toContain("Mara is deciding")
     expect(container?.textContent).toContain("Vary the threshold image.")
 
-    await act(async () => button("Overused Language")?.click())
+    await act(async () => button("Overused language")?.click())
     expect(container?.textContent).toContain("silver moon")
     expect(container?.querySelector('a[href*="ai_beta_finding=term-1"]')).toBeTruthy()
 
-    await act(async () => button("Character Voices")?.click())
+    await act(async () => button("Character voices")?.click())
     expect(container?.textContent).toContain("42%")
     expect(container?.textContent).toContain("high confidence")
 
-    await act(async () => button("Revision Priorities")?.click())
+    await act(async () => button("Revision priorities")?.click())
     await act(async () => button("Save note")?.click())
     expect(saveNoteMock).toHaveBeenCalledWith(expect.objectContaining({
       explicitFolder: "AI Beta Reader/Chapter 1",
@@ -209,8 +210,15 @@ describe("AiBetaReaderPage", () => {
 
   it("runs all checks for the selected chapter and uses an exact cached report", async () => {
     renderPage()
-    await waitForText("Run again")
-    await act(async () => button("Run again")?.click())
+    await waitForText("Reader report")
+    expect(getChapterListMock).not.toHaveBeenCalled()
+    expect(getCharactersMock).not.toHaveBeenCalled()
+
+    await act(async () => button("New run")?.click())
+    await waitForText("The Gate")
+    expect(getChapterListMock).toHaveBeenCalledTimes(1)
+    expect(getCharactersMock).toHaveBeenCalledTimes(1)
+    await act(async () => button("Run reader pass")?.click())
 
     expect(runBetaReaderMock).toHaveBeenCalledWith("book-1", expect.objectContaining({
       scope: "chapter",
@@ -234,4 +242,109 @@ describe("AiBetaReaderPage", () => {
     expect(container?.textContent).toContain("Human beta readers do not receive AI access automatically")
     expect(getReportsMock).not.toHaveBeenCalled()
   })
+  it("shows a report-load failure instead of a false empty state and retries", async () => {
+    getReportsMock.mockRejectedValueOnce(new Error("Offline"))
+    renderPage()
+    await waitForText("Could not load saved reports")
+    expect(container?.textContent).not.toContain("No saved reports yet")
+    expect(container?.textContent).not.toContain("No reader report yet")
+    await act(async () => button("Retry saved reports")?.click())
+    await waitForText("The opening creates immediate tension")
+  })
+
+  it("does not interpret unavailable book data as denied permission", async () => {
+    getBookMock.mockRejectedValueOnce(new Error("Offline"))
+    renderPage()
+    await waitForText("Could not load manuscript access")
+    expect(container?.textContent).not.toContain("Permission required")
+    await act(async () => button("Retry manuscript")?.click())
+    await waitForText("Reader report")
+  })
+
+  it("keeps a queued job recoverable across transient polling errors", async () => {
+    sessionStorage.setItem("lorevia:beta-reader-job:book-1", JSON.stringify({ taskId: "job-1", scope: "full_book" }))
+    getJobMock.mockRejectedValueOnce(new Error("Offline")).mockResolvedValue({ status: "complete", report })
+    renderPage()
+    await waitForText("Could not check progress")
+    expect(container?.textContent).not.toContain("Configure a reader pass")
+    expect(button("Run reader pass")).toBeUndefined()
+    await act(async () => button("Check progress now")?.click())
+    await waitForText("Reader report")
+    expect(runBetaReaderMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem("lorevia:beta-reader-job:book-1")).toBeNull()
+  })
+
+  it("recovers a missing saved job without repeatedly polling it", async () => {
+    sessionStorage.setItem("lorevia:beta-reader-job:book-1", JSON.stringify({ taskId: "missing-job", scope: "chapter" }))
+    getJobMock.mockRejectedValue({ isAxiosError: true, response: { status: 404 } })
+    renderPage()
+    await waitForText("This reader pass could no longer be found")
+    expect(button("New run")).toBeTruthy()
+    expect(sessionStorage.getItem("lorevia:beta-reader-job:book-1")).toBeNull()
+  })
+
+  it("ignores malformed stored jobs and handles a completed job with no report", async () => {
+    sessionStorage.setItem("lorevia:beta-reader-job:book-1", "{broken")
+    runBetaReaderMock.mockResolvedValue({ status: "queued", task_id: "job-1", report: null })
+    getJobMock.mockResolvedValue({ status: "complete", report: null })
+    renderPage()
+    await waitForText("Reader report")
+    await act(async () => button("New run")?.click())
+    await waitForText("The Gate")
+    await act(async () => button("Run reader pass")?.click())
+    await waitForText("finished without returning a report")
+    expect(sessionStorage.getItem("lorevia:beta-reader-job:book-1")).toBeNull()
+  })
+
+  it("adds a cached report to history while keeping earlier reports reachable", async () => {
+    runBetaReaderMock.mockResolvedValue({ status: "complete", task_id: null, report: { ...report, report_id: "second", scope: "full_book", overall_impression: "A new full report." } })
+    renderPage()
+    await waitForText("Reader report")
+    await act(async () => button("New run")?.click())
+    await waitForText("The Gate")
+    await act(async () => button("Run reader pass")?.click())
+    await waitForText("A new full report.")
+    expect(container?.querySelectorAll('aside button[aria-pressed]').length).toBe(2)
+  })
+
+  it("clears incompatible finding types when switching report tabs", async () => {
+    renderPage()
+    await waitForText("Reader report")
+    const type = Array.from(container!.querySelectorAll("label")).find((item) => item.textContent?.includes("Finding type"))!.querySelector("select")!
+    await act(async () => { type.value = "pacing"; type.dispatchEvent(new Event("change", { bubbles: true })) })
+    await act(async () => button("Overused language")?.click())
+    expect(container?.textContent).toContain("silver moon")
+    expect(container?.querySelector('[role="tabpanel"]')?.getAttribute("aria-labelledby")).toBe(button("Overused language")?.id)
+  })
+
+  it("deduplicates save requests and restores controls after failure", async () => {
+    let fail!: (error: Error) => void
+    saveNoteMock.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject }))
+    renderPage()
+    await waitForText("Reader report")
+    await act(async () => { button("Save to notes")?.click(); button("Save to notes")?.click() })
+    expect(saveNoteMock).toHaveBeenCalledTimes(1)
+    expect(button("Save finding")?.disabled).toBe(true)
+    await act(async () => { fail(new Error("Offline")); await Promise.resolve() })
+    await waitForText("Could not save this report")
+    expect(button("Save to notes")?.disabled).toBe(false)
+    await act(async () => button("Save finding")?.click())
+    await waitForText("Saved finding")
+    expect(container?.textContent).not.toContain("Could not save this report")
+  })
+
+  it("caps optional voice selection at twenty characters without blocking deselection", async () => {
+    getCharactersMock.mockResolvedValue(Array.from({ length: 21 }, (_, index) => ({ id: `character-${index}`, name: `Character ${index}` })))
+    renderPage()
+    await waitForText("Reader report")
+    await act(async () => button("New run")?.click())
+    await waitForText("Character 20")
+    const choices = Array.from(container!.querySelectorAll<HTMLInputElement>('details input[type="checkbox"]'))
+    for (const choice of choices.slice(0, 20)) await act(async () => choice.click())
+    expect(choices[20].disabled).toBe(true)
+    expect(container?.textContent).toContain("20 of 20 selected")
+    await act(async () => choices[0].click())
+    expect(choices[20].disabled).toBe(false)
+  })
+
 })

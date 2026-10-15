@@ -35,9 +35,9 @@ function ResetPasswordInner() {
   }
 
   return (
-    <main className={`min-h-screen px-4 py-12 ${isDark ? "bg-black text-white" : "bg-[#f8f3ec] text-stone-950"}`}>
-      <form onSubmit={submit} className={`mx-auto mt-12 max-w-md rounded-lg border p-6 ${isDark ? "border-white/10 bg-white/[0.04]" : "border-stone-200 bg-white"}`}>
-        <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Account recovery</p>
+    <main>
+      <form onSubmit={submit} className={`border-y py-8 ${isDark ? "border-white/10" : "border-stone-200"}`}>
+        <p className={`text-sm font-semibold ${isDark ? "text-slate-400" : "text-stone-600"}`}>Account recovery</p>
         <h1 className="mt-2 text-3xl font-semibold">Choose a new password</h1>
         <p className={`mt-3 text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>
           Use at least 12 characters with upper and lower case letters, a number, and a symbol.
@@ -54,11 +54,11 @@ function ResetPasswordInner() {
           />
         </label>
 
-        {!token ? <p className="mt-4 text-sm text-red-500">This reset link is missing a token.</p> : null}
-        {message ? <p className="mt-4 text-sm text-emerald-500">{message}</p> : null}
-        {error ? <p className="mt-4 text-sm text-red-500">{error}</p> : null}
+        {!token ? <p className={`mt-4 border-l-2 px-4 py-2 text-sm ${isDark ? "border-rose-400 text-rose-300" : "border-rose-700 text-rose-700"}`}>This reset link is missing a token.</p> : null}
+        {message ? <p className={`mt-4 border-l-2 px-4 py-2 text-sm ${isDark ? "border-emerald-400 text-emerald-300" : "border-emerald-700 text-emerald-700"}`}>{message}</p> : null}
+        {error ? <p className={`mt-4 border-l-2 px-4 py-2 text-sm ${isDark ? "border-rose-400 text-rose-300" : "border-rose-700 text-rose-700"}`}>{error}</p> : null}
 
-        <button type="submit" disabled={loading || !token || !password} className="mt-6 w-full rounded-md bg-stone-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
+        <button type="submit" disabled={loading || !token || !password} className={`mt-6 w-full rounded-md px-4 py-3 text-sm font-semibold disabled:opacity-50 ${isDark ? "bg-white text-stone-950" : "bg-stone-950 text-white"}`}>
           {loading ? "Updating..." : "Update password"}
         </button>
         <Link href="/login" className={`mt-4 block text-center text-sm ${isDark ? "text-slate-400 hover:text-white" : "text-stone-500 hover:text-stone-900"}`}>

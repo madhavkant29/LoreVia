@@ -34,6 +34,17 @@ describe("DemoWorkspace", () => {
     const reset = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Reset demo")
     act(() => reset?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
     expect(container.textContent).toContain("0/3 reviewed")
-    expect(container.textContent).toContain("Accepted findings appear here")
+    expect(container.textContent).toContain("How to review")
+    expect(container.textContent).not.toContain("Revision plan")
+  })
+
+  it("keeps contextual panels out of the workspace until they contain useful information", () => {
+    act(() => root.render(<DemoWorkspace />))
+
+    expect(container.querySelector("[data-testid='demo-review-task']")).not.toBeNull()
+    expect(container.querySelector("[data-testid='demo-context-rail']")).not.toBeNull()
+    expect(container.textContent).not.toContain("Chapter context")
+    expect(container.textContent).not.toContain("Revision plan")
+    expect(container.textContent).toContain("How to review")
   })
 })

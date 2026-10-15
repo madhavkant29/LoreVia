@@ -38,11 +38,16 @@ vi.mock("@/components/seo/JsonLdScript", () => ({
   },
 }))
 vi.mock("@/components/app/QueryProvider", () => ({ QueryProvider: ({ children }: { children: ReactNode }) => <>{children}</> }))
-vi.mock("@/components/billing/PricingPlans", () => ({ PricingPlans: ({ surface, nonce }: { surface: string; nonce?: string }) => <div>Plans {surface} {nonce}</div> }))
+vi.mock("@/components/billing/PricingPlans", () => ({
+  PricingPageIntro: () => <h1>Choose the plan that matches your work</h1>,
+  PricingPlans: ({ surface, nonce }: { surface: string; nonce?: string }) => <div>Plans {surface} {nonce}</div>,
+}))
 vi.mock("@/components/layout/Navbar", () => ({ Navbar: () => <nav>Pricing navigation</nav> }))
+vi.mock("@/components/marketing/MarketingHeader", () => ({ MarketingHeader: () => <nav>Pricing navigation</nav> }))
 
 import PublicChapterPage, { generateMetadata } from "./public/[bookId]/chapter/[chapterId]/page"
 import PricingPage, { metadata as pricingMetadata } from "./pricing/page"
+import UpgradePage, { metadata as upgradeMetadata } from "./(dashboard)/upgrade/page"
 import AddChapterPage from "./(dashboard)/library/add-chapter/page"
 
 let root: Root | null = null
@@ -112,14 +117,31 @@ describe("previously uncovered runtime pages", () => {
     ])
   })
 
+  it("shares the pricing introduction and plan surface on upgrade", async () => {
+    expect(upgradeMetadata.title).toBe("Upgrade")
+    await render(await UpgradePage())
+
+    expect(container?.textContent).toContain("Choose the plan that matches your work")
+    expect(container?.textContent).toContain("Plans app nonce-1")
+  })
+
   it("renders the dark add-chapter flow and returns to the library after upload", async () => {
     await render(<AddChapterPage />)
-    expect(container?.textContent).toContain("Add New Chapter")
+    expect(container?.textContent).toContain("Add a chapter")
     expect(container?.textContent).toContain("Upload for book-1")
     expect(container?.querySelector('a[href="/book-1/manuscript"]')).not.toBeNull()
     const finish = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Finish upload")
     act(() => finish?.click())
     expect(pushMock).toHaveBeenCalledWith("/library")
+  })
+
+  it("keeps chapter import contextual to a selected project", async () => {
+    searchParamsMock.delete("book")
+    await render(<AddChapterPage />)
+    expect(container?.textContent).toContain("Choose a project first")
+    expect(container?.textContent).not.toContain("Upload for")
+    expect(container?.querySelector('a[href="/library"]')).not.toBeNull()
+    searchParamsMock.set("book", "book-1")
   })
 })
 

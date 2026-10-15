@@ -1,6 +1,6 @@
 import type { Route } from "next"
 import type { QueryClient } from "@tanstack/react-query"
-import { startTransition, useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
+import { startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react"
 
 import { booksApi } from "@/lib/api/books"
 import { MANUSCRIPT_CHAPTER_INCLUDE, readerApi } from "@/lib/api/reader"
@@ -106,6 +106,7 @@ export function useManuscriptChapterLoading({
   setWriterWorkspace,
   userTier,
 }: UseManuscriptChapterLoadingArgs) {
+  const [loadError, setLoadError] = useState<string | null>(null)
   const selectedChapterRef = useRef(selectedChapter)
   selectedChapterRef.current = selectedChapter
 
@@ -232,6 +233,7 @@ export function useManuscriptChapterLoading({
     setWriterWorkspace(bootstrap.writer_workspace)
     setWorkspaceTree(bootstrap.workspace_tree)
     setChapterList(chapters)
+    setLoadError(null)
     const initialChapterNumber = chapters.chapters.some((item) => item.number === requestedChapter)
       ? requestedChapter
       : chapters.chapters[chapters.chapters.length - 1]?.number ?? null
@@ -294,9 +296,7 @@ export function useManuscriptChapterLoading({
         setStatusMessage(`Recovered a local autosave for chapter ${initialChapterNumber}.`)
       }
     } catch {
-      setChapterTitle(chapterMeta?.title || `Chapter ${initialChapterNumber}`)
-      setText("")
-      setHtml(textToHtml(""))
+      setLoadError(`Chapter ${initialChapterNumber} could not be loaded. Check your connection and try again.`)
     }
   }, [
     authHydrated,
@@ -326,9 +326,20 @@ export function useManuscriptChapterLoading({
     userTier,
   ])
 
-  useEffect(() => {
-    loadBase().finally(() => setLoading(false))
+  const retryLoad = useCallback(async () => {
+    setLoading(true)
+    try {
+      await loadBase()
+    } catch {
+      setLoadError("Your manuscript could not be loaded. Check your connection and try again.")
+    } finally {
+      setLoading(false)
+    }
   }, [loadBase, setLoading])
+
+  useEffect(() => {
+    void retryLoad()
+  }, [retryLoad])
 
   useEffect(() => {
     if (selectedChapter === null) {
@@ -346,6 +357,7 @@ export function useManuscriptChapterLoading({
     }
     const chapterMeta = chapterList?.chapters.find((item) => item.number === selectedChapter)
     readerApi.getChapter(bookId, selectedChapter, { include: MANUSCRIPT_CHAPTER_INCLUDE }).then((chapter) => {
+      setLoadError(null)
       const title = chapter.chapter_title || chapterMeta?.title || `Chapter ${selectedChapter}`
       const chapterText = chapter.text_content || ""
       const chapterHtml = hydrateChapterMediaHtml(chapter)
@@ -392,9 +404,7 @@ export function useManuscriptChapterLoading({
       setReview(null)
       setReviewPassages([])
     }).catch(() => {
-      setChapterTitle(chapterMeta?.title || `Chapter ${selectedChapter}`)
-      setText("")
-      setHtml(textToHtml(""))
+      setLoadError(`Chapter ${selectedChapter} could not be loaded. Check your connection and try again.`)
     })
   }, [
     bookId,
@@ -474,6 +484,7 @@ export function useManuscriptChapterLoading({
           }
         })
       })
+      .catch(() => setLoadError("Some chapters could not be loaded. Your drafts are still held in this workspace. Try again to open the full book."))
       .finally(() => setFullBookLoading(false))
   }, [
     bookDrafts,
@@ -489,6 +500,8 @@ export function useManuscriptChapterLoading({
   ])
 
   return {
+    loadError,
+    retryLoad,
     clearDraftDirty,
     loadBase,
     loadWorkspaceTree,

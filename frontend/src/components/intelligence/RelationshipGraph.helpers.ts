@@ -5,9 +5,31 @@ import type { RelationshipGraph as GraphData } from "@/types/character"
 
 type GraphNode = GraphData["nodes"][number]
 
+export function storedGraphLabels(raw: string | null): Record<string, string> {
+  try {
+    const value: unknown = raw ? JSON.parse(raw) : null
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+  } catch { return {} }
+}
+
+export function storedGraphPositions(raw: string | null): Record<string, { x: number; y: number }> | null {
+  try {
+    const value: unknown = raw ? JSON.parse(raw) : null
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null
+    const entries = Object.entries(value).filter((entry): entry is [string, { x: number; y: number }] => {
+      const position = entry[1]
+      return !!position && typeof position === "object" && Number.isFinite(position.x) && Number.isFinite(position.y)
+    })
+    return entries.length ? Object.fromEntries(entries) : null
+  } catch { return null }
+}
+
 export const BASE_LAYOUT: cytoscape.LayoutOptions = {
   name: "cose",
-  animate: true,
+  animate: false,
+  componentSpacing: 120,
+  nodeDimensionsIncludeLabels: true,
   padding: 56,
   nodeRepulsion: () => 14500,
   idealEdgeLength: () => 164,
@@ -17,16 +39,16 @@ export const BASE_LAYOUT: cytoscape.LayoutOptions = {
 
 export function controlButtonClass(active = false) {
   return cn(
-    "inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition",
+    "inline-flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium transition-colors",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70",
     active
-      ? "border-violet-400/40 bg-violet-500/20 text-white shadow-[0_10px_30px_rgba(76,29,149,0.18)]"
-      : "border-white/10 bg-white/[0.03] text-slate-200 hover:border-white/20 hover:bg-white/[0.06]"
+      ? "border-violet-400/40 bg-violet-500/20 text-[rgb(var(--foreground))]"
+      : "border-[rgb(var(--border))] bg-white/[0.03] text-[rgb(var(--foreground))] hover:border-[rgb(var(--border))] hover:bg-white/[0.06]"
   )
 }
 
 export function panelClass() {
-  return "rounded-lg border border-white/10 bg-[#080c16] shadow-[0_24px_80px_rgba(0,0,0,0.36)]"
+  return "rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))]"
 }
 
 export function buildIsolatedPositions(nodes: GraphNode[]) {

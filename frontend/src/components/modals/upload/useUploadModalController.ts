@@ -20,6 +20,15 @@ import { useBookModeStore } from "@/lib/stores/bookModeStore"
 import type { BookMode } from "@/lib/stores/bookModeStore"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { normalizeProcessingStatus } from "@/lib/utils/processingStatus"
+import {
+  BOOK_UPLOAD_MAX_BYTES,
+  MANUSCRIPT_IMPORT_ACCEPT,
+  NOVEL_UPLOAD_ACCEPT,
+  SCREENPLAY_UPLOAD_ACCEPT,
+  validateCoverFile,
+  validateManuscriptFile,
+  validateManuscriptFiles,
+} from "@/lib/validation/manuscriptUpload"
 import type { Book, BookSelector, ChapterConsistencyReport, PaginatedSeries, UserStats } from "@/types/book"
 import type { AdvisorSuggestion, EditorialReview, EditorialReviewPassage, ManuscriptSynopsis } from "@/types/intelligence"
 import type { PlotThread } from "@/types/reader"
@@ -31,10 +40,28 @@ const MAX_TAGS = 8
 const TAG_SUGGESTION_LIMIT = 18
 
 function getApiErrorDetail(error: unknown) {
-  if (!axios.isAxiosError(error)) return null
-  const detail = error.response?.data?.detail
-  if (typeof detail === "string") return detail
-  return typeof detail?.message === "string" ? detail.message : null
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    if (typeof detail === "string" && detail.trim()) return detail
+    if (typeof detail?.message === "string" && detail.message.trim()) return detail.message
+    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+      return "The upload timed out before it finished. Check your connection and try again."
+    }
+    if (!error.response) {
+      return "We couldn't reach LoreVia. Check your connection and try again."
+    }
+    if (error.response.status === 413) {
+      return "This file is larger than the upload limit. Export a smaller file and try again."
+    }
+    if (error.response.status === 403) {
+      return "Your account doesn't have access to this authoring feature yet."
+    }
+    if (error.response.status >= 500) {
+      return "LoreVia hit a problem while processing your request. Please try again in a moment."
+    }
+  }
+  if (error instanceof Error && error.message.trim()) return error.message
+  return null
 }
 
 function pastedChapterDraftKey(userId: string, bookId: string) {
@@ -376,13 +403,33 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const workTypeForValidation = effectiveWorkType === "screenplay" ? "screenplay" : "novel"
     if (isManagingExisting && !canSubmitExistingImport) {
       setError(chapterSource === "paste" ? "Paste a chapter before processing it." : "Please select a chapter file.")
       return
     }
-    if (!isManagingExisting && !startEmpty && files.length === 0) {
-      setError("Please select at least one file")
-      return
+    if (isManagingExisting && chapterSource !== "paste") {
+      const fileError = validateManuscriptFiles(files, { workType: workTypeForValidation })
+      if (fileError) {
+        setError(fileError)
+        return
+      }
+    }
+    if (!isManagingExisting && !startEmpty) {
+      const fileError = files[0]
+        ? validateManuscriptFile(files[0], { workType: workTypeForValidation, maxBytes: BOOK_UPLOAD_MAX_BYTES })
+        : "Please select at least one file"
+      if (fileError) {
+        setError(fileError)
+        return
+      }
+    }
+    if (!autoExtractCover && coverFile) {
+      const coverError = validateCoverFile(coverFile)
+      if (coverError) {
+        setError(coverError)
+        return
+      }
     }
 
     setUploading(true)
@@ -596,7 +643,40 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
   const isScreenplayWorkspace = effectiveWorkType === "screenplay"
   const storyUnitLabel = isScreenplayWorkspace ? "scene" : "chapter"
   const storyUnitLabelTitle = isScreenplayWorkspace ? "Scene" : "Chapter"
-  const newUploadAccept = isScreenplayWorkspace ? ".pdf,.txt,.md" : ".pdf,.epub,.docx,.txt,.md"
+  const newUploadAccept = isScreenplayWorkspace ? SCREENPLAY_UPLOAD_ACCEPT : NOVEL_UPLOAD_ACCEPT
+
+  const handleFilesSelected = (selectedFiles: File[]) => {
+    const workTypeForValidation = isScreenplayWorkspace ? "screenplay" : "novel"
+    const validationError = isManagingExisting
+      ? validateManuscriptFiles(selectedFiles, { workType: workTypeForValidation })
+      : selectedFiles[0]
+        ? validateManuscriptFile(selectedFiles[0], {
+            workType: workTypeForValidation,
+            maxBytes: BOOK_UPLOAD_MAX_BYTES,
+          })
+        : "Please select at least one file"
+    if (validationError) {
+      setError(validationError)
+      setFiles([])
+      return
+    }
+    setError(null)
+    setFiles(selectedFiles)
+  }
+
+  const handleCoverSelected = (file: File | null) => {
+    if (!file) {
+      setCoverFile(null)
+      return
+    }
+    const validationError = validateCoverFile(file)
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+    setError(null)
+    setCoverFile(file)
+  }
   const primaryFile = files[0] ?? null
   const chapterUploadHelp = isScreenplayWorkspace
     ? "Upload a screenplay PDF, Fountain, TXT, or Markdown script segment. LoreVia will turn scenes into synthetic chapters for the rest of the pipeline."
@@ -607,6 +687,7 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
   async function retryProcessing() {
     if (!processingBookId) return
     setProcessingRetrying(true)
+    setError(null)
     try {
       if (processingSummary?.resumeAvailable) {
         await booksApi.continueProcessing(processingBookId)
@@ -614,6 +695,8 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
         await booksApi.retryProcessing(processingBookId)
       }
       await refetchBooks()
+    } catch (retryError) {
+      setError(getApiErrorDetail(retryError) ?? "Processing could not be restarted. Please try again.")
     } finally {
       setProcessingRetrying(false)
     }
@@ -654,7 +737,8 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
   return {
     wizard, onClose, isInline, shellClassName, isManagingExisting, startEmpty, storyUnitLabel, storyUnitLabelTitle, isDark,
     uploadStage, processingBook, processingSummary, processingRetrying, retryProcessing, submit,
-    inputRef, coverInputRef, newUploadAccept, files, setFiles, primaryFile, isScreenplayWorkspace,
+    inputRef, coverInputRef, newUploadAccept, files, setFiles, handleFilesSelected, handleCoverSelected,
+    chapterUploadAccept: isScreenplayWorkspace ? SCREENPLAY_UPLOAD_ACCEPT : MANUSCRIPT_IMPORT_ACCEPT, primaryFile, isScreenplayWorkspace,
     importPreview, setImportPreview, dismissPreview, setDismissPreview, previewLoading, fetchPreview,
     setImportAsSingle, showEditor, setShowEditor, canUploadAuthorMode, needsUsername, settingUsername,
     usernameError, handleSetUsername, existingAuthorBooks, selectedExistingBook, existingBookSelectLabel,

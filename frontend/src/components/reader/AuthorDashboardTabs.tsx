@@ -583,7 +583,7 @@ export function PlanningTab({
         <PlanningMetric isDark={isDark} label="Book goal" value={targetWords ? `${targetWords.toLocaleString()} words` : "Not set"} />
         <PlanningMetric isDark={isDark} label="Chapter goal" value={chapterTarget > 0 ? `${chapterTarget.toLocaleString()} avg. words` : `${formatNumber(chapterCount)} chapters`} />
         <PlanningMetric isDark={isDark} label="Daily quota" value={`${dailyTarget.toLocaleString()} words`} />
-        <PlanningMetric isDark={isDark} label="Writing streak" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} />
+        <PlanningMetric isDark={isDark} label="Sign-in streak" value={`${loginStreakDays} day${loginStreakDays === 1 ? "" : "s"}`} />
         <PlanningMetric isDark={isDark} label="Target completion" value={etaDays !== null ? (etaDays === 0 ? "Target reached" : `In ${etaDays} days`) : "Not available"} />
       </div>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.45fr)] xl:auto-rows-fr">
@@ -596,7 +596,7 @@ export function PlanningTab({
           onOpenManuscript={onOpenManuscript}
         />
         <div className="space-y-5">
-          <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+          <section className={panelClass(isDark, "p-4 sm:p-5")}>
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Session goals</p>
             <div className="mt-4 space-y-3">
               {incompleteItems.slice(0, 3).map((item) => (
@@ -608,7 +608,7 @@ export function PlanningTab({
               {incompleteItems.length === 0 ? <p className={isDark ? "text-sm text-slate-300" : "text-sm text-slate-600"}>Add a planning item to define the next session.</p> : null}
             </div>
           </section>
-          <section className={panelClass(isDark, "h-full p-4 sm:p-5")}>
+          <section className={panelClass(isDark, "p-4 sm:p-5")}>
             <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Quotas</p>
             <div className="mt-4 space-y-3">
               <CompactProgressRow isDark={isDark} label="Daily quota" value={`${dailyWords} / ${dailyTarget}`} percent={(dailyWords / dailyTarget) * 100} />
@@ -764,7 +764,7 @@ export function StoryMapTab({
               <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Memory map</p>
               <h3 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Who is in play and what still needs closure.</h3>
             </div>
-            <button type="button" onClick={onOpenRelationships} className="text-sm font-semibold text-teal-700">
+            <button type="button" onClick={onOpenRelationships} className="text-sm font-semibold text-teal-700 dark:text-teal-300">
               Open graph
             </button>
           </div>

@@ -69,7 +69,7 @@ export function modeLabel(mode: string) {
   return MODES.find((item) => item.value === mode)?.label ?? "Casual"
 }
 
-export function useActiveSettingsSection() {
+export function useActiveSettingsSection(query = "", hydrated = true) {
   const [activeSectionId, setActiveSectionId] = useState(SETTINGS_NAV[0].id)
 
   useEffect(() => {
@@ -141,7 +141,7 @@ export function useActiveSettingsSection() {
       sectionObserver?.disconnect()
       resizeObserver?.disconnect()
     }
-  }, [])
+  }, [query, hydrated])
 
   return { activeSectionId, setActiveSectionId }
 }
@@ -150,8 +150,8 @@ export function SettingsPanel({ id, title, compact = false, children }: { id: st
   const visibleSectionIds = useContext(SettingsSearchContext)
   if (visibleSectionIds && !visibleSectionIds.has(id)) return null
   return (
-    <section id={id} className={compact ? "settings-panel settings-panel--compact" : "settings-panel"}>
-      <h2 className="settings-panel__title">{title}</h2>
+    <section id={id} aria-labelledby={`${id}-title`} className={compact ? "settings-panel settings-panel--compact" : "settings-panel"}>
+      <h2 id={`${id}-title`} className="settings-panel__title">{title}</h2>
       <div className={compact ? "mt-3" : "mt-5"}>{children}</div>
     </section>
   )
@@ -212,7 +212,7 @@ export function SelectableCard({
 }
 
 export function InlineMessage({ message, tone, className = "" }: { message: string; tone: "warning" | "neutral"; className?: string }) {
-  return <div className={`settings-message ${tone === "warning" ? "settings-message--warning" : ""} ${className}`.trim()}>{message}</div>
+  return <div role={tone === "warning" ? "alert" : "status"} className={`settings-message ${tone === "warning" ? "settings-message--warning" : ""} ${className}`.trim()}>{message}</div>
 }
 
 export function GoalRing({ progress }: { progress: number }) {

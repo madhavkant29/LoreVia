@@ -106,7 +106,7 @@ function renderRail({
 }
 
 function clickButton(view: HTMLDivElement, label: string) {
-  const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes(label))
+  const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent?.trim() === label)
   if (!button) throw new Error(`Could not find ${label} button`)
   act(() => {
     button.click()

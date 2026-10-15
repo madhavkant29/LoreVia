@@ -31,6 +31,91 @@ def report_sentence(text: str | None) -> str:
     return lines[0] if lines else ""
 
 
+# Document parsers raise many library-specific exception types for corrupt or
+# malformed inputs. They all mean the same thing to an author: the file could
+# not be read, so map them to one clear 400 response instead of leaking a 500.
+try:  # pragma: no cover - python-docx is a hard dependency, import is defensive
+    from docx.opc.exceptions import PackageNotFoundError
+except ImportError:  # pragma: no cover
+    PackageNotFoundError = ValueError
+
+_UNREADABLE_DOCUMENT_EXCEPTIONS = (
+    AttributeError,
+    IndexError,
+    KeyError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    zipfile.BadZipFile,
+    PackageNotFoundError,
+)
+
+
+def _unreadable_document_error(filename: str) -> HTTPException:
+    label = filename if filename and filename not in {"preview", "this file"} else "this manuscript"
+    return HTTPException(
+        400,
+        f"We couldn't read {label}. The file may be corrupted or partially "
+        "saved. Try re-saving or re-exporting it, then upload it again.",
+    )
+
+
+def parse_document_or_400(parse: Any, raw: bytes, *, filename: str, **kwargs: Any) -> Any:
+    """Run a synchronous parser, converting document errors into a 400."""
+    try:
+        return parse(raw, **kwargs)
+    except _UNREADABLE_DOCUMENT_EXCEPTIONS as exc:
+        raise _unreadable_document_error(filename) from exc
+
+
+async def parse_document_or_400_async(
+    parse: Any, raw: bytes, *, filename: str, **kwargs: Any
+) -> Any:
+    """Run a parser in a worker thread, converting document errors into a 400."""
+    try:
+        return await asyncio.to_thread(parse, raw, **kwargs)
+    except _UNREADABLE_DOCUMENT_EXCEPTIONS as exc:
+        raise _unreadable_document_error(filename) from exc
+
+
+def _parse_docx_text(raw: bytes) -> str:
+    from io import BytesIO
+
+    from docx import Document
+
+    doc = Document(BytesIO(raw))
+    text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
+    return book_text._normalize_unicode_replacements(text)
+
+
+def _sample_pdf_text(raw: bytes) -> str:
+    import fitz
+
+    doc = fitz.open(stream=raw, filetype="pdf")
+    try:
+        pages = min(doc.page_count, 3)
+        return "".join(doc.load_page(index).get_text() for index in range(pages))
+    finally:
+        doc.close()
+
+
+def _sample_epub_text(raw: bytes) -> str:
+    from io import BytesIO
+
+    from bs4 import BeautifulSoup
+    from ebooklib import epub as epub_lib
+
+    book = epub_lib.read_epub(BytesIO(raw))
+    sample_text = ""
+    for item in book.get_items_of_type(9):  # ITEM_DOCUMENT
+        content = item.get_content().decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(content, "html.parser")
+        sample_text += soup.get_text()
+        if len(sample_text) > 5000:
+            break
+    return sample_text
+
+
 async def next_chapter_number(db: AsyncSession, book_id: uuid.UUID) -> int:
     current_max = await db.scalar(
         select(func.max(Chapter.number)).where(Chapter.book_id == book_id)
@@ -44,7 +129,9 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
     if lower.endswith(".scrivzip") or lower.endswith(".scriv.zip"):
         from app.utils.scrivener_utils import parse_scrivener_archive
 
-        chapters = await asyncio.to_thread(parse_scrivener_archive, raw)
+        chapters = await parse_document_or_400_async(
+            parse_scrivener_archive, raw, filename=filename
+        )
         if split_into_chapters:
             return chapters
         return [
@@ -57,7 +144,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
     if lower.endswith(".pdf"):
         from app.parsers.pdf_parser import parse_pdf
 
-        chapters = await asyncio.to_thread(parse_pdf, raw)
+        chapters = await parse_document_or_400_async(parse_pdf, raw, filename=filename)
         if split_into_chapters and chapters:
             return chapters
         merged_text = "\n\n".join(
@@ -67,7 +154,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
     if lower.endswith(".epub"):
         from app.parsers.epub_parser import parse_epub
 
-        chapters = await asyncio.to_thread(parse_epub, raw)
+        chapters = await parse_document_or_400_async(parse_epub, raw, filename=filename)
         if split_into_chapters and chapters:
             return chapters
         merged_text = "\n\n".join(
@@ -75,13 +162,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
         )
         return [{"title": stem, "text": merged_text or "", "number": 1}]
     if lower.endswith(".docx"):
-        from io import BytesIO
-
-        from docx import Document
-
-        doc = Document(BytesIO(raw))
-        text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
-        text = book_text._normalize_unicode_replacements(text)
+        text = parse_document_or_400(_parse_docx_text, raw, filename=filename)
         if split_into_chapters:
             from app.parsers.text_parser import parse_text_chapters
 
@@ -200,7 +281,7 @@ async def parse_screenplay_upload(filename: str, raw: bytes) -> dict[str, Any]:
     if lower.endswith(".pdf"):
         from app.parsers.pdf_parser import parse_pdf
 
-        parsed_pages = await asyncio.to_thread(parse_pdf, raw)
+        parsed_pages = await parse_document_or_400_async(parse_pdf, raw, filename=filename)
         source_text = "\n\n".join(
             (chapter.get("text") or "").strip() for chapter in parsed_pages if chapter.get("text")
         )
@@ -245,11 +326,11 @@ async def parse_book_upload_for_ingestion(
     preserve_chapter_numbers: bool,
     preserve_source_chapters: bool,
     language: str | None = None,
+    filename: str | None = None,
 ) -> dict[str, Any]:
+    display_filename = filename or normalization.upload_filename_for_format(format_name)
     if work_type == "screenplay":
-        screenplay_payload = await parse_screenplay_upload(
-            normalization.upload_filename_for_format(format_name), raw
-        )
+        screenplay_payload = await parse_screenplay_upload(display_filename, raw)
         return {
             "chapters": screenplay_payload["chapters"],
             "screenplay_payload": screenplay_payload,
@@ -262,9 +343,10 @@ async def parse_book_upload_for_ingestion(
     if format_name == "pdf":
         from app.parsers.pdf_parser import parse_pdf_with_diagnostics
 
-        chapters, parser_diagnostics = await asyncio.to_thread(
+        chapters, parser_diagnostics = await parse_document_or_400_async(
             parse_pdf_with_diagnostics,
             raw,
+            filename=display_filename,
             split_large_chapters=not preserve_exact_structure,
             language=language,
         )
@@ -278,9 +360,10 @@ async def parse_book_upload_for_ingestion(
     if format_name == "epub":
         from app.parsers.epub_parser import parse_epub
 
-        chapters = await asyncio.to_thread(
+        chapters = await parse_document_or_400_async(
             parse_epub,
             raw,
+            filename=display_filename,
             split_large_chapters=not preserve_exact_structure,
         )
         return {
@@ -290,9 +373,7 @@ async def parse_book_upload_for_ingestion(
             "detected_language": language or "en",
         }
 
-    parsed = await parse_import_upload(
-        normalization.upload_filename_for_format(format_name), raw, False
-    )
+    parsed = await parse_import_upload(display_filename, raw, False)
     return {
         "chapters": parsed,
         "screenplay_payload": None,
@@ -442,38 +523,27 @@ def build_import_preview(
     # Build sample text for language detection when not provided
     sample_text = ""
     if format_name == "pdf":
-        import fitz
-
-        doc = fitz.open(stream=raw, filetype="pdf")
-        try:
-            pages = min(doc.page_count, 3)
-            for i in range(pages):
-                sample_text += doc.load_page(i).get_text()
-        finally:
-            doc.close()
+        sample_text = parse_document_or_400(_sample_pdf_text, raw, filename="preview")
     elif format_name == "epub":
-        from io import BytesIO
-
-        from ebooklib import epub as epub_lib
-
-        book = epub_lib.read_epub(BytesIO(raw))
-        from bs4 import BeautifulSoup
-
-        for item in book.get_items_of_type(9):  # ITEM_DOCUMENT
-            content = item.get_content().decode("utf-8", errors="ignore")
-            soup = BeautifulSoup(content, "html.parser")
-            sample_text += soup.get_text()
-            if len(sample_text) > 5000:
-                break
-    elif format_name in ("docx", "doc"):
-        from io import BytesIO
-
-        from docx import Document
-
-        doc = Document(BytesIO(raw))
-        sample_text = "\n".join(
-            paragraph.text for paragraph in doc.paragraphs[:30] if paragraph.text.strip()
+        sample_text = parse_document_or_400(_sample_epub_text, raw, filename="preview")
+    elif format_name == "doc":
+        raise HTTPException(
+            400,
+            "Legacy .doc files require additional system dependencies. Please convert to .docx format.",
         )
+    elif format_name == "docx":
+        sample_text = "\n".join(
+            parse_document_or_400(_parse_docx_text, raw, filename="preview").splitlines()[:30]
+        )
+    elif format_name == "scrivener":
+        from app.utils.scrivener_utils import parse_scrivener_archive
+
+        scrivener_chapters = parse_document_or_400(
+            parse_scrivener_archive, raw, filename="preview"
+        )
+        sample_text = "\n".join(
+            str(chapter.get("text") or "") for chapter in scrivener_chapters
+        )[:5000]
     elif format_name in ("txt", "md", "fountain"):
         sample_text = raw.decode("utf-8", errors="replace")[:5000]
         sample_text = book_text._normalize_unicode_replacements(sample_text)
@@ -495,27 +565,29 @@ def build_import_preview(
     if format_name == "pdf":
         from app.parsers.pdf_parser import parse_pdf_with_diagnostics
 
-        chapters, diagnostics = parse_pdf_with_diagnostics(
+        chapters, diagnostics = parse_document_or_400(
+            parse_pdf_with_diagnostics,
             raw,
+            filename="preview",
             split_large_chapters=not preserve_exact,
             language=language,
         )
     elif format_name == "epub":
         from app.parsers.epub_parser import parse_epub
 
-        chapters = parse_epub(
+        chapters = parse_document_or_400(
+            parse_epub,
             raw,
+            filename="preview",
             split_large_chapters=not preserve_exact,
         )
-    elif format_name in ("docx", "doc"):
-        from io import BytesIO
-
-        from docx import Document
-
-        doc = Document(BytesIO(raw))
-        text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
-        text = book_text._normalize_unicode_replacements(text)
+    elif format_name == "docx":
+        text = parse_document_or_400(_parse_docx_text, raw, filename="preview")
         chapters = parse_text_chapters(text, language=language)
+    elif format_name == "scrivener":
+        from app.utils.scrivener_utils import parse_scrivener_archive
+
+        chapters = parse_document_or_400(parse_scrivener_archive, raw, filename="preview")
     elif format_name in ("txt", "md", "fountain"):
         text = raw.decode("utf-8", errors="replace")
         text = book_text._normalize_unicode_replacements(text)

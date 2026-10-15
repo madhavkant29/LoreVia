@@ -14,6 +14,7 @@ import { GLOBAL_SHORTCUTS } from "@/lib/utils/shortcuts"
 import type { SupportAnswer, SupportConfig, SupportGuideSummary, SupportRecentMessage, SupportUiContext } from "@/types/support"
 
 const COMMAND_PALETTE_EVENT = "lorevia:open-command-palette"
+export const SUPPORT_HELP_EVENT = "lorevia:open-support-help"
 
 function guidanceForPath(pathname: string | null) {
   const path = pathname ?? "/"
@@ -59,6 +60,12 @@ export function ShortcutHelp() {
   const [supportError, setSupportError] = useState<string | null>(null)
   const dismissGuidance = useUiPreferencesStore((state) => state.dismissGuidance)
   const restartGuidance = useUiPreferencesStore((state) => state.restartGuidance)
+
+  useEffect(() => {
+    const openSupport = () => setDialog("support")
+    window.addEventListener(SUPPORT_HELP_EVENT, openSupport)
+    return () => window.removeEventListener(SUPPORT_HELP_EVENT, openSupport)
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -155,9 +162,11 @@ export function ShortcutHelp() {
     }
   }
 
+  if (pathname === "/upgrade") return null
+
   return (
     <>
-      <div data-lorevia-bottom-floating className="fixed bottom-20 left-4 z-[65] md:bottom-6 lg:left-[16.5rem]">
+      {!pathname?.endsWith("/manuscript") ? <div data-floating-help data-lorevia-bottom-floating className="fixed bottom-20 left-4 z-[65] md:bottom-6 lg:left-[16.5rem]">
         <button
           type="button"
           aria-label="Help"
@@ -167,7 +176,7 @@ export function ShortcutHelp() {
           <HelpCircle className="h-4 w-4" aria-hidden="true" />
           <span>Help</span>
         </button>
-      </div>
+      </div> : null}
 
       <Dialog
         open={dialog === "shortcuts"}

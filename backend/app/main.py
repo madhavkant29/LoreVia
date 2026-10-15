@@ -41,6 +41,8 @@ if settings.SENTRY_DSN and not settings.DEBUG:
             CeleryIntegration(),
         ],
         before_send=scrub_sentry_event,
+        release=normalize_release_sha(settings.RELEASE_SHA),
+        environment=settings.DEPLOYMENT_ENV,
         traces_sample_rate=settings.SENTRY_API_TRACES_SAMPLE_RATE,
         profiles_sample_rate=settings.SENTRY_API_PROFILES_SAMPLE_RATE,
     )

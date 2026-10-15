@@ -12,9 +12,20 @@ export function Reveal({
   className?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [inView, setInView] = useState(false)
+  const [inView, setInView] = useState(true)
+  const [canAnimate, setCanAnimate] = useState(false)
 
   useEffect(() => {
+    const node = ref.current
+    if (!node || typeof IntersectionObserver === "undefined") return
+
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    if (reducedMotion) return
+
+    setCanAnimate(true)
+    const initiallyVisible = node.getBoundingClientRect().top <= window.innerHeight
+    setInView(initiallyVisible)
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -25,10 +36,7 @@ export function Reveal({
       { threshold: 0.14 }
     )
 
-    const node = ref.current
-    if (node) {
-      observer.observe(node)
-    }
+    observer.observe(node)
 
     return () => observer.disconnect()
   }, [])
@@ -37,8 +45,8 @@ export function Reveal({
     <div
       ref={ref}
       style={{ transitionDelay: `${delay}ms` }}
-      className={`transform-gpu transition-all duration-500 ease-out ${
-        inView ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
+      className={`transform-gpu transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
+        !canAnimate || inView ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
       } ${className}`}
     >
       {children}

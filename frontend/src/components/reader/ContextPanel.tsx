@@ -3,6 +3,9 @@
 import { memo, useMemo, useRef, useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
+import { Dialog } from "@/components/ui/Dialog"
+import { useReaderDraftGuard } from "@/lib/hooks/useReaderDraftGuard"
 
 import { readerApi } from "@/lib/api/reader"
 import { booksApi } from "@/lib/api/books"
@@ -19,6 +22,10 @@ interface Props {
   chapterNumber: number
   chapterTitle: string | null
   characters: ChapterCharacter[]
+  error?: string | null
+  onRetry?: () => void
+  canEdit?: boolean
+  onDraftState?: (dirty: boolean, busy: boolean) => void
 }
 
 export const ContextPanel = memo(function ContextPanel({
@@ -31,15 +38,23 @@ export const ContextPanel = memo(function ContextPanel({
   chapterNumber,
   chapterTitle,
   characters,
+  error,
+  onRetry,
+  canEdit = false,
+  onDraftState,
 }: Props) {
   const { bookId } = useParams<{ bookId: string }>()
   const [savingQuote, setSavingQuote] = useState(false)
   const [quoteCharacter, setQuoteCharacter] = useState("")
   const [quoteNote, setQuoteNote] = useState("")
+  const [quoteStatus, setQuoteStatus] = useState<string | null>(null)
+  const quoteBusy = useRef(false)
+  const editBusy = useRef(false)
+  const [savedCharacter, setSavedCharacter] = useState<ChapterCharacter | null>(null)
   const [dragOffset, setDragOffset] = useState(0)
   const dragStartRef = useRef<number | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
-  const activeCharacter = result?.type === "character" ? result.character : null
+  const activeCharacter = result?.type === "character" ? (savedCharacter?.id === result.character?.id ? savedCharacter : result.character) : null
   const isDark = theme === "dark"
   
   // Edit state
@@ -59,6 +74,12 @@ export const ContextPanel = memo(function ContextPanel({
     motivations: activeCharacter?.motivations?.join(", ") || "",
     fears: activeCharacter?.fears?.join(", ") || "",
   })
+  const dirty = editing || Boolean(quoteNote || quoteCharacter)
+  const canLeave = useReaderDraftGuard(dirty, saving || savingQuote)
+  const closePanel = () => { if (canLeave()) onClose() }
+  const previousFocus = useRef<HTMLElement | null>(null)
+  useEffect(() => { onDraftState?.(dirty, saving || savingQuote) }, [dirty, saving, savingQuote, onDraftState])
+  useEffect(() => { setQuoteStatus(null) }, [selectedQuote])
 
   const shell = isDark
     ? {
@@ -68,7 +89,7 @@ export const ContextPanel = memo(function ContextPanel({
         tab: "text-stone-500 hover:text-stone-300",
         card: "border-white/5 bg-white/[0.02]",
         subCard: "border-white/5 bg-white/[0.03]",
-        muted: "text-stone-500",
+        muted: "text-stone-400",
         body: "text-stone-400",
         input: "border-white/10 bg-white/5 text-white",
         button: "bg-white text-black hover:bg-white/90",
@@ -86,7 +107,7 @@ export const ContextPanel = memo(function ContextPanel({
         tab: "text-stone-400 hover:text-stone-600",
         card: "border-stone-200/60 bg-stone-50/50",
         subCard: "border-stone-200/60 bg-white",
-        muted: "text-stone-400",
+        muted: "text-stone-600",
         body: "text-stone-600",
         input: "border-stone-200 bg-white text-stone-900",
         button: "bg-stone-900 text-white hover:bg-stone-800",
@@ -105,7 +126,7 @@ export const ContextPanel = memo(function ContextPanel({
 
   // Update draft when activeCharacter changes
   useEffect(() => {
-    if (activeCharacter) {
+    if (activeCharacter && !editing) {
       setDraft({
         name: activeCharacter.name || "",
         aliases: activeCharacter.aliases?.join(", ") || "",
@@ -115,28 +136,16 @@ export const ContextPanel = memo(function ContextPanel({
         fears: activeCharacter.fears?.join(", ") || "",
       })
     }
-  }, [activeCharacter])
-
-  // Click outside to close
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-    }
-  }, [onClose])
+  }, [activeCharacter, editing])
 
   async function handleSaveEdit() {
-    if (!bookId || !activeCharacter) return
+    if (!bookId || !activeCharacter || !canEdit || editBusy.current) return
+    if (!draft.name.trim()) { setEditError("Enter a character name."); return }
+    editBusy.current = true
     setSaving(true)
     setEditError(null)
     try {
-      await booksApi.updateCharacter(bookId, activeCharacter.id, {
+      const updated = await booksApi.updateCharacter(bookId, activeCharacter.id, {
         name: draft.name.trim(),
         aliases: draft.aliases.split(",").map((s: string) => s.trim()).filter(Boolean),
         description: draft.description.trim() || null,
@@ -144,10 +153,12 @@ export const ContextPanel = memo(function ContextPanel({
         motivations: draft.motivations.split(",").map((s: string) => s.trim()).filter(Boolean),
         fears: draft.fears.split(",").map((s: string) => s.trim()).filter(Boolean),
       })
+      setSavedCharacter({ ...activeCharacter, ...updated })
       setEditing(false)
     } catch {
       setEditError("Could not save character changes.")
     } finally {
+      editBusy.current = false
       setSaving(false)
     }
   }
@@ -167,7 +178,9 @@ export const ContextPanel = memo(function ContextPanel({
   }
 
   const saveSelectedQuote = async () => {
-    if (!selectedQuote?.trim()) return
+    if (!selectedQuote?.trim() || quoteBusy.current) return
+    quoteBusy.current = true
+    setQuoteStatus(null)
     setSavingQuote(true)
     try {
       await readerApi.saveQuote(bookId, {
@@ -178,7 +191,11 @@ export const ContextPanel = memo(function ContextPanel({
       })
       setQuoteCharacter("")
       setQuoteNote("")
+      setQuoteStatus("Line bookmark saved in Quotes.")
+    } catch {
+      setQuoteStatus("Could not confirm the bookmark save. Your note is still here; check Quotes before retrying.")
     } finally {
+      quoteBusy.current = false
       setSavingQuote(false)
     }
   }
@@ -196,16 +213,23 @@ export const ContextPanel = memo(function ContextPanel({
   const endDrag = () => {
     if (!mobileSheet) return
     if (dragOffset > 120) {
-      onClose()
+      closePanel()
     }
     dragStartRef.current = null
     setDragOffset(0)
   }
 
   return (
+    <DialogPrimitive.Root open modal={mobileSheet} onOpenChange={(open) => { if (!open) closePanel() }}>
+    {mobileSheet ? <DialogPrimitive.Overlay className="fixed inset-0 z-30 bg-black/50" /> : null}
+    <DialogPrimitive.Content asChild aria-describedby={undefined} aria-modal={mobileSheet || undefined}
+      onOpenAutoFocus={() => { previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }}
+      onCloseAutoFocus={(event) => { event.preventDefault(); previousFocus.current?.focus() }}
+      onInteractOutside={(event) => event.preventDefault()}>
     <aside
       ref={panelRef}
-      className={`fixed inset-x-0 bottom-0 z-40 flex h-[78dvh] flex-col overflow-hidden rounded-t-lg border md:static md:inset-auto md:h-auto md:max-h-none md:w-[23rem] md:rounded-none md:border-l md:border-t-0 xl:w-[25rem] ${shell.container}`}
+      data-reader-context
+      className={`z-40 flex shrink-0 flex-col overflow-hidden border ${mobileSheet ? "fixed inset-x-0 bottom-0 h-[78dvh] rounded-t-sm" : "relative h-full w-[23rem] border-l xl:w-[25rem]"} ${shell.container}`}
       style={{
         transform: mobileSheet ? `translateY(${dragOffset}px)` : undefined,
         transition: dragStartRef.current === null ? "transform 180ms ease-out" : undefined,
@@ -223,17 +247,18 @@ export const ContextPanel = memo(function ContextPanel({
         <div className="px-5 py-3 md:py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className={`text-3xs font-medium uppercase tracking-[0.2em] ${shell.muted}`}>Character</p>
-              <h2 className={`mt-1 text-2xl font-medium leading-tight ${shell.title}`} style={{ fontFamily: "var(--reader-display)" }}>
-                Details
-              </h2>
+              <p className={`text-sm font-medium ${shell.muted}`}>Chapter {chapterNumber}</p>
+              <DialogPrimitive.Title asChild><h2 className={`mt-1 text-2xl font-medium leading-tight ${shell.title}`} style={{ fontFamily: "var(--reader-display)" }}>
+                {selectedQuote ? "Line bookmark" : result?.type === "search" ? "Reading context" : "Character details"}
+              </h2></DialogPrimitive.Title>
             </div>
             <button
-              onClick={onClose}
+              type="button"
+              onClick={closePanel}
               aria-label="Close context panel"
-              className={`rounded-lg px-2 py-1.5 text-xs transition ${shell.tab}`}
+              className={`min-h-11 rounded-sm border px-3 text-sm transition ${shell.body}`}
             >
-              x
+              Close
             </button>
           </div>
         </div>
@@ -249,8 +274,10 @@ export const ContextPanel = memo(function ContextPanel({
                 <span className="font-medium">Chapter:</span> {chapterTitle ? `${chapterNumber} - ${chapterTitle}` : `Chapter ${chapterNumber}`}
               </div>
               <select
+                aria-label="Quote speaker"
+                disabled={savingQuote}
                 value={quoteCharacter}
-                onChange={(event) => setQuoteCharacter(event.target.value)}
+                onChange={(event) => { setQuoteCharacter(event.target.value); setQuoteStatus(null) }}
                 className={`w-full rounded-md border px-3 py-2 text-sm ${shell.input}`}
               >
                 <option value="">Who said it? (optional)</option>
@@ -261,14 +288,17 @@ export const ContextPanel = memo(function ContextPanel({
                 ))}
               </select>
               <textarea
+                disabled={savingQuote}
                 value={quoteNote}
-                onChange={(event) => setQuoteNote(event.target.value)}
+                onChange={(event) => { setQuoteNote(event.target.value); setQuoteStatus(null) }}
                 rows={3}
                 aria-label="Line bookmark note"
                 className={`w-full rounded-md border px-3 py-2 text-sm ${shell.input}`}
               />
               <p className={`text-xs ${shell.muted}`}>Why does this line matter?</p>
-              <button onClick={saveSelectedQuote} className={`w-full rounded-md px-4 py-3 text-sm font-semibold transition ${shell.button}`}>
+              {quoteStatus ? <p role="status" className="text-sm leading-6">{quoteStatus}</p> : null}
+              {quoteStatus?.startsWith("Line bookmark saved") ? <Link href="/quotes" className="inline-flex items-center text-sm underline">Open saved quotes</Link> : null}
+              <button type="button" disabled={savingQuote || quoteStatus?.startsWith("Line bookmark saved")} onClick={saveSelectedQuote} className={`w-full rounded-sm px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${shell.button}`}>
                 {savingQuote ? "Saving..." : "Save line bookmark"}
               </button>
             </div>
@@ -276,82 +306,67 @@ export const ContextPanel = memo(function ContextPanel({
         ) : null}
 
         {loading ? <ContextLoadingRows label="Loading character context" /> : null}
+        {error ? <p role="alert" className="my-4 text-sm">{error} <button type="button" onClick={onRetry} className="min-h-11 underline">Retry context</button></p> : null}
 
         {!loading && activeCharacter ? (
           <div className={`rounded-xl border p-5 ${shell.card}`}>
             {editing ? (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-                <div className={`relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg p-6 md:p-8 ${
-                  isDark ? "bg-[#000000] text-white border border-white/10" : "bg-white text-stone-900 border border-stone-200"
-                }`}>
-                  <div className="absolute top-4 right-4">
-                    <button
-                      onClick={() => setEditing(false)}
-                      aria-label="Close character editor"
-                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${shell.tab}`}
-                    >
-                      x
-                    </button>
-                  </div>
-                  
-                  <h3 className={`text-2xl font-medium mb-6 ${shell.heading}`}>Edit Character</h3>
-                  
-                  <div className="space-y-4">
+              <Dialog open title="Edit Character" description="Update this character’s profile. Changes apply across the project." closeOnOutside={false} onClose={() => { if (!saving && window.confirm("Discard character changes?")) setEditing(false) }}><fieldset disabled={saving} className="mt-5 space-y-4">
                     <div>
                       <label className={`block text-xs font-medium uppercase tracking-[0.15em] ${shell.muted} mb-2`}>Name</label>
                       <textarea
-                        value={draft.name}
+                        aria-label="Character name" value={draft.name}
                         onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                        rows={4}
+                        rows={2}
                         className={`w-full rounded-lg px-3 py-2 text-sm ${shell.input}`}
                       />
                     </div>
                     <div>
                       <label className={`block text-xs font-medium uppercase tracking-[0.15em] ${shell.muted} mb-2`}>Aliases (comma separated)</label>
                       <textarea
-                        value={draft.aliases}
+                        aria-label="Character aliases" value={draft.aliases}
                         onChange={(e) => setDraft({ ...draft, aliases: e.target.value })}
-                        rows={4}
+                        rows={2}
                         className={`w-full rounded-lg px-3 py-2 text-sm ${shell.input}`}
                       />
                     </div>
                     <div>
                       <label className={`block text-xs font-medium uppercase tracking-[0.15em] ${shell.muted} mb-2`}>Description</label>
                       <textarea
-                        value={draft.description}
+                        aria-label="Character description" value={draft.description}
                         onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-                        rows={12}
+                        rows={5}
                         className={`w-full rounded-lg px-3 py-2 text-sm ${shell.input}`}
                       />
                     </div>
                     <div>
                       <label className={`block text-xs font-medium uppercase tracking-[0.15em] ${shell.muted} mb-2`}>Personality Tags (comma separated)</label>
                       <textarea
-                        value={draft.personalityTags}
+                        aria-label="Character personalityTags" value={draft.personalityTags}
                         onChange={(e) => setDraft({ ...draft, personalityTags: e.target.value })}
-                        rows={4}
+                        rows={2}
                         className={`w-full rounded-lg px-3 py-2 text-sm ${shell.input}`}
                       />
                     </div>
                     <div>
                       <label className={`block text-xs font-medium uppercase tracking-[0.15em] ${shell.muted} mb-2`}>Motivations (comma separated)</label>
                       <textarea
-                        value={draft.motivations}
+                        aria-label="Character motivations" value={draft.motivations}
                         onChange={(e) => setDraft({ ...draft, motivations: e.target.value })}
-                        rows={4}
+                        rows={2}
                         className={`w-full rounded-lg px-3 py-2 text-sm ${shell.input}`}
                       />
                     </div>
                     <div>
                       <label className={`block text-xs font-medium uppercase tracking-[0.15em] ${shell.muted} mb-2`}>Fears (comma separated)</label>
                       <textarea
-                        value={draft.fears}
+                        aria-label="Character fears" value={draft.fears}
                         onChange={(e) => setDraft({ ...draft, fears: e.target.value })}
-                        rows={4}
+                        rows={2}
                         className={`w-full rounded-lg px-3 py-2 text-sm ${shell.input}`}
                       />
                     </div>
-                    {editError && <p className="text-sm text-red-500">{editError}</p>}
+                    {editError && <p role="alert" className="text-sm text-red-500">{editError}</p>}
                     <div className="flex gap-2 pt-4">
                       <button
                         onClick={handleSaveEdit}
@@ -361,15 +376,14 @@ export const ContextPanel = memo(function ContextPanel({
                         {saving ? "Saving..." : "Save Changes"}
                       </button>
                       <button
-                        onClick={() => setEditing(false)}
+                        onClick={() => { if (!saving && window.confirm("Discard character changes?")) setEditing(false) }}
                         className={`rounded-lg px-4 py-3 text-sm font-medium transition ${shell.tab}`}
                       >
                         Cancel
                       </button>
                     </div>
-                  </div>
-                </div>
-              </div>
+                  </fieldset>
+              </Dialog>
             ) : (
               <>
                 <div className="flex items-start gap-4">
@@ -404,20 +418,20 @@ export const ContextPanel = memo(function ContextPanel({
                         </span>
                       ))}
                       {activeCharacter.personality_tags.length > 3 && !traitsExpanded ? (
-                        <span 
+                        <button type="button"
                           onClick={() => setTraitsExpanded(true)}
                           className={`rounded-md px-2 py-0.5 text-3xs cursor-pointer ${shell.muted} hover:underline`}
                         >
                           +{activeCharacter.personality_tags.length - 3} more
-                        </span>
+                        </button>
                       ) : null}
                       {traitsExpanded && activeCharacter.personality_tags.length > 3 ? (
-                        <span 
+                        <button type="button"
                           onClick={() => setTraitsExpanded(false)}
                           className={`rounded-md px-2 py-0.5 text-3xs cursor-pointer ${shell.muted} hover:underline`}
                         >
                           Show less
-                        </span>
+                        </button>
                       ) : null}
                     </div>
                   </div>
@@ -444,12 +458,11 @@ export const ContextPanel = memo(function ContextPanel({
                 <div className="mt-6">
                   <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Actions</p>
                   <div className="mt-2 flex gap-2">
-                    <button 
-                      onClick={() => setEditing(true)} 
+                    {canEdit ? <button onClick={() => setEditing(true)}
                       className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${isDark ? "bg-white/10 text-white hover:bg-white/20" : "bg-stone-100 text-stone-900 hover:bg-stone-200"}`}
                     >
                       Edit
-                    </button>
+                    </button> : null}
                     <button 
                       onClick={() => setShowLinks(!showLinks)} 
                       className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${isDark ? "bg-white/10 text-white hover:bg-white/20" : "bg-stone-100 text-stone-900 hover:bg-stone-200"}`}
@@ -475,14 +488,15 @@ export const ContextPanel = memo(function ContextPanel({
                   <div className="mt-4">
                     <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Character Links</p>
                     <p className={`mt-2 text-sm ${shell.body}`}>
-                      Relationship links will appear here when character has established connections.
+                      <Link href={`/${bookId}/graph?chapter=${chapterNumber}`} className="underline">View relationships through chapter {chapterNumber}</Link>
                     </p>
                   </div>
                 )}
 
                 {showRecall && (
                   <div className="mt-4">
-                    <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Recall</p>
+                    <p className={`text-xs font-medium uppercase tracking-[0.15em] ${shell.muted}`}>Book recall</p>
+                    <p className={`mt-2 text-sm ${shell.muted}`}>Based on your saved reading progress, which may include later chapters.</p>
                     {recallLoading ? (
                       <ContextLoadingRows label="Loading recall context" compact />
                     ) : recallText ? (
@@ -495,7 +509,7 @@ export const ContextPanel = memo(function ContextPanel({
 
                 <Link
                   href={`/${bookId}/characters`}
-                  onClick={onClose}
+                  onClick={closePanel}
                   className={`mt-6 block w-full rounded-lg px-4 py-2.5 text-center text-sm font-medium transition ${shell.button}`}
                 >
                   Open Lore Entry
@@ -519,15 +533,17 @@ export const ContextPanel = memo(function ContextPanel({
           </div>
         ) : null}
 
-        {!loading && !selectedQuote && !activeCharacter && result?.type !== "search" ? (
+        {!loading && !error && !selectedQuote && !activeCharacter && result?.type !== "search" ? (
           <div className={`rounded-lg border p-5 ${shell.card}`}>
             <p className={`text-sm leading-7 ${shell.body}`}>
-              Tap a highlighted character name to open a profile here. On mobile, this panel opens as a clean bottom sheet so the reading page stays visible behind it without collapsing the content.
+              Select an underlined character name to open its profile here.
             </p>
           </div>
         ) : null}
       </div>
     </aside>
+    </DialogPrimitive.Content>
+    </DialogPrimitive.Root>
   )
 })
 

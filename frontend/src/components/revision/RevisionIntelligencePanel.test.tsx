@@ -3,7 +3,8 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { RevisionIntelligencePanel } from "./RevisionIntelligencePanel"
-import type { RevisionActionItem, RevisionIntelligence } from "@/types/book"
+import { booksApi } from "@/lib/api/books"
+import type { RevisionActionItem, RevisionIntelligence, WriterWorkspace } from "@/types/book"
 
 vi.mock("@/lib/api/books", () => ({
   booksApi: {
@@ -82,9 +83,29 @@ describe("RevisionIntelligencePanel", () => {
     expect(view.textContent).toContain("Grete")
     expect(view.textContent).toContain("Ch 3")
   })
+  it("keeps checklist creation disabled until existing planning data is available", () => {
+    const view = renderPanel("preview")
+    expect(Array.from(view.querySelectorAll("button")).find((button) => button.textContent === "Create checklist")?.disabled).toBe(true)
+    expect(view.textContent).toContain("once project planning data loads")
+  })
+
+  it("prevents repeat checklist submission and reports a failed save", async () => {
+    let rejectSave: (reason: Error) => void = () => {}
+    vi.mocked(booksApi.updateWriterWorkspace).mockImplementation(() => new Promise((_, reject) => { rejectSave = reject }))
+    const workspace = { goal_calendar: [], revision_board: { items: [], last_generated_at: null } } as unknown as WriterWorkspace
+    const view = renderPanel("preview", buildRevision(), workspace)
+    const button = Array.from(view.querySelectorAll("button")).find((candidate) => candidate.textContent === "Create checklist")!
+    await act(async () => { button.click() })
+    expect(button.disabled).toBe(true)
+    expect(button.textContent).toBe("Creating checklist...")
+    await act(async () => { rejectSave(new Error("offline")); await Promise.resolve() })
+    expect(button.disabled).toBe(false)
+    expect(view.textContent).toContain("could not create the revision checklist")
+  })
+
 })
 
-function renderPanel(variant: "full" | "preview" | "story-map" = "full", revision: RevisionIntelligence = buildRevision()) {
+function renderPanel(variant: "full" | "preview" | "story-map" = "full", revision: RevisionIntelligence = buildRevision(), writerWorkspace: WriterWorkspace | null = null) {
   container = document.createElement("div")
   document.body.appendChild(container)
   root = createRoot(container)
@@ -93,7 +114,7 @@ function renderPanel(variant: "full" | "preview" | "story-map" = "full", revisio
       <RevisionIntelligencePanel
         bookId="book-1"
         revision={revision}
-        writerWorkspace={null}
+        writerWorkspace={writerWorkspace}
         isDark={false}
         onRevisionChange={vi.fn()}
         onWriterWorkspaceChange={vi.fn()}

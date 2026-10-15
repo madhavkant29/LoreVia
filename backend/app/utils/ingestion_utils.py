@@ -846,4 +846,13 @@ def is_llm_coordination_retry_error(exc: BaseException) -> bool:
         return False
     detail = getattr(exc, "detail", None)
     message = " ".join(str(detail if detail is not None else exc).lower().split())
-    return "llm capacity" in message or "llm coordination" in message
+    # Covers the coordination limiter ("LLM capacity"), the provider circuit
+    # breaker ("LLM provider capacity"), and the system-scope limiter
+    # ("System AI capacity"). All three are transient and must pause, not fail.
+    coordination_markers = (
+        "llm capacity",
+        "llm coordination",
+        "llm provider capacity",
+        "ai capacity",
+    )
+    return any(marker in message for marker in coordination_markers)

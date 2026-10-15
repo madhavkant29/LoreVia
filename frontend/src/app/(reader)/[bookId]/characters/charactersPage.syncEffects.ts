@@ -69,7 +69,6 @@ export function useCharacterPageSyncEffects({
   selectedId,
   selectedMergeKey,
   workspaceMode,
-  setActionError,
   setBook,
   setCharacterMenuOpen,
   setChars,
@@ -126,13 +125,14 @@ export function useCharacterPageSyncEffects({
   }, [relationshipGraphData, setGraphData])
 
   useEffect(() => {
+    if (chars.some((char) => char.id === selectedId)) return
     if (filteredChars.length === 0) {
       setSelectedId("")
       return
     }
     if (filteredChars.some((char) => char.id === selectedId)) return
     setSelectedId(filteredChars[0].id)
-  }, [filteredChars, selectedId, setSelectedId])
+  }, [chars, filteredChars, selectedId, setSelectedId])
 
   useEffect(() => {
     if (filteredMergeSuggestions.length === 0) {
@@ -146,9 +146,8 @@ export function useCharacterPageSyncEffects({
   useEffect(() => {
     if (!editing) {
       setDraft(buildDraft(selectedCharacter))
-      setActionError(null)
     }
-  }, [editing, selectedCharacter, setActionError, setDraft])
+  }, [editing, selectedCharacter, setDraft])
 
   useEffect(() => {
     setReviewNoteDraft(selectedCharacter?.analysis_metadata?.review_note ?? "")

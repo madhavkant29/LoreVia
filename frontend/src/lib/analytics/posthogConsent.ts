@@ -1,4 +1,10 @@
 export const ANALYTICS_CONSENT_COOKIE = "lorevia_analytics_consent"
+export const ANALYTICS_CONSENT_EVENT = "lorevia:analytics-consent-changed"
+
+export function writeAnalyticsConsentCookie(value: "true" | "false") {
+  document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${value}; Max-Age=31536000; Path=/; SameSite=Lax`
+  window.dispatchEvent(new Event(ANALYTICS_CONSENT_EVENT))
+}
 
 export function hasAnalyticsConsent(consentValue: string | undefined) {
   return consentValue === "true"

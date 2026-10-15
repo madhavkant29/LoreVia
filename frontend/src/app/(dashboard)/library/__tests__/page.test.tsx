@@ -39,7 +39,7 @@ vi.stubGlobal("localStorage", localStorageMock)
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
-    data: mockBooks,
+    data: mockIsError && mockBooks.length === 0 ? undefined : mockBooks,
     isLoading: mockIsLoading,
     isError: mockIsError,
     refetch: mockRefetch,
@@ -48,7 +48,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, prefetch: mockPrefetch }),
   useParams: () => ({}),
 }))
 
@@ -96,6 +96,7 @@ vi.mock("@/components/ui/ConfirmDialog", () => ({
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (key: string) => key,
   booksPageCacheKey: () => "books-page",
+  bookCacheKey: () => "book-bootstrap",
 }))
 
 vi.mock("@/lib/stores/authStore", () => ({
@@ -282,6 +283,64 @@ describe("LibraryPage error state", () => {
 })
 
 describe("LibraryPage shared-book filtering", () => {
+  it.each([
+    ["Archive", mockArchive, "Could not archive"],
+    ["Remove", mockHide, "Could not remove"],
+    ["Unpublish public book", mockUnpublishPublicly, "Could not unpublish"],
+  ] as const)("keeps the project visible when %s fails", async (label, mutation, message) => {
+    mockIsError = false
+    mockBooks = [buildBook({ id: "book-1", title: "Test Draft", is_public: true, public_status: "published" })]
+    mutation.mockRejectedValueOnce(new Error("Network unavailable"))
+    render()
+    clickByText("Open actions for Test Draft")
+    clickExactButton(label)
+    await flushUi()
+    expect(container?.querySelector('[role="alert"]')?.textContent).toContain(message)
+    expect(container?.querySelector('a[aria-label="Open Test Draft"]')).toBeTruthy()
+    clickExactButton("Dismiss")
+    expect(container?.querySelector('[role="alert"]')).toBeNull()
+  })
+
+  it("preserves the last loaded projects when a background refresh fails", () => {
+    mockBooks = [buildBook({ id: "book-1", title: "Cached Draft" })]
+    mockIsError = true
+    render()
+    expect(container?.querySelector('[role="alert"]')?.textContent).toContain("Could not refresh")
+    expect(container?.querySelector('a[aria-label="Open Cached Draft"]')).toBeTruthy()
+  })
+
+  it("keeps deletion confirmation and displays an error when deletion fails", async () => {
+    mockIsError = false
+    mockBooks = [buildBook({ id: "book-1", title: "Test Draft" })]
+    mockDeletePermanently.mockRejectedValueOnce(new Error("Network unavailable"))
+    render()
+    clickByText("Open actions for Test Draft")
+    clickExactButton("Delete permanently")
+    await flushUi()
+    const input = document.querySelector('[role="dialog"] input') as HTMLInputElement
+    setValue(input, "DELETE BOOK")
+    clickExactButton("Delete permanently")
+    await flushUi()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Could not delete")
+    expect(input.value).toBe("DELETE BOOK")
+  })
+
+  it("preserves publishing input and displays a retryable error", async () => {
+    mockIsError = false
+    mockBooks = [buildBook({ id: "book-1", title: "Test Draft" })]
+    mockPublishPublicly.mockRejectedValueOnce(new Error("Network unavailable"))
+    render()
+    clickByText("Open actions for Test Draft")
+    clickExactButton("Publish publicly")
+    await flushUi()
+    const rights = document.querySelector('[role="dialog"] input[type="checkbox"]') as HTMLInputElement
+    act(() => rights.click())
+    clickExactButton("Publish publicly")
+    await flushUi()
+    expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toContain("Could not publish")
+    expect(rights.checked).toBe(true)
+  })
+
   it("shows the first-manuscript hero for eligible zero-project users and opens author upload", async () => {
     mockIsError = false
     mockBooks = []
@@ -387,12 +446,13 @@ describe("LibraryPage shared-book filtering", () => {
     setValue(search, "processing")
     expect(container?.textContent).toContain("Processing Draft")
 
-    clickByText("Filter")
-    clickByText("Author Workspace")
-    clickByText("Processing")
-    const showArchived = container?.querySelector('button[aria-label="Show archived projects"]') as HTMLButtonElement
+    const mode = container?.querySelector('select[aria-label="Project mode"]') as HTMLSelectElement
+    const status = container?.querySelector('select[aria-label="Project status"]') as HTMLSelectElement
+    setValue(mode, "author")
+    setValue(status, "processing")
+    const showArchived = container?.querySelector('input[type="checkbox"]') as HTMLInputElement
     act(() => showArchived.click())
-    expect(showArchived.getAttribute("aria-pressed")).toBe("true")
+    expect(showArchived.checked).toBe(true)
 
     const sort = container?.querySelector('select[aria-label="Sort projects"]') as HTMLSelectElement
     setValue(sort, "title")
@@ -400,14 +460,14 @@ describe("LibraryPage shared-book filtering", () => {
     expect(container?.querySelector('[aria-label="List view"]')?.getAttribute("aria-pressed")).toBe("true")
 
     setValue(search, "")
-    clickByText("Any")
+    setValue(status, "all")
     clickByText("Open actions for Aster Draft")
     clickExactButton("Pin project")
     expect(localStorageStore["library-pinned-projects:v1"]).toBeDefined()
 
     clickByText("Open actions for Aster Draft")
     clickExactButton("Add chapter")
-    expect(mockPush).toHaveBeenCalledWith("/library/add-chapter?book=book-ready")
+    expect(mockPush).toHaveBeenCalledWith("/library/add-chapter?book=book-ready&title=Aster%20Draft")
 
     clickExactButton("Archive")
     await flushUi()
@@ -426,18 +486,18 @@ describe("LibraryPage shared-book filtering", () => {
     const inputs = Array.from(document.body.querySelectorAll("input")) as HTMLInputElement[]
     const deleteInput = inputs[inputs.length - 1]
     setValue(deleteInput, "DELETE BOOK")
-    clickExactButton("Delete permanently", 1)
+    clickExactButton("Delete permanently")
     await flushUi()
     expect(mockDeletePermanently).toHaveBeenCalledWith("book-ready", "DELETE BOOK")
 
     clickByText("Open actions for Aster Draft")
     clickExactButton("Publish publicly")
     expect(document.body.textContent).toContain("Publish your own original work")
-    const publishInputs = Array.from(document.body.querySelectorAll("input"))
+    const publishInputs = Array.from(document.body.querySelectorAll<HTMLInputElement>('[role="dialog"] input'))
     const rightsCheckbox = publishInputs.find((input) => input.type === "checkbox") as HTMLInputElement
     act(() => rightsCheckbox.click())
     await flushUi()
-    clickExactButton("Publish publicly", 1)
+    clickExactButton("Publish publicly")
     await flushUi()
     expect(mockPublishPublicly).toHaveBeenCalledWith("book-ready", {
       publicSlug: "aster-draft",
@@ -454,7 +514,7 @@ describe("LibraryPage shared-book filtering", () => {
     await flushUi()
     expect(mockRetryProcessing).toHaveBeenCalledWith("book-processing")
 
-    clickByText("Create new project")
+    clickByText("New project")
     expect(container?.textContent).toContain("Upload modal inline")
     clickByText("Close upload")
     await flushUi()

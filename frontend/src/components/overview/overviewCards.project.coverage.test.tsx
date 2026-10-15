@@ -124,7 +124,7 @@ describe("overview cards", () => {
 
     expect(getContainer().textContent).toContain("Project Overview")
     expect(getContainer().textContent).toContain("12,500")
-    expect(getContainer().textContent).toContain("Writing streak")
+    expect(getContainer().textContent).toContain("Sign-in streak")
     expect(getContainer().textContent).toContain("9 days")
 
     await clickByTextAsync("Create")

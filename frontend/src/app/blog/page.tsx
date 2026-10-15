@@ -41,7 +41,8 @@ export const metadata: Metadata = {
 
 export default function BlogPage() {
   const latest = publicationArticles.slice(1, 5)
-  const topics = Array.from(new Set(blogArticles.map((article) => article.category)))
+  const archive = publicationArticles.slice(5)
+  const topics = Array.from(new Set(archive.map((article) => article.category)))
   const collection = buildCollectionPageJsonLd({
     name: "LoreVia Editorial",
     description: BLOG_DESCRIPTION,
@@ -107,15 +108,18 @@ export default function BlogPage() {
 
         <section className="editorial-topics" aria-labelledby="topics-title">
           <div className="editorial-section-heading">
-            <p className="editorial-kicker">The library</p>
-            <h2 id="topics-title">Browse by topic</h2>
+            <p className="editorial-kicker">Article archive</p>
+            <h2 id="topics-title">Browse every guide</h2>
           </div>
           {topics.map((topic) => (
             <section key={topic} className="editorial-topic-row" aria-labelledby={`topic-${topic.replace(/\s+/g, "-").toLowerCase()}`}>
               <h3 id={`topic-${topic.replace(/\s+/g, "-").toLowerCase()}`}>{topic}</h3>
-              <div>
-                {blogArticles.filter((article) => article.category === topic).map((article) => (
-                  <StoryCard key={article.slug} story={article} compact />
+              <div className="editorial-archive-list">
+                {archive.filter((article) => article.category === topic).map((article) => (
+                  <Link key={article.slug} href={`/blog/${article.slug}` as Route}>
+                    <span>{article.title}</span>
+                    <span>{article.publishedLabel} · {article.readTime}</span>
+                  </Link>
                 ))}
               </div>
             </section>

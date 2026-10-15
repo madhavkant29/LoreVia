@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from kombu.exceptions import OperationalError as KombuOperationalError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.redis import cache_del, cache_set_if_absent, mark_book_cache_dirty
 from app.models.book import Chapter
 from app.models.operations import BookProcessingRun, TaskDispatchOutbox, TaskExecution
+from app.services.book_freeze_service import load_persisted_freeze_cutoff
 from app.services.processing_pause_service import (
     parse_processing_blocker,
     parse_processing_resume_at,
@@ -305,6 +306,35 @@ async def claim_task_execution(db: AsyncSession, execution_id: str, celery_task_
         return False
     now = datetime.now(UTC)
     if execution.status == "running" and execution.locked_until and execution.locked_until > now:
+        return False
+    cutoff = await load_persisted_freeze_cutoff(db)
+    if cutoff is not None and execution.created_at is not None and execution.created_at < cutoff:
+        # Deployment transition gate: work created before the one-time legacy
+        # cutoff is dismissed before any provider call. Already-delivered Celery
+        # messages therefore become no-ops instead of spending tokens.
+        execution.status = "dismissed"
+        execution.error_category = "legacy_cutoff"
+        execution.error_detail = (
+            "Held by the one-time legacy freeze cutoff before any provider call."
+        )
+        execution.completed_at = now
+        execution.locked_until = None
+        await db.execute(
+            update(TaskDispatchOutbox)
+            .where(
+                TaskDispatchOutbox.execution_id == execution.id,
+                TaskDispatchOutbox.status.in_(("pending", "publishing", "publish_failed")),
+            )
+            .values(status="cancelled", lease_until=None, last_error="legacy_cutoff")
+        )
+        await release_execution_processing_reservation(db, execution)
+        await db.commit()
+        await _clear_task_execution_cache_lease_best_effort(execution.id)
+        log.warning(
+            "legacy_cutoff_execution_dismissed execution_id=%s book_id=%s",
+            execution.id,
+            execution.book_id,
+        )
         return False
     if execution.attempt_count >= execution.max_attempts:
         execution.status = "failed_terminal"
@@ -838,6 +868,7 @@ async def publish_task_dispatch_outbox(
 ) -> int:
     await reconcile_stale_task_dispatch_outbox(db, limit=limit)
     now = datetime.now(UTC)
+    cutoff = await load_persisted_freeze_cutoff(db)
     rows = (
         (
             await db.execute(
@@ -877,6 +908,20 @@ async def publish_task_dispatch_outbox(
                     fresh.lease_until = None
                 await db.commit()
                 continue
+            if (
+                cutoff is not None
+                and execution.created_at is not None
+                and execution.created_at < cutoff
+            ):
+                # Never publish pre-cutoff (legacy) work; the one-time freeze
+                # owns it and it must not spend provider tokens.
+                fresh = await db.get(TaskDispatchOutbox, row.id, with_for_update=True)
+                if fresh is not None:
+                    fresh.status = "cancelled"
+                    fresh.lease_until = None
+                    fresh.last_error = "legacy_cutoff"
+                await db.commit()
+                continue
             _publish_outbox_task(row)
             fresh = await db.get(TaskDispatchOutbox, row.id, with_for_update=True)
             execution.status = "queued"
@@ -912,22 +957,24 @@ async def publish_task_dispatch_outbox(
 
 async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("task_dispatch:extraction"))))
-    candidates = (
-        (
-            await db.execute(
-                select(TaskExecution)
-                .where(
-                    TaskExecution.task_name.in_(EXTRACTION_TASK_NAMES),
-                    TaskExecution.status == "pending_dispatch",
-                )
-                .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
-                .with_for_update(skip_locked=True)
-                .limit(100)
-            )
+    cutoff = await load_persisted_freeze_cutoff(db)
+    candidate_statement = (
+        select(TaskExecution)
+        .where(
+            TaskExecution.task_name.in_(EXTRACTION_TASK_NAMES),
+            TaskExecution.status == "pending_dispatch",
         )
-        .scalars()
-        .all()
+        .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
+        .with_for_update(skip_locked=True)
+        .limit(100)
     )
+    if cutoff is not None:
+        # Legacy executions stay pending_dispatch until the one-time freeze
+        # dismisses them; they must not occupy dispatch slots or be published.
+        candidate_statement = candidate_statement.where(
+            TaskExecution.created_at >= cutoff
+        )
+    candidates = (await db.execute(candidate_statement)).scalars().all()
     if not candidates:
         await db.commit()
         return 0
@@ -957,22 +1004,27 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
         .scalars()
         .all()
     )
+    pending_book_heads_statement = (
+        select(
+            TaskExecution.book_id,
+            func.min(TaskExecution.chapter_number),
+        )
+        .where(
+            TaskExecution.task_name.in_(BOOK_SERIAL_EXTRACTION_TASK_NAMES),
+            TaskExecution.status == "pending_dispatch",
+            TaskExecution.book_id.isnot(None),
+            TaskExecution.chapter_number.isnot(None),
+        )
+        .group_by(TaskExecution.book_id)
+    )
+    if cutoff is not None:
+        pending_book_heads_statement = pending_book_heads_statement.where(
+            TaskExecution.created_at >= cutoff
+        )
     pending_book_heads = {
         book_id: int(chapter_number)
         for book_id, chapter_number in (
-            await db.execute(
-                select(
-                    TaskExecution.book_id,
-                    func.min(TaskExecution.chapter_number),
-                )
-                .where(
-                    TaskExecution.task_name.in_(BOOK_SERIAL_EXTRACTION_TASK_NAMES),
-                    TaskExecution.status == "pending_dispatch",
-                    TaskExecution.book_id.isnot(None),
-                    TaskExecution.chapter_number.isnot(None),
-                )
-                .group_by(TaskExecution.book_id)
-            )
+            await db.execute(pending_book_heads_statement)
         ).all()
     }
     available_slots = max(
@@ -1226,22 +1278,20 @@ async def dispatch_pending_analysis_tasks(db: AsyncSession) -> int:
     if available_slots == 0:
         await db.commit()
         return 0
-    candidates = (
-        (
-            await db.execute(
-                select(TaskExecution)
-                .where(
-                    TaskExecution.task_name == "analysis_tasks.analyse_chapter",
-                    TaskExecution.status == "pending_dispatch",
-                )
-                .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
-                .with_for_update(skip_locked=True)
-                .limit(available_slots)
-            )
+    cutoff = await load_persisted_freeze_cutoff(db)
+    analysis_statement = (
+        select(TaskExecution)
+        .where(
+            TaskExecution.task_name == "analysis_tasks.analyse_chapter",
+            TaskExecution.status == "pending_dispatch",
         )
-        .scalars()
-        .all()
+        .order_by(TaskExecution.created_at, TaskExecution.chapter_number)
+        .with_for_update(skip_locked=True)
+        .limit(available_slots)
     )
+    if cutoff is not None:
+        analysis_statement = analysis_statement.where(TaskExecution.created_at >= cutoff)
+    candidates = (await db.execute(analysis_statement)).scalars().all()
     if not candidates:
         await db.commit()
         return 0
@@ -1288,22 +1338,20 @@ async def dispatch_pending_embedding_tasks(db: AsyncSession) -> int:
     if available_slots == 0:
         await db.commit()
         return 0
-    candidates = (
-        (
-            await db.execute(
-                select(TaskExecution)
-                .where(
-                    TaskExecution.task_name == "embedding_tasks.update_character_embedding",
-                    TaskExecution.status == "pending_dispatch",
-                )
-                .order_by(TaskExecution.created_at)
-                .with_for_update(skip_locked=True)
-                .limit(available_slots)
-            )
+    cutoff = await load_persisted_freeze_cutoff(db)
+    embedding_statement = (
+        select(TaskExecution)
+        .where(
+            TaskExecution.task_name == "embedding_tasks.update_character_embedding",
+            TaskExecution.status == "pending_dispatch",
         )
-        .scalars()
-        .all()
+        .order_by(TaskExecution.created_at)
+        .with_for_update(skip_locked=True)
+        .limit(available_slots)
     )
+    if cutoff is not None:
+        embedding_statement = embedding_statement.where(TaskExecution.created_at >= cutoff)
+    candidates = (await db.execute(embedding_statement)).scalars().all()
     if not candidates:
         await db.commit()
         return 0

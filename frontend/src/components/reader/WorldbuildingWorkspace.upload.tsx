@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { useEffect, useRef } from "react"
 import type { Route } from "next"
 
 import { LabeledField, WorkspaceCard } from "./WorldbuildingWorkspace.components"
@@ -38,6 +39,8 @@ export function WorldCorpusUploadCard({
   onReplaceCorpusOnUploadChange: (value: boolean) => void
   onUploadDocumentFiles: () => void
 }) {
+  const fileInput = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (!uploadFiles.length && fileInput.current) fileInput.current.value = "" }, [uploadFiles.length])
   return (
     <WorkspaceCard
       number="1"
@@ -73,13 +76,15 @@ export function WorldCorpusUploadCard({
                 <span className="sr-only">Upload world corpus files</span>
                 <input
                   type="file"
+                  aria-label="Upload world corpus files"
+                  ref={fileInput}
                   multiple
                   onChange={(event) => onUploadFilesChange(Array.from(event.target.files ?? []))}
-                  className="sr-only"
+                  className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-sm file:border file:border-[rgb(var(--border))] file:bg-[rgb(var(--background))] file:px-3 file:text-[rgb(var(--foreground))]"
                 />
                 <div className="space-y-2">
                   <p className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-stone-900"}`}>
-                    Drag and drop files here, or click to browse
+                    Choose reference files to import
                   </p>
                   <p className={`text-xs ${mutedTextClass(isDark)}`}>
                     {uploadFiles.length > 0

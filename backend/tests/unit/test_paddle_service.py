@@ -657,7 +657,7 @@ async def test_get_transaction_summary_returns_invoice_details(monkeypatch):
                         "invoice_number": "INV-123",
                         "subscription_id": "sub_123",
                         "custom_data": {"plan": "author_monthly"},
-                        "details": {"totals": {"total": 2900}},
+                        "details": {"totals": {"total": 1900}},
                         "customer": {"email": "author@getlorevia.com"},
                         "billed_at": "2026-05-24T12:00:00Z",
                     }
@@ -675,7 +675,7 @@ async def test_get_transaction_summary_returns_invoice_details(monkeypatch):
 
     assert summary.transaction_id == "txn_123"
     assert summary.plan == "author_monthly"
-    assert summary.total == "USD 29.00"
+    assert summary.total == "USD 19.00"
     assert summary.invoice_number == "INV-123"
     assert summary.invoice_pdf_url == "https://files.paddle.com/invoice.pdf"
     assert summary.customer_email == "author@getlorevia.com"

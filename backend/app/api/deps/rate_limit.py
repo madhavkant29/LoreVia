@@ -13,6 +13,8 @@ from app.core.redis import REDIS_OPERATION_EXCEPTIONS, get_redis, key_ratelimit
 from app.models.user import User
 from app.utils.billing_utils import (
     DAILY_LIMIT_MESSAGE,
+    advisor_daily_limit_message,
+    continuity_daily_limit_message,
     continuity_limit_per_day,
     free_advisor_limit_per_week,
     free_search_limit_per_day,
@@ -89,6 +91,8 @@ async def _bump_daily_bucket(
     user: User | object,
     action: str,
     limit: int,
+    *,
+    message: str | None = None,
 ) -> None:
     if limit <= 0:
         raise HTTPException(403, DAILY_LIMIT_MESSAGE)
@@ -102,7 +106,7 @@ async def _bump_daily_bucket(
     if count > limit:
         if isinstance(user, User) or getattr(user, "email", None):
             await track_usage_limit_friction_and_maybe_send(user, action=action)
-        raise HTTPException(429, DAILY_LIMIT_MESSAGE)
+        raise HTTPException(429, message or DAILY_LIMIT_MESSAGE)
 
 
 async def _bump_weekly_bucket(
@@ -179,7 +183,13 @@ async def rate_limit_advisor(
             403, "Story Advisor requires an active trial, Author, or Architect plan."
         )
     daily_limit = await _limit_for_user(db, current_user.id, "advisor_per_day", daily_limit)
-    await _bump_daily_bucket(db, current_user, "high_cost_authoring", daily_limit)
+    await _bump_daily_bucket(
+        db,
+        current_user,
+        "high_cost_authoring",
+        daily_limit,
+        message=advisor_daily_limit_message(daily_limit),
+    )
 
 
 async def rate_limit_recall(
@@ -205,7 +215,13 @@ async def enforce_continuity_rate_limit(db: AsyncSession, billing_user: User) ->
         raise HTTPException(
             403, "Continuity checks are authoring features. Upgrade to Author for access."
         )
-    await _bump_daily_bucket(db, billing_user, "continuity", daily_limit)
+    await _bump_daily_bucket(
+        db,
+        billing_user,
+        "continuity",
+        daily_limit,
+        message=continuity_daily_limit_message(daily_limit),
+    )
 
 
 async def rate_limit_api(

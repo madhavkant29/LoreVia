@@ -268,6 +268,7 @@ export function RevisionIntelligencePanel({
   variant = "full",
 }: Props) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [creatingChecklist, setCreatingChecklist] = useState(false)
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
   const [showKnowledgeDetails, setShowKnowledgeDetails] = useState(false)
   const [selectedGenreLabel, setSelectedGenreLabel] = useState<string | null>(null)
@@ -357,6 +358,7 @@ export function RevisionIntelligencePanel({
   }
 
   const createChecklist = async () => {
+    if (!writerWorkspace || creatingChecklist) return
     const planItems = revision.revision_plan.flatMap((revisionPass) => revisionPass.items)
     const actionable = planItems.filter((item, index, array) => array.findIndex((candidate) => candidate.id === item.id) === index)
     const pending = actionable.filter((item) => item.status !== "fixed" && item.status !== "ignored").slice(0, 5)
@@ -375,6 +377,7 @@ export function RevisionIntelligencePanel({
       revision
     )
 
+    setCreatingChecklist(true)
     try {
       await persistWorkspace(
         {
@@ -386,6 +389,8 @@ export function RevisionIntelligencePanel({
       setStatusMessage(`Created ${pending.length} revision checklist item${pending.length === 1 ? "" : "s"}.`)
     } catch {
       setStatusMessage("We could not create the revision checklist right now.")
+    } finally {
+      setCreatingChecklist(false)
     }
   }
 
@@ -438,7 +443,7 @@ export function RevisionIntelligencePanel({
     return (
       <section className={panelClass(isDark)}>
         <div className="border-b px-5 py-5">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-300" : "text-slate-600"}`}>Revision hub</p>
               <h2 className={`mt-2 text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Revision pressure at a glance.</h2>
@@ -447,28 +452,30 @@ export function RevisionIntelligencePanel({
             <button
               type="button"
               onClick={() => void createChecklist()}
-              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500"}`}
+              disabled={!writerWorkspace || creatingChecklist}
+              className={`min-h-10 rounded-sm px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-violet-700 text-white hover:bg-violet-600" : "bg-violet-600 text-white hover:bg-violet-500"}`}
             >
-              Create checklist
+              {creatingChecklist ? "Creating checklist..." : "Create checklist"}
             </button>
           </div>
         </div>
 
         <div className="px-5 py-5">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-3 gap-3">
             {[
               { label: "Active items", value: revision.summary.active_item_count },
               { label: "High severity", value: revision.summary.high_severity_count },
               { label: "Task-ready", value: revision.summary.task_ready_count },
             ].map((stat) => (
-              <div key={stat.label} className={`rounded-md border p-4 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
-                <p className={isDark ? "text-xs uppercase tracking-[0.2em] text-slate-300" : "text-xs uppercase tracking-[0.2em] text-slate-600"}>{stat.label}</p>
-                <p className={`mt-2 text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{stat.value}</p>
+              <div key={stat.label} className={`min-w-0 border-l pl-3 first:border-l-0 first:pl-0 ${isDark ? "border-white/[0.06] bg-[#101720]" : "border-slate-200 bg-slate-50"}`}>
+                <p className={isDark ? "text-xs text-slate-300" : "text-xs uppercase tracking-[0.2em] text-slate-600"}>{stat.label}</p>
+                <p className={`mt-2 text-lg font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{stat.value}</p>
               </div>
             ))}
           </div>
 
-          {statusMessage ? <p className={`mt-4 text-sm ${isDark ? "text-violet-300" : "text-violet-700"}`}>{statusMessage}</p> : null}
+          {!writerWorkspace ? <p className={`mt-4 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Checklist creation is available once project planning data loads. Retry from Project details if needed.</p> : null}
+          {statusMessage ? <p role="status" className={`mt-4 text-sm ${isDark ? "text-violet-300" : "text-violet-700"}`}>{statusMessage}</p> : null}
 
           <div className="mt-5">
             {renderActionSummaryList(
@@ -590,9 +597,11 @@ export function RevisionIntelligencePanel({
         <button
           type="button"
           onClick={() => void createChecklist()}
+          disabled={!writerWorkspace || creatingChecklist}
+          title={!writerWorkspace ? "Wait for project planning data to load." : undefined}
           className={`rounded-full px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-violet-500 text-white hover:bg-violet-400" : "bg-violet-600 text-white hover:bg-violet-500"}`}
         >
-          Open revision board
+          {creatingChecklist ? "Creating checklist..." : "Open revision board"}
         </button>
       </div>
 

@@ -117,10 +117,34 @@ describe("ReaderOverview", () => {
     expect(view.textContent).toContain("Not opened yet")
     expect(view.textContent).not.toContain("Story Pulse")
   })
+  it("offers one chapter list and a labelled search that trims and encodes the query", () => {
+    recallHookMock.mockReturnValue({ recall: null, show: false, dismiss: vi.fn() })
+    const onNavigate = vi.fn()
+    const view = renderReaderOverview({ onNavigate })
+    expect(view.querySelectorAll("h1")).toHaveLength(1)
+    expect(Array.from(view.querySelectorAll("button")).filter((button) => button.textContent?.includes("Chapter 4"))).toHaveLength(1)
+    const input = view.querySelector<HTMLInputElement>("#overview-book-search")!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "  Nora & Tarin  ")
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    act(() => { view.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })) })
+    expect(onNavigate).toHaveBeenCalledWith("/book-1/search?q=Nora%20%26%20Tarin")
+  })
+
+  it("disables reading when there are no chapters and explains the empty state", () => {
+    recallHookMock.mockReturnValue({ recall: null, show: false, dismiss: vi.fn() })
+    const view = renderReaderOverview({ chapterList: { chapters: [], current_chapter: 1, read_upto: 0 } })
+    const action = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Continue Reading")
+    expect(action?.disabled).toBe(true)
+    expect(view.textContent).toContain("no chapters yet")
+  })
+
 })
 
 function renderReaderOverview({
   onContinueReading = vi.fn(),
+  onNavigate = vi.fn(),
   progress,
   chapterList,
   summaryCollection,
@@ -128,6 +152,7 @@ function renderReaderOverview({
   savedQuotes = [],
 }: {
   onContinueReading?: () => void
+  onNavigate?: (href: string) => void
   progress?: ReadingProgress | null
   chapterList?: ChapterListResponse | null
   summaryCollection?: SummaryCollectionResponse | null
@@ -155,7 +180,7 @@ function renderReaderOverview({
         canUseAuthorMode={true}
         onModeChange={() => {}}
         onToggleTheme={() => {}}
-        onNavigate={() => {}}
+        onNavigate={onNavigate}
         onContinueReading={onContinueReading}
       />
     )
@@ -168,6 +193,7 @@ function buildBook(): Book {
   return {
     id: "book-1",
     title: "The Ember Gate",
+    status: "ready",
     author: "A. Writer",
     genre: "Fantasy",
     work_type: "novel",

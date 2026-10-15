@@ -981,6 +981,10 @@ class BookProcessingOut(BaseModel):
     resume_blockers: list[dict[str, Any]] = Field(default_factory=list)
     next_chapter_number: int | None = None
     next_resume_at: datetime | None = None
+    frozen: bool = False
+    freeze_reason: str | None = None
+    freeze_message: str | None = None
+    frozen_at: datetime | None = None
 
 
 class WriterWorkspaceOut(BaseModel):
@@ -1005,6 +1009,7 @@ class WriterWorkspaceOut(BaseModel):
     reprocess: ReprocessMetadataOut = Field(default_factory=ReprocessMetadataOut)
     processing: BookProcessingOut | None = None
     index_format: str = "arabic"
+    source_fingerprint: str | None = None
 
 
 class WordCountGoalsBody(BaseModel):

@@ -112,7 +112,7 @@ async function renderElement(element: ReactElement) {
 }
 
 async function click(label: string, index = 0) {
-  const matches = Array.from(container?.querySelectorAll("button") ?? []).filter((button) => button.textContent?.includes(label) || button.getAttribute("aria-label")?.includes(label))
+  const matches = Array.from(document.querySelectorAll("button")).filter((button) => button.textContent?.includes(label) || button.getAttribute("aria-label")?.includes(label))
   const target = matches[index]
   if (!target) throw new Error(`Missing button: ${label}`)
   await act(async () => {
@@ -121,8 +121,19 @@ async function click(label: string, index = 0) {
   })
 }
 
+async function openFormatMenu() {
+  const details = container?.querySelector("details")
+  if (!details) throw new Error("Missing format menu")
+  await act(async () => {
+    ;(details as HTMLDetailsElement).open = true
+    details.dispatchEvent(new Event("toggle", { bubbles: true }))
+    await Promise.resolve()
+  })
+}
+
 function changeSelect(label: string, value: string) {
-  const select = Array.from(container?.querySelectorAll("select") ?? []).find((item) => item.getAttribute("aria-label") === label)
+  // Colors and spacing controls render through a portal into document.body.
+  const select = Array.from(document.querySelectorAll("select")).find((item) => item.getAttribute("aria-label") === label)
   if (!select) throw new Error(`Missing select: ${label}`)
   const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
   setter?.call(select, value)
@@ -188,6 +199,7 @@ describe("SharedRichTextEditor runtime coverage", () => {
     await click("@Mara")
     await click("Comment")
     await click("Notes")
+    await openFormatMenu()
     changeSelect("Text color", "#1d4ed8")
     changeSelect("Highlight color", "#bfdbfe")
     changeSelect("Line height", "2")

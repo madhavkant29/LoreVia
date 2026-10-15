@@ -9,33 +9,29 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <div
-      className={`min-h-[100dvh] px-4 py-8 transition-colors ${
+      className={`auth-shell min-h-[100dvh] px-4 py-8 transition-colors ${
         isDark
           ? "bg-[#171b1d] text-slate-100"
           : "bg-[#f8f4ee] text-stone-950"
       }`}
     >
       <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-5xl flex-col gap-10">
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[rgba(var(--border),0.9)] bg-[rgba(255,252,247,0.82)] px-4 py-3 dark:bg-white/[0.04]">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(var(--border),0.9)] pb-4">
           <Link href="/" className={`flex items-center gap-3 ${isDark ? "text-white" : "text-stone-900"}`}>
-            <ThemeBrandImage variant="lockup" alt="LoreVia" className="h-11 w-auto object-contain sm:h-12" priority />
+            <ThemeBrandImage variant="icon" alt="LoreVia" className="h-9 w-9 object-contain" priority />
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4 text-sm font-medium">
             <button
               onClick={toggleTheme}
-              className={`rounded-md border px-4 py-2 text-sm font-medium transition ${
-                isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-[rgba(var(--border),0.9)] bg-white/90 text-stone-700 hover:bg-white"
-              }`}
+              className={isDark ? "text-slate-300 hover:text-white" : "text-stone-600 hover:text-stone-950"}
             >
               {isDark ? "Light mode" : "Dark mode"}
             </button>
             <Link
               href="/"
-              className={`rounded-md border px-4 py-2 text-sm font-medium transition ${
-                isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-[rgba(var(--border),0.9)] bg-white/90 text-stone-700 hover:bg-white"
-              }`}
+              className={isDark ? "text-slate-300 hover:text-white" : "text-stone-600 hover:text-stone-950"}
             >
-              Back to home
+              Home
             </Link>
           </div>
         </header>

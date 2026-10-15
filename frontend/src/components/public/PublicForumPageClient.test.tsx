@@ -274,7 +274,8 @@ describe("PublicForumPageClient", () => {
     expect(listForumPostsMock).toHaveBeenCalledWith(undefined, 1, 20, "general")
     expect(container.textContent).toContain("General writing discussions.")
     expect(container.textContent).toContain("How do you revise openings?")
-    expect(container.textContent).toContain("General threads are for broader craft and community discussion.")
+    expect(container.querySelector("[data-testid='forum-topic-list']")?.querySelectorAll("article")).toHaveLength(1)
+    expect(container.querySelector("[data-testid='forum-topic-list'] .rounded-lg")).toBeNull()
     unmount()
   })
 

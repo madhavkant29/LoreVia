@@ -18,6 +18,7 @@ export function PublishBookDialog({
   publishSlug,
   publishDescription,
   publishConfirmed,
+  error,
   busy,
   onSlugChange,
   onDescriptionChange,
@@ -28,6 +29,7 @@ export function PublishBookDialog({
   publishSlug: string
   publishDescription: string
   publishConfirmed: boolean
+  error?: string | null
   busy: boolean
   onSlugChange: (value: string) => void
   onDescriptionChange: (value: string) => void
@@ -61,6 +63,7 @@ export function PublishBookDialog({
         </div>
       }
     >
+        {error ? <p role="alert" className="mt-4 text-sm text-rose-700 dark:text-rose-300">{error}</p> : null}
         <div className="mt-6 grid gap-4">
           <label className="grid gap-2 text-sm">
             <span className={headingText}>Public URL slug</span>

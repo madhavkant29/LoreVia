@@ -163,8 +163,9 @@ describe("zero-coverage client runtime components", () => {
     await clickButton("Dismiss")
     expect(onContinue).toHaveBeenCalled()
     expect(onDismiss).toHaveBeenCalled()
-    const fill = Array.from(container?.querySelectorAll<HTMLElement>("div") ?? []).find((node) => node.style.height === "100%")
-    expect(fill).toBeTruthy()
+    // The redesigned rail reports position as text instead of a fill bar.
+    expect(container?.querySelector('[aria-label="Reading position"]')).not.toBeNull()
+    expect(container?.textContent).toContain("1,200 of 2,400 words")
   })
 
   it("shows first-time help once and persists its dismissal", async () => {
@@ -179,7 +180,6 @@ describe("zero-coverage client runtime components", () => {
   })
 
   it("renders the character workspace header and shell navigation", async () => {
-    const onBack = vi.fn()
     await renderElement(
       <>
         <CharacterWorkspaceHeader
@@ -187,7 +187,6 @@ describe("zero-coverage client runtime components", () => {
           description="Review the cast."
           stats={<span>12 profiles</span>}
           actions={<button type="button">Add character</button>}
-          onBack={onBack}
           isDark
         />
         <NotificationBellShell />
@@ -198,8 +197,7 @@ describe("zero-coverage client runtime components", () => {
     expect(container?.textContent).toContain("12 profiles")
     expect(container?.textContent).toContain("Go to library")
     expect(container?.querySelector('a[aria-label="Open notifications"]')?.getAttribute("href")).toBe("/notifications")
-    await clickButton("Projects")
-    expect(onBack).toHaveBeenCalled()
+    expect(container?.textContent).not.toContain("Search (Ctrl K)")
 
     cleanupRenderedTree()
     authState.user = null

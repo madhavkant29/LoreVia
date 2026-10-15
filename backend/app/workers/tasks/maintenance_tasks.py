@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from datetime import UTC, datetime
 
@@ -7,6 +8,8 @@ from app.utils.exception_boundaries import FATAL_TASK_BOUNDARY_EXCEPTIONS
 from app.utils.retry_utils import NON_LLM_MAX_RETRIES, exponential_backoff_seconds
 from app.utils.worker_async_utils import run_worker_coro
 from app.workers.celery_app import celery_app
+
+log = logging.getLogger("lorevia.maintenance")
 
 
 @celery_app.task(
@@ -343,6 +346,7 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
         from app.models.book import Book
         from app.services.editor_project_service import repair_stale_editor_processing_state
         from app.services.pipeline_state_service import (
+            book_processing_has_blocking_failure,
             repair_stale_completed_processing_state,
             requeue_stalled_book_processing_if_needed,
         )
@@ -432,16 +436,33 @@ def repair_processing_books_task(self, *, book_id: str | None = None, limit: int
                 for book in books:
                     if book.status != "processing":
                         continue
-                    if await requeue_stalled_book_processing_if_needed(
+                    book_requeued = await requeue_stalled_book_processing_if_needed(
                         db,
                         book=book,
                         chapters=list(book.chapters),
-                    ):
+                    )
+                    if book_requeued:
                         requeued += 1
-                    if await repair_stale_completed_processing_state(db, book):
+                    book_repaired = await repair_stale_completed_processing_state(db, book)
+                    if book_repaired:
                         repaired += 1
                     if await repair_stale_editor_processing_state(db, book):
+                        book_repaired = True
                         repaired += 1
+                    if (
+                        not book_requeued
+                        and not book_repaired
+                        and book.status == "processing"
+                        and book_processing_has_blocking_failure(book)
+                    ):
+                        # Alertable signal: a book cannot finish on its own and
+                        # the repair sweep cannot resolve it. Operators can find
+                        # it by book_id without reading manuscript contents.
+                        log.error(
+                            "book_processing_stuck book_id=%s user_id=%s",
+                            book.id,
+                            book.user_id,
+                        )
                 await db.commit()
                 return {
                     "checked": len(books),
@@ -521,6 +542,78 @@ def send_due_trial_emails_task(self, *, limit: int = 100):
         try:
             async with AsyncSessionLocal() as db:
                 result = await send_due_trial_emails(db, limit=limit)
+                await db.commit()
+                return result
+        finally:
+            await cache_delete_if_owner(lock_key, owner_token)
+
+    try:
+        return run_worker_coro(_run())
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
+
+
+@celery_app.task(
+    bind=True,
+    name="maintenance_tasks.send_due_subscription_emails",
+    queue="maintenance",
+    max_retries=NON_LLM_MAX_RETRIES,
+    ignore_result=True,
+)
+def send_due_subscription_emails_task(self, *, limit: int = 100):
+    async def _run():
+        from app.core.database import AsyncSessionLocal
+        from app.core.redis import cache_delete_if_owner, cache_set_if_absent, key_cron_lock
+        from app.services.subscription_email_service import send_due_subscription_emails
+
+        lock_key = key_cron_lock("maintenance_tasks.send_due_subscription_emails")
+        owner_token = self.request.id or "unknown"
+        if not await cache_set_if_absent(lock_key, owner_token, ttl=600):
+            return {"skipped": "cron_task_already_running"}
+
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await send_due_subscription_emails(db, limit=limit)
+                await db.commit()
+                return result
+        finally:
+            await cache_delete_if_owner(lock_key, owner_token)
+
+    try:
+        return run_worker_coro(_run())
+    except FATAL_TASK_BOUNDARY_EXCEPTIONS as exc:
+        raise self.retry(
+            exc=exc,
+            countdown=exponential_backoff_seconds(self.request.retries),
+        )
+
+
+@celery_app.task(
+    bind=True,
+    name="maintenance_tasks.reconcile_paddle_subscriptions",
+    queue="maintenance",
+    max_retries=NON_LLM_MAX_RETRIES,
+    ignore_result=True,
+)
+def reconcile_paddle_subscriptions_task(self, *, limit: int = 25):
+    async def _run():
+        from app.core.database import AsyncSessionLocal
+        from app.core.redis import cache_delete_if_owner, cache_set_if_absent, key_cron_lock
+        from app.services.subscription_reconciliation_service import (
+            reconcile_stale_subscriptions,
+        )
+
+        lock_key = key_cron_lock("maintenance_tasks.reconcile_paddle_subscriptions")
+        owner_token = self.request.id or "unknown"
+        if not await cache_set_if_absent(lock_key, owner_token, ttl=1800):
+            return {"skipped": "cron_task_already_running"}
+
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await reconcile_stale_subscriptions(db, limit=limit)
                 await db.commit()
                 return result
         finally:
@@ -841,10 +934,11 @@ def cleanup_expired_subscription_events_task(self, *, batch_size: int = 1000):
         from sqlalchemy import delete, select
 
         from app.core.database import AsyncSessionLocal
-        from app.models.user import SubscriptionEvent
+        from app.models.user import SubscriptionEmailEvent, SubscriptionEvent
 
         cutoff = datetime.now(UTC) - timedelta(days=365)
         total_deleted = 0
+        email_events_deleted = 0
 
         async with AsyncSessionLocal() as db:
             while True:
@@ -862,7 +956,27 @@ def cleanup_expired_subscription_events_task(self, *, batch_size: int = 1000):
                 await db.commit()
                 total_deleted += len(ids)
 
-            return {"deleted": total_deleted}
+            while True:
+                email_ids_result = await db.execute(
+                    select(SubscriptionEmailEvent.id)
+                    .where(SubscriptionEmailEvent.created_at < cutoff)
+                    .limit(batch_size)
+                )
+                email_ids = email_ids_result.scalars().all()
+                if not email_ids:
+                    break
+                await db.execute(
+                    delete(SubscriptionEmailEvent).where(
+                        SubscriptionEmailEvent.id.in_(list(email_ids))
+                    )
+                )
+                await db.commit()
+                email_events_deleted += len(email_ids)
+
+            return {
+                "deleted": total_deleted,
+                "email_events_deleted": email_events_deleted,
+            }
 
     try:
         return run_worker_coro(_run())

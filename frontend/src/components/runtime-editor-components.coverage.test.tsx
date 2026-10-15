@@ -97,6 +97,18 @@ describe("runtime editor components", () => {
               suggestion: "Move the oath earlier.",
             },
           ],
+          insertion_opportunities: [
+            {
+              title: "Seed the oath earlier",
+              problem: "The gate knowledge arrives after Mara uses it.",
+              target_chapter: 2,
+              target_chapter_title: "The Rule",
+              anchor_excerpt: "The rule was sworn.",
+              what_to_add: "Let Mara overhear the first line of the oath.",
+              why_here: "This establishes knowledge before the gate scene.",
+              purpose: "foreshadowing",
+            },
+          ],
           grammar_issues: [
             { issue: "Comma splice", original: "The gate opens, Mara runs", fix: "The gate opens, and Mara runs." },
           ],
@@ -108,11 +120,13 @@ describe("runtime editor components", () => {
     )
 
     expect(text()).toContain("Overall verdict")
+    expect(text()).toContain("Seed the oath earlier")
     await click("Save summary note")
     await click("Download continuity report")
     await click("Save note (Ch. 4)")
     await click("Save note", 1)
     await click("Save note", 2)
+    await click("Save note", 3)
 
     expect(onSaveNote).toHaveBeenCalled()
     expect(intelligenceApiMock.continuityReport).toHaveBeenCalledWith("book-1", "Mara breaks the gate rule.", "pdf", 4)
@@ -128,6 +142,7 @@ describe("runtime editor components", () => {
           overall_verdict: "Clean.",
           thematic_fit: { score: "strong", notes: "Theme lands." },
           continuity_issues: [],
+          insertion_opportunities: [],
           grammar_issues: [],
           formatting_notes: [],
         } as never}
@@ -136,6 +151,25 @@ describe("runtime editor components", () => {
       />,
     )
     expect(text()).toContain("No continuity or grammar issues found")
+  })
+
+  it("prevents duplicate saves and provides persistent error feedback with retry", async () => {
+    let finish!: () => void
+    const save = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve })).mockRejectedValueOnce(new Error("Offline")).mockResolvedValue(undefined)
+    await render(<EditorialReviewResults bookId="book-1" chapterNumber={null} editText="Source" editPassages={[]} editResult={{ overall_verdict: "Review", thematic_fit: { score: "strong", notes: "Fits" }, continuity_issues: [], grammar_issues: [], formatting_notes: [], insertion_opportunities: [] }} isDark onSaveNote={save} />)
+    await click("Save summary note")
+    const button = Array.from(container!.querySelectorAll("button")).find((item) => item.textContent?.includes("Save summary note"))!
+    expect(button.disabled).toBe(true)
+    await click("Save summary note")
+    expect(save).toHaveBeenCalledTimes(1)
+    await act(async () => { finish(); await Promise.resolve() })
+    expect(text()).toContain("Saved to Notes.")
+    await click("Save summary note")
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain("Could not complete")
+    expect(button.disabled).toBe(false)
+    await click("Save summary note")
+    expect(container!.querySelector('[role="alert"]')).toBeNull()
+    expect(text()).toContain("Saved to Notes.")
   })
 
   it("renders manuscript overlay scene and compile dialogs with callbacks", async () => {

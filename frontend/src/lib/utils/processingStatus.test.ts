@@ -18,6 +18,36 @@ describe("normalizeProcessingStatus", () => {
     expect(status?.partialReady).toBe(true)
   })
 
+  it("renders administratively frozen imports as interrupted without retry", () => {
+    const status = normalizeProcessingStatus({
+      status: "failed",
+      stage: "frozen",
+      frozen: true,
+      freeze_message:
+        "Import interrupted - please upload again. Your project and files have been preserved.",
+      retry_actions: [],
+      last_error: "ignored",
+    })
+
+    expect(status?.stage).toBe("frozen")
+    expect(status?.frozen).toBe(true)
+    expect(status?.label).toBe("Import interrupted")
+    expect(status?.retryAvailable).toBe(false)
+    expect(status?.failureKind).toBeNull()
+    expect(status?.stateVariant).toBe("frozen")
+    expect(status?.detail).toContain("upload again")
+    expect(status?.lastError).toBeNull()
+  })
+
+  it("falls back to a clear frozen message and never offers retry", () => {
+    const status = normalizeProcessingStatus({ status: "failed", frozen: true } as never)
+
+    expect(status?.frozen).toBe(true)
+    expect(status?.label).toBe("Import interrupted")
+    expect(status?.retryAvailable).toBe(false)
+    expect(status?.detail).toContain("upload again")
+  })
+
   it("marks failed or retryable states as retry available", () => {
     expect(normalizeProcessingStatus({ status: "failed", stage: "failed" })?.retryAvailable).toBe(true)
     expect(normalizeProcessingStatus({ status: "processing", stage: "analysis", retry_actions: ["wait_for_analysis"] })?.retryAvailable).toBe(false)

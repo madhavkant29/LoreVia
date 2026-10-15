@@ -33,7 +33,7 @@ describe("ReaderToolbar", () => {
     root = null
   })
 
-  it("renders required reader actions and selected toolbar controls", () => {
+  it("keeps chapter and reading tools behind focused disclosures", () => {
     const onSummary = vi.fn()
     const onToggleTheme = vi.fn()
     const onSetFontSize = vi.fn()
@@ -72,22 +72,29 @@ describe("ReaderToolbar", () => {
     })
 
     expect(container.textContent).toContain("Project overview")
-    expect(container.textContent).toContain("Summary")
-    expect(container.textContent).toContain("Graph")
-    expect(container.textContent).toContain("Ask with citations")
-    expect(container.textContent).toContain("Search passages")
+    expect(container.textContent).toContain("Recap")
+    expect(container.textContent).toContain("Chapter tools")
     expect(container.textContent).toContain("The Lantern Room")
     expect(container.textContent).toContain("33%")
+    expect(container.textContent).not.toContain("Graph")
+    expect(container.textContent).not.toContain("Ask with citations")
+    expect(container.textContent).not.toContain("Old Style Serif")
+
+    const chapterToolsButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Chapter tools")
+    act(() => chapterToolsButton?.click())
+    expect(container.textContent).toContain("Ask with citations")
+    expect(container.textContent).toContain("Search this chapter")
+    expect(container.textContent).toContain("Chapter notes")
+
+    const textButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Text")
+    act(() => textButton?.click())
     expect(container.textContent).toContain("Old Style Serif")
     expect(container.textContent).toContain("EB Garamond")
 
     const publishedButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Published")
     const serifButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Serif")
-    const homeLinks = Array.from(container.querySelectorAll("a"))
-      .filter((link) => link.textContent?.trim() === "Home")
     expect(publishedButton?.getAttribute("aria-pressed")).toBe("true")
     expect(serifButton?.getAttribute("aria-pressed")).toBe("true")
-    expect(homeLinks.length).toBeGreaterThan(0)
-    expect(homeLinks.every((link) => link.getAttribute("href") === "/book-1")).toBe(true)
+    expect(container.querySelector('a[href="/book-1"]')).not.toBeNull()
   })
 })

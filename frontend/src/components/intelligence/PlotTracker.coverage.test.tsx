@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const useQueryMock = vi.hoisted(() => vi.fn())
 const readerApiMock = vi.hoisted(() => ({
   getPlotThreads: vi.fn(),
+  getPlotThreadsPage: vi.fn(),
+  getPlotThread: vi.fn(),
+  getChapterList: vi.fn(),
   updatePlotThread: vi.fn(),
 }))
 const booksApiMock = vi.hoisted(() => ({
@@ -17,7 +20,7 @@ const saveContextualVaultNoteMock = vi.hoisted(() => vi.fn())
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
 }))
-vi.mock("@tanstack/react-query", () => ({ useQuery: useQueryMock }))
+vi.mock("@tanstack/react-query", () => ({ useQuery: useQueryMock, useQueryClient: () => ({ setQueryData: vi.fn() }) }))
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/api/reader", () => ({ readerApi: readerApiMock }))
 vi.mock("@/lib/query/cacheKeys", () => ({
@@ -38,14 +41,14 @@ let container: HTMLDivElement | null = null
 
 beforeEach(() => {
   readerApiMock.getPlotThreads.mockResolvedValue(plotThreads())
-  readerApiMock.updatePlotThread.mockResolvedValue({})
+  readerApiMock.updatePlotThread.mockImplementation(async (_book, id, payload) => ({ ...plotThreads().find((thread) => thread.id === id), ...payload }))
   booksApiMock.listVaultNotes.mockResolvedValue([])
   saveContextualVaultNoteMock.mockResolvedValue({})
-  useQueryMock.mockReturnValue({
-    data: plotThreads(),
+  useQueryMock.mockImplementation(({ queryKey }: { queryKey: string }) => ({
+    data: String(queryKey).includes(":chapters") ? { chapters: [{ number: 1 }, { number: 4 }] } : String(queryKey).includes(":detail:") ? plotThreads()[0] : plotThreads(),
     isLoading: false,
     refetch: vi.fn().mockResolvedValue({}),
-  })
+  }))
 })
 
 afterEach(() => {
@@ -65,28 +68,93 @@ describe("PlotTracker", () => {
   it("renders compact, dashboard, save note, status, and vault flows", async () => {
     await render(<PlotTracker bookId="book-1" chapter={2} mode="compact" />)
     expect(text()).toContain("Missing gate oath")
-    expect(text()).toContain("Open full plot thread dashboard")
+    expect(text()).toContain("View all plot threads")
 
     await rerender(<PlotTracker bookId="book-1" mode="dashboard" />)
-    expect(text()).toContain("Lifecycle status")
+    expect(text()).toContain("Needs attention")
+    await click("Missing gate oath")
+    expect(text()).toContain("Thread details")
+    await click("Save to notes")
+    expect(saveContextualVaultNoteMock).toHaveBeenCalled()
     setSelectValue("select", "resolved")
     setTextareaValue("textarea", "Resolve this in the finale.")
-    await click("Save thread")
+    await click("Save changes")
     expect(readerApiMock.updatePlotThread).toHaveBeenCalledWith("book-1", "thread-1", {
       note: "Resolve this in the finale.",
       status: "resolved",
     })
 
-    await click("Save to vault")
-    expect(saveContextualVaultNoteMock).toHaveBeenCalled()
-
     useQueryMock.mockReturnValue({ data: [], isLoading: false, refetch: vi.fn() })
     await rerender(<PlotTracker key="empty" bookId="book-1" />)
-    expect(text()).toContain("No plot threads tracked yet")
+    expect(text()).toContain("No plot threads yet")
 
     useQueryMock.mockReturnValue({ data: [], isLoading: true, refetch: vi.fn() })
     await rerender(<PlotTracker key="loading" bookId="book-1" />)
     expect(text()).toContain("Loading plot threads")
+  })
+
+  it("retains failed edits and blocks navigation or closing until discarded", async () => {
+    readerApiMock.updatePlotThread.mockRejectedValueOnce(new Error("offline"))
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    await render(<PlotTracker bookId="book-1" mode="dashboard" />)
+    await click("Missing gate oath")
+    await act(async () => { setTextareaValue("textarea", "Keep this draft"); await flush() })
+    await click("Save changes")
+    expect(text()).toContain("Changes could not be saved")
+    await click("Close")
+    expect(confirm).toHaveBeenCalled()
+    expect(container?.querySelector("textarea")?.value).toBe("Keep this draft")
+    const unload = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
+    const link = container?.querySelector('a[href="/book-1/notes"]')
+    const navigate = new MouseEvent("click", { bubbles: true, cancelable: true })
+    link?.dispatchEvent(navigate)
+    expect(navigate.defaultPrevented).toBe(true)
+    await click("Discard changes")
+    expect(container?.querySelector("textarea")?.value).toBe("Track the oath.")
+    await click("Close")
+    expect(container?.querySelector("textarea")).toBeNull()
+    confirm.mockRestore()
+  })
+
+  it("preserves edits during a refreshed detail snapshot and handles copy failures", async () => {
+    await render(<PlotTracker bookId="book-1" mode="dashboard" />)
+    await click("Missing gate oath")
+    await act(async () => { setTextareaValue("textarea", "Unsaved reminder"); await flush() })
+    await rerender(<PlotTracker bookId="book-1" mode="dashboard" />)
+    expect(container?.querySelector("textarea")?.value).toBe("Unsaved reminder")
+    saveContextualVaultNoteMock.mockRejectedValueOnce(new Error("offline"))
+    await click("Save to notes")
+    expect(text()).toContain("The copy could not be saved")
+    await click("Save to notes")
+    expect(text()).toContain("Copied to Notes")
+    expect(saveContextualVaultNoteMock).toHaveBeenLastCalledWith(expect.objectContaining({ content: expect.stringContaining("Unsaved reminder") }))
+    expect(container?.querySelector("textarea")?.value).toBe("Unsaved reminder")
+  })
+
+  it("distinguishes loading failures from empty results and retries", async () => {
+    const refetch = vi.fn()
+    useQueryMock.mockReturnValue({ data: undefined, isError: true, isLoading: false, refetch })
+    await render(<PlotTracker bookId="book-1" mode="dashboard" />)
+    expect(text()).toContain("Plot threads could not be loaded")
+    expect(text()).not.toContain("No plot threads yet")
+    await click("Retry plot threads")
+    expect(refetch).toHaveBeenCalled()
+  })
+
+  it("locks concurrent saves until the current request finishes", async () => {
+    let finish: ((value: unknown) => void) | undefined
+    readerApiMock.updatePlotThread.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    await render(<PlotTracker bookId="book-1" mode="dashboard" />)
+    await click("Missing gate oath")
+    await act(async () => { setTextareaValue("textarea", "One correction"); await flush() })
+    const save = Array.from(container?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Save changes")
+    await act(async () => { save?.click(); save?.click(); await flush() })
+    expect(readerApiMock.updatePlotThread).toHaveBeenCalledTimes(1)
+    expect(container?.querySelector("fieldset")?.disabled).toBe(true)
+    await act(async () => { finish?.({ ...plotThreads()[0], note: "One correction" }); await flush() })
+    expect(text()).toContain("Thread changes saved.")
   })
 })
 

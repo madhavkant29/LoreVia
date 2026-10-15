@@ -1,60 +1,45 @@
 "use client"
 
 import Link from "next/link"
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react"
+import { RelationshipGraphInspector } from "./RelationshipGraph.inspector"
+import { RelationshipGraphBrowser } from "./RelationshipGraph.browser"
+import { relationshipDraft, relationshipDraftError, useRelationshipDraftGuard } from "./RelationshipGraph.editing"
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import cytoscape from "cytoscape"
 
 import { booksApi } from "@/lib/api/books"
-import { readerApi } from "@/lib/api/reader"
+import { loadRelationshipGraph } from "./RelationshipGraph.loading"
 import { RELATIONSHIP_COLORS } from "@/lib/constants"
 import { asQueryKey, readerCacheKey } from "@/lib/query/cacheKeys"
 import { cn } from "@/lib/utils/text"
 import type { RelationshipGraph as GraphData } from "@/types/character"
 import {
   ArrangeIcon,
-  CheckIcon,
   CompactSelectionSummary,
-  EmptyInspector,
   EyeIcon,
   FilterSelect,
   FitIcon,
-  GraphStatusPill,
-  GraphToolbarButton,
   GridIcon,
-  HandIcon,
-  InspectorMetric,
-  InspectorSection,
-  LinksIcon,
+  GraphToolbarButton,
   MinusIcon,
   PlusIcon,
-  RelationshipLabelChecklist,
   ResetIcon,
-  ScopeIcon,
-  TargetIcon,
-  TrashIcon,
-  UsersIcon,
   type GraphEdgeView,
   type GraphNodeView,
 } from "./RelationshipGraph.controls"
 import {
   BASE_LAYOUT,
   buildIsolatedPositions,
-  controlButtonClass,
   panelClass,
+  storedGraphLabels,
+  storedGraphPositions,
 } from "./RelationshipGraph.helpers"
 
 import {
-  DIRECTIONAL_RELATIONSHIP_LABEL_OPTIONS,
-  PRIMARY_RELATIONSHIP_TYPE_OPTIONS,
-  SHARED_RELATIONSHIP_LABEL_OPTIONS,
   graphLabelKey,
   graphStorageKey,
-  nodeInitial,
-  relationshipFacetLabel,
   relationshipFacetSummary,
-  relationshipLabel,
-  sentimentLabel,
   zoomPercentLabel,
 } from "./relationshipGraphDisplay"
 
@@ -68,6 +53,8 @@ interface Props {
   focusCharacterId?: string | null
   onSelectCharacterId?: (characterId: string | null) => void
   onGraphDataChange?: (graph: GraphData) => void
+  toolbarLeading?: ReactNode
+  inspectorPlacement?: "overlay" | "inline"
 }
 
 type Selection =
@@ -84,8 +71,15 @@ type GraphTestHandle = {
   clearSelection: () => void
 }
 
+function graphTestHandleEnabled() {
+  // Debug handle stays development-only. Production test builds must use the
+  // separately acknowledged admin override path instead of leaking a graph
+  // instance onto window for any visitor.
+  return typeof window !== "undefined" && process.env.NODE_ENV !== "production"
+}
+
 function installGraphTestHandle(cy: cytoscape.Core) {
-  if (typeof window === "undefined" || process.env.NODE_ENV === "production") return
+  if (!graphTestHandleEnabled()) return
 
   const graphWindow = window as Window & {
     __LOREVIA_RELATIONSHIP_GRAPH__?: GraphTestHandle
@@ -115,7 +109,7 @@ function installGraphTestHandle(cy: cytoscape.Core) {
 }
 
 function clearGraphTestHandle(cy: cytoscape.Core) {
-  if (typeof window === "undefined" || process.env.NODE_ENV === "production") return
+  if (!graphTestHandleEnabled()) return
 
   const graphWindow = window as Window & {
     __LOREVIA_RELATIONSHIP_GRAPH__?: GraphTestHandle
@@ -136,6 +130,8 @@ export const RelationshipGraph = memo(function RelationshipGraph({
   focusCharacterId = null,
   onSelectCharacterId,
   onGraphDataChange,
+  toolbarLeading,
+  inspectorPlacement = "overlay",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
@@ -151,22 +147,24 @@ export const RelationshipGraph = memo(function RelationshipGraph({
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("arrange")
   const [zoomLevel, setZoomLevel] = useState(1)
   const [showGrid, setShowGrid] = useState(true)
-  const [edgeDraft, setEdgeDraft] = useState({
-    relType: "",
-    description: "",
-    sentiment: "0",
-    fromChapter: "",
-    toChapter: "",
-    sharedLabels: [] as string[],
-    sourceToTargetLabels: [] as string[],
-    targetToSourceLabels: [] as string[],
-  })
+  const [edgeDraft, setEdgeDraft] = useState(() => relationshipDraft(null))
   const [savingEdge, setSavingEdge] = useState(false)
   const [edgeMessage, setEdgeMessage] = useState<string | null>(null)
+  const savingRef = useRef(false)
+  const [storageError, setStorageError] = useState(false)
+  const dirty = selection?.type === "edge" && JSON.stringify(edgeDraft) !== JSON.stringify(relationshipDraft(selection.data))
+  const canLeave = useRelationshipDraftGuard(dirty, savingEdge)
+  const requestSelectionRef = useRef((next: Selection) => { void next })
+  requestSelectionRef.current = (next) => {
+    if (!canLeave()) return
+    setSelection(next)
+    setEdgeMessage(null)
+    if (next?.type === "node") selectCharacterRef.current?.(next.data.id)
+  }
 
-  const { data: graphQueryData = null, isLoading: loading } = useQuery<GraphData | null>({
+  const { data: graphQueryData = null, isLoading: loading, isError, isFetching, refetch } = useQuery<GraphData | null>({
     queryKey: asQueryKey(readerCacheKey(bookId, `relationships:${upToChapter}:${includeInactive ? "all" : "active"}`)),
-    queryFn: () => readerApi.getRelationships(bookId, upToChapter, { includeInactive, include: "nodes,edges,hidden_nodes" }),
+    queryFn: () => loadRelationshipGraph(bookId, upToChapter, includeInactive),
   })
 
   useEffect(() => {
@@ -178,7 +176,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
 
     try {
       const raw = window.localStorage.getItem(graphLabelKey(bookId))
-      setLabelOverrides(raw ? JSON.parse(raw) : {})
+      setLabelOverrides(storedGraphLabels(raw))
     } catch {
       setLabelOverrides({})
     }
@@ -214,7 +212,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
       connected.add(edge.target)
     })
 
-    const visibleNodes = graphData.nodes.filter((node) => connected.size === 0 || connected.has(node.id))
+    const visibleNodes = graphData.nodes.filter((node) => connected.has(node.id))
     return { nodes: visibleNodes, edges: visibleEdges }
   }, [graphData, filterType, showIsolated])
 
@@ -240,7 +238,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
           id: `${otherId}-${edge.type}-${index}`,
           label: relationshipFacetSummary([...(edge.character_a_to_b_labels ?? []), ...(edge.character_b_to_a_labels ?? []), ...(edge.shared_labels ?? [])], edge.type),
           name: otherNode?.name ?? "Unknown character",
-          chapter: edge.from_chapter,
+          chapter: edge.from_chapter ?? null,
         }
       })
   }, [filteredGraph, nodeLookup, selectedNode])
@@ -278,7 +276,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
             return theme === "dark" ? "#6d5bd0" : "#c4b5fd"
           },
           color: theme === "dark" ? "#f8fafc" : "#111827",
-          "font-size": 11,
+          "font-size": 14,
           "font-weight": 600,
           "text-wrap": "wrap",
           "text-max-width": "100px",
@@ -306,9 +304,9 @@ export const RelationshipGraph = memo(function RelationshipGraph({
           "target-arrow-color": (ele: cytoscape.EdgeSingular) => RELATIONSHIP_COLORS[ele.data("type")] || "#64748b",
           "target-arrow-shape": "triangle",
           "target-arrow-fill": "filled",
-          opacity: 0.5,
+          opacity: 0.85,
           label: "data(label)",
-          "font-size": 9,
+          "font-size": 12,
           "font-weight": 600,
           color: theme === "dark" ? "#94a3b8" : "#6b7280",
           "text-background-color": theme === "dark" ? "#04050b" : "#ffffff",
@@ -340,7 +338,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
 
       try {
         const raw = window.localStorage.getItem(graphStorageKey(bookId, upToChapter))
-        return raw ? (JSON.parse(raw) as Record<string, { x: number; y: number }>) : null
+        return storedGraphPositions(raw)
       } catch {
         return null
       }
@@ -405,18 +403,16 @@ export const RelationshipGraph = memo(function RelationshipGraph({
 
     cy.on("tap", "node", (event) => {
       const nextSelection = { type: "node", data: event.target.data() as GraphNodeView } as const
-      setSelection(nextSelection)
-      selectCharacterRef.current?.(nextSelection.data.id)
+      requestSelectionRef.current(nextSelection)
     })
 
     cy.on("tap", "edge", (event) => {
-      setSelection({ type: "edge", data: event.target.data() as GraphEdgeView })
+      requestSelectionRef.current({ type: "edge", data: event.target.data() as GraphEdgeView })
     })
 
     cy.on("tap", (event) => {
       if (event.target === cy) {
-        setSelection(null)
-        cy.elements().unselect()
+        requestSelectionRef.current(null)
       }
     })
 
@@ -427,7 +423,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
           window.clearTimeout(layoutPersistTimerRef.current)
         }
         layoutPersistTimerRef.current = window.setTimeout(() => {
-          window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions))
+          try { window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions)) } catch { setStorageError(true) }
           layoutPersistTimerRef.current = null
         }, 180)
       }
@@ -439,8 +435,16 @@ export const RelationshipGraph = memo(function RelationshipGraph({
 
     cyRef.current = cy
     installGraphTestHandle(cy)
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
+      if (cy.destroyed()) return
+      cy.resize()
+      cy.fit(undefined, compact ? 72 : 40)
+      setZoomLevel(cy.zoom())
+    })
+    resizeObserver?.observe(containerRef.current)
 
     return () => {
+      resizeObserver?.disconnect()
       if (layoutPersistTimerRef.current) {
         window.clearTimeout(layoutPersistTimerRef.current)
         layoutPersistTimerRef.current = null
@@ -448,10 +452,11 @@ export const RelationshipGraph = memo(function RelationshipGraph({
 
       const positions = Object.fromEntries(cy.nodes().map((node) => [node.id(), node.position()]))
       if (typeof window !== "undefined") {
-        window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions))
+        try { window.localStorage.setItem(graphStorageKey(bookId, upToChapter), JSON.stringify(positions)) } catch { setStorageError(true) }
       }
       clearGraphTestHandle(cy)
       cy.destroy()
+      if (cyRef.current === cy) cyRef.current = null
     }
   }, [bookId, compact, filteredGraph, interactionMode, labelOverrides, relationshipStylesheet, theme, upToChapter])
 
@@ -464,7 +469,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
 
     cy.elements().unselect()
     node.select()
-    setSelection({ type: "node", data: node.data() as GraphNodeView })
+    requestSelectionRef.current({ type: "node", data: node.data() as GraphNodeView })
 
     if (compact) {
       cy.animate({
@@ -478,25 +483,14 @@ export const RelationshipGraph = memo(function RelationshipGraph({
   useEffect(() => {
     if (!selectedEdge) return
 
-    setEdgeDraft({
-      relType: selectedEdge.type || "",
-      description: selectedEdge.description || "",
-      sentiment: typeof selectedEdge.sentiment === "number" ? String(selectedEdge.sentiment) : "0",
-      fromChapter: typeof selectedEdge.from_chapter === "number" ? String(selectedEdge.from_chapter) : "",
-      toChapter: typeof selectedEdge.to_chapter === "number" ? String(selectedEdge.to_chapter) : "",
-      sharedLabels: selectedEdge.shared_labels ?? [],
-      sourceToTargetLabels: selectedEdge.character_a_to_b_labels ?? [],
-      targetToSourceLabels: selectedEdge.character_b_to_a_labels ?? [],
-    })
-    setEdgeMessage(null)
+    setEdgeDraft(relationshipDraft(selectedEdge))
   }, [selectedEdge])
 
   function updateNodeLabel(nodeId: string, value: string) {
-    const fallback = graphData?.nodes.find((node) => node.id === nodeId)?.name || value
-    const next = { ...labelOverrides, [nodeId]: value.trim() || fallback }
+    const next = { ...labelOverrides, [nodeId]: value }
     setLabelOverrides(next)
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(graphLabelKey(bookId), JSON.stringify(next))
+      try { window.localStorage.setItem(graphLabelKey(bookId), JSON.stringify(next)) } catch { setStorageError(true) }
     }
   }
 
@@ -505,13 +499,13 @@ export const RelationshipGraph = memo(function RelationshipGraph({
     delete next[node.id]
     setLabelOverrides(next)
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(graphLabelKey(bookId), JSON.stringify(next))
+      try { window.localStorage.setItem(graphLabelKey(bookId), JSON.stringify(next)) } catch { setStorageError(true) }
     }
   }
 
   function resetLayout() {
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(graphStorageKey(bookId, upToChapter))
+      try { window.localStorage.removeItem(graphStorageKey(bookId, upToChapter)) } catch { setStorageError(true) }
     }
 
     cyRef.current?.layout(BASE_LAYOUT).run()
@@ -531,7 +525,8 @@ export const RelationshipGraph = memo(function RelationshipGraph({
   }
 
   function fitCanvas() {
-    cyRef.current?.fit(undefined, compact ? 72 : 96)
+    cyRef.current?.resize()
+    cyRef.current?.fit(undefined, compact ? 72 : 40)
   }
 
   function adjustZoom(direction: "in" | "out") {
@@ -544,17 +539,18 @@ export const RelationshipGraph = memo(function RelationshipGraph({
     setZoomLevel(cy.zoom())
   }
 
-  function resetZoom() {
-    const cy = cyRef.current
-    if (!cy) return
-
-    cy.zoom({ level: 1, position: { x: cy.width() / 2, y: cy.height() / 2 } })
-    setZoomLevel(cy.zoom())
+  function clearSelection() {
+    if (!canLeave()) return
+    cyRef.current?.elements().unselect()
+    setSelection(null)
+    selectCharacterRef.current?.(null)
   }
 
   async function saveEdgeCorrection() {
-    if (!selectedEdge?.relationshipId) return
-
+    if (!selectedEdge?.relationshipId || savingRef.current) return
+    const validation = relationshipDraftError(edgeDraft)
+    if (validation) { setEdgeMessage(validation); return }
+    savingRef.current = true
     setSavingEdge(true)
     setEdgeMessage(null)
 
@@ -598,7 +594,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
       })
 
       setSelection((current) =>
-        current?.type === "edge"
+        current?.type === "edge" && current.data.relationshipId === selectedEdge.relationshipId
           ? {
               type: "edge",
               data: {
@@ -620,13 +616,15 @@ export const RelationshipGraph = memo(function RelationshipGraph({
     } catch {
       setEdgeMessage("Could not save the relationship correction.")
     } finally {
+      savingRef.current = false
       setSavingEdge(false)
     }
   }
 
   async function deleteSelectedRelationship() {
-    if (!selectedEdge?.relationshipId) return
-
+    if (!selectedEdge?.relationshipId || savingRef.current) return
+    if (!window.confirm("Delete this relationship? This removes the recorded connection and any unsaved correction.")) return
+    savingRef.current = true
     setSavingEdge(true)
     setEdgeMessage(null)
 
@@ -649,35 +647,38 @@ export const RelationshipGraph = memo(function RelationshipGraph({
     } catch {
       setEdgeMessage("Could not remove the relationship.")
     } finally {
+      savingRef.current = false
       setSavingEdge(false)
     }
   }
 
   if (loading) {
     return (
-      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-8 text-sm text-slate-300 shadow-[0_24px_80px_rgba(0,0,0,0.32)]">
+      <div role="status" className="py-8 text-sm text-[rgb(var(--muted-foreground))]">
         Building the relationship graph...
       </div>
     )
   }
 
+  if (isError && !graphData) return <div role="alert" className="border-l-2 border-amber-500 p-4 text-sm"><p>The relationship graph could not load.</p><button type="button" className="app-button-secondary mt-3" disabled={isFetching} onClick={() => void refetch()}>Retry graph</button></div>
+
   if (compact) {
     return (
-      <section className="rounded-lg border border-white/10 bg-[#060915] p-3 text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.24)]">
+      <section className="rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))] p-3 text-[rgb(var(--foreground))] ">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">Relationship graph</h2>
-            <p className="mt-1 text-xs leading-5 text-slate-400">
+            <h2 className="text-base font-semibold text-[rgb(var(--foreground))]">Relationship graph</h2>
+            <p className="mt-1 text-sm leading-5 text-[rgb(var(--muted-foreground))]">
               Zoomed out by default. Tap a node to sync the profile.
             </p>
           </div>
-          <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-slate-300">
+          <div className="rounded-sm border border-[rgb(var(--border))] bg-white/[0.03] px-3 py-1.5 text-sm font-medium text-[rgb(var(--foreground))]">
             {graphStats.nodeCount} cast - {graphStats.edgeCount} ties
           </div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <FilterSelect filterId={filterId} filterType={filterType} relationshipTypes={relationshipTypes} setFilterType={setFilterType} />
+          <FilterSelect filterId={filterId} filterType={filterType} relationshipTypes={relationshipTypes} setFilterType={(value) => { if (canLeave()) { setFilterType(value); setSelection(null) } }} />
           <div className="flex flex-wrap gap-2">
             <GraphToolbarButton icon={<FitIcon className="h-4 w-4" />} onClick={fitCanvas}>Fit</GraphToolbarButton>
             <GraphToolbarButton icon={<MinusIcon className="h-4 w-4" />} onClick={() => adjustZoom("out")}>Zoom out</GraphToolbarButton>
@@ -685,7 +686,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
               active={showIsolated}
               ariaPressed={showIsolated}
               icon={<EyeIcon className="h-4 w-4" />}
-              onClick={() => setShowIsolated((current) => !current)}
+              onClick={() => { if (canLeave()) { setShowIsolated((current) => !current); setSelection(null) } }}
             >
               {showIsolated ? "Hide isolated" : "Show isolated"}
             </GraphToolbarButton>
@@ -694,7 +695,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
         </div>
 
         {filteredGraph && filteredGraph.nodes.length > 0 ? (
-          <div className="relative mt-3 overflow-hidden rounded-md border border-white/10 bg-[#050814]">
+          <div className="relative mt-3 overflow-hidden rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))]">
             <div
               aria-hidden="true"
               className={cn(
@@ -709,7 +710,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
             />
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(109,91,208,0.18),transparent_42%),linear-gradient(180deg,rgba(5,8,20,0.88),rgba(3,5,11,0.98))]"
+              className="pointer-events-none absolute inset-0 "
             />
             <div
               ref={containerRef}
@@ -718,23 +719,23 @@ export const RelationshipGraph = memo(function RelationshipGraph({
             />
           </div>
         ) : (
-          <div className="mt-3 flex min-h-[220px] items-center justify-center rounded-md border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
+          <div className="mt-3 flex min-h-[220px] items-center justify-center rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))] text-center text-[rgb(var(--muted-foreground))]">
             <div className="max-w-sm space-y-3 px-6">
-              <p className="text-base font-semibold text-white">No graphable relationships yet</p>
+              <p className="text-base font-semibold text-[rgb(var(--foreground))]">No graphable relationships yet</p>
               <p className="text-sm leading-6">Relationships appear after character extraction has enough scene evidence. Clear filters, open Characters, or retry processing if extraction failed.</p>
               <div className="flex flex-wrap justify-center gap-2 pt-1">
-                <Link href={`/${bookId}/characters`} className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]">
+                <Link href={`/${bookId}/characters`} className="rounded-sm border border-[rgb(var(--border))] bg-white/[0.06] px-3 py-2 text-sm font-semibold text-[rgb(var(--foreground))] hover:bg-white/[0.1]">
                   Open characters
                 </Link>
-                <Link href={`/${bookId}/manuscript`} className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]">
-                  Open manuscript
+                <Link href={`/${bookId}/${authorMode ? "manuscript" : "chapters"}`} className="rounded-sm border border-[rgb(var(--border))] bg-white/[0.06] px-3 py-2 text-sm font-semibold text-[rgb(var(--foreground))] hover:bg-white/[0.1]">
+                  {authorMode ? "Open manuscript" : "View chapters"}
                 </Link>
               </div>
             </div>
           </div>
         )}
 
-        <div className="mt-3 rounded-md border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-slate-300">
+        <div className="mt-3 rounded-sm border border-[rgb(var(--border))] bg-white/[0.03] p-3 text-sm leading-5 text-[rgb(var(--foreground))]">
           <CompactSelectionSummary selectedNode={selectedNode} selectedEdge={selectedEdge} />
         </div>
       </section>
@@ -742,18 +743,17 @@ export const RelationshipGraph = memo(function RelationshipGraph({
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <section className={cn(panelClass(), "p-4 md:p-5")}>
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-2xl">
-              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Relationship graph</p>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Relationship graph</h2>
-              <p className="mt-2 text-sm leading-7 text-slate-400">
-                Arrange the map to match how you read it. Drag nodes, zoom the canvas, and keep a saved layout on this device.
-              </p>
+    <div className={cn("relative min-w-0 [overflow-wrap:anywhere]", selection && inspectorPlacement === "overlay" && "xl:grid xl:grid-cols-[minmax(0,1fr)_380px] xl:items-start xl:gap-4")}>
+      {isError ? <div role="alert" className="col-span-full mb-4 border-l-2 border-amber-500 pl-4 text-sm">Graph refresh failed. Previously loaded data remains visible.</div> : null}
+      {storageError ? <p role="status" className="col-span-full mb-3 text-sm">Changes to display labels and layout cannot be saved on this device.</p> : null}
+      {edgeMessage && !selection ? <p role="status" className="col-span-full mb-3 text-sm">{edgeMessage}</p> : null}
+      <section className={cn(panelClass(), "min-w-0 overflow-hidden p-3")}>
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-[rgb(var(--border))] pb-3">
+            <div className="min-w-max">
+              <FilterSelect filterId={filterId} filterType={filterType} relationshipTypes={relationshipTypes} setFilterType={(value) => { if (canLeave()) { setFilterType(value); setSelection(null) } }} />
             </div>
-
+            {toolbarLeading ? <div className="min-w-max">{toolbarLeading}</div> : null}
             <div className="flex flex-wrap gap-2">
               <GraphToolbarButton
                 active={interactionMode === "arrange"}
@@ -767,51 +767,35 @@ export const RelationshipGraph = memo(function RelationshipGraph({
                 active={showIsolated}
                 ariaPressed={showIsolated}
                 icon={<EyeIcon className="h-4 w-4" />}
-                onClick={() => setShowIsolated((current) => !current)}
+                onClick={() => { if (canLeave()) { setShowIsolated((current) => !current); setSelection(null) } }}
               >
                 {showIsolated ? "Hide isolated" : "Show isolated"}
               </GraphToolbarButton>
+              <GraphToolbarButton
+                active={showGrid}
+                ariaPressed={showGrid}
+                icon={<GridIcon className="h-4 w-4" />}
+                onClick={() => setShowGrid((current) => !current)}
+              >
+                Grid
+              </GraphToolbarButton>
               <GraphToolbarButton icon={<MinusIcon className="h-4 w-4" />} onClick={() => adjustZoom("out")}>Zoom out</GraphToolbarButton>
               <GraphToolbarButton icon={<PlusIcon className="h-4 w-4" />} onClick={() => adjustZoom("in")}>Zoom in</GraphToolbarButton>
-              <GraphToolbarButton icon={<ScopeIcon className="h-4 w-4" />} onClick={resetZoom}>Reset zoom</GraphToolbarButton>
               <GraphToolbarButton icon={<FitIcon className="h-4 w-4" />} onClick={fitCanvas}>Fit</GraphToolbarButton>
-              <GraphToolbarButton
-                disabled={selection?.type !== "node"}
-                icon={<TargetIcon className="h-4 w-4" />}
-                onClick={focusSelection}
-              >
-                Center selection
-              </GraphToolbarButton>
               <GraphToolbarButton icon={<ResetIcon className="h-4 w-4" />} onClick={resetLayout}>Reset layout</GraphToolbarButton>
+              <button type="button" disabled={isFetching || savingEdge} className="app-button-secondary !rounded-sm" onClick={() => { if (canLeave()) { setSelection(null); void refetch() } }}>{isFetching ? "Refreshing…" : "Refresh graph"}</button>
+            </div>
+            <div className="ml-auto min-w-max px-2 text-sm text-[rgb(var(--muted-foreground))]">
+              {graphStats.nodeCount} characters · {graphStats.edgeCount} connections · {zoomPercentLabel(zoomLevel)}
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <GraphStatusPill icon={<UsersIcon className="h-4 w-4" />}>
-              <span className="font-medium text-white">{graphStats.nodeCount}</span> characters
-            </GraphStatusPill>
-            <GraphStatusPill icon={<LinksIcon className="h-4 w-4" />}>
-              <span className="font-medium text-white">{graphStats.edgeCount}</span> connections
-            </GraphStatusPill>
-            <GraphStatusPill icon={<EyeIcon className="h-4 w-4" />}>
-              {showIsolated ? "Isolated cast members stay visible." : "Only connected cast members are visible."}
-            </GraphStatusPill>
-            <GraphStatusPill icon={<HandIcon className="h-4 w-4" />}>
-              {interactionMode === "arrange" ? "Nodes are draggable right now." : "Nodes are locked for inspection."}
-            </GraphStatusPill>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <FilterSelect filterId={filterId} filterType={filterType} relationshipTypes={relationshipTypes} setFilterType={setFilterType} />
-
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-300">
-              <ScopeIcon className="h-4 w-4 text-slate-400" />
-              <span>Zoom {zoomPercentLabel(zoomLevel)}</span>
-            </div>
-          </div>
-
+          {filteredGraph ? <RelationshipGraphBrowser graph={filteredGraph} disabled={savingEdge} onSelect={(kind, id) => {
+            const element = cyRef.current?.getElementById(id)
+            if (element?.nonempty()) requestSelectionRef.current(kind === "node" ? { type: "node", data: element.data() as GraphNodeView } : { type: "edge", data: element.data() as GraphEdgeView })
+          }} /> : null}
           {filteredGraph && filteredGraph.nodes.length > 0 ? (
-            <div className="relative overflow-hidden rounded-lg border border-white/10 bg-[#040712]">
+            <div className="relative overflow-hidden rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))]">
               <div
                 aria-hidden="true"
                 className={cn(
@@ -826,64 +810,35 @@ export const RelationshipGraph = memo(function RelationshipGraph({
               />
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(109,91,208,0.18),transparent_42%),linear-gradient(180deg,rgba(5,8,20,0.88),rgba(3,5,11,0.98))]"
+                className="pointer-events-none absolute inset-0 "
               />
-
-              <div className="absolute right-4 top-4 z-20 flex items-center gap-2">
-                <button
-                  type="button"
-                  aria-pressed={showGrid}
-                  onClick={() => setShowGrid((current) => !current)}
-                  className={controlButtonClass(showGrid)}
-                >
-                  <GridIcon className="h-4 w-4" />
-                  <span>Grid</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => adjustZoom("out")}
-                  className={controlButtonClass()}
-                  aria-label="Zoom out"
-                >
-                  <MinusIcon className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => adjustZoom("in")}
-                  className={controlButtonClass()}
-                  aria-label="Zoom in"
-                >
-                  <PlusIcon className="h-4 w-4" />
-                </button>
-              </div>
 
               <div
                 ref={containerRef}
-                className="relative z-10 h-[56vh] min-h-[380px] md:h-[70vh] md:min-h-[560px]"
+                className="relative z-10 h-[64vh] min-h-[430px] md:h-[72vh] md:min-h-[600px]"
                 style={{ cursor: interactionMode === "arrange" ? "grab" : "default" }}
               />
 
-              <div className="pointer-events-none absolute bottom-4 left-4 z-20 flex flex-wrap gap-2">
-                <div className="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
-                  Saved layout on this device
-                </div>
+              <div className="pointer-events-none absolute bottom-4 left-4 z-20 flex max-w-[calc(100%-2rem)] flex-wrap gap-2 text-sm text-[rgb(var(--muted-foreground))]">
+                <span>{storageError ? "Layout stays in this session; device storage is unavailable." : "Layout saves on this device."}</span>
                 {filteredGraph.edges.length === 0 ? (
-                  <div className="rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
+                  <span>
                     No relationships extracted yet. Characters remain visible so you can arrange the cast.
-                  </div>
+                  </span>
                 ) : null}
               </div>
             </div>
           ) : (
-            <div className="flex h-[40vh] min-h-[340px] items-center justify-center rounded-lg border border-white/10 bg-[linear-gradient(180deg,#050814_0%,#03050b_100%)] text-center text-slate-400">
+            <div className="flex h-[40vh] min-h-[340px] items-center justify-center rounded-sm border border-[rgb(var(--border))] bg-[rgb(var(--card))] text-center text-[rgb(var(--muted-foreground))]">
               <div className="max-w-sm space-y-3 px-6">
-                <p className="text-lg font-semibold text-white">No graphable relationships yet</p>
+                <p className="text-lg font-semibold text-[rgb(var(--foreground))]">{graphData?.nodes.length ? "No characters match these filters" : "No graphable relationships yet"}</p>
+                {graphData?.nodes.length ? <button type="button" className="app-button-secondary" onClick={() => { setFilterType(null); setShowIsolated(true) }}>Clear graph filters</button> : null}
                 <p className="text-sm leading-6">Relationship edges appear after character extraction has enough scene evidence. If this manuscript just finished uploading, processing may still be catching up.</p>
                 <div className="flex flex-wrap justify-center gap-2 pt-1">
-                  <Link href={`/${bookId}/manuscript`} className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/[0.1]">
-                    Open manuscript
+                  <Link href={`/${bookId}/${authorMode ? "manuscript" : "chapters"}`} className="rounded-sm border border-[rgb(var(--border))] bg-white/[0.06] px-3 py-2 text-sm font-semibold text-[rgb(var(--foreground))] hover:bg-white/[0.1]">
+                    {authorMode ? "Open manuscript" : "View chapters"}
                   </Link>
-                  <Link href={`/${bookId}/characters`} className="rounded-md bg-violet-500/20 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/30">
+                  <Link href={`/${bookId}/characters`} className="rounded-sm bg-violet-500/20 px-3 py-2 text-sm font-semibold text-violet-800 dark:text-violet-100 hover:bg-violet-500/30">
                     Review characters
                   </Link>
                 </div>
@@ -893,305 +848,7 @@ export const RelationshipGraph = memo(function RelationshipGraph({
         </div>
       </section>
 
-      <aside className={cn(panelClass(), "p-5 xl:sticky xl:top-6 xl:max-h-[84vh] xl:overflow-y-auto")}>
-        {selectedNode ? (
-          <div className="space-y-5">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-400/30 bg-violet-500/10 text-lg font-semibold text-violet-100">
-                {nodeInitial(selectedNode.name)}
-              </div>
-              <div className="min-w-0">
-                <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Character</p>
-                <h3 className="mt-2 truncate text-[1.9rem] font-semibold tracking-tight text-white">{selectedNode.name}</h3>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedNode.role ? (
-                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-3xs text-slate-200">{selectedNode.role}</span>
-                  ) : null}
-                  {selectedNode.is_manual ? (
-                    <span className="rounded-full border border-amber-400/20 bg-amber-500/12 px-3 py-1 text-3xs text-amber-100">manual</span>
-                  ) : null}
-                  {selectedNode.graph_visibility_override === "include" ? (
-                    <span className="rounded-full border border-teal-400/20 bg-teal-500/12 px-3 py-1 text-3xs text-teal-100">forced visible</span>
-                  ) : null}
-                  {typeof selectedNode.visibility_score === "number" ? (
-                    <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-3xs text-slate-300">score {selectedNode.visibility_score}</span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            <InspectorSection title="Quick view">
-              <div className="space-y-3 text-sm text-slate-300">
-                {typeof selectedNode.mention_count === "number" ? <InspectorMetric label="Mentions" value={selectedNode.mention_count} /> : null}
-                <InspectorMetric label="Connections in view" value={selectedNode.relationshipCount ?? 0} />
-                <InspectorMetric label="First chapter" value={selectedNode.first_chapter} />
-              </div>
-            </InspectorSection>
-
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={focusSelection} className={controlButtonClass(true)}>
-                <TargetIcon className="h-4 w-4" />
-                <span>Center node</span>
-              </button>
-              <Link href={`/${bookId}/characters`} className={controlButtonClass()}>
-                <UsersIcon className="h-4 w-4" />
-                <span>Open characters workspace</span>
-              </Link>
-            </div>
-
-            <InspectorSection title="Display label">
-              <label htmlFor={labelInputId} className="sr-only">Display label</label>
-              <input
-                id={labelInputId}
-                value={labelOverrides[selectedNode.id] || selectedNode.name}
-                onChange={(event) => updateNodeLabel(selectedNode.id, event.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-              />
-              <button
-                type="button"
-                onClick={() => clearLabelOverride(selectedNode)}
-                className="mt-3 text-xs font-medium text-slate-400 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-              >
-                Reset to canonical name
-              </button>
-            </InspectorSection>
-
-            <InspectorSection title="Reading note">
-              <p className="text-sm leading-7 text-slate-300">
-                {selectedNode.description || "No narrative summary has been saved yet."}
-              </p>
-            </InspectorSection>
-
-            {"arc_summary" in selectedNode && selectedNode.arc_summary ? (
-              <InspectorSection title="Arc summary">
-                <p className="text-sm leading-7 text-slate-300">{selectedNode.arc_summary}</p>
-              </InspectorSection>
-            ) : null}
-
-            {selectedNode.aliases?.length ? (
-              <InspectorSection title="Aliases">
-                <div className="flex flex-wrap gap-2">
-                  {selectedNode.aliases.map((alias) => (
-                    <span key={alias} className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-slate-200">
-                      {alias}
-                    </span>
-                  ))}
-                </div>
-              </InspectorSection>
-            ) : null}
-
-            {selectedNode.personality_tags?.length ? (
-              <InspectorSection title="Disposition">
-                <p className="text-sm leading-7 text-slate-300">{selectedNode.personality_tags.join(", ")}</p>
-              </InspectorSection>
-            ) : null}
-
-            {selectedNode.motivations?.length ? (
-              <InspectorSection title="Motivations">
-                <p className="text-sm leading-7 text-slate-300">{selectedNode.motivations.join(", ")}</p>
-              </InspectorSection>
-            ) : null}
-
-            {selectedNode.fears?.length ? (
-              <InspectorSection title="Fears">
-                <p className="text-sm leading-7 text-slate-300">{selectedNode.fears.join(", ")}</p>
-              </InspectorSection>
-            ) : null}
-
-            {selectedNodeConnections.length > 0 ? (
-              <InspectorSection title="Visible connections">
-                <div className="space-y-3">
-                  {selectedNodeConnections.map((connection) => (
-                    <div key={connection.id} className="flex items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-sm">
-                      <div>
-                        <p className="font-medium text-white">{connection.name}</p>
-                        <p className="mt-1 text-xs text-slate-400">{connection.label}</p>
-                      </div>
-                      {typeof connection.chapter === "number" ? (
-                        <span className="text-xs text-slate-500">Ch. {connection.chapter}</span>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </InspectorSection>
-            ) : null}
-          </div>
-        ) : selectedEdge ? (
-          <div className="space-y-5">
-            <div>
-              <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-violet-300/85">Connection</p>
-              <h3 className="mt-3 text-[1.9rem] font-semibold tracking-tight text-white">
-                {relationshipFacetSummary([...(selectedEdge.character_a_to_b_labels ?? []), ...(selectedEdge.character_b_to_a_labels ?? []), ...(selectedEdge.shared_labels ?? [])], selectedEdge.type)}
-              </h3>
-              {selectedEdgeParticipants ? (
-                <p className="mt-3 text-sm leading-7 text-slate-400">
-                  {selectedEdgeParticipants.source} {"->"} {selectedEdgeParticipants.target}
-                </p>
-              ) : null}
-            </div>
-
-            <InspectorSection title="Relationship note">
-              <p className="text-sm leading-7 text-slate-300">
-                {selectedEdge.description || "No explicit relationship note has been saved yet."}
-              </p>
-            </InspectorSection>
-
-            <InspectorSection title="Network detail">
-              <div className="space-y-3 text-sm text-slate-300">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-slate-300">Primary type</span>
-                  <span className="font-semibold text-white">{relationshipFacetLabel(selectedEdge.type)}</span>
-                </div>
-                {typeof selectedEdge.from_chapter === "number" ? <InspectorMetric label="First tracked" value={selectedEdge.from_chapter} /> : null}
-                {typeof selectedEdge.to_chapter === "number" ? <InspectorMetric label="Ends chapter" value={selectedEdge.to_chapter} /> : null}
-                {selectedEdge.status ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-slate-300">Status</span>
-                    <span className="font-semibold capitalize text-white">{selectedEdge.status}</span>
-                  </div>
-                ) : null}
-                {sentimentLabel(selectedEdge.sentiment) ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-slate-300">Emotional direction</span>
-                    <span className="font-semibold text-white">{sentimentLabel(selectedEdge.sentiment)}</span>
-                  </div>
-                ) : null}
-              </div>
-            </InspectorSection>
-
-            {authorMode && selectedEdge.relationshipId ? (
-              <InspectorSection title="Author correction">
-                <p className="text-sm leading-6 text-slate-400">
-                  Correct the extracted relationship if the manuscript context is clearer than the model guess.
-                </p>
-
-                <div className="mt-4 space-y-3">
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-slate-400">Type</span>
-                    <select
-                      value={edgeDraft.relType}
-                      onChange={(event) => setEdgeDraft((value) => ({ ...value, relType: event.target.value }))}
-                      className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-                    >
-                      {edgeDraft.relType && !PRIMARY_RELATIONSHIP_TYPE_OPTIONS.includes(edgeDraft.relType as (typeof PRIMARY_RELATIONSHIP_TYPE_OPTIONS)[number]) ? (
-                        <option value={edgeDraft.relType}>{relationshipLabel(edgeDraft.relType)}</option>
-                      ) : null}
-                      {PRIMARY_RELATIONSHIP_TYPE_OPTIONS.map((type) => (
-                        <option key={type} value={type}>
-                          {relationshipFacetLabel(type)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <RelationshipLabelChecklist
-                    label="Shared facets"
-                    options={SHARED_RELATIONSHIP_LABEL_OPTIONS}
-                    selected={edgeDraft.sharedLabels}
-                    onChange={(labels) => setEdgeDraft((value) => ({ ...value, sharedLabels: labels }))}
-                  />
-
-                  {selectedEdgeParticipants ? (
-                    <div className="grid gap-3 lg:grid-cols-2">
-                      <RelationshipLabelChecklist
-                        label={`${selectedEdgeParticipants.source} to ${selectedEdgeParticipants.target}`}
-                        options={DIRECTIONAL_RELATIONSHIP_LABEL_OPTIONS}
-                        selected={edgeDraft.sourceToTargetLabels}
-                        onChange={(labels) => setEdgeDraft((value) => ({ ...value, sourceToTargetLabels: labels }))}
-                      />
-                      <RelationshipLabelChecklist
-                        label={`${selectedEdgeParticipants.target} to ${selectedEdgeParticipants.source}`}
-                        options={DIRECTIONAL_RELATIONSHIP_LABEL_OPTIONS}
-                        selected={edgeDraft.targetToSourceLabels}
-                        onChange={(labels) => setEdgeDraft((value) => ({ ...value, targetToSourceLabels: labels }))}
-                      />
-                    </div>
-                  ) : null}
-
-                  <label className="block">
-                    <span className="mb-1 block text-xs text-slate-400">Relationship note</span>
-                    <textarea
-                      value={edgeDraft.description}
-                      onChange={(event) => setEdgeDraft((value) => ({ ...value, description: event.target.value }))}
-                      rows={4}
-                      className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-                    />
-                  </label>
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-slate-400">Sentiment</span>
-                      <input
-                        type="number"
-                        min={-1}
-                        max={1}
-                        step={0.1}
-                        value={edgeDraft.sentiment}
-                        onChange={(event) => setEdgeDraft((value) => ({ ...value, sentiment: event.target.value }))}
-                        className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-slate-400">From chapter</span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={edgeDraft.fromChapter}
-                        onChange={(event) => setEdgeDraft((value) => ({ ...value, fromChapter: event.target.value }))}
-                        className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-slate-400">Ends chapter</span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={edgeDraft.toChapter}
-                        onChange={(event) => setEdgeDraft((value) => ({ ...value, toChapter: event.target.value }))}
-                        className="w-full rounded-xl border border-white/10 bg-[#0b1020] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70"
-                      />
-                      <span className="mt-1 block text-xs text-slate-500">Leave blank if ongoing.</span>
-                    </label>
-                  </div>
-
-                  {edgeMessage ? (
-                    <p className={cn("text-sm", edgeMessage.includes("saved") || edgeMessage.includes("removed") ? "text-emerald-400" : "text-rose-300")}>
-                      {edgeMessage}
-                    </p>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={savingEdge}
-                      onClick={() => void saveEdgeCorrection()}
-                      className={cn(controlButtonClass(true), savingEdge && "opacity-60")}
-                    >
-                      <CheckIcon className="h-4 w-4" />
-                      <span>{savingEdge ? "Saving..." : "Save correction"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={savingEdge}
-                      onClick={() => void deleteSelectedRelationship()}
-                      className={cn(
-                        "inline-flex items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/70",
-                        savingEdge && "opacity-60"
-                      )}
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                      <span>Delete relationship</span>
-                    </button>
-                  </div>
-                </div>
-              </InspectorSection>
-            ) : null}
-          </div>
-        ) : (
-          <EmptyInspector edgeCount={graphStats.edgeCount} nodeCount={graphStats.nodeCount} />
-        )}
-      </aside>
+      {selection ? <RelationshipGraphInspector bookId={bookId} inspectorPlacement={inspectorPlacement} selectedNode={selectedNode} selectedEdge={selectedEdge} selectedEdgeParticipants={selectedEdgeParticipants} selectedNodeConnections={selectedNodeConnections} labelInputId={labelInputId} labelOverrides={labelOverrides} storageError={storageError} updateNodeLabel={updateNodeLabel} clearLabelOverride={clearLabelOverride} clearSelection={clearSelection} focusSelection={focusSelection} authorMode={authorMode} savingEdge={savingEdge} edgeMessage={edgeMessage} edgeDraft={edgeDraft} setEdgeDraft={setEdgeDraft} saveEdgeCorrection={saveEdgeCorrection} deleteSelectedRelationship={deleteSelectedRelationship} /> : null}
     </div>
   )
 })

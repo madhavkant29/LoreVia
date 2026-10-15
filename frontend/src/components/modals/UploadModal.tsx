@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { X } from "lucide-react"
-import { memo } from "react"
+import { memo, useEffect } from "react"
 
 import { AdvancedImportSettings } from "@/components/modals/upload/AdvancedImportSettings"
 import { ExistingProjectImportStep } from "@/components/modals/upload/ExistingProjectImportStep"
@@ -19,16 +19,19 @@ export const UploadModal = memo(function UploadModal({
   initialMode = "reader",
   initialExistingBookId = "",
   presentation = "modal",
+  onDraftChange,
 }: {
   onClose: () => void
   initialMode?: BookMode
   initialExistingBookId?: string
   presentation?: "modal" | "inline"
+  onDraftChange?: (hasDraft: boolean) => void
 }) {
   const {
     wizard, isInline, shellClassName, isManagingExisting, startEmpty, storyUnitLabel, storyUnitLabelTitle, isDark,
     uploadStage, processingBook, processingSummary, processingRetrying, retryProcessing, submit,
-    inputRef, coverInputRef, newUploadAccept, files, setFiles, primaryFile, isScreenplayWorkspace,
+    inputRef, coverInputRef, newUploadAccept, files, handleFilesSelected, handleCoverSelected,
+    chapterUploadAccept, primaryFile, isScreenplayWorkspace,
     importPreview, setImportPreview, dismissPreview, setDismissPreview, previewLoading, fetchPreview,
     setImportAsSingle, showEditor, setShowEditor, canUploadAuthorMode, needsUsername, settingUsername,
     usernameError, handleSetUsername, existingAuthorBooks, selectedExistingBook, existingBookSelectLabel,
@@ -37,11 +40,14 @@ export const UploadModal = memo(function UploadModal({
     replaceExisting, setReplaceExisting, chapterTitle, setChapterTitle, chapterText, setChapterText,
     chapterUploadHelp, splitIntoChapters, setSplitIntoChapters, chunkLongDocuments, setChunkLongDocuments,
     infoButtonClass, chapterReports, advancedSettingsOpen, setAdvancedSettingsOpen, preserveChapterNumbers,
-    setPreserveChapterNumbers, preserveSourceChapters, setPreserveSourceChapters, coverFile, setCoverFile,
+    setPreserveChapterNumbers, preserveSourceChapters, setPreserveSourceChapters, coverFile,
     autoExtractCover, setAutoExtractCover, error, uploading, uploadProgress, postImportReview, reportReady,
     postImportSynopsis, postImportPassages, postImportThreads, postImportSuggestions, user, confirm,
     booksApi, existingBookId, refetchBooks, primaryActionDisabled, primaryActionLabel,
   } = useUploadModalController({ onClose, initialMode, initialExistingBookId, presentation })
+  useEffect(() => {
+    onDraftChange?.(uploading || files.length > 0 || !!chapterText.trim() || !!chapterTitle.trim())
+  }, [chapterText, chapterTitle, files.length, onDraftChange, uploading])
   const TitleElement = isInline ? "h2" : "div"
 
   const content = (
@@ -115,7 +121,7 @@ export const UploadModal = memo(function UploadModal({
             inputRef={inputRef}
             newUploadAccept={newUploadAccept}
             files={files}
-            setFiles={setFiles}
+            onFilesSelected={handleFilesSelected}
             primaryFile={primaryFile}
             isScreenplayWorkspace={isScreenplayWorkspace}
             importPreview={importPreview}
@@ -172,7 +178,8 @@ export const UploadModal = memo(function UploadModal({
             setChapterText={setChapterText}
             inputRef={inputRef}
             files={files}
-            setFiles={setFiles}
+            onFilesSelected={handleFilesSelected}
+            chapterUploadAccept={chapterUploadAccept}
             chapterUploadHelp={chapterUploadHelp}
             splitIntoChapters={splitIntoChapters}
             setSplitIntoChapters={setSplitIntoChapters}
@@ -194,7 +201,7 @@ export const UploadModal = memo(function UploadModal({
             setPreserveSourceChapters={setPreserveSourceChapters}
             coverInputRef={coverInputRef}
             coverFile={coverFile}
-            setCoverFile={setCoverFile}
+            onCoverSelected={handleCoverSelected}
             autoExtractCover={autoExtractCover}
             setAutoExtractCover={setAutoExtractCover}
           />
@@ -212,13 +219,17 @@ export const UploadModal = memo(function UploadModal({
                   {uploadStage === "uploading" ? "Uploading file" : "Handing off for processing"}
                 </span>
                 <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                  {uploadStage === "uploading" ? `${uploadProgress}%` : "Queued"}
+                  {uploadStage === "uploading"
+                    ? `${uploadProgress}%`
+                    : uploadProgress > 0
+                      ? `${uploadProgress}%`
+                      : "Queued"}
                 </span>
               </div>
               <div className={`h-2 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-gray-200"}`}>
                 <div
                   className="h-full rounded-full bg-indigo-600 transition-all duration-200"
-                  style={{ width: `${uploadStage === "processing" ? 100 : uploadProgress}%` }}
+                  style={{ width: `${uploadStage === "uploading" ? uploadProgress : Math.max(uploadProgress, 5)}%` }}
                 />
               </div>
               <p className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>

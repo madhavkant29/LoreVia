@@ -220,7 +220,11 @@ class _FakeDB:
     async def execute(self, *_args, **_kwargs):
         return self._execute_values.pop(0)
 
-    async def scalar(self, *_args, **_kwargs):
+    async def scalar(self, *args, **_kwargs):
+        statement = str(args[0]) if args else ""
+        if "admin_audit_events" in statement:
+            # Legacy-freeze cutoff lookup; these tests have no cutoff recorded.
+            return None
         return self._scalar_values.pop(0)
 
     def add(self, value):
@@ -485,6 +489,12 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
     )
     patch_route_dependency(monkeypatch, books, "resolve_owned_series_ids", _fake_resolve_series)
     patch_route_dependency(monkeypatch, books, "check_upload_limit", _async_value(None))
+    patch_route_dependency(
+        monkeypatch, books, "find_active_duplicate_upload", _async_value(None)
+    )
+    patch_route_dependency(
+        monkeypatch, books, "acquire_upload_fingerprint_lock", AsyncMock()
+    )
 
     def _upload_object(key, raw, content_type=None):
         label = "book" if key.startswith("books/") else "cover"
@@ -2336,7 +2346,15 @@ async def test_get_book_overview_and_writer_workspace_use_cache(monkeypatch):
 
     overview_first = await books.get_book_overview(
         book.id,
-        db=_FakeDB(execute_values=[_Result(scalar=None), _Result(all_rows=[])]),
+        db=_FakeDB(
+            execute_values=[
+                _Result(scalar=None),
+                _Result(all_rows=[]),
+                _Result(scalar=0),
+                _Result(scalar=0),
+                _Result(scalar=0),
+            ]
+        ),
         current_user=user,
     )
     overview_second = await books.get_book_overview(book.id, db=_FakeDB(), current_user=user)

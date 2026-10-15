@@ -14,7 +14,7 @@ type Props = {
   setPreserveSourceChapters: Dispatch<SetStateAction<boolean>>
   coverInputRef: RefObject<HTMLInputElement | null>
   coverFile: File | null
-  setCoverFile: Dispatch<SetStateAction<File | null>>
+  onCoverSelected: (file: File | null) => void
   autoExtractCover: boolean
   setAutoExtractCover: Dispatch<SetStateAction<boolean>>
 }
@@ -31,7 +31,7 @@ export function AdvancedImportSettings({
   setPreserveSourceChapters,
   coverInputRef,
   coverFile,
-  setCoverFile,
+  onCoverSelected,
   autoExtractCover,
   setAutoExtractCover,
 }: Props) {
@@ -75,8 +75,9 @@ export function AdvancedImportSettings({
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null
-                setCoverFile(file)
+                onCoverSelected(file)
                 if (file) setAutoExtractCover(false)
+                event.target.value = ""
               }}
             />
             <button type="button" onClick={() => coverInputRef.current?.click()} className={`w-full rounded-lg border px-3 py-2.5 text-sm transition ${isDark ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-gray-300 bg-white text-slate-700 hover:bg-gray-50"}`}>{coverFile ? `Cover selected: ${coverFile.name}` : "Upload separate cover image"}</button>
@@ -89,7 +90,7 @@ export function AdvancedImportSettings({
               checked={autoExtractCover}
               onChange={(event) => {
                 setAutoExtractCover(event.target.checked)
-                if (event.target.checked) setCoverFile(null)
+                if (event.target.checked) onCoverSelected(null)
               }}
               disabled={Boolean(coverFile)}
               className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed"

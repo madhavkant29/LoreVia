@@ -16,6 +16,11 @@ const saveScene = vi.fn()
 const confirmDialog = vi.fn()
 const promptDialog = vi.fn()
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock("@/components/ui/ShortcutHelp", () => ({ SUPPORT_HELP_EVENT: "lorevia:open-support-help" }))
+vi.mock("@/components/ui/WorkspaceSidePanel", () => ({ WorkspaceSidePanel: ({ children, onClose }: { children: ReactNode; onClose: () => void }) => <div><button onClick={onClose}>Close</button>{children}</div> }))
+vi.mock("@/components/ui/Dialog", () => ({ Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div> }))
+
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
 }))
@@ -242,17 +247,22 @@ describe("VaultNotesEditor runtime behavior", () => {
       />,
     )
 
-    await act(async () => {
-      vi.runOnlyPendingTimers()
-      await Promise.resolve()
-    })
-
-    expect(text()).toContain("Vault notes workspace")
+    expect(text()).toContain("Notes")
     expect(text()).toContain("The Ember Gate")
     expect(text()).toContain("Mira")
     expect(text()).toContain("Ash Gate")
+    expect(getWorkspaceTree).not.toHaveBeenCalled()
+    expect(getVaultNoteRelations).not.toHaveBeenCalled()
+
+    await clickButton("Details")
+    await act(async () => {
+      await Promise.resolve()
+    })
     expect(getWorkspaceTree).toHaveBeenCalledWith("book-1")
     expect(getVaultNoteRelations).toHaveBeenCalledWith("book-1", "Characters/Mira.md")
+
+    await clickButton("Details")
+    expect(container?.querySelector("aside[aria-label='Note details']")).toBeNull()
 
     const search = container?.querySelector("input[aria-label='Search notes']") as HTMLInputElement
     await act(async () => {
@@ -296,7 +306,9 @@ describe("VaultNotesEditor runtime behavior", () => {
 
     await clickByAriaLabel("Open full graph")
     expect(text()).toContain("Vault graph view")
-    await clickButton("Close")
+    const graphClose = Array.from(container?.querySelectorAll("button") ?? []).filter((button) => button.textContent?.trim() === "Close").at(-1)
+    await act(async () => graphClose?.click())
+    await clickButton("Details")
 
     const titleInput = Array.from(container?.querySelectorAll("input") ?? []).find((input) => input.value === "Mira") as HTMLInputElement
     await act(async () => {

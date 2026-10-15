@@ -18,12 +18,12 @@ export function ManuscriptEditorStatusFooter({
   onSaveFullBook,
 }: ManuscriptEditorStatusFooterProps) {
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-      <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>
+    <div className="mt-4 px-4 pb-4 flex flex-wrap items-center justify-between gap-3">
+      <p className={`text-xs ${isDark ? "text-slate-300" : "text-stone-500"}`}>
         {draftSurfaceMode === "paged"
           ? "Paged preview is read-only. Switch back to Draft mode to edit text, tighten selections, or anchor annotations."
           : editorMode === "chapter"
-          ? "Save runs continuity review and refreshes unresolved plot-thread context immediately after ingest."
+          ? "Local draft backup is automatic. Save sends this chapter to LoreVia."
           : "Full-book mode lets continuity findings and search hits jump straight to the right chapter card."}
       </p>
       {editorMode === "book" ? (

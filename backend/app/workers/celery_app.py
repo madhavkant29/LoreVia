@@ -13,6 +13,7 @@ from app.core.database import engine
 from app.core.redis import close_all_redis_clients
 from app.utils.exception_boundaries import BEST_EFFORT_CLEANUP_EXCEPTIONS
 from app.utils.logging.errors import scrub_sentry_event
+from app.utils.release_utils import normalize_release_sha
 from app.utils.request_context import get_request_id, set_request_id, set_request_user_id
 from app.utils.retry_utils import NON_LLM_MAX_RETRIES
 from app.utils.worker_async_utils import close_worker_loop, get_worker_loop, has_worker_loop
@@ -71,6 +72,8 @@ if settings.SENTRY_DSN and not settings.DEBUG:
         dsn=settings.SENTRY_DSN,
         integrations=[CeleryIntegration()],
         before_send=scrub_sentry_event,
+        release=normalize_release_sha(settings.RELEASE_SHA),
+        environment=settings.DEPLOYMENT_ENV,
         traces_sample_rate=settings.SENTRY_WORKER_TRACES_SAMPLE_RATE,
         profiles_sample_rate=settings.SENTRY_WORKER_PROFILES_SAMPLE_RATE,
     )
@@ -193,6 +196,16 @@ celery_app.conf.update(
             "task": "maintenance_tasks.send_due_trial_emails",
             "schedule": crontab(minute=0),
             "kwargs": {"limit": 100},
+        },
+        "maintenance-send-due-subscription-emails-hourly": {
+            "task": "maintenance_tasks.send_due_subscription_emails",
+            "schedule": crontab(minute=15),
+            "kwargs": {"limit": 100},
+        },
+        "maintenance-reconcile-paddle-subscriptions-daily": {
+            "task": "maintenance_tasks.reconcile_paddle_subscriptions",
+            "schedule": crontab(minute=50, hour=4),
+            "kwargs": {"limit": 25},
         },
         "maintenance-process-beta-reads-every-15-minutes": {
             "task": "maintenance_tasks.process_beta_reads",

@@ -54,10 +54,11 @@ export function WorldbuildingOpportunitiesCard({
           disabled={loadingIntegration || !documentsAvailable}
           className={secondaryButtonClass(isDark)}
         >
-          {loadingIntegration ? "Mapping..." : "Run opportunities scan"}
+          {loadingIntegration ? "Mapping..." : "Refresh opportunities"}
         </button>
       )}
     >
+      {integration?.is_stale ? <p role="status" className="mb-4 border-l-2 border-amber-500 pl-3 text-sm">These opportunities use earlier canon or manuscript content. A background refresh may still be running. Refresh to check the latest result.</p> : null}
       {integration ? (
         <div className="space-y-3">
           {integration.integration_opportunities.length === 0 ? (
@@ -72,7 +73,7 @@ export function WorldbuildingOpportunitiesCard({
                   disabled={loadingIntegration || !documentsAvailable}
                   className={secondaryButtonClass(isDark)}
                 >
-                  {loadingIntegration ? "Mapping..." : "Run opportunities scan"}
+                  {loadingIntegration ? "Mapping..." : "Refresh opportunities"}
                 </button>
               )}
             />
@@ -91,7 +92,7 @@ export function WorldbuildingOpportunitiesCard({
                   <button
                     type="button"
                     onClick={() => onSaveIntegrationAsNote(item)}
-                    disabled={noteSavingId === item.id}
+                    disabled={!!noteSavingId}
                     className={primaryButtonClass("teal")}
                   >
                     {noteSavingId === item.id ? "Saving..." : "Save as note"}
@@ -122,7 +123,7 @@ export function WorldbuildingOpportunitiesCard({
       ) : (
         <EmptyState
           title="No opportunities yet."
-          description="No opportunity scan is loaded yet. Run the scan after adding reference docs to find underused canon elements."
+          description="No opportunity scan is loaded yet. Refresh to load the latest result and request an update if the source content has changed."
           isDark={isDark}
           action={(
             <button
@@ -131,7 +132,7 @@ export function WorldbuildingOpportunitiesCard({
               disabled={loadingIntegration || !documentsAvailable}
               className={secondaryButtonClass(isDark)}
             >
-              {loadingIntegration ? "Mapping..." : "Run opportunities scan"}
+              {loadingIntegration ? "Mapping..." : "Refresh opportunities"}
             </button>
           )}
         />

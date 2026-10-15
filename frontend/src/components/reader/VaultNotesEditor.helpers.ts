@@ -281,7 +281,7 @@ export function inferNoteType(path: string) {
 }
 
 export function markdownButtonClass(isDark: boolean) {
-  return `flex h-9 min-w-9 items-center justify-center rounded-xl border px-2 text-sm font-semibold transition ${
+  return `flex h-9 min-w-9 items-center justify-center rounded-sm border px-2 text-sm font-semibold transition-colors ${
     isDark
       ? "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.08] hover:text-white"
       : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"

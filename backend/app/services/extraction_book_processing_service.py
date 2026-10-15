@@ -84,6 +84,12 @@ async def process_book_ingestion_and_queue(
     if not book:
         return {"error": "not found"}
 
+    from app.services.book_freeze_service import is_book_frozen
+
+    if is_book_frozen(book):
+        log.info("Skipping processing for frozen book %s", book_id)
+        return {"skipped": "frozen"}
+
     if await is_book_hidden(db, book.id):
         log.info("Skipping processing for unavailable book %s", book_id)
         return {"skipped": "book_unavailable"}

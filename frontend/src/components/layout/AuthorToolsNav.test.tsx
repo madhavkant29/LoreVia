@@ -1,5 +1,6 @@
 import React, { act, type ReactNode } from "react"
-import { createRoot, type Root } from "react-dom/client"
+import { createRoot, hydrateRoot, type Root } from "react-dom/client"
+import { renderToString } from "react-dom/server"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import type { CollaborationPermissions } from "@/types/book"
@@ -102,7 +103,7 @@ const uiPreferencesStoreMock = vi.hoisted(() => {
 })
 
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
+  default: ({ href, children, prefetch: _prefetch, ...props }: { href: string; children: ReactNode; prefetch?: boolean | null }) => (
     <a href={href} {...props}>
       {children}
     </a>
@@ -151,6 +152,19 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 
 describe("AuthorToolsNav", () => {
+  it("hydrates cached author access without changing the server's initial navigation", async () => {
+    mockBaseState({ tier: "" })
+    canUseAuthorFeaturesMock.mockImplementation((tier) => tier === "pro")
+    const element = <AuthorToolsNav bookId="book-1" active="notes" isDark={true} variant="bar" />
+    container = document.createElement("div")
+    container.innerHTML = renderToString(element)
+    document.body.appendChild(container)
+    useAuthStoreMock.mockImplementation((selector) => selector({ user: { tier: "pro" } }))
+    const onRecoverableError = vi.fn()
+    await act(async () => { root = hydrateRoot(container!, element, { onRecoverableError }) })
+    expect(onRecoverableError).not.toHaveBeenCalled()
+    expect(findLink(container, "Story Bible")).toBeDefined()
+  })
   beforeAll(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   })
@@ -235,6 +249,19 @@ describe("AuthorToolsNav", () => {
     expect(aside?.className ?? "").toContain("xl:group-hover/navwrap:w-[16.5rem]")
   })
 
+  it("renders a stable book bar with four author hubs and no helper paragraphs", () => {
+    mockBaseState()
+
+    const view = renderAuthorToolsNav({ variant: "bar" })
+
+    expect(view.querySelector('[data-testid="author-tools-nav-bar"]')).not.toBeNull()
+    expect(findLink(view, "Draft")?.getAttribute("href")).toBe("/book-1")
+    expect(findLink(view, "Story Bible")?.getAttribute("href")).toBe("/book-1/characters")
+    expect(findLink(view, "Review")?.getAttribute("href")).toBe("/book-1/advisor")
+    expect(findLink(view, "Share")?.getAttribute("href")).toBe("/book-1/collaboration")
+    expect(view.querySelector('[data-testid="author-nav-helper-overview"]')).toBeNull()
+  })
+
   it("limits author navigation for a free owner when the book is in author mode", () => {
     mockBaseState({
       tier: "free",
@@ -247,7 +274,7 @@ describe("AuthorToolsNav", () => {
     expect(view.querySelector('[data-testid="author-nav-item-manuscript"]')).toBeNull()
     expect(view.querySelector('[data-testid="author-nav-item-characters"]')).toBeNull()
     expect(view.querySelector('[data-testid="author-nav-item-advisor"]')?.textContent).toContain("Story Advisor")
-    expect(view.querySelector('[data-testid="author-nav-item-export"]')?.textContent).toContain("Import & Export")
+    expect(view.querySelector('[data-testid="author-nav-item-export"]')?.textContent).toContain("Files & Export")
   })
 
   it("places notes workspace directly under the scene workspace", () => {
@@ -272,7 +299,7 @@ describe("AuthorToolsNav", () => {
     ).toBe(true)
   })
 
-  it("reveals the advanced author lens entry on request", () => {
+  it("keeps the contextual revision workflow out of the all-tools rail", () => {
     mockBaseState()
 
     const view = renderAuthorToolsNav()
@@ -280,7 +307,7 @@ describe("AuthorToolsNav", () => {
     const toggle = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes("Show advanced tools"))
     act(() => toggle?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
 
-    expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')?.textContent).toContain("Author Lens")
+    expect(view.querySelector('[data-testid="author-nav-item-author-loop"]')).toBeNull()
   })
 
   it("switches book presets from the author navigation", () => {
@@ -368,10 +395,12 @@ function renderAuthorToolsNav({
   active = "overview",
   railSize,
   mode = "author",
+  variant = "rail",
 }: {
   active?: string
   railSize?: "default" | "compact"
   mode?: "reader" | "author"
+  variant?: "panel" | "rail" | "bar"
 } = {}) {
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -385,7 +414,7 @@ function renderAuthorToolsNav({
         isDark={false}
         currentChapter={2}
         mode={mode}
-        variant="rail"
+        variant={variant}
         railSize={railSize}
       />
     )
@@ -396,6 +425,10 @@ function renderAuthorToolsNav({
 
 function findButton(view: HTMLDivElement, label: string) {
   return Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes(label))
+}
+
+function findLink(view: HTMLDivElement, label: string) {
+  return Array.from(view.querySelectorAll("a")).find((link) => link.textContent?.includes(label))
 }
 
 function mockBaseState({

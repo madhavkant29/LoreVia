@@ -61,7 +61,7 @@ async def snapshot_revision_round(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
     return RevisionRoundOut(
         **(
             await create_revision_round(
@@ -148,7 +148,7 @@ async def apply_external_manuscript(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    await ensure_project_writable(db, book)
     if not file.filename:
         raise HTTPException(400, "Choose a DOCX or Scrivener project to apply.")
     format_name, work_type = resolve_upload_format_and_work_type(file.filename, book.work_type)

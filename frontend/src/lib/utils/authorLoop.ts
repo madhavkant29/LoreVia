@@ -3,6 +3,36 @@ import type { Book, ChapterConsistencyReport, RevisionActionItem, RevisionBoard,
 import type { Character } from "@/types/character"
 import type { NextBestActionCandidate } from "@/lib/workspace/nextBestActionResolver"
 import type { Route } from "next"
+import { todayDateKey } from "./revisionIntelligence"
+
+export function deadlineFromWindow(windowDays: number, now = new Date()) {
+  const date = new Date(now)
+  date.setDate(date.getDate() + windowDays)
+  return todayDateKey(date)
+}
+
+export function parseDeadlineWindow(deadline: string, now = new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(deadline)) return null
+  const [year, month, day] = deadline.split("-").map(Number)
+  const target = new Date(year, month - 1, day)
+  if (todayDateKey(target) !== deadline) return null
+  const days = (Date.UTC(year, month - 1, day) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86_400_000
+  return days >= 3 && days <= 7 ? days : null
+}
+
+export function validateAuthorLoopInvite(draft: { readerEmail: string; deadline: string; scopeKind: string; chapterStart: string; chapterEnd: string; authorQuestions: string }, totalChapters: number, now = new Date()) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.readerEmail.trim()) || draft.readerEmail.trim().length > 320) return "Enter a valid reader email address."
+  if (parseDeadlineWindow(draft.deadline, now) === null) return "Choose a deadline between 3 and 7 days from today."
+  if (draft.scopeKind !== "full_book" && draft.scopeKind !== "chapter_range") return "Choose full book or chapter range."
+  if (draft.scopeKind === "chapter_range") {
+    const start = Number(draft.chapterStart); const end = Number(draft.chapterEnd)
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) return "Enter whole chapter numbers, with the end at or after the start."
+    if (totalChapters > 0 && end > totalChapters) return `The range cannot exceed this manuscript's ${totalChapters} chapters.`
+  }
+  const questions = draft.authorQuestions.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  if (questions.length > 12 || questions.some((question) => question.length > 300)) return "Use at most 12 questions, each 300 characters or fewer."
+  return null
+}
 
 export type AuthorLoopStepTone = "ready" | "working" | "attention"
 
@@ -55,14 +85,19 @@ function buildIssueCardFromRevisionItem(item: RevisionActionItem, board: Revisio
     explanation: item.description,
     suggestedFix: item.recommendation || "Review the cited passage and decide whether this needs a manuscript update.",
     confidence: severity === "high" ? "High priority" : severity === "medium" ? "Worth a focused pass" : "Keep on radar",
-    status: normalizeBoardStatus(board, item.id),
+    status: board?.items.find((state) => state.item_id === item.id)?.status ?? item.status ?? "pending",
     sourceLabel: item.category.replace(/_/g, " "),
   }
 }
 
-function buildIssueCardFromChapterReport(report: ChapterConsistencyReport, index: number): AuthorLoopIssueCard[] {
-  return report.continuity_flags.map((flag, flagIndex) => ({
-    id: `chapter-report:${report.chapter_number}:${index}:${flagIndex}`,
+function buildIssueCardFromChapterReport(report: ChapterConsistencyReport, index: number, board: RevisionBoard | null | undefined): AuthorLoopIssueCard[] {
+  return report.continuity_flags.map((flag, flagIndex) => {
+    const stableId = `chapter-report:${report.chapter_number}:flag:${encodeURIComponent(flag)}`
+    const legacyId = `chapter-report:${report.chapter_number}:${index}:${flagIndex}`
+    const legacyState = board?.items.find((item) => item.item_id === legacyId)
+    const id = legacyState ? legacyId : stableId
+    return {
+    id,
     title: flag,
     severity: "medium",
     affected: [report.chapter_title ? `Chapter ${report.chapter_number}: ${report.chapter_title}` : `Chapter ${report.chapter_number}`],
@@ -70,9 +105,9 @@ function buildIssueCardFromChapterReport(report: ChapterConsistencyReport, index
     explanation: report.summary,
     suggestedFix: "Open the cited chapter report and verify whether the flagged detail needs a continuity note or a direct revision.",
     confidence: "Chapter-level signal",
-    status: "pending",
+    status: normalizeBoardStatus(board, id),
     sourceLabel: "chapter report",
-  }))
+  }})
 }
 
 export function buildAuthorLoopIssueCards(
@@ -86,6 +121,7 @@ export function buildAuthorLoopIssueCards(
     ...(revision?.scene_advice ?? []),
     ...(revision?.confusion_map ?? []),
     ...(revision?.voice_alerts ?? []),
+    ...(revision?.genre_checks?.flatMap((check) => check.findings ?? []) ?? []),
     ...(revision?.external_signals ?? []),
     ...(revision?.revision_plan.flatMap((revisionPass) => revisionPass.items) ?? []),
   ]
@@ -95,9 +131,9 @@ export function buildAuthorLoopIssueCards(
   }
   const cards = [...uniqueItems.values()].map((item) => buildIssueCardFromRevisionItem(item, board))
   reports.forEach((report, index) => {
-    cards.push(...buildIssueCardFromChapterReport(report, index))
+    cards.push(...buildIssueCardFromChapterReport(report, index, board))
   })
-  return cards
+  return [...new Map(cards.map((card) => [card.id, card])).values()]
     .filter((card) => card.status !== "fixed" && card.status !== "ignored")
     .sort((left, right) => severityRank(right.severity) - severityRank(left.severity))
 }

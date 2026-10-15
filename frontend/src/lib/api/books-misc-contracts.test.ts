@@ -15,6 +15,38 @@ describe("books api misc contracts", () => {
     resetBooksApiMocks()
   })
 
+  it("loads every saved-quote page and deduplicates overlapping rows", async () => {
+    getMock.mockResolvedValueOnce({ data: { items: [{ id: "q1" }], next_cursor: "second", has_more: true } })
+      .mockResolvedValueOnce({ data: { items: [{ id: "q1" }, { id: "q2" }], next_cursor: null, has_more: false } })
+    expect(await booksApi.listQuotes()).toEqual([{ id: "q1" }, { id: "q2" }])
+    expect(getMock).toHaveBeenLastCalledWith("/books/quotes/page", { params: { limit: 100, cursor: "second" } })
+  })
+
+  it("rejects incomplete or looping quote pagination instead of returning a partial collection", async () => {
+    getMock.mockResolvedValue({ data: { items: [], next_cursor: "loop", has_more: true } })
+    await expect(booksApi.listQuotes()).rejects.toThrow("repeated a cursor")
+    getMock.mockResolvedValue({ data: { items: [], next_cursor: null, has_more: true } })
+    await expect(booksApi.listQuotes()).rejects.toThrow("incomplete")
+    getMock.mockResolvedValue({ data: { next_cursor: null } })
+    await expect(booksApi.listQuotes()).rejects.toThrow("incomplete")
+  })
+
+  it("loads all saved-note pages with bodies and removes overlapping rows", async () => {
+    getMock.mockResolvedValueOnce({ data: { items: [{ id: "n1", body: "one" }], next_cursor: "next", has_more: true } })
+      .mockResolvedValueOnce({ data: { items: [{ id: "n1", body: "one" }, { id: "n2", body: "two" }], next_cursor: null, has_more: false } })
+    expect(await booksApi.listNotes()).toHaveLength(2)
+    expect(getMock).toHaveBeenLastCalledWith("/books/notes/page", { params: { limit: 100, include_body: true, cursor: "next" } })
+  })
+
+  it("rejects repeated or missing note cursors rather than claiming a complete index", async () => {
+    getMock.mockResolvedValue({ data: { items: [], next_cursor: "loop", has_more: true } })
+    await expect(booksApi.listNotes()).rejects.toThrow("repeated a cursor")
+    getMock.mockResolvedValue({ data: { items: [], next_cursor: null, has_more: true } })
+    await expect(booksApi.listNotes()).rejects.toThrow("incomplete")
+    getMock.mockResolvedValue({ data: { next_cursor: null } })
+    await expect(booksApi.listNotes()).rejects.toThrow("incomplete")
+  })
+
   it("covers remaining read-only book, revision, workspace, and analytics endpoints", async () => {
     getMock.mockResolvedValue({ data: { items: [{ id: "assignment-1" }] } })
 

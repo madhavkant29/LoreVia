@@ -24,14 +24,21 @@ from app.services.processing_allowance_service import (
 )
 
 
-def test_archived_projects_are_read_only() -> None:
-    ensure_project_writable(SimpleNamespace(archived_at=None))
-    try:
-        ensure_project_writable(SimpleNamespace(archived_at=datetime.now(UTC)))
-    except HTTPException as exc:
-        assert exc.status_code == 409
-    else:
-        raise AssertionError("archived project should be read-only")
+async def test_archived_projects_are_read_only(db) -> None:
+    await ensure_project_writable(
+        db,
+        SimpleNamespace(archived_at=None, status="ready", writer_workspace={}),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await ensure_project_writable(
+            db,
+            SimpleNamespace(
+                archived_at=datetime.now(UTC),
+                status="ready",
+                writer_workspace={},
+            ),
+        )
+    assert exc.value.status_code == 409
 
 
 async def _user(db) -> User:

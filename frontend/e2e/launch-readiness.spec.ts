@@ -11,6 +11,12 @@ const REQUESTED_AUTH_ROUTE_NAMES = new Set(
     .map((name) => name.trim())
     .filter(Boolean),
 )
+const REQUESTED_PUBLIC_ROUTE_NAMES = new Set(
+  (process.env.UI_AUDIT_PUBLIC_ROUTE_NAMES ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean),
+)
 
 const authenticatedRoutes = [
   { name: "library", path: "/library" },
@@ -93,14 +99,20 @@ const publicRoutes = [
   { name: "font-notice", path: "/font-notice" },
 ] as const
 
+const selectedPublicRoutes = REQUESTED_PUBLIC_ROUTE_NAMES.size > 0
+  ? publicRoutes.filter((route) => REQUESTED_PUBLIC_ROUTE_NAMES.has(route.name))
+  : publicRoutes
+
 test("authenticated launch surfaces avoid clipping, duplicate ids, and fixed-layer collisions", async ({ page }) => {
-  test.setTimeout(600_000)
+  test.setTimeout(1_800_000)
   await installMockApi(page)
   if (CAPTURE_AUDIT) await mkdir("test-results/ui-audit", { recursive: true })
   const violations: string[] = []
 
   for (const viewport of [
     { name: "desktop", width: 1440, height: 900 },
+    { name: "laptop", width: 1280, height: 800 },
+    { name: "tablet", width: 768, height: 1024 },
     { name: "mobile", width: 390, height: 844 },
   ] as const) {
     await page.setViewportSize(viewport)
@@ -126,16 +138,18 @@ test("authenticated launch surfaces avoid clipping, duplicate ids, and fixed-lay
 })
 
 test("public launch surfaces avoid clipping, unnamed fields, and fixed-layer collisions", async ({ page }) => {
-  test.setTimeout(480_000)
+  test.setTimeout(1_200_000)
   await installMockApi(page, { session: "guest" })
   const violations: string[] = []
 
   for (const viewport of [
     { name: "desktop", width: 1440, height: 900 },
+    { name: "laptop", width: 1280, height: 800 },
+    { name: "tablet", width: 768, height: 1024 },
     { name: "mobile", width: 390, height: 844 },
   ] as const) {
     await page.setViewportSize(viewport)
-    for (const route of publicRoutes) {
+    for (const route of selectedPublicRoutes) {
       await page.goto(route.path)
       await expect(page.locator("body")).toBeVisible()
       await page.locator("h1, h2").filter({ visible: true }).first().waitFor({ state: "visible", timeout: 15_000 })
@@ -206,7 +220,10 @@ async function collectLayoutAudit(page: Page) {
       return false
     }
 
+    // App Router can retain prior route segments in hidden cache trees. Audit the
+    // rendered surface so a second active label/control target still fails.
     const ids = Array.from(document.querySelectorAll<HTMLElement>("body [id]:not(script):not(style)"))
+      .filter(visible)
       .map((element) => element.id)
       .filter(Boolean)
     const duplicateIds = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))]

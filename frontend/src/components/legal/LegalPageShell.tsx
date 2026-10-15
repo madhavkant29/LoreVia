@@ -88,7 +88,7 @@ export function LegalHero({
 }: Pick<LegalPageShellProps, "eyebrow" | "title" | "description" | "effectiveDate" | "notice">) {
   return (
     <section className="py-14 sm:py-18">
-      <p className={`text-3xs font-semibold uppercase tracking-[0.32em] ${legalAccent}`}>{eyebrow}</p>
+      <p className={`text-sm font-semibold ${legalAccent}`}>{eyebrow}</p>
       <h1 className="mt-5 max-w-4xl text-[2.55rem] font-semibold leading-[1.02] tracking-[-0.045em] text-stone-950 sm:text-[3.45rem] lg:text-[3.75rem]">
         {title}
       </h1>
@@ -103,7 +103,7 @@ export function LegalHero({
 
 export function LegalNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-8 max-w-3xl rounded-md border border-[rgba(var(--border),0.5)] bg-[rgba(255,252,247,0.94)] px-5 py-4 text-sm leading-7 text-stone-700">
+    <div className="mt-8 max-w-3xl border-l-2 border-teal-800 px-5 py-2 text-sm leading-7 text-stone-700">
       {children}
     </div>
   )
@@ -112,7 +112,7 @@ export function LegalNotice({ children }: { children: ReactNode }) {
 export function LegalTableOfContents({ sections }: { sections: ReadonlyArray<LegalSectionContent> }) {
   return (
     <nav aria-labelledby="legal-toc" className="border-t border-[rgba(var(--border),0.9)] py-8">
-      <h2 id="legal-toc" className="text-3xs font-semibold uppercase tracking-[0.32em] text-stone-500">
+      <h2 id="legal-toc" className="text-sm font-semibold text-stone-600">
         Table of contents
       </h2>
       <ol className="mt-6 grid gap-x-12 gap-y-4 md:grid-cols-2">
@@ -174,11 +174,11 @@ export function LegalSection({ section, index }: { section: LegalSectionContent;
 
 export function LegalRightRail({ items }: { items: ReadonlyArray<LegalRailItem> }) {
   return (
-    <aside className="rounded-md border border-[rgba(var(--border),0.5)] bg-[rgba(255,252,247,0.94)] px-5 py-2 lg:sticky lg:top-6">
+    <aside className="border-y border-[rgba(var(--border),0.9)] lg:sticky lg:top-6">
       {items.map((item, index) => {
         const content = (
           <>
-            <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-stone-500">{item.label}</p>
+            <p className="text-sm font-semibold text-stone-600">{item.label}</p>
             <p className="mt-3 break-words text-base font-medium text-stone-950">{item.value}</p>
             {item.detail ? <p className="mt-2 text-sm leading-6 text-stone-600">{item.detail}</p> : null}
           </>
@@ -187,7 +187,7 @@ export function LegalRightRail({ items }: { items: ReadonlyArray<LegalRailItem> 
         return (
           <div key={`rail-item-${index}-${item.label}`} className="border-b border-[rgba(var(--border),0.9)] py-5 last:border-b-0">
             {item.href ? (
-              <a href={item.href} className="block rounded-md outline-none transition hover:text-stone-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-800/40">
+              <a href={item.href} className="block outline-none transition hover:text-stone-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-800/40">
                 {content}
               </a>
             ) : (
@@ -212,8 +212,8 @@ export function LegalContactBlock({
   legalEmail?: string
 }) {
   return (
-    <section className="mt-4 border-t border-[rgba(var(--border),0.9)] py-10">
-      <div className="rounded-md border border-[rgba(var(--border),0.5)] bg-[rgba(255,252,247,0.94)] px-5 py-6 sm:px-6">
+    <section className="mt-4 border-y border-[rgba(var(--border),0.9)] py-8">
+      <div>
         <h2 className="text-xl font-semibold text-stone-950">{title}</h2>
         <p className="mt-3 max-w-2xl text-[15.5px] leading-8 text-stone-600">{description}</p>
         <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3 text-sm">

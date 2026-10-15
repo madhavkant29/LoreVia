@@ -177,17 +177,17 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
         onLoad={() => setScriptReady(true)}
         onError={() => setMessage("Paddle checkout could not be loaded. Refresh and try again.")}
       />
-      <section className="mx-auto flex min-h-[70vh] w-full max-w-3xl flex-col justify-center px-6 py-16">
-        <div className="rounded-lg border border-white/[0.08] bg-[#0B0F14] p-8 text-[#F2F4F7]">
-          <p className="text-3xs font-semibold uppercase tracking-[0.28em] text-[#C9A86A]">Secure billing</p>
-          <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em]">
-            LoreVia checkout opens here for payment links, invoice links, and payment-method updates.
+      <section className="mx-auto flex min-h-[calc(100dvh-80px)] w-full max-w-2xl flex-col justify-center px-6 py-16">
+        <div className="border-y border-white/10 py-8 text-[#F2F4F7]">
+          <p className="text-sm font-semibold text-[#C9A86A]">Secure billing</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em]">
+            Complete your secure checkout.
           </h1>
           <p className="mt-4 text-base leading-7 text-[#A8B0BA]">
-            This page is the approved Paddle landing page for hosted checkout actions. If a valid transaction was passed in the link, the checkout overlay opens automatically.
+            Paddle opens the payment form for your selected plan. Your manuscript workspace stays unchanged until payment is confirmed.
           </p>
 
-          <div className="mt-6 rounded-md border border-[#C9A86A]/30 bg-[#111720] px-5 py-4 text-sm leading-6 text-[#E7D3A8]">
+          <div role="status" className="mt-6 border-l-2 border-[#C9A86A] px-4 py-2 text-sm leading-6 text-[#E7D3A8]">
             {message}
           </div>
 
@@ -196,13 +196,13 @@ export function PaddleCheckoutPage({ nonce }: { nonce?: string }) {
               type="button"
               onClick={openCheckout}
               disabled={checkoutAbandoned}
-              className="inline-flex items-center justify-center rounded-lg border border-[#D2B47A] bg-[#D2B47A] px-5 py-3 text-sm font-semibold text-[#05070A] transition hover:bg-[#E5CA91]"
+              className="inline-flex items-center justify-center rounded-md bg-[#D2B47A] px-5 py-3 text-sm font-semibold text-[#05070A] transition hover:bg-[#E5CA91] disabled:opacity-50"
             >
               {checkoutAbandoned ? "Checkout closed" : "Open checkout again"}
             </button>
             <Link
               href="/pricing"
-              className="inline-flex items-center justify-center rounded-lg border border-white/[0.12] px-5 py-3 text-sm font-semibold text-[#F2F4F7] transition hover:border-[#C9A86A]/45"
+              className="inline-flex items-center justify-center px-2 py-3 text-sm font-semibold text-[#A8B0BA] transition hover:text-white"
             >
               View pricing
             </Link>

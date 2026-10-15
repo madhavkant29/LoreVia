@@ -1,8 +1,33 @@
 import { describe, expect, it } from "vitest"
 
-import { buildAuthorLoopIssueCards, buildAuthorLoopSteps, buildCharacterReviewStats, buildProjectNextActions } from "./authorLoop"
+import { buildAuthorLoopIssueCards, buildAuthorLoopSteps, buildCharacterReviewStats, buildProjectNextActions, deadlineFromWindow, parseDeadlineWindow, validateAuthorLoopInvite } from "./authorLoop"
 
 describe("authorLoop utils", () => {
+  it("uses local calendar dates and validates exact deadline boundaries", () => {
+    const now = new Date(2026, 9, 11, 0, 10)
+    expect(deadlineFromWindow(7, now)).toBe("2026-10-18")
+    expect(parseDeadlineWindow("2026-10-14", now)).toBe(3)
+    expect(parseDeadlineWindow("2026-10-18", now)).toBe(7)
+    for (const date of ["", "2026-10-13", "2026-10-19", "2026-02-31", "bad date"]) expect(parseDeadlineWindow(date, now)).toBeNull()
+  })
+
+  it("validates invitation scope, email and questions without coercing invalid drafts", () => {
+    const now = new Date(2026, 9, 11)
+    const draft = { readerEmail: "reader@example.com", deadline: "2026-10-18", scopeKind: "chapter_range", chapterStart: "1", chapterEnd: "3", authorQuestions: "What was unclear?" }
+    expect(validateAuthorLoopInvite(draft, 3, now)).toBeNull()
+    for (const patch of [{ readerEmail: "reader" }, { chapterStart: "" }, { chapterStart: "1.5" }, { chapterEnd: "0" }, { chapterEnd: "4" }, { authorQuestions: "x".repeat(301) }, { authorQuestions: Array(13).fill("Question").join("\n") }, { scopeKind: "unknown" }]) expect(validateAuthorLoopInvite({ ...draft, ...patch }, 3, now)).not.toBeNull()
+    expect(validateAuthorLoopInvite({ ...draft, scopeKind: "full_book", chapterStart: "", chapterEnd: "" }, 3, now)).toBeNull()
+  })
+
+  it("preserves report decisions and stable identities across report ordering", () => {
+    const report = { chapter_number: 7, chapter_title: "Gate", summary: "The rule changes.", continuity_flags: ["The gate opened twice.", "The gate opened twice."] } as never
+    const first = buildAuthorLoopIssueCards(null, [report], null)
+    expect(first).toHaveLength(1)
+    const reordered = buildAuthorLoopIssueCards(null, [{ chapter_number: 1, continuity_flags: [] } as never, report], null)
+    expect(reordered[0].id).toBe(first[0].id)
+    expect(buildAuthorLoopIssueCards(null, [report], { revision_board: { items: [{ item_id: first[0].id, status: "ignored" }] } } as never)).toEqual([])
+    expect(buildAuthorLoopIssueCards(null, [{ ...report as object, continuity_flags: ["The gate opened twice."] } as never], { revision_board: { items: [{ item_id: "chapter-report:7:0:0", status: "ignored" }] } } as never)).toEqual([])
+  })
   it("builds cited issue cards from revision intelligence and chapter reports", () => {
     const cards = buildAuthorLoopIssueCards(
       {

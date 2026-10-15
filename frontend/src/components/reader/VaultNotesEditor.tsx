@@ -10,11 +10,9 @@ import { useConfirmDialog } from "@/components/ui/ConfirmDialog"
 import { usePromptDialog } from "@/components/ui/PromptDialog"
 import { migrateVaultStorage } from "@/lib/utils/vaultStorageMigration"
 import {
-  CORE_NOTE_FOLDERS,
   buildFolderTree,
   buildNoteMap,
   filterVaultNotes,
-  getAvailableNotePaths,
   getDisplayedVaultNotes,
   getFavoriteVaultNotes,
   getRecentVaultMentions,
@@ -28,6 +26,8 @@ import {
   noteTitle,
 } from "./VaultNotesEditor.helpers"
 import { useVaultNoteSceneSender, useVaultNotesLocalStoragePersistence, useVaultNotesMarkdownToolbar, useVaultNotesSelectionMenu } from "./VaultNotesEditor.hooks"
+import { WorkspaceSidePanel } from "@/components/ui/WorkspaceSidePanel"
+import { useVaultNotesAutosave } from "./VaultNotesEditor.autosave"
 import { useVaultNotesEditorActions } from "./VaultNotesEditor.actions"
 import { VaultNotesFolderPanel } from "./VaultNotesEditor.folderPanel"
 import { VaultNotesGraphModal } from "./VaultNotesEditor.graphModal"
@@ -80,9 +80,13 @@ export function VaultNotesEditor({
   const [findWithinNote, setFindWithinNote] = useState("")
   const [replaceWithinNote, setReplaceWithinNote] = useState("")
   const [secondaryPanelsEnabled, setSecondaryPanelsEnabled] = useState(false)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [detailsError, setDetailsError] = useState(false)
+  const [relationsError, setRelationsError] = useState(false)
+  const [detailsRetry, setDetailsRetry] = useState(0)
   const [firstLineIndent, setFirstLineIndent] = useState(false)
   const deferredQuery = useDeferredValue(query)
-  const saveTimersRef = useRef<Record<string, number>>({})
   const latestDraftRef = useRef<Record<string, string>>({})
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -112,29 +116,10 @@ export function VaultNotesEditor({
   })
 
   useEffect(() => {
-    if (secondaryPanelsEnabled) return
-
-    const schedule =
-      typeof window.requestIdleCallback === "function"
-        ? window.requestIdleCallback.bind(window)
-        : ((callback: IdleRequestCallback) =>
-            window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 150))
-    const cancel =
-      typeof window.cancelIdleCallback === "function"
-        ? window.cancelIdleCallback.bind(window)
-        : window.clearTimeout.bind(window)
-
-    const handle = schedule(() => {
-      startTransition(() => setSecondaryPanelsEnabled(true))
-    })
-
-    return () => cancel(handle)
-  }, [secondaryPanelsEnabled])
-
-  useEffect(() => {
-    if (!secondaryPanelsEnabled) return
+    if (!secondaryPanelsEnabled || !inspectorOpen) return
 
     let active = true
+    setDetailsError(false)
     void booksApi.getWorkspaceTree(bookId)
       .then((value) => {
         if (!active) return
@@ -143,36 +128,16 @@ export function VaultNotesEditor({
       })
       .catch(() => {
         if (!active) return
-        setWorkspaceTree(null)
+        setDetailsError(true)
       })
     return () => {
       active = false
     }
-  }, [bookId, secondaryPanelsEnabled])
-
-  useEffect(() => {
-    const saveTimers = saveTimersRef.current
-    return () => {
-      for (const timer of Object.values(saveTimers)) {
-        window.clearTimeout(timer)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!graphExpanded) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setGraphExpanded(false)
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [graphExpanded])
+  }, [bookId, inspectorOpen, secondaryPanelsEnabled, detailsRetry])
 
   const noteMap = useMemo(() => buildNoteMap(notes), [notes])
   const folderTree = useMemo(
-    () => buildFolderTree(notes.map((note) => note.path), [...CORE_NOTE_FOLDERS, ...customFolders]),
+    () => buildFolderTree(notes.map((note) => note.path), customFolders),
     [customFolders, notes]
   )
   const selectedNote = getSelectedVaultNote(noteMap, selectedPath)
@@ -192,20 +157,8 @@ export function VaultNotesEditor({
     [favorites, filteredNotes]
   )
   const displayedNotes = getDisplayedVaultNotes(notesView, filteredNotes, favoriteNotes)
-  const availablePaths = useMemo(() => getAvailableNotePaths(filteredNotes), [filteredNotes])
-
   useEffect(() => {
-    if (!selectedPath && availablePaths[0]) {
-      setSelectedPath(availablePaths[0])
-      return
-    }
-    if (selectedPath && availablePaths.length > 0 && !availablePaths.includes(selectedPath)) {
-      setSelectedPath(availablePaths[0])
-    }
-  }, [availablePaths, selectedPath])
-
-  useEffect(() => {
-    if (!selectedNote || !secondaryPanelsEnabled) {
+    if (!selectedNote || !secondaryPanelsEnabled || !inspectorOpen) {
       setRelations(null)
       return
     }
@@ -219,27 +172,31 @@ export function VaultNotesEditor({
 
     let cancelled = false
     setRelations(null)
+    setRelationsError(false)
     void booksApi.getVaultNoteRelations(bookId, selectedNote.path)
       .then((value) => {
         if (!cancelled) setRelations(value)
       })
       .catch(() => {
-        if (!cancelled) setRelations(null)
+        if (!cancelled) setRelationsError(true)
       })
     return () => {
       cancelled = true
     }
-  }, [bookId, secondaryPanelsEnabled, selectedNote])
+  }, [bookId, inspectorOpen, secondaryPanelsEnabled, selectedNote, detailsRetry])
 
   useEffect(() => {
-    if (!selectedNote) {
+    if (!selectedPath) {
       setEditedFolder("")
       setEditedTitle("")
       return
     }
-    setEditedFolder(noteFolder(selectedNote.path))
-    setEditedTitle(noteTitle(selectedNote.path))
-  }, [selectedNote])
+    setEditedFolder(noteFolder(selectedPath))
+    setEditedTitle(noteTitle(selectedPath))
+  }, [selectedPath])
+
+  const autosave = useVaultNotesAutosave({ bookId, notes, drafts, latestDraftRef, busy, setNotes, setDrafts })
+  const { saveNote, updateDraft } = autosave
 
   const {
     copyCurrentReference,
@@ -252,11 +209,10 @@ export function VaultNotesEditor({
     moveCurrent,
     moveNoteToFolder,
     openNote,
-    saveNote,
-    updateDraft,
   } = useVaultNotesEditorActions({
     bookId,
     bookTitle,
+    busy,
     confirm,
     drafts,
     editedFolder,
@@ -278,23 +234,13 @@ export function VaultNotesEditor({
     setGraph,
     setMode,
     setNotes,
-    setRelations,
+    settlePath: autosave.settlePath,
+    forgetPath: autosave.forgetPath,
+    flushAll: autosave.flushAll,
     setSelectedFolder,
     setSelectedPath,
     setStatus,
   })
-
-  useEffect(() => {
-    if (!selectedNote) return
-    const nextValue = drafts[selectedNote.path]
-    if (nextValue === undefined || nextValue === selectedNote.content) return
-    const existingTimer = saveTimersRef.current[selectedNote.path]
-    if (existingTimer) window.clearTimeout(existingTimer)
-    saveTimersRef.current[selectedNote.path] = window.setTimeout(() => {
-      delete saveTimersRef.current[selectedNote.path]
-      void saveNote(selectedNote.path, latestDraftRef.current[selectedNote.path] ?? nextValue)
-    }, 700)
-  }, [drafts, saveNote, selectedNote])
 
   const toolbarButtons = useVaultNotesMarkdownToolbar({
     drafts,
@@ -340,24 +286,40 @@ export function VaultNotesEditor({
 
   return (
     <div
-      className={`rounded-lg border p-4 sm:p-5 ${
+      className={`border-y py-4 ${
         isDark
           ? "border-white/[0.08] bg-[#071211]"
           : "border-stone-200 bg-white"
       }`}
     >
       <VaultNotesTopbar
-        busy={busy}
+        busy={busy || autosave.leaving}
         importInputRef={importInputRef}
         isDark={isDark}
+        inspectorOpen={inspectorOpen}
+        onOpenLibrary={() => setLibraryOpen(true)}
         selectedNoteAvailable={Boolean(selectedNote)}
         onCreateNote={() => void createNote()}
         onDuplicateCurrent={() => void duplicateCurrent()}
         onExportNotes={() => void exportNotes()}
         onImportNotes={(file) => void importNotes(file)}
+        onToggleInspector={() => {
+          const nextOpen = !inspectorOpen
+          setInspectorOpen(nextOpen)
+          if (nextOpen && !secondaryPanelsEnabled) {
+            startTransition(() => setSecondaryPanelsEnabled(true))
+          }
+        }}
       />
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(18rem,20rem)_minmax(0,1fr)_minmax(16rem,18rem)]">
+      {autosave.recovered && autosave.dirty ? <p role="status" className="mt-3 text-sm">Recovered unsaved notes from this browser tab. Review them, then <button type="button" disabled={busy || autosave.leaving} className="min-h-10 underline" onClick={() => void autosave.flushAll()}>Save recovered notes</button>.</p> : null}
+      {autosave.backupUnavailable && autosave.dirty ? <p role="alert" className="mt-3 text-sm">Tab backup is unavailable. Keep this page open until your notes are saved.</p> : null}
+      {status ? <p role={/could not|already uses|cannot/i.test(status) ? "alert" : "status"} className="mt-3 break-words text-sm">{status}</p> : null}
+      {Object.entries(autosave.errors).map(([path, message]) => <div key={path} role="alert" className="mt-3 flex flex-wrap items-center gap-3 border-l-2 border-rose-400 pl-3 text-sm"><span className="min-w-0 break-words">{message}</span><button type="button" disabled={busy || autosave.saving[path]} onClick={() => void autosave.saveNote(path, latestDraftRef.current[path])} className="min-h-10 underline">Retry save</button></div>)}
+      <div className={`mt-5 grid gap-4 ${inspectorOpen ? "xl:grid-cols-[16rem_minmax(0,1fr)_18rem]" : "xl:grid-cols-[18rem_minmax(0,1fr)]"}`}>
+        <div className={libraryOpen ? "min-w-0" : "hidden min-w-0 xl:block"}>
+        <WorkspaceSidePanel title="Note library" side="left" open={libraryOpen} onClose={() => setLibraryOpen(false)}>
+        <fieldset disabled={busy || autosave.leaving} className="min-w-0">
         <VaultNotesSidebarShell
           bookTitle={bookTitle}
           busy={busy}
@@ -386,11 +348,15 @@ export function VaultNotesEditor({
               isDark={isDark}
               notesView={notesView}
               selectedPath={selectedPath}
-              onSelectNote={setSelectedPath}
+              onSelectNote={(path) => { setSelectedPath(path); setLibraryOpen(false) }}
               onViewChange={setNotesView}
             />
         </VaultNotesSidebarShell>
+        </fieldset>
+        </WorkspaceSidePanel>
+        </div>
 
+        <div className="min-w-0">
         <VaultNoteWorkspace
           bookId={bookId}
           findWithinNote={findWithinNote}
@@ -402,7 +368,8 @@ export function VaultNotesEditor({
           replaceWithinNote={replaceWithinNote}
           selectedContent={selectedContent}
           selectedNote={selectedNote}
-          status={status}
+          status={selectedNote ? autosave.errors[selectedNote.path] ? "Save failed" : autosave.saving[selectedNote.path] ? "Saving…" : drafts[selectedNote.path] !== undefined && drafts[selectedNote.path] !== selectedNote.content ? "Unsaved changes" : null : null}
+          busy={busy || autosave.leaving}
           textareaRef={textareaRef}
           toolbarButtons={toolbarButtons}
           onCopyReference={() => void copyCurrentReference()}
@@ -418,9 +385,15 @@ export function VaultNotesEditor({
           onSyncSelectionMenu={syncNotesSelectionMenu}
           onUpdateDraft={updateDraft}
         />
+        </div>
 
-        <aside className="space-y-4">
-          <VaultNotePropertiesPanel
+        {inspectorOpen ? (
+          <WorkspaceSidePanel title="Note details" side="right" onClose={() => setInspectorOpen(false)}>
+            <div className="space-y-4 p-3 xl:p-0">
+              {status ? <p role={/could not|already uses|cannot/i.test(status) ? "alert" : "status"} className="break-words text-sm xl:hidden">{status}</p> : null}
+              {Object.values(autosave.errors).length ? <div role="alert" className="text-sm xl:hidden">{Object.values(autosave.errors).map((message) => <p key={message} className="break-words">{message}</p>)}<button type="button" disabled={busy || autosave.leaving} onClick={() => void autosave.flushAll()} className="min-h-10 underline">Retry save</button></div> : null}
+              {detailsError || relationsError ? <div role="alert" className="border-l-2 border-amber-400 pl-3 text-sm"><p>Some note details could not load.</p><button type="button" className="min-h-10 underline" onClick={() => setDetailsRetry((value) => value + 1)}>Retry note details</button></div> : null}
+              <VaultNotePropertiesPanel
             bookId={bookId}
             busy={busy}
             editedFolder={editedFolder}
@@ -437,20 +410,22 @@ export function VaultNotesEditor({
             onMoveCurrent={() => void moveCurrent()}
             onSceneChapterNumberChange={setSceneChapterNumber}
             onSendToScene={() => void sendToScene()}
-            onSwitchToEdit={() => setMode("edit")}
-          />
+            onSwitchToEdit={() => { setMode("edit"); setInspectorOpen(false) }}
+              />
 
-          <VaultNoteRelatedPanels
-            isDark={isDark}
-            previewNodes={previewNodes}
-            recentMentions={recentMentions}
-            relations={relations}
-            selectedNote={selectedNote}
-            selectedOutgoingLinks={selectedOutgoingLinks}
-            onOpenGraph={() => setGraphExpanded(true)}
-            onOpenNote={openNote}
-          />
-        </aside>
+              {!relationsError && relations ? <VaultNoteRelatedPanels
+                isDark={isDark}
+                previewNodes={previewNodes}
+                recentMentions={recentMentions}
+                relations={relations}
+                selectedNote={selectedNote}
+                selectedOutgoingLinks={selectedOutgoingLinks}
+                onOpenGraph={() => setGraphExpanded(true)}
+                onOpenNote={(path) => { openNote(path); setInspectorOpen(false) }}
+              /> : null}
+            </div>
+          </WorkspaceSidePanel>
+        ) : null}
       </div>
 
       {graphExpanded ? (
@@ -461,6 +436,7 @@ export function VaultNotesEditor({
           selectedPath={selectedPath}
           onClose={() => setGraphExpanded(false)}
           onOpenPath={(path) => {
+            if (busy || autosave.leaving) return
             setSelectedPath(path)
             setGraphExpanded(false)
           }}

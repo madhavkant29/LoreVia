@@ -22,20 +22,20 @@ export function VaultNotesList({
 }) {
   return (
     <div className="mt-6">
-      <p className={`text-3xs font-semibold uppercase tracking-[0.28em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>Notes</p>
-      <div className="mt-3 flex gap-2" role="tablist" aria-label="Notes view">
-        <button type="button" role="tab" aria-selected={notesView === "recent"} onClick={() => onViewChange("recent")} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${notesView === "recent" ? "bg-emerald-500/16 text-emerald-200" : isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
+      <p className={`text-xs font-medium ${isDark ? "text-slate-400" : "text-stone-600"}`}>Notes</p>
+      <div className={`mt-2 flex gap-4 border-b ${isDark ? "border-white/[0.08]" : "border-stone-200"}`} role="group" aria-label="Notes view">
+        <button type="button" aria-pressed={notesView === "recent"} onClick={() => onViewChange("recent")} className={`border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${notesView === "recent" ? isDark ? "border-teal-300 text-white" : "border-teal-800 text-stone-950" : isDark ? "border-transparent text-slate-400 hover:text-white" : "border-transparent text-stone-600 hover:text-stone-900"}`}>
           Recent
         </button>
-        <button type="button" role="tab" aria-selected={notesView === "favorites"} onClick={() => onViewChange("favorites")} className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${notesView === "favorites" ? "bg-emerald-500/16 text-emerald-200" : isDark ? "text-slate-400 hover:bg-white/[0.05] hover:text-white" : "text-stone-500 hover:bg-stone-100 hover:text-stone-900"}`}>
+        <button type="button" aria-pressed={notesView === "favorites"} onClick={() => onViewChange("favorites")} className={`border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${notesView === "favorites" ? isDark ? "border-teal-300 text-white" : "border-teal-800 text-stone-950" : isDark ? "border-transparent text-slate-400 hover:text-white" : "border-transparent text-stone-600 hover:text-stone-900"}`}>
           Favorites
         </button>
       </div>
 
       <div className="mt-3 max-h-[18rem] space-y-1 overflow-auto pr-1">
         {displayedNotes.length === 0 ? (
-          <div className={`rounded-md border border-dashed px-4 py-8 text-center text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-stone-300 text-stone-500"}`}>
-            {notesView === "favorites" ? "Star a note to keep it here." : "No notes match that search."}
+          <div className={`border-t px-1 py-5 text-sm ${isDark ? "border-white/[0.08] text-slate-400" : "border-stone-200 text-stone-600"}`}>
+            {notesView === "favorites" ? "Star a note to keep it here." : "No notes here. Clear filters or create a new note."}
           </div>
         ) : (
           displayedNotes.map((note) => {
@@ -45,13 +45,14 @@ export function VaultNotesList({
                 key={note.path}
                 type="button"
                 onClick={() => onSelectNote(note.path)}
+                aria-current={active ? "true" : undefined}
                 draggable
                 onDragStart={(event) => {
                   const payload: NotesDragItem = { kind: "note", path: note.path }
                   event.dataTransfer.effectAllowed = "move"
                   event.dataTransfer.setData("application/lorevia-note-item", JSON.stringify(payload))
                 }}
-                className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-3 text-left transition ${
+                className={`flex w-full items-center justify-between gap-3 rounded-sm px-3 py-3 text-left transition ${
                   active
                     ? isDark
                       ? "bg-white/[0.06] text-white"
@@ -64,11 +65,11 @@ export function VaultNotesList({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <IconDocument small />
-                    <span className="truncate text-sm font-medium">{noteTitle(note.path)}</span>
+                    <span className="break-words text-sm font-medium">{noteTitle(note.path)}</span>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className={`text-xs ${active ? (isDark ? "text-slate-300" : "text-stone-600") : isDark ? "text-slate-500" : "text-stone-400"}`}>{formatRelativeTime(note.updated_at)}</span>
+                  <span className={`text-xs ${active ? (isDark ? "text-slate-300" : "text-stone-600") : isDark ? "text-slate-400" : "text-stone-600"}`}>{formatRelativeTime(note.updated_at)}</span>
                   {active ? <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> : null}
                 </div>
               </button>

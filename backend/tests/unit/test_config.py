@@ -21,12 +21,14 @@ def test_latency_rollout_and_sentry_sampling_defaults_are_safe():
     assert Settings.model_fields["PUBLIC_ASSET_BASE_URL"].default is None
     assert Settings.model_fields["PUBLIC_ASSET_CACHE_MAX_AGE_SECONDS"].default == 60
     assert Settings.model_fields["MANUSCRIPT_EXPORT_SPOOL_DIRECTORY"].default is None
-    assert Settings.model_fields["SENTRY_WORKER_TRACES_SAMPLE_RATE"].default < Settings.model_fields[
-        "SENTRY_API_TRACES_SAMPLE_RATE"
-    ].default
-    assert Settings.model_fields["SENTRY_WORKER_PROFILES_SAMPLE_RATE"].default < Settings.model_fields[
-        "SENTRY_API_PROFILES_SAMPLE_RATE"
-    ].default
+    assert (
+        Settings.model_fields["SENTRY_WORKER_TRACES_SAMPLE_RATE"].default
+        < Settings.model_fields["SENTRY_API_TRACES_SAMPLE_RATE"].default
+    )
+    assert (
+        Settings.model_fields["SENTRY_WORKER_PROFILES_SAMPLE_RATE"].default
+        < Settings.model_fields["SENTRY_API_PROFILES_SAMPLE_RATE"].default
+    )
 
 
 def test_cors_origins_include_localhost_and_loopback(monkeypatch):
@@ -207,16 +209,22 @@ def test_production_configuration_rejects_edge_proxy_placeholder(monkeypatch):
     )
 
 
+def test_architect_daily_advisor_and_scan_limits_are_exact():
+    assert settings.AUTHOR_ADVISOR_PER_DAY == 30
+    assert settings.ARCHITECT_ADVISOR_PER_DAY == 60
+    assert settings.AUTHOR_HIGH_COST_TURNS_PER_DAY == 30
+    assert settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY == 60
+    assert settings.AUTHOR_PREDICTION_PER_DAY == 30
+    assert settings.ARCHITECT_PREDICTION_PER_DAY == 60
+
+
+def test_architect_advisor_period_limits_are_at_least_twice_author_limits():
+    assert settings.ARCHITECT_ADVISOR_PER_WEEK >= settings.AUTHOR_ADVISOR_PER_WEEK * 2
+    assert settings.ARCHITECT_ADVISOR_PER_MONTH >= settings.AUTHOR_ADVISOR_PER_MONTH * 2
+
+
 def test_architect_limits_are_at_least_two_and_a_half_times_author_limits():
     paired_limits = (
-        (settings.AUTHOR_PREDICTION_PER_DAY, settings.ARCHITECT_PREDICTION_PER_DAY),
-        (
-            settings.AUTHOR_HIGH_COST_TURNS_PER_DAY,
-            settings.ARCHITECT_HIGH_COST_TURNS_PER_DAY,
-        ),
-        (settings.AUTHOR_ADVISOR_PER_DAY, settings.ARCHITECT_ADVISOR_PER_DAY),
-        (settings.AUTHOR_ADVISOR_PER_WEEK, settings.ARCHITECT_ADVISOR_PER_WEEK),
-        (settings.AUTHOR_ADVISOR_PER_MONTH, settings.ARCHITECT_ADVISOR_PER_MONTH),
         (settings.AUTHOR_LLM_TOKENS_5H, settings.ARCHITECT_LLM_TOKENS_5H),
         (settings.AUTHOR_LLM_TOKENS_WEEK, settings.ARCHITECT_LLM_TOKENS_WEEK),
         (settings.AUTHOR_LLM_TOKENS_MONTH, settings.ARCHITECT_LLM_TOKENS_MONTH),

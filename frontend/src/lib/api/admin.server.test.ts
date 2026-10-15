@@ -23,8 +23,11 @@ describe("admin server api", () => {
     cookiesMock.mockResolvedValue({ get: () => undefined })
     notFoundMock.mockClear()
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     delete process.env.ADMIN_E2E_TEST_SECRET
+    delete process.env.ADMIN_E2E_ALLOW_PRODUCTION
     delete process.env.API_ORIGIN
+    delete process.env.NEXT_PUBLIC_E2E_MOCK_API
     delete process.env.NEXT_PUBLIC_API_URL
   })
 
@@ -62,6 +65,44 @@ describe("admin server api", () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(session.is_owner).toBe(true)
     expect(session.scopes).toEqual(["moderation_admin", "billing_admin", "super_admin"])
+  })
+
+  it("refuses the production override unless the server-only production acknowledgement is set", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    process.env.NEXT_PUBLIC_E2E_MOCK_API = "1"
+    process.env.ADMIN_E2E_TEST_SECRET = "test-admin-secret"
+    headersMock.mockResolvedValue(
+      new Headers({
+        cookie: "lorevia_admin_test_session=owner%3Atest-admin-secret",
+      })
+    )
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 403 })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { getAdminSessionServer } = await import("./admin.server")
+
+    await expect(getAdminSessionServer()).rejects.toThrow("NEXT_NOT_FOUND")
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it("allows the production override only with mock mode, a secret, and the server acknowledgement", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    process.env.NEXT_PUBLIC_E2E_MOCK_API = "1"
+    process.env.ADMIN_E2E_TEST_SECRET = "test-admin-secret"
+    process.env.ADMIN_E2E_ALLOW_PRODUCTION = "1"
+    headersMock.mockResolvedValue(
+      new Headers({
+        cookie: "lorevia_admin_test_session=owner%3Atest-admin-secret",
+      })
+    )
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { getAdminSessionServer } = await import("./admin.server")
+    const session = await getAdminSessionServer()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(session.is_owner).toBe(true)
   })
 
   it("404s when the dev-only guest cookie override is supplied", async () => {

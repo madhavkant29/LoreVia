@@ -29,6 +29,7 @@ const acceptSuggestionMock = vi.fn()
 const generateWikiMock = vi.fn()
 const queryMock = vi.fn()
 const getNotesByChapterMock = vi.fn()
+vi.mock("@/lib/api/reader", () => ({ readerApi: { getChapterList: async () => ({ chapters: [{ number: 2 }] }) } }))
 
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
@@ -91,6 +92,7 @@ function renderWithQuery(ui: React.ReactNode, seedQueryData?: (queryClient: Quer
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 afterEach(() => {
+  vi.restoreAllMocks()
   getBootstrapMock.mockReset()
   listDocumentsMock.mockReset()
   listNotesMock.mockReset()
@@ -118,7 +120,7 @@ afterEach(() => {
 async function flushUi(times = 4) {
   for (let index = 0; index < times; index += 1) {
     await act(async () => {
-      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
     })
   }
 }
@@ -325,8 +327,8 @@ function mockWorldbuildingSuccess() {
   updateDocumentMock.mockResolvedValue({ ...documentsFixture[0], text: "Updated world text." })
   uploadDocumentsMock.mockResolvedValue([{ id: "doc-2", title: "New World Doc", word_count: 30, updated_at: "2026-06-02T00:00:00Z" }])
   deleteDocumentMock.mockResolvedValue({})
-  createNoteMock.mockResolvedValue({ id: "note-3" })
-  updateNoteStatusMock.mockResolvedValue({})
+  createNoteMock.mockResolvedValue({ ...notesFixture[0], id: "note-3", title: "Saved opportunity", linked_gap_id: null, linked_integration_id: "opportunity-1" })
+  updateNoteStatusMock.mockImplementation(async (_bookId: string, noteId: string, status: string) => ({ ...notesFixture.find((note) => note.id === noteId), status }))
   deleteNoteMock.mockResolvedValue({})
   saveCanonOverrideMock.mockResolvedValue({ id: "canon-2", canonical_name: "Aster Sea", aliases: ["Sea"] })
   acceptSuggestionMock.mockResolvedValue({})
@@ -343,16 +345,8 @@ function mockWorldbuildingSuccess() {
 }
 
 describe("WorldbuildingWorkspace", () => {
-  it("does not loop while notes are still loading", async () => {
-    getBootstrapMock.mockResolvedValue({
-      documents: [],
-      notes: [],
-      canon_overrides: [],
-      elements: [],
-      wiki: [],
-      stats: null,
-      gap_analysis: null,
-    })
+  it("does not loop while workspace data is still loading", async () => {
+    getBootstrapMock.mockImplementation(() => new Promise(() => {}))
     listDocumentsMock.mockResolvedValue([])
     listNotesMock.mockImplementation(() => new Promise(() => {}))
     listCanonOverridesMock.mockResolvedValue([])
@@ -366,10 +360,10 @@ describe("WorldbuildingWorkspace", () => {
     )
 
     await act(async () => {
-      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
-    expect(container.textContent).toContain("Loading saved world-gap notes...")
+    expect(container.textContent).toContain("Loading canon sources, comparison, and saved cleanup notes")
     expect(
       consoleErrorSpy.mock.calls.some(([message]) =>
         String(message).includes("Maximum update depth exceeded"),
@@ -381,6 +375,7 @@ describe("WorldbuildingWorkspace", () => {
   })
 
   it("drives the worldbuilding runtime workspace actions", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
     mockWorldbuildingSuccess()
     const { container, unmount } = renderWithQuery(
       <WorldbuildingWorkspace bookId="book-1" isDark={false} focus="gap" />,
@@ -391,13 +386,15 @@ describe("WorldbuildingWorkspace", () => {
 
     await waitForText(container, "World Bible")
     await waitForText(container, "Canon gaps")
-    expect(container.textContent).toContain("Aster Sea")
 
-    clickByText(container, "Run gap detection")
+    clickByText(container, "Refresh comparison")
     await flushUi()
     expect(getGapsMock).toHaveBeenCalledWith("book-1")
 
-    clickByText(container, "Run opportunities scan")
+    clickByText(container, "Canon tools")
+    await flushUi()
+    expect(container.textContent).toContain("Aster Sea")
+    clickByText(container, "Refresh opportunities")
     await flushUi()
     expect(getIntegrationMock).toHaveBeenCalledWith("book-1")
     expect(container.textContent).toContain("Use the sea as a pressure point.")
@@ -408,8 +405,8 @@ describe("WorldbuildingWorkspace", () => {
 
     const inputs = Array.from(container.querySelectorAll("input"))
     const textInputs = inputs.filter((input) => input.type !== "file" && input.type !== "checkbox")
-    setFieldValue(textInputs[1] as HTMLInputElement, "Aster Sea")
-    setFieldValue(textInputs[2] as HTMLInputElement, "Sea, Storm Road")
+    setFieldValue(textInputs[0] as HTMLInputElement, "Aster Sea")
+    setFieldValue(textInputs[1] as HTMLInputElement, "Sea, Storm Road")
     clickByText(container, "Save override")
     await flushUi()
     expect(saveCanonOverrideMock).toHaveBeenCalledWith("book-1", {
@@ -438,12 +435,18 @@ describe("WorldbuildingWorkspace", () => {
     })
     expect(container.textContent).toContain("The canon holds")
 
-    setFieldValue(textareas[textareas.length - 1] as HTMLTextAreaElement, "Updated world text.")
+    clickByText(container, "Canon sources")
+    await flushUi(4)
+    const sourceTextareas = Array.from(container.querySelectorAll("textarea"))
+    setFieldValue(sourceTextareas[sourceTextareas.length - 1] as HTMLTextAreaElement, "Updated world text.")
     clickByText(container, "Save document")
     await flushUi()
     expect(updateDocumentMock).toHaveBeenCalled()
 
-    setFieldValue(textInputs[textInputs.length - 1] as HTMLInputElement, "2")
+    clickByText(container, "Review gaps")
+    await flushUi()
+    const gapInputs = Array.from(container.querySelectorAll("input"))
+    setFieldValue(gapInputs[gapInputs.length - 1] as HTMLInputElement, "2")
     clickByText(container, "Filter by chapter")
     await flushUi()
     expect(getNotesByChapterMock).toHaveBeenCalledWith("book-1", 2)
@@ -456,6 +459,118 @@ describe("WorldbuildingWorkspace", () => {
     await flushUi()
     expect(deleteNoteMock).toHaveBeenCalledWith("book-1", "note-1")
 
+    unmount()
+  })
+
+  it("shows a recoverable bootstrap failure without claiming sources are empty", async () => {
+    mockWorldbuildingSuccess()
+    getBootstrapMock.mockRejectedValueOnce(new Error("offline"))
+    const { container, unmount } = renderWithQuery(<WorldbuildingWorkspace bookId="book-1" isDark={false} focus="gap" />)
+    await flushUi(6)
+    expect(container.textContent).toContain("Worldbuilding data could not be loaded")
+    expect(container.textContent).not.toContain("No world documents")
+    clickExactButton(container, "Retry worldbuilding workspace"); await flushUi(6)
+    expect(container.textContent).toContain("Canon conflicts")
+    unmount()
+  })
+
+  it("keeps a new source draft attached to the new document across tabs", async () => {
+    mockWorldbuildingSuccess()
+    const { container, unmount } = renderWithQuery(<WorldbuildingWorkspace bookId="book-1" isDark={false} focus="gap" />, seedWorldbuildingQueryData)
+    await flushUi(6); clickExactButton(container, "Canon sources"); await flushUi(4)
+    clickExactButton(container, "New blank document")
+    setFieldValue(container.querySelector("textarea")!, "A newly drafted canon rule")
+    clickExactButton(container, "Review gaps"); clickExactButton(container, "Canon sources"); await flushUi(4)
+    expect(container.querySelector("textarea")?.value).toBe("A newly drafted canon rule")
+    expect(container.textContent).toContain("Create document")
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    clickByText(container, "World Bible"); await flushUi(3)
+    expect(confirm).toHaveBeenCalled()
+    expect(container.querySelector("textarea")?.value).toBe("A newly drafted canon rule")
+    uploadDocumentsMock.mockRejectedValueOnce(new Error("offline"))
+    clickExactButton(container, "Create document"); await flushUi(6)
+    expect(uploadDocumentsMock).toHaveBeenCalledWith("book-1", { title: "Worldbuilding Manuscript", text: "A newly drafted canon rule" })
+    expect(updateDocumentMock).not.toHaveBeenCalled()
+    expect(container.querySelector("textarea")?.value).toBe("A newly drafted canon rule")
+    expect(container.textContent).toContain("Your draft is retained")
+    unmount()
+  })
+
+  it("ignores a late chapter filter after returning to all cleanup notes", async () => {
+    mockWorldbuildingSuccess()
+    const { container, unmount } = renderWithQuery(<WorldbuildingWorkspace bookId="book-1" isDark={false} focus="gap" />, seedWorldbuildingQueryData)
+    await flushUi(6)
+    setFieldValue(container.querySelector('input[aria-label="Chapter number filter"]')!, "2")
+    clickExactButton(container, "Filter by chapter"); await flushUi(4)
+    let finish!: (value: unknown) => void
+    getNotesByChapterMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    setFieldValue(container.querySelector('input[aria-label="Chapter number filter"]')!, "3")
+    clickExactButton(container, "Filter by chapter"); await flushUi(2)
+    clickExactButton(container, "Show all")
+    await act(async () => { finish([]) }); await flushUi(4)
+    expect(container.textContent).toContain("Showing all cleanup notes.")
+    expect(container.textContent).toContain("Rename the old capital")
+    expect(container.textContent).not.toContain("Showing chapter 3")
+    unmount()
+  })
+
+  it("keeps the comparison marked outdated when a new source saves but refresh fails", async () => {
+    mockWorldbuildingSuccess()
+    const created = { ...documentsFixture[0], id: "doc-new", title: "New canon" }
+    uploadDocumentsMock.mockResolvedValueOnce([created])
+    listDocumentsMock.mockResolvedValue([documentsFixture[0], created])
+    getGapsMock.mockRejectedValueOnce(new Error("offline"))
+    const { container, unmount } = renderWithQuery(<WorldbuildingWorkspace bookId="book-1" isDark={false} focus="gap" />, seedWorldbuildingQueryData)
+    await flushUi(6); clickExactButton(container, "Canon sources"); await flushUi(4)
+    clickExactButton(container, "New blank document")
+    setFieldValue(container.querySelector("textarea")!, "A new source rule")
+    clickExactButton(container, "Create document"); await flushUi(6)
+    clickExactButton(container, "Review gaps"); await flushUi(3)
+    expect(container.textContent).toContain("This comparison uses earlier source or manuscript content.")
+    expect(container.textContent).toContain("Capital mismatch")
+    expect(container.textContent).toContain("Retry comparison")
+    unmount()
+  })
+
+  it("retains canon queries after a failure and blocks concurrent canon writes", async () => {
+    mockWorldbuildingSuccess()
+    const { container, unmount } = renderWithQuery(<WorldbuildingWorkspace bookId="book-1" isDark={false} focus="gap" />, seedWorldbuildingQueryData)
+    await flushUi(6); clickExactButton(container, "Canon tools"); await flushUi(2)
+    setFieldValue(container.querySelector("textarea")!, "Does the storm rule still work?")
+    clickExactButton(container, "Canon status"); await flushUi(4)
+    expect(container.textContent).toContain("The canon holds")
+    let reject!: (reason: Error) => void
+    queryMock.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+    setFieldValue(container.querySelector("textarea")!, "What changes at night?")
+    clickExactButton(container, "Canon status"); await flushUi(2)
+    expect(container.querySelector("fieldset")?.disabled).toBe(true)
+    clickExactButton(container, "Generate wiki")
+    expect(generateWikiMock).not.toHaveBeenCalled()
+    await act(async () => { reject(new Error("offline")) }); await flushUi(4)
+    expect(container.querySelector("textarea")?.value).toBe("What changes at night?")
+    expect(container.textContent).toContain("The canon holds")
+    expect(container.textContent).toContain("question and any previous answer are retained")
+    expect(container.querySelector("fieldset")?.disabled).toBe(false)
+    unmount()
+  })
+
+  it("preserves existing source edits across tabs and prevents editing during a save", async () => {
+    mockWorldbuildingSuccess()
+    let finish!: (value: unknown) => void
+    updateDocumentMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const { container, unmount } = renderWithQuery(<WorldbuildingWorkspace bookId="book-1" isDark={false} focus="gap" />, seedWorldbuildingQueryData)
+    await flushUi(6); clickExactButton(container, "Canon sources"); await flushUi(4)
+    setFieldValue(container.querySelector("textarea")!, "Retained world revision")
+    clickExactButton(container, "Canon tools"); clickExactButton(container, "Canon sources"); await flushUi(4)
+    expect(container.querySelector("textarea")?.value).toBe("Retained world revision")
+    clickExactButton(container, "Save document"); await flushUi(2)
+    expect(container.querySelector("fieldset")?.disabled).toBe(true)
+    await act(async () => { finish({ ...documentsFixture[0], text: "Retained world revision" }) })
+    getDocumentMock.mockResolvedValue({ ...documentsFixture[0], text: "Retained world revision" })
+    await flushUi(6)
+    expect(updateDocumentMock).toHaveBeenCalledTimes(1)
+    expect(container.querySelector("textarea")?.value).toBe("Retained world revision")
+    expect(container.querySelector("fieldset")?.disabled).toBe(false)
     unmount()
   })
 })

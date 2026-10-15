@@ -9,13 +9,13 @@ const booksApiMock = vi.hoisted(() => ({
   createSeries: vi.fn(),
   getSeriesBible: vi.fn(),
   list: vi.fn(),
+  listPage: vi.fn(),
   listSelector: vi.fn(),
   listSeries: vi.fn(),
   removeBookFromSeries: vi.fn(),
   setSeriesBookStatus: vi.fn(),
 }))
 const intelligenceApiMock = vi.hoisted(() => ({
-  seriesAdvisorMessageStream: vi.fn(),
   seriesContinuityCheckStream: vi.fn(),
 }))
 const worldBuildingApiMock = vi.hoisted(() => ({
@@ -55,14 +55,12 @@ vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock 
 vi.mock("@/lib/api/worldBuilding", () => ({ worldBuildingApi: worldBuildingApiMock }))
 vi.mock("@/lib/billing/plans", () => ({ isPaidTier: (tier?: string | null) => tier === "author" || tier === "architect" }))
 vi.mock("@/lib/stores/authStore", () => ({
-  useAuthStore: (selector: (state: { user: { tier: string | null } | null }) => unknown) =>
-    selector({ user: userTier ? { tier: userTier } : null }),
+  useAuthStore: (selector: (state: { hydrated: boolean; user: { tier: string | null } | null }) => unknown) =>
+    selector({ hydrated: true, user: userTier ? { tier: userTier } : null }),
 }))
 vi.mock("@/lib/stores/preferencesStore", () => ({
   usePreferencesStore: () => ({ theme }),
 }))
-vi.mock("@/lib/utils/richText", () => ({ renderMarkdownHtml: (value: string) => `<p>${value}</p>` }))
-
 import SeriesPage from "@/app/(dashboard)/series/page"
 
 let root: Root | null = null
@@ -162,10 +160,12 @@ function setFieldValue(field: HTMLInputElement | HTMLSelectElement | HTMLTextAre
 }
 
 beforeEach(() => {
+  vi.spyOn(window, "confirm").mockReturnValue(true)
   userTier = "architect"
   theme = "dark"
   booksApiMock.listSeries.mockResolvedValue(seriesRows)
   booksApiMock.list.mockResolvedValue(bookRows)
+  booksApiMock.listPage.mockResolvedValue({ items: bookRows, next_cursor: null, has_more: false })
   booksApiMock.listSelector.mockResolvedValue(bookRows)
   booksApiMock.createSeries.mockResolvedValue({ id: "series-2" })
   booksApiMock.getSeriesBible.mockResolvedValue({
@@ -180,16 +180,6 @@ beforeEach(() => {
     book_count: 2,
     analysis_count: 3,
     world_context: [{ name: "Ash Gate" }, "Moon Road"],
-  })
-  intelligenceApiMock.seriesAdvisorMessageStream.mockImplementation(async (_seriesId, _messages, callbacks) => {
-    callbacks?.onDelta?.("Draft ")
-    return {
-      reply: "Draft the oath payoff.",
-      intent: "direction",
-      response_type: "standard",
-      retrieved_passages: [],
-      cached: true,
-    }
   })
   intelligenceApiMock.seriesContinuityCheckStream.mockImplementation(async (_seriesId, _bookId, _text, _chapter, callbacks) => {
     callbacks?.onStage?.("Reading earlier volumes")
@@ -220,9 +210,69 @@ afterEach(() => {
   container = null
   document.body.innerHTML = ""
   vi.clearAllMocks()
+  vi.restoreAllMocks()
 })
 
 describe("SeriesPage", () => {
+  it("keeps a failed creation draft and honors discard cancellation", async () => {
+    booksApiMock.createSeries.mockRejectedValueOnce(new Error("offline"))
+    await renderPage(<SeriesPage />)
+    await click("New series")
+    const name = document.querySelector('input[aria-label="Series name"]') as HTMLInputElement
+    await act(async () => { setFieldValue(name, "Draft cycle") })
+    await click("Create series")
+    await waitForText("Creation could not be confirmed")
+    expect(name.value).toBe("Draft cycle")
+    vi.mocked(window.confirm).mockReturnValueOnce(false)
+    await click("Cancel new series")
+    expect(name.isConnected).toBe(true)
+    await click("Cancel new series")
+    expect(name.isConnected).toBe(false)
+  })
+
+  it("retries failed world context and renders the backend's string response intact", async () => {
+    worldBuildingApiMock.getSeriesAnalysis.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ book_count: 1, analysis_count: 1, world_context: "The first rule.\nThe last rule." })
+    await renderPage(<SeriesPage />)
+    await click("World analysis")
+    await waitForText("This series context could not be loaded.")
+    await click("Retry series context")
+    await waitForText("The first rule.\nThe last rule.")
+  })
+
+  it("protects unsaved series forms when navigating or unloading", async () => {
+    await renderPage(<SeriesPage />)
+    await click("New series")
+    const name = document.querySelector('input[aria-label="Series name"]') as HTMLInputElement
+    await act(async () => { setFieldValue(name, "Keep this draft") })
+    const unload = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
+    vi.mocked(window.confirm).mockReturnValueOnce(false)
+    const navigation = new MouseEvent("click", { bubbles: true, cancelable: true })
+    document.querySelector('a[href="/series/series-1/ask"]')?.dispatchEvent(navigation)
+    expect(navigation.defaultPrevented).toBe(true)
+    expect(name.value).toBe("Keep this draft")
+    await click("Cancel new series")
+    const cleanUnload = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(cleanUnload)
+    expect(cleanUnload.defaultPrevented).toBe(false)
+  })
+
+  it("does not silently coerce invalid chapter numbers or truncate continuity passages", async () => {
+    await renderPage(<SeriesPage />)
+    await click("Continuity check")
+    const project = document.querySelector('select[aria-label="Project to check"]') as HTMLSelectElement
+    const chapter = document.querySelector('input[aria-label="Chapter or scene number"]') as HTMLInputElement
+    const passage = document.querySelector('textarea[aria-label="Passage to cross-check"]') as HTMLTextAreaElement
+    await act(async () => { setFieldValue(project, "book-1"); setFieldValue(chapter, "-2"); setFieldValue(passage, "Keep the whole passage.") })
+    expect(button("Run continuity check").disabled).toBe(true)
+    expect(chapter.value).toBe("-2")
+    await act(async () => { setFieldValue(chapter, "2"); setFieldValue(passage, "x".repeat(4001)) })
+    expect(button("Run continuity check").disabled).toBe(true)
+    expect(passage.value).toHaveLength(4001)
+    expect(intelligenceApiMock.seriesContinuityCheckStream).not.toHaveBeenCalled()
+  })
+
   it("renders the paid gate for guests and free users", async () => {
     userTier = null
     await renderPage(<SeriesPage />)
@@ -231,18 +281,25 @@ describe("SeriesPage", () => {
     expect(booksApiMock.listSeries).not.toHaveBeenCalled()
   })
 
-  it("drives series creation, bible, world analysis, advisor, continuity, and book actions", async () => {
+  it("uses one selected-series workspace and defers secondary analysis until requested", async () => {
     await renderPage(<SeriesPage />)
     await waitForText("Gate Saga")
 
-    expect(text()).toContain("Track sagas")
+    expect(text()).toContain("Series management")
     expect(text()).toContain("Gate One")
-    expect(text()).toContain("Gate Two")
+    expect(text()).not.toContain("Gate Two")
+    expect(booksApiMock.getSeriesBible).not.toHaveBeenCalled()
+    expect(worldBuildingApiMock.getSeriesAnalysis).not.toHaveBeenCalled()
 
-    const inputs = Array.from(container?.querySelectorAll("input") ?? []) as HTMLInputElement[]
+    const askLink = document.body.querySelector('a[href="/series/series-1/ask"]')
+    expect(askLink?.textContent).toContain("Ask about this series")
+
+    await click("New series")
+    const nameInput = document.body.querySelector('input') as HTMLInputElement
+    const descriptionInput = document.body.querySelector('textarea') as HTMLTextAreaElement
     await act(async () => {
-      setFieldValue(inputs[0], "Moon Saga")
-      setFieldValue(inputs[1], "A second continuity lane.")
+      setFieldValue(nameInput, "Moon Saga")
+      setFieldValue(descriptionInput, "A second continuity lane.")
       await Promise.resolve()
     })
     await click("Create series")
@@ -251,7 +308,7 @@ describe("SeriesPage", () => {
       description: "A second continuity lane.",
     })
 
-    await click("View Series Bible")
+    await click("Series bible")
     await waitForText("Gate law changes between episodes.")
     expect(booksApiMock.getSeriesBible).toHaveBeenCalledWith("series-1")
     expect(text()).toContain("Recurring characters")
@@ -261,21 +318,9 @@ describe("SeriesPage", () => {
     await waitForText("Ash Gate")
     expect(worldBuildingApiMock.getSeriesAnalysis).toHaveBeenCalledWith("series-1")
 
-    await click("Ask")
-    await waitForText("Series intelligence")
-    const askInput = document.body.querySelector('input[aria-label="Ask series question"]') as HTMLInputElement
-    await act(async () => {
-      setFieldValue(askInput, "How should the oath pay off?")
-      await Promise.resolve()
-    })
-    await click("Ask", 2)
-    await waitForText("Draft the oath payoff.")
-    expect(intelligenceApiMock.seriesAdvisorMessageStream).toHaveBeenCalled()
-    expect(text()).toContain("Cached response")
-
-    await click("Series continuity check")
-    const select = document.body.querySelector("select") as HTMLSelectElement
-    const chapterInput = document.body.querySelector('input[aria-label="Scene number"]') as HTMLInputElement
+    await click("Continuity check")
+    const select = document.body.querySelector('select[aria-label="Project to check"]') as HTMLSelectElement
+    const chapterInput = document.body.querySelector('input[aria-label="Chapter or scene number"]') as HTMLInputElement
     const passage = document.body.querySelector('textarea[aria-label="Passage to cross-check"]') as HTMLTextAreaElement
     await act(async () => {
       setFieldValue(select, "book-1")
@@ -283,7 +328,7 @@ describe("SeriesPage", () => {
       setFieldValue(passage, "Mira repeats the old oath.")
       await Promise.resolve()
     })
-    await click("Run series continuity check")
+    await click("Run continuity check")
     await waitForText("Fits the earlier oath.")
     expect(intelligenceApiMock.seriesContinuityCheckStream).toHaveBeenCalledWith(
       "series-1",
@@ -295,15 +340,18 @@ describe("SeriesPage", () => {
     expect(text()).toContain("Oath timing")
     expect(text()).toContain("Echo the gate law")
 
-    await click("Close")
-    await click("Mark read")
+    await click("Mark complete")
     expect(booksApiMock.setSeriesBookStatus).toHaveBeenCalledWith("series-1", "book-1", true)
 
     await click("Remove")
     expect(booksApiMock.removeBookFromSeries).toHaveBeenCalledWith("series-1", "book-1")
 
-    const volumeInput = container?.querySelector('input[aria-label="Volume number"]') as HTMLInputElement
+    await click("Add project")
+    expect(text()).toContain("Gate Two")
+    const projectSelect = container?.querySelector('select[aria-label="Project to add"]') as HTMLSelectElement
+    const volumeInput = container?.querySelector('input[aria-label="Series position"]') as HTMLInputElement
     await act(async () => {
+      setFieldValue(projectSelect, "book-2")
       setFieldValue(volumeInput, "2")
       await Promise.resolve()
     })

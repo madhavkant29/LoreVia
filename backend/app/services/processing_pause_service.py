@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.book import Book
 from app.models.operations import BookProcessingRun, TaskExecution
+from app.services.book_freeze_service import is_book_frozen
 
 
 def parse_processing_blocker(error_detail: str | None) -> dict[str, Any]:
@@ -39,6 +40,10 @@ async def write_book_pause_state(
 ) -> None:
     book = await db.get(Book, run.book_id, with_for_update=True)
     if book is None:
+        return
+    if is_book_frozen(book):
+        # Frozen books are administratively paused; no sweep or late task may
+        # overwrite their state or make a retry look available.
         return
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
     processing = dict(
@@ -90,6 +95,12 @@ async def write_book_terminal_processing_state(
     book = await db.get(Book, run.book_id, with_for_update=True)
     if book is None:
         return
+    if is_book_frozen(book):
+        # Keep the administrative freeze authoritative over late task failures.
+        return
+    from app.utils.processing_error_utils import friendly_processing_error
+
+    user_visible_error = friendly_processing_error(error)
     effective_rebuild_run_id = rebuild_run_id or run.rebuild_run_id
     if effective_rebuild_run_id:
         from app.services.editor_project_service import fail_rebuild_if_active
@@ -98,7 +109,7 @@ async def write_book_terminal_processing_state(
             db,
             book,
             expected_rebuild_run_id=effective_rebuild_run_id,
-            error=error,
+            error=user_visible_error,
         ):
             return
         return
@@ -116,7 +127,7 @@ async def write_book_terminal_processing_state(
             "resume_blockers": [],
             "next_resume_at": None,
             "retry_actions": ["retry_extraction"],
-            "last_error": error,
+            "last_error": user_visible_error,
         }
     )
     workspace["processing"] = processing
@@ -171,11 +182,13 @@ async def settle_terminal_processing_failure(
         return None
     run.status = "failed_terminal"
     run.completed_at = completed_at
-    if execution.rebuild_run_id:
-        await write_book_terminal_processing_state(
-            db,
-            run,
-            error=error,
-            rebuild_run_id=execution.rebuild_run_id,
-        )
+    # Terminal failures must be visible to the author for every run kind, not
+    # only rebuilds. Otherwise the book stays "processing" forever and the
+    # retry endpoint refuses to act because no retryable state was recorded.
+    await write_book_terminal_processing_state(
+        db,
+        run,
+        error=error,
+        rebuild_run_id=execution.rebuild_run_id,
+    )
     return run

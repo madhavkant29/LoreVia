@@ -173,7 +173,6 @@ async def test_series_bible_endpoint_aggregates_recurring_screenplay_entities(cl
         f"/api/v1/books/series/{series.id}/bible",
         headers=_auth_headers(user.id),
     )
-
     assert response.status_code == 200
     payload = response.json()
 
@@ -191,3 +190,21 @@ async def test_series_bible_endpoint_aggregates_recurring_screenplay_entities(cl
         "The Grid has differing location descriptions across episodes." == item
         for item in payload["continuity_risks"]
     )
+
+
+@pytest.mark.asyncio
+async def test_series_list_endpoint_is_not_shadowed_by_book_lookup(client, db):
+    """GET /books/series must reach the series router, not GET /books/{book_id}.
+
+    Regression: core_router's dynamic /{book_id} route was registered before
+    series_router, so the literal /series path failed UUID validation with 422.
+    """
+    user, series = await _build_series_bible_fixture(db)
+
+    response = await client.get("/api/v1/books/series", headers=_auth_headers(user.id))
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    names = [item["name"] for item in payload["items"]]
+    assert "Neon Nights" in names
+

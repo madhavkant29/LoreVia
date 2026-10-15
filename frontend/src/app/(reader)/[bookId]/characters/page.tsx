@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
 
 import type { SidebarTab } from "@/components/reader/CharacterProfileRightRail"
 import type { CharacterProfileTab } from "@/components/reader/CharacterProfileTabs"
@@ -19,6 +19,7 @@ import {
   type EditDraft,
   type RelationshipComposerDraft,
 } from "./charactersPage.helpers"
+import { useCharacterDraftProtection } from "./charactersPage.draftProtection"
 import { useCharacterMutationActions } from "./charactersPage.characterActions"
 import { useCharacterPageDerivedState } from "./charactersPage.derivedState"
 import { useCharacterEvidence, useCharacterEvidenceAutoLoad } from "./charactersPage.evidence"
@@ -41,7 +42,6 @@ type WorkspaceMode = "profile" | "review" | "duplicates" | "repair"
 
 export default function CharactersPage() {
   const { bookId } = useParams<{ bookId: string }>()
-  const router = useRouter()
   const confirm = useConfirmDialog()
   const prompt = usePromptDialog()
 
@@ -80,11 +80,11 @@ export default function CharactersPage() {
   const theme = usePreferencesStore((state) => state.theme)
   const isDark = theme === "dark"
   const isAuthorMode = book?.mode === "author"
-  const error: string | null = null
   const atmosphere = isDark ? "bg-[#11191a] text-slate-100" : "bg-[#f4f5f3] text-stone-950"
 
   const {
     bookData,
+    error, queryIssues, repairUnavailable,
     charactersData,
     charactersLoading,
     chapterAppearanceText,
@@ -394,6 +394,9 @@ export default function CharactersPage() {
     workspaceMode,
   })
 
+  const changeWorkspace = useCharacterDraftProtection({ editing, creating, draft, createDraft, character: selectedCharacter,
+    busy: saving || createBusy || deleting, initialChapter: progress?.current_chapter ?? 1, confirm, onDiscard: () => { setEditing(false); setCreating(false) } })
+
   const pageMenuActions = buildPageMenuActions({
     exporting,
     isAuthorMode,
@@ -406,7 +409,7 @@ export default function CharactersPage() {
     onOpenRepairWorkspace: openRepairWorkspace,
     onOpenReviewQueue: openReviewQueue,
     onRebuildGraph: () => void refreshGraph(),
-    onResetFilters: resetFilters,
+    onResetFilters: () => { resetFilters(); setStatusFilter("all"); setRoleFilter("all") },
   })
 
   const characterMenuActions = buildCharacterMenuActions({
@@ -426,7 +429,7 @@ export default function CharactersPage() {
     onOpenDuplicateReview: (characterId) => openDuplicateReview(characterId),
     onOpenReviewQueue: openReviewQueue,
     onPartitionCharacter: () => void handlePartitionCharacter(),
-    onSetEditing: setEditing,
+    onSetEditing: (value) => { setActiveTab("overview"); setEditing(typeof value === "function" ? value(editing) : value) },
     onToggleProtectedFromRepair: () => void handleToggleProtectedFromRepair(),
   })
 
@@ -448,13 +451,13 @@ export default function CharactersPage() {
     handleRejectRelationshipCandidate, handleRepairRelationships, handleResolveRelationshipCandidate, handleSaveCharacter, handleSaveReviewNote,
     handleShareCharacter, handleToggleProtectedFromRepair, handleUndoIdentityAction, loadCandidateEvidence, loadCharacterEvidence, openCharacterEvidence,
     openCreateCharacter, openDuplicateReview, openManualMerge, openRelationships, openRepairWorkspace, openReviewQueue, progressChapter: progress?.current_chapter ?? 1,
-    refetchRepairPreview, onBack: () => router.back(), saveCharacterWorkspaceNote, setActionError, setActiveTab, setCharacterMenuOpen, setCreateDraft,
+    refetchRepairPreview, saveCharacterWorkspaceNote, setActionError, setActiveTab, setCharacterMenuOpen, setCreateDraft,
     setCreating, setEditing, setManualMergePrimaryId, setManualMergeSecondaryId, setPageMenuOpen, setReviewDataEnabled, setSelectedId, setSidebarTab,
     setWorkspaceMode,
   })
 
   const layoutProps: CharactersPageLayoutProps = {
-    actionError, activeTab, atmosphere, book, bookId, candidateActionId, castFilter, characterMenuActions, characterMenuOpen, chapterAppearanceText,
+    queryIssues, repairUnavailable, actionError, activeTab, atmosphere, book, bookId, candidateActionId, castFilter, characterMenuActions, characterMenuOpen, chapterAppearanceText,
     chars, createBusy, createDraft, createRelationshipBusy, creating, derived, draft, editing, error, evidenceCache, evidenceError, evidenceLoadingId,
     graphOverrideBusy, identityDiagnostics, identityUndoActionId, isAuthorMode, isDark, loading, mergeBusy, mergeError, noteToast, pageMenuActions,
     pageMenuOpen, partitioning, relationshipCandidateActionId, relationshipChapter, relationshipDraft, repairPreview, repairPreviewFetching,
@@ -465,5 +468,13 @@ export default function CharactersPage() {
     setStatusFilter, setWorkspaceMode,
   }
 
-  return <CharactersPageLayout {...layoutProps} />
+  return <CharactersPageLayout {...layoutProps}
+    onSelectCharacter={(id) => { if (id !== selectedId || creating || workspaceMode !== "profile") void changeWorkspace(() => layoutActions.onSelectCharacter(id)) }}
+    onOpenCreateCharacter={() => { void changeWorkspace(openCreateCharacter) }}
+    onOpenReviewQueue={() => { void changeWorkspace(openReviewQueue) }}
+    onDuplicateReview={(id) => { void changeWorkspace(() => openDuplicateReview(id)) }}
+    onOpenRepairWorkspace={() => { void changeWorkspace(openRepairWorkspace) }}
+    pageMenuActions={pageMenuActions.map((action) => /^(Open |Review duplicate)/.test(action.label) ? { ...action, onClick: () => { void changeWorkspace(action.onClick) } } : action)}
+    characterMenuActions={characterMenuActions.map((action) => /^(Open |Review duplicate|Merge |Close edit)/.test(action.label) ? { ...action, onClick: () => { void changeWorkspace(action.onClick) } } : action)}
+  />
 }

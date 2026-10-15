@@ -4,14 +4,17 @@ import { act, type ReactElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, vi } from "vitest"
 
-const routerMock = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn() }))
+const routerMock = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }))
 const searchParamsState = vi.hoisted(() => ({ value: new URLSearchParams() }))
 const themeState = vi.hoisted(() => ({ value: "light" }))
-const authState = vi.hoisted(() => ({ user: { id: "user-1", tier: "pro" } as { id: string; tier: string } | null }))
+const bookModeState = vi.hoisted(() => ({ value: "author" as "author" | "reader" }))
+const authState = vi.hoisted(() => ({ hydrated: true, user: { id: "user-1", tier: "pro" } as { id: string; tier: string } | null }))
 const useQueryMock = vi.hoisted(() => vi.fn())
 const booksApiMock = vi.hoisted(() => ({
   deleteChapter: vi.fn(),
   get: vi.fn(),
+  getChapterReports: vi.fn(),
+  getContinuityFindings: vi.fn(),
   getBookNotes: vi.fn(),
   getVaultGraph: vi.fn(),
   list: vi.fn(),
@@ -36,12 +39,12 @@ const intelligenceApiMock = vi.hoisted(() => ({
 }))
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
+  default: ({ children, href, prefetch: _prefetch, ...props }: { children: ReactNode; href: string; prefetch?: boolean | null }) => <a href={href} {...props}>{children}</a>,
 }))
 
 vi.mock("next/dynamic", () => ({
   default: () => function DynamicMock(props: Record<string, unknown>) {
-    return <section data-testid="dynamic-route-section">{String(props.title ?? props.bookTitle ?? "Dynamic route section")}</section>
+    return <section data-testid="dynamic-route-section">{String(props.title ?? props.bookTitle ?? "Dynamic route section")}{props.toolbarLeading as ReactNode}</section>
   },
 }))
 
@@ -51,7 +54,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParamsState.value,
 }))
 
-vi.mock("@tanstack/react-query", () => ({ useQuery: useQueryMock }))
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: useQueryMock,
+  useQueryClient: () => ({ prefetchQuery: vi.fn() }),
+}))
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))
 vi.mock("@/lib/api/reader", () => ({ readerApi: readerApiMock }))
 vi.mock("@/lib/api/intelligence", () => ({ intelligenceApi: intelligenceApiMock }))
@@ -61,9 +67,10 @@ vi.mock("@/lib/billing/plans", () => ({
   isPaidTier: (tier?: string | null) => tier === "pro" || tier === "architect",
 }))
 vi.mock("@/lib/hooks/useBookDetail", () => ({
-  useBookDetail: () => ({ data: { id: "book-1", title: "The Lantern Gate", mode: "author" }, isLoading: false }),
+  useBookDetail: () => ({ data: { id: "book-1", title: "The Lantern Gate", mode: "author", access_class: "owner" }, isLoading: false }),
+  useCachedBookDetail: () => ({ data: { id: "book-1", title: "The Lantern Gate", mode: "author", access_class: "owner" }, isLoading: false }),
 }))
-vi.mock("@/lib/limits/dailyCap", () => ({ buildDailyCapEventDetail: () => null }))
+vi.mock("@/lib/limits/dailyCap", () => ({ buildDailyCapEventDetail: () => null, isDailyLimitDetail: () => false }))
 vi.mock("@/lib/query/cacheKeys", () => ({
   asQueryKey: (value: unknown) => value,
   bookCacheKey: (...parts: string[]) => parts.join(":"),
@@ -80,7 +87,8 @@ vi.mock("@/lib/stores/authStore", () => ({
 vi.mock("@/lib/stores/preferencesStore", () => ({
   usePreferencesStore: () => ({ theme: themeState.value }),
 }))
-vi.mock("@/lib/utils/richText", () => ({
+vi.mock("@/lib/utils/richText", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/utils/richText")>()),
   renderMarkdownHtml: (value: string) => `<p>${value}</p>`,
   renderRichTextHtml: (value: string) => `<p>${value}</p>`,
 }))
@@ -157,16 +165,19 @@ vi.mock("@/components/reader/ChaptersPageHeader", () => ({
     onBack,
     onPrimaryAction,
     primaryActionBusy,
+    subtitle,
     title,
   }: {
     backLabel: string
     onBack: () => void
     onPrimaryAction: () => void
     primaryActionBusy: boolean
+    subtitle: string
     title: string
   }) => (
     <header>
       <h1>{title}</h1>
+      <p>{subtitle}</p>
       <button type="button" onClick={onBack}>{backLabel}</button>
       <button type="button" onClick={onPrimaryAction}>{primaryActionBusy ? "Marking..." : "Mark book as read"}</button>
     </header>
@@ -212,7 +223,9 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   routerMock.back.mockReset()
   routerMock.push.mockReset()
+  routerMock.replace.mockReset()
   themeState.value = "light"
+  bookModeState.value = "author"
   authState.user = { id: "user-1", tier: "pro" }
   searchParamsState.value = new URLSearchParams()
   Object.values(booksApiMock).forEach((mock) => mock.mockReset())
@@ -220,6 +233,8 @@ beforeEach(() => {
   Object.values(intelligenceApiMock).forEach((mock) => mock.mockReset())
 
   booksApiMock.get.mockResolvedValue({ id: "book-1", title: "The Lantern Gate", mode: "author", work_type: "novel", total_chapters: 3 })
+  booksApiMock.getChapterReports.mockResolvedValue([])
+  booksApiMock.getContinuityFindings.mockResolvedValue([])
   booksApiMock.list.mockResolvedValue([
     { id: "book-1", title: "The Lantern Gate", mode: "author", work_type: "novel", total_chapters: 3 },
     { id: "book-2", title: "The Ash Door", mode: "author", work_type: "novel", total_chapters: 4 },
@@ -281,7 +296,7 @@ beforeEach(() => {
               right_book_id: "book-2",
               left_name: "Mara Vale",
               right_name: "Mara Vail",
-              similarity: 0.82,
+              similarity: 0.98,
             },
           ],
           wiki_matches: [
@@ -291,10 +306,63 @@ beforeEach(() => {
               left_name: "Moon Gate",
               right_name: "Lunar Gate",
               entry_type: "place",
-              similarity: 0.55,
+              similarity: 0.92,
             },
           ],
         },
+        isLoading: false,
+      }
+    }
+    if (key.includes("relationship-evolution")) {
+      return {
+        data: {
+          pairs: [{
+            characters: ["Mara", "Joren"],
+            events: [
+              { chapter: 2, type: "alliance", description: "They share the key." },
+              { chapter: 4, type: "conflict", description: null },
+            ],
+          }],
+        },
+        isLoading: false,
+        isError: false,
+      }
+    }
+    if (key.includes("continuity-findings")) {
+      return {
+        data: [{
+          id: "finding-1",
+          scan_id: "scan-1",
+          book_id: "book-1",
+          category: "state_conflict",
+          severity: "high",
+          confidence: 0.94,
+          status: "open",
+          title: "The gate oath changes between chapters",
+          explanation: "Chapter 1 requires blood, while Chapter 2 says the gate opens for any sworn name.",
+          subject_type: "world_rule",
+          subject_label: "Gate oath",
+          detector_version: "test",
+          content_versions: {},
+          coverage: {},
+          is_stale: false,
+          evidence: [{ chapter_number: 2 }],
+        }],
+        isLoading: false,
+      }
+    }
+    if (key.includes("chapter-reports")) {
+      return {
+        data: [{
+          chapter_number: 3,
+          chapter_title: "The Gate",
+          summary: "Mara opens the gate and changes her alliance.",
+          new_characters: [{ name: "Theo" }],
+          relationship_changes: ["Mara now trusts Theo"],
+          plot_threads_opened: ["The brass key"],
+          plot_threads_resolved: [],
+          continuity_flags: ["The key changed color"],
+        }],
         isLoading: false,
       }
     }
@@ -309,13 +377,13 @@ beforeEach(() => {
     }
     if (key === "dashboard:notes") return { data: notesFixture(), isLoading: false }
     if (key === "dashboard:quotes") return { data: quotesFixture(), isLoading: false }
-    if (key === "dashboard:series") return { data: { items: [{ id: "series-1", name: "Gate Cycle", description: "Linked gate novels.", books: [{ id: "book-1" }, { id: "book-2" }] }] }, isLoading: false }
+    if (key.startsWith("dashboard:series")) return { data: { items: [{ id: "series-1", name: "Gate Cycle", description: "Linked gate novels.", books: [{ id: "book-1" }, { id: "book-2" }] }] }, isLoading: false }
     if (key.includes("chapters")) return { data: chapterListFixture(), isLoading: false, isError: false, refetch: vi.fn().mockResolvedValue({}) }
     if (key.includes("progress")) return { data: { current_chapter: 2, progress_pct: 50 }, isLoading: false, refetch: vi.fn().mockResolvedValue({}) }
     if (key.includes("notes")) return { data: bookNotesFixture(), isLoading: false, refetch: vi.fn().mockResolvedValue({}) }
     if (key.includes("vault-notes")) return { data: [{ path: "Characters/Mara.md", content: "Mara keeps the gate." }], isLoading: false, refetch: vi.fn().mockResolvedValue({}) }
     if (key.includes("vault-graph")) return { data: { nodes: [{ id: "mara" }], edges: [] }, isLoading: false, refetch: vi.fn().mockResolvedValue({}) }
-    return { data: { id: "book-1", title: "The Lantern Gate", mode: "author", work_type: "novel", total_chapters: 3 }, isLoading: false, isError: false, refetch: vi.fn().mockResolvedValue({}) }
+    return { data: { id: "book-1", title: "The Lantern Gate", mode: bookModeState.value, work_type: "novel", total_chapters: 3 }, isLoading: false, isError: false, refetch: vi.fn().mockResolvedValue({}) }
   })
 })
 
@@ -378,11 +446,12 @@ async function waitForText(expected: string) {
 }
 
 function setInputValue(selector: string, value: string) {
-  const input = container?.querySelector(selector) as HTMLInputElement | null
+  const input = container?.querySelector(selector) as HTMLInputElement | HTMLSelectElement | null
   if (!input) throw new Error(`Missing input ${selector}`)
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+  const prototype = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set
   setter?.call(input, value)
-  input.dispatchEvent(new Event("input", { bubbles: true }))
+  input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }))
 }
 
 function setTextareaValue(value: string) {
@@ -461,6 +530,7 @@ function getContainer() {
 
 export {
   authState,
+  bookModeState,
   booksApiMock,
   click,
   flush,

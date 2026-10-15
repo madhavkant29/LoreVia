@@ -297,6 +297,77 @@ async def test_trial_authoring_surfaces_share_one_daily_bucket(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tier", "limit"),
+    [("author", 30), ("architect", 60)],
+)
+async def test_advisor_daily_limit_enforced_per_tier(monkeypatch, tier, limit):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    async def _fake_limit_for_user(_db, user_id, field, default):
+        assert field == "advisor_per_day"
+        return default
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    monkeypatch.setattr("app.api.deps.rate_limit._limit_for_user", _fake_limit_for_user)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+    monkeypatch.setattr(
+        "app.api.deps.rate_limit._current_utc",
+        lambda now=None: datetime(2026, 6, 10, 10, 0, tzinfo=UTC),
+    )
+    user = SimpleNamespace(
+        id=f"user-{tier}-advisor",
+        tier=tier,
+        created_at=datetime(2026, 6, 6, 10, 0, tzinfo=UTC),
+    )
+
+    for _ in range(limit):
+        await rate_limit_advisor(user, db=None)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_advisor(user, db=None)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+    assert f"daily limit of {limit} Story Advisor turns" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tier", "limit"),
+    [("author", 30), ("architect", 60)],
+)
+async def test_continuity_daily_limit_enforced_per_tier(monkeypatch, tier, limit):
+    fake_redis = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis
+
+    monkeypatch.setattr("app.api.deps.rate_limit.get_redis", _fake_get_redis)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", False, raising=False)
+    monkeypatch.setattr(
+        "app.api.deps.rate_limit._current_utc",
+        lambda now=None: datetime(2026, 6, 10, 10, 0, tzinfo=UTC),
+    )
+    user = SimpleNamespace(
+        id=f"user-{tier}-continuity",
+        tier=tier,
+        created_at=datetime(2026, 6, 6, 10, 0, tzinfo=UTC),
+    )
+
+    for _ in range(limit):
+        await rate_limit_continuity_checker(user, db=None)
+
+    with pytest.raises(Exception) as exc_info:
+        await rate_limit_continuity_checker(user, db=None)
+
+    assert getattr(exc_info.value, "status_code", None) == 429
+    assert f"daily limit of {limit} continuity and editorial scans" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_free_advisor_uses_one_weekly_turn(monkeypatch):
     fake_redis = _FakeRedis()
 

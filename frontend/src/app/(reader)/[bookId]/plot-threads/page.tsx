@@ -1,14 +1,14 @@
 "use client"
 
-import Link from "next/link"
 import { useEffect } from "react"
 import { useParams } from "next/navigation"
 
 import { PlotTracker } from "@/components/intelligence/PlotTracker"
 import { WorkspaceFamilyHeader } from "@/components/reader/WorkspaceFamilyHeader"
-import { WorkspacePage, WorkspacePanel } from "@/components/ui/Workspace"
+import { WorkspacePage } from "@/components/ui/Workspace"
 import { usePreferencesStore } from "@/lib/stores/preferencesStore"
 import { capture } from "@/lib/analytics/posthog"
+import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
 
 export default function PlotThreadsPage() {
   const { bookId } = useParams<{ bookId: string }>()
@@ -21,25 +21,20 @@ export default function PlotThreadsPage() {
 
   return (
     <WorkspacePage className={isDark ? "text-slate-100" : "text-stone-950"}>
-      <div className="mx-auto max-w-7xl px-0 pb-16 pt-6 sm:px-2 lg:px-4">
+      <main data-plot-threads-workspace className="mx-auto min-w-0 max-w-7xl px-0 pb-16 pt-6 sm:px-2 lg:px-4 [overflow-wrap:anywhere]">
         <WorkspaceFamilyHeader
           active="plot-threads"
           bookId={bookId}
           family="story-bible"
           title="Plot threads"
           description="Track open arcs across the manuscript, identify unresolved pressure points, and keep private reminders beside the story structure."
-          actions={(
-            <>
-              <Link href={`/${bookId}`} className="app-button-secondary">Home</Link>
-              <Link href={`/${bookId}/manuscript`} className="app-button-primary">Manuscript</Link>
-            </>
-          )}
+          actions={<button type="button" className="app-button-secondary !rounded-sm" onClick={() => window.dispatchEvent(new CustomEvent(SUPPORT_HELP_EVENT))}>Help</button>}
         />
 
-        <WorkspacePanel className="mt-6 p-5 sm:p-6">
-          <PlotTracker bookId={bookId} mode="dashboard" />
-        </WorkspacePanel>
-      </div>
+        <div className="mt-6">
+          <PlotTracker key={bookId} bookId={bookId} mode="dashboard" />
+        </div>
+      </main>
     </WorkspacePage>
   )
 }

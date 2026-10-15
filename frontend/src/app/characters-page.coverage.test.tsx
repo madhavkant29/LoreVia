@@ -38,14 +38,17 @@ describe("CharactersPage", () => {
     await click("Reject candidate")
     expect(booksApiMock.rejectCharacterCandidate).toHaveBeenCalledWith("book-1", "candidate-1")
 
-    await click("Review duplicates")
+    await click("Open menu")
+    await click("Review duplicate suggestions")
     await waitForText("Merge suggestion")
+    await click("Details")
     await waitForText("Embedding similarity: 81%")
     await click("Compare evidence")
     await waitForText("Evidence panel")
     expect(readerApiMock.search).toHaveBeenCalledWith("book-1", expect.stringContaining("Mira"), 12)
 
-    await click("Review duplicates")
+    await click("Open menu")
+    await click("Review duplicate suggestions")
     await waitForText("Merge records")
     await click("Keep separate")
     expect(booksApiMock.dismissDuplicateSuggestion).toHaveBeenCalledWith("book-1", "dup-1")
@@ -60,7 +63,8 @@ describe("CharactersPage", () => {
     await renderCharactersPage()
     await waitForText("Character workspace")
 
-    await click("Repair workspace")
+    await click("Open menu")
+    await click("Open repair workspace")
     await waitForText("Book reprocess preview")
     await click("Refresh preview")
     await click("Apply repair plan")
@@ -83,7 +87,7 @@ describe("CharactersPage", () => {
     expect(booksApiMock.createCharacter).toHaveBeenCalledWith("book-1", expect.objectContaining({ name: "Lina" }))
 
     await click("Overview tab")
-    await click("Open menu", 1)
+    await click("Character actions")
     await click("Edit details")
     await waitForText("Save changes")
     setFieldValue(firstField<HTMLInputElement>("input"), "Mira Revised")

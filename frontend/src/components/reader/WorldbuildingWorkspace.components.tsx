@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { cloneElement, isValidElement, useId, type ReactNode, type ReactElement } from "react"
 
 import { Skeleton } from "@/components/ui/Skeleton"
 import type { WorldNote } from "@/types/world-building"
@@ -18,7 +18,6 @@ import {
 } from "./WorldbuildingWorkspace.helpers"
 
 export function WorkspaceCard({
-  number,
   sectionLabel,
   title,
   description,
@@ -35,13 +34,10 @@ export function WorkspaceCard({
   isDark: boolean
 }) {
   return (
-    <section className={`rounded-lg border p-4 md:p-5 ${panelClass(isDark)}`}>
+    <section className={`min-w-0 border-y py-5 ${isDark ? "border-white/10" : "border-stone-200"}`}>
       <div className={`flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between ${isDark ? "border-white/10" : "border-stone-200"}`}>
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-3xs font-semibold ${isDark ? "bg-white/[0.08] text-slate-300" : "bg-stone-100 text-stone-600"}`}>
-              {number}
-            </span>
             <p className={eyebrowClass(isDark)}>{sectionLabel}</p>
           </div>
           <h2 className={`mt-2 text-[1.15rem] font-semibold ${titleTextClass(isDark)}`}>{title}</h2>
@@ -90,11 +86,12 @@ export function LabeledField({
   children: ReactNode
   isDark: boolean
 }) {
+  const inputId = useId()
   return (
-    <label className="block">
-      <span className={`mb-2 block text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</span>
-      {children}
-    </label>
+    <div className="block">
+      <label htmlFor={inputId} className={`mb-2 block text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-stone-500"}`}>{label}</label>
+      {isValidElement(children) ? cloneElement(children as ReactElement<{ id?: string }>, { id: inputId }) : children}
+    </div>
   )
 }
 

@@ -138,6 +138,23 @@ async def _dispatch_durable_book_processing(
 
 
 async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] | None:
+    from fastapi import HTTPException
+
+    from app.services.book_freeze_service import (
+        LEGACY_INCOMPLETE_MESSAGE,
+        book_is_legacy_incomplete,
+        frozen_conflict_message,
+        is_book_frozen,
+        load_persisted_freeze_cutoff,
+    )
+
+    if is_book_frozen(book):
+        raise HTTPException(409, frozen_conflict_message())
+    cutoff = await load_persisted_freeze_cutoff(db)
+    if book_is_legacy_incomplete(book, cutoff):
+        # Deployment transition gate: pre-cutoff incomplete books await the
+        # one-time freeze and must not restart paid processing.
+        raise HTTPException(409, LEGACY_INCOMPLETE_MESSAGE)
     if not _book_has_retryable_processing_state(book):
         return None
 
@@ -158,10 +175,11 @@ async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] 
 
     if should_restart_extraction:
         if getattr(book, "is_editor_project", False):
-            from app.services.editor_project_service import dispatch_rebuild, prepare_rebuild
+            from app.services.editor_project_service import (
+                dispatch_manual_rebuild_with_reservations,
+            )
 
-            await prepare_rebuild(db, book, reason="manual_reprocess")
-            await dispatch_rebuild(db, book)
+            await dispatch_manual_rebuild_with_reservations(db, book)
         else:
             book.status = "processing"
             book.writer_workspace = update_book_processing_state(
@@ -190,12 +208,25 @@ async def retry_book_processing(db: AsyncSession, book: Book) -> dict[str, Any] 
 async def continue_book_processing(db: AsyncSession, book: Book) -> dict[str, Any]:
     from fastapi import HTTPException
 
+    from app.services.book_freeze_service import (
+        LEGACY_INCOMPLETE_MESSAGE,
+        book_is_legacy_incomplete,
+        frozen_conflict_message,
+        is_book_frozen,
+        load_persisted_freeze_cutoff,
+    )
     from app.services.processing_allowance_service import reserve_processing_words
     from app.services.task_execution_service import (
         dispatch_pending_analysis_tasks,
         dispatch_pending_extraction_tasks,
         ensure_task_execution,
     )
+
+    if is_book_frozen(book):
+        raise HTTPException(409, frozen_conflict_message())
+    cutoff = await load_persisted_freeze_cutoff(db)
+    if book_is_legacy_incomplete(book, cutoff):
+        raise HTTPException(409, LEGACY_INCOMPLETE_MESSAGE)
 
     run = (
         (
@@ -355,6 +386,17 @@ async def requeue_stalled_book_processing_if_needed(
     if book.status != "processing":
         return False
 
+    from app.services.book_freeze_service import (
+        book_created_before_cutoff,
+        load_persisted_freeze_cutoff,
+    )
+
+    cutoff = await load_persisted_freeze_cutoff(db)
+    if book_created_before_cutoff(book, cutoff):
+        # Deployment transition gate: automatic recovery must not restart
+        # processing for pre-cutoff books before the one-time freeze runs.
+        return False
+
     processing_started_at = get_processing_started_at(book)
     if processing_started_at is None:
         return False
@@ -426,6 +468,17 @@ def _processing_pipeline_has_blocking_failure(processing: dict[str, Any]) -> boo
     return False
 
 
+def book_processing_has_blocking_failure(book: Book) -> bool:
+    """Whether the stored pipeline for a book contains a failed stage or chapter."""
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
+    processing = (
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
+    return _processing_pipeline_has_blocking_failure(processing)
+
+
 async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) -> bool:
     """Mark a normal uploaded book ready when persisted chapter intelligence is complete."""
     if getattr(book, "is_editor_project", False) or book.status != "processing":
@@ -467,6 +520,97 @@ async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) 
     if processed_count < chapter_count or detailed_summary_count < chapter_count:
         return False
 
+    await _write_ready_book_state(
+        db,
+        book,
+        chapter_count=chapter_count,
+        processed_count=processed_count,
+        detailed_summary_count=detailed_summary_count,
+    )
+    log.warning(
+        "repaired_stale_completed_processing_state book_id=%s chapters=%s", book.id, chapter_count
+    )
+    return True
+
+
+async def complete_book_after_analysis(db: AsyncSession, *, book_id: Any) -> bool:
+    """Finalize a normal upload as ready as soon as the last analysis succeeds.
+
+    The 5-minute stale-processing repair is a safety net, not the primary
+    completion path. Without this, books whose extraction finished before
+    analysis waited for the repair cycle to flip them to ready.
+    """
+    book = await db.get(Book, book_id, with_for_update=True)
+    if book is None or getattr(book, "is_editor_project", False):
+        return False
+    if book.status != "processing":
+        return False
+
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
+    processing = dict(
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
+    if processing.get("rebuild_run_id") or _processing_pipeline_has_blocking_failure(processing):
+        # Rebuilds finalize through the editor-project flow, and blocking
+        # failures must stay visible instead of being promoted to ready.
+        return False
+
+    chapter_count, processed_count, detailed_summary_count = (
+        await db.execute(
+            select(
+                func.count(func.distinct(Chapter.number)).filter(Chapter.word_count > 0),
+                func.count(func.distinct(Chapter.number)).filter(
+                    Chapter.word_count > 0,
+                    Chapter.processed.is_(True),
+                ),
+                func.count(func.distinct(Chapter.number)).filter(
+                    Chapter.word_count > 0,
+                    Chapter.processed.is_(True),
+                    ChapterSummary.mode == "detailed",
+                ),
+            )
+            .select_from(Chapter)
+            .outerjoin(ChapterSummary, ChapterSummary.chapter_id == Chapter.id)
+            .where(Chapter.book_id == book.id)
+        )
+    ).one()
+    chapter_count = int(chapter_count or 0)
+    processed_count = int(processed_count or 0)
+    detailed_summary_count = int(detailed_summary_count or 0)
+    if chapter_count <= 0 or processed_count < chapter_count:
+        return False
+    if detailed_summary_count < chapter_count:
+        return False
+
+    await _write_ready_book_state(
+        db,
+        book,
+        chapter_count=chapter_count,
+        processed_count=processed_count,
+        detailed_summary_count=detailed_summary_count,
+    )
+    log.info(
+        "book_processing_completed book_id=%s chapters=%s", book.id, chapter_count
+    )
+    return True
+
+
+async def _write_ready_book_state(
+    db: AsyncSession,
+    book: Book,
+    *,
+    chapter_count: int,
+    processed_count: int,
+    detailed_summary_count: int,
+) -> None:
+    workspace = normalize_writer_workspace(
+        book.writer_workspace if isinstance(book.writer_workspace, dict) else None
+    )
+    processing = dict(
+        workspace.get("processing") if isinstance(workspace.get("processing"), dict) else {}
+    )
     now = datetime.now(UTC).isoformat()
     processing.update(
         {
@@ -500,6 +644,7 @@ async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) 
     processing["status"] = "ready"
     processing["stage"] = "complete"
     processing["retry_actions"] = []
+    processing["last_error"] = None
     workspace["processing"] = processing
     book.writer_workspace = workspace
     book.status = "ready"
@@ -507,7 +652,3 @@ async def repair_stale_completed_processing_state(db: AsyncSession, book: Book) 
     await db.refresh(book)
     await mark_book_cache_dirty(str(book.id))
     await mark_user_dashboard_cache_dirty(str(book.user_id))
-    log.warning(
-        "repaired_stale_completed_processing_state book_id=%s chapters=%s", book.id, chapter_count
-    )
-    return True

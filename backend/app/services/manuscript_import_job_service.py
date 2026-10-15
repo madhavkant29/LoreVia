@@ -18,6 +18,7 @@ from app.models.book import Book
 from app.models.operations import ManuscriptImportJob
 from app.models.user import User
 from app.schemas.books import ManuscriptImportJobOut, ManuscriptImportResult
+from app.services.book_freeze_service import load_persisted_freeze_cutoff
 from app.services.manuscript_import_service import persist_manuscript_import
 from app.services.processing_allowance_service import ensure_source_storage_capacity
 from app.utils.books.chapter_titles import normalize_chapter_title
@@ -239,37 +240,39 @@ async def dispatch_pending_manuscript_import_jobs(
     now = datetime.now(UTC)
     queued_dispatch_cutoff = now - timedelta(minutes=10)
     running_recovery_cutoff = now - timedelta(hours=2)
-    jobs = list(
-        (
-            await db.execute(
-                select(ManuscriptImportJob)
-                .where(
+    legacy_cutoff = await load_persisted_freeze_cutoff(db)
+    job_statement = (
+        select(ManuscriptImportJob)
+        .where(
+            or_(
+                and_(
+                    ManuscriptImportJob.status == "queued",
                     or_(
-                        and_(
-                            ManuscriptImportJob.status == "queued",
-                            or_(
-                                ManuscriptImportJob.celery_task_id.is_(None),
-                                ManuscriptImportJob.updated_at < queued_dispatch_cutoff,
-                            ),
-                        ),
-                        and_(
-                            ManuscriptImportJob.status == "running",
-                            ManuscriptImportJob.updated_at < running_recovery_cutoff,
-                        ),
-                        and_(
-                            ManuscriptImportJob.status == "cancel_requested",
-                            ManuscriptImportJob.updated_at < running_recovery_cutoff,
-                        ),
-                    )
-                )
-                .order_by(ManuscriptImportJob.created_at.asc())
-                .limit(max(1, min(limit, 100)))
-                .with_for_update(skip_locked=True)
+                        ManuscriptImportJob.celery_task_id.is_(None),
+                        ManuscriptImportJob.updated_at < queued_dispatch_cutoff,
+                    ),
+                ),
+                and_(
+                    ManuscriptImportJob.status == "running",
+                    ManuscriptImportJob.updated_at < running_recovery_cutoff,
+                ),
+                and_(
+                    ManuscriptImportJob.status == "cancel_requested",
+                    ManuscriptImportJob.updated_at < running_recovery_cutoff,
+                ),
             )
         )
-        .scalars()
-        .all()
+        .order_by(ManuscriptImportJob.created_at.asc())
+        .limit(max(1, min(limit, 100)))
+        .with_for_update(skip_locked=True)
     )
+    if legacy_cutoff is not None:
+        # Pre-cutoff imports are held for the one-time freeze; dispatch would
+        # parse files and can trigger paid analysis.
+        job_statement = job_statement.where(
+            ManuscriptImportJob.created_at >= legacy_cutoff
+        )
+    jobs = list((await db.execute(job_statement)).scalars().all())
     dispatched = 0
     for job in jobs:
         if job.status == "cancel_requested":
@@ -379,6 +382,18 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
     if job.status != "queued":
         return {"status": job.status, "job_id": str(job_id)}
 
+    legacy_cutoff = await load_persisted_freeze_cutoff(db)
+    if (
+        legacy_cutoff is not None
+        and job.created_at is not None
+        and job.created_at < legacy_cutoff
+    ):
+        # Deployment transition gate: a message delivered before the cutoff was
+        # recorded must not parse files or queue paid analysis. The one-time
+        # freeze cancels this job explicitly; leave it untouched here.
+        log.warning("manuscript_import_job_held_by_legacy_cutoff job_id=%s", job_id)
+        return {"status": "held_legacy_cutoff", "job_id": str(job_id)}
+
     job.status = "running"
     job.started_at = job.started_at or datetime.now(UTC)
     job.error_detail = None
@@ -477,6 +492,7 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
                 raw=raw,
                 preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
                 preserve_source_chapters=bool(book.preserve_source_chapters),
+                filename=filename,
             )
             screenplay_payload = (
                 parsed_payload.get("screenplay_payload")
@@ -635,4 +651,27 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
             job.request_json = request_state
             await db.commit()
         log.exception("manuscript_import_job_failed", extra={"job_id": str(job_id)})
+        try:
+            import sentry_sdk
+
+            sentry_sdk.set_tag("job_id", str(job_id))
+            if job is not None:
+                sentry_sdk.set_tag("book_id", str(job.book_id))
+                sentry_sdk.set_tag("user_id", str(job.user_id))
+            sentry_sdk.set_context(
+                "manuscript_import_job",
+                {
+                    "job_id": str(job_id),
+                    "file_count": len(job.source_files_json or []) if job is not None else 0,
+                    "failure_category": (
+                        "validation"
+                        if isinstance(exc, HTTPException)
+                        and 400 <= int(exc.status_code) < 500
+                        else "processing"
+                    ),
+                },
+            )
+            sentry_sdk.capture_exception(exc)
+        except Exception:
+            log.warning("import_job_sentry_report_failed job_id=%s", job_id, exc_info=True)
         return {"status": "failed", "job_id": str(job_id)}

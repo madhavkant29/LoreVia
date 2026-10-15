@@ -13,7 +13,7 @@ type Props = {
   inputRef: RefObject<HTMLInputElement | null>
   newUploadAccept: string
   files: File[]
-  setFiles: Dispatch<SetStateAction<File[]>>
+  onFilesSelected: (files: File[]) => void
   primaryFile: File | null
   isScreenplayWorkspace: boolean
   importPreview: ImportPreview | null
@@ -34,7 +34,7 @@ export function UploadSourceStep({
   inputRef,
   newUploadAccept,
   files,
-  setFiles,
+  onFilesSelected,
   primaryFile,
   isScreenplayWorkspace,
   importPreview,
@@ -69,7 +69,10 @@ export function UploadSourceStep({
             type="file"
             accept={newUploadAccept}
             className="hidden"
-            onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+            onChange={(event) => {
+              onFilesSelected(Array.from(event.target.files ?? []))
+              event.target.value = ""
+            }}
           />
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -79,7 +82,7 @@ export function UploadSourceStep({
               <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 {files.length > 0
                   ? "Replace the selected file at any time before uploading."
-                  : `Supported formats: ${isScreenplayWorkspace ? "PDF, TXT, Markdown" : "DOCX, PDF, EPUB, TXT, Markdown"}.`}
+                  : `Supported formats: ${isScreenplayWorkspace ? "PDF, Fountain, TXT, Markdown" : "DOCX, PDF, EPUB, TXT, Markdown, Scrivener"}. Up to 100 MB per file.`}
               </p>
             </div>
             <div className={`inline-flex rounded-full px-4 py-2 text-sm font-medium ${isDark ? "bg-white text-slate-950" : "bg-slate-900 text-white"}`}>

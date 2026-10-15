@@ -74,40 +74,51 @@ async def test_apply_ingestion_token_budget_truncates_free_user(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_apply_ingestion_token_budget_marks_error_when_budget_exhausted(monkeypatch):
+async def test_apply_ingestion_token_budget_blocks_with_visible_failure_when_exhausted(monkeypatch):
     monkeypatch.setattr(budget_service, "has_paid_reading_access", lambda _user: False)
     monkeypatch.setattr(budget_service.settings, "FREE_TOTAL_TOKEN_BUDGET", 5)
     monkeypatch.setattr(budget_service, "count_tokens", lambda text: len(str(text).split()))
 
     db = FakeDb(used_tokens=5)
+    book = SimpleNamespace(id=uuid.uuid4())
     result = await budget_service.apply_ingestion_token_budget(
         db,
-        book=SimpleNamespace(id=uuid.uuid4()),
+        book=book,
         user=SimpleNamespace(id=uuid.uuid4()),
         all_chapters=[{"text": "one two"}],
     )
 
     assert result["error"] == "budget_exhausted"
     assert result["processed_tokens"] == 0
-    assert db.execute_calls == 2
+    assert db.execute_calls == 1
     assert db.commits == 1
+    # The author must see a failed state instead of an endlessly queued book.
+    assert book.status == "failed"
+    assert book.writer_workspace["processing"]["status"] == "failed"
+    assert book.writer_workspace["processing"]["stage"] == "failed"
+    assert book.writer_workspace["processing"]["last_error"]
 
 
 @pytest.mark.asyncio
-async def test_apply_ingestion_token_budget_marks_error_when_first_chapter_too_large(monkeypatch):
+async def test_apply_ingestion_token_budget_blocks_with_visible_failure_when_first_chapter_too_large(
+    monkeypatch,
+):
     monkeypatch.setattr(budget_service, "has_paid_reading_access", lambda _user: False)
     monkeypatch.setattr(budget_service.settings, "FREE_TOTAL_TOKEN_BUDGET", 5)
     monkeypatch.setattr(budget_service, "count_tokens", lambda text: len(str(text).split()))
 
     db = FakeDb(used_tokens=3)
+    book = SimpleNamespace(id=uuid.uuid4())
     result = await budget_service.apply_ingestion_token_budget(
         db,
-        book=SimpleNamespace(id=uuid.uuid4()),
+        book=book,
         user=SimpleNamespace(id=uuid.uuid4()),
         all_chapters=[{"text": "one two three"}],
     )
 
     assert result["error"] == "insufficient_remaining_budget"
     assert result["remaining_budget"] == 2
-    assert db.execute_calls == 2
+    assert db.execute_calls == 1
     assert db.commits == 1
+    assert book.status == "failed"
+    assert book.writer_workspace["processing"]["status"] == "failed"

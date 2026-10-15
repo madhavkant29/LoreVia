@@ -83,7 +83,6 @@ export function PublicWriterProfilePageClient({
   const forumDiscussionHref = project?.forum_post_id ? `/public/forum/${project.forum_post_id}` : null
 
   const pageClass = isDark ? "bg-[#10161d] text-slate-100" : "bg-[#f3f4f6] text-slate-950"
-  const panelClass = isDark ? "border-white/[0.08] bg-[#141b23]" : "border-[#dde2e8] bg-white"
   const insetClass = isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"
   const mutedText = isDark ? "text-slate-400" : "text-slate-600"
   const softText = isDark ? "text-slate-500" : "text-slate-500"
@@ -101,67 +100,22 @@ export function PublicWriterProfilePageClient({
       icon: <SparkIcon />,
     },
     {
-      label: "Posts",
-      value: String(profileView.forum_post_count),
-      detail: "Visible threads",
-      icon: <PostIcon />,
-    },
-    {
-      label: "Comments",
-      value: String(profileView.forum_comment_count),
-      detail: "Visible replies",
-      icon: <CommentIcon />,
-    },
-    {
-      label: "Votes",
-      value: `${profileView.reputation_likes_received}/${profileView.reputation_dislikes_received}`,
-      detail: "Likes / dislikes",
-      icon: <HeartIcon />,
-    },
-    {
-      label: "Views",
-      value: profileView.public_analytics.total_book_views.toLocaleString(),
-      detail: "Across public books",
-      icon: <EyeIcon />,
-    },
-    {
-      label: "Readers 30d",
-      value: profileView.public_analytics.total_unique_readers_30d.toLocaleString(),
-      detail: "Distinct recent visitors",
-      icon: <ReadersIcon />,
-    },
-  ]
-
-  const footprintStats = [
-    {
       label: "Public books",
       value: String(profileView.public_books_count),
-      detail: "Visible creator-published books",
+      detail: "Published in the library",
       icon: <BookIcon />,
     },
     {
-      label: "Chapters",
-      value: String(profileView.public_analytics.total_chapters),
-      detail: "Visible public chapters",
-      icon: <PageIcon />,
+      label: "Readers, 30 days",
+      value: profileView.public_analytics.total_unique_readers_30d.toLocaleString(),
+      detail: "Across public books",
+      icon: <ReadersIcon />,
     },
     {
-      label: "Words",
-      value: formatWordProgress(profileView.public_analytics.total_words),
-      detail: "Estimated readable words",
-      icon: <TypeIcon />,
-    },
-    {
-      label: "Latest published",
-      value: formatCompactDate(profileView.public_analytics.latest_published_at),
-      detail: "Most recent dated upload",
-      icon: <CalendarIcon />,
-    },
-    {
-      label: "Open discussions",
-      value: String(profileView.public_analytics.open_forum_discussions_count),
-      detail: "Active public forum threads",
-      icon: <BubbleIcon />,
+      label: "Forum contributions",
+      value: String(profileView.forum_post_count + profileView.forum_comment_count),
+      detail: `${profileView.forum_post_count} posts · ${profileView.forum_comment_count} comments`,
+      icon: <PostIcon />,
     },
   ]
 
@@ -173,20 +127,20 @@ export function PublicWriterProfilePageClient({
           Back to public library
         </Link>
 
-        <section className={`mt-5 rounded-lg border p-5 sm:p-6 lg:p-7 ${panelClass}`}>
+        <section data-testid="writer-profile-masthead" className={`mt-5 border-y py-6 lg:py-8 ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-              <div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border text-4xl ${insetClass} ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+              <div className={`flex h-20 w-20 shrink-0 items-center justify-center rounded-full border text-3xl ${insetClass} ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                 @
               </div>
 
               <div className="max-w-xl">
-                <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${eyebrowClass}`}>Public writer profile</p>
+                <p className={`text-sm font-semibold ${eyebrowClass}`}>Public writer profile</p>
                 <h1 className="mt-2 font-display text-[2.3rem] tracking-[-0.035em] sm:text-[2.7rem]">@{profileView.username}</h1>
                 <p className={`mt-3 max-w-lg text-sm leading-7 ${mutedText}`}>
                   Visible public profile for reading activity, discussion history, and the public books this writer has chosen to share.
                 </p>
-                <p className={`mt-4 text-3xs font-semibold uppercase tracking-[0.22em] ${softText}`}>Public forum status: public</p>
+                <p className={`mt-4 text-xs font-semibold ${softText}`}>Public forum status: public</p>
               </div>
             </div>
 
@@ -198,7 +152,7 @@ export function PublicWriterProfilePageClient({
             </Link>
           </div>
 
-          <div className="mt-6 grid gap-4 border-t pt-6 sm:grid-cols-2 xl:grid-cols-6">
+          <div className="mt-6 grid gap-5 border-t pt-6 sm:grid-cols-2 xl:grid-cols-4">
             {overviewStats.map((stat) => (
               <CompactStat
                 key={stat.label}
@@ -210,38 +164,23 @@ export function PublicWriterProfilePageClient({
               />
             ))}
           </div>
+          <p className={`mt-6 border-t pt-4 text-xs ${softText}`}>
+            {profileView.public_analytics.total_book_views.toLocaleString()} total book views
+            {" · "}{profileView.public_analytics.total_chapters.toLocaleString()} visible chapters
+            {" · "}{formatWordProgress(profileView.public_analytics.total_words)} visible
+          </p>
         </section>
-
-        <SectionCard
-          isDark={isDark}
-          eyebrow="Public upload analytics"
-          title="Visible public footprint"
-          className="mt-6"
-        >
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            {footprintStats.map((stat) => (
-              <MetricCard
-                key={stat.label}
-                isDark={isDark}
-                label={stat.label}
-                value={stat.value}
-                detail={stat.detail}
-                icon={stat.icon}
-              />
-            ))}
-          </div>
-        </SectionCard>
 
         <SectionCard
           isDark={isDark}
           eyebrow="Public books"
           title="Published books"
           trailing={<p className={`text-sm ${softText}`}>{profileView.public_books_count} visible upload{profileView.public_books_count === 1 ? "" : "s"}</p>}
-          className="mt-4"
+          className="mt-10"
         >
           <div className="mt-5">
             {profileView.public_books.length > 0 ? (
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className={`border-y ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
                 {profileView.public_books.map((book) => (
                   <PublicBookCard key={book.id} isDark={isDark} book={book} />
                 ))}
@@ -262,11 +201,11 @@ export function PublicWriterProfilePageClient({
               <TabButton isDark={isDark} active={activeTab === "comments"} onClick={() => setActiveTab("comments")} label={`Comments (${profileView.comments.length})`} />
             </div>
           }
-          className="mt-4"
+          className="mt-10"
         >
           <div className="mt-5">
             {activeTab === "posts" ? (
-              <div className="space-y-4">
+              <div className={`border-y ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
                 {profileView.posts.length === 0 ? (
                   <InlineEmptyState isDark={isDark} icon={<BubbleIcon />} text="No public posts are visible for this writer yet." />
                 ) : profileView.posts.map((post) => (
@@ -274,7 +213,7 @@ export function PublicWriterProfilePageClient({
                 ))}
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className={`border-y ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
                 {profileView.comments.length === 0 ? (
                   <InlineEmptyState isDark={isDark} icon={<BubbleIcon />} text="No public comments are visible for this writer yet." />
                 ) : profileView.comments.map((comment) => (
@@ -289,21 +228,16 @@ export function PublicWriterProfilePageClient({
           isDark={isDark}
           eyebrow="Surfaced project"
           title={project?.title || "No public sample surfaced yet"}
-          className="mt-4"
+          className="mt-10"
         >
           <div className="mt-5">
             {project ? (
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_16rem]">
-                <div className={`rounded-md border p-5 ${insetClass}`}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {project.genre ? (
-                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isDark ? "bg-amber-400/15 text-amber-200" : "bg-amber-100 text-amber-800"}`}>
-                        {project.genre}
-                      </span>
-                    ) : null}
-                    <span className={`rounded-full px-3 py-1 text-xs ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-white text-slate-600"}`}>
-                      {formatWordProgress(project.progress_words)}
-                    </span>
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_16rem]">
+                <div className="py-2">
+                  <div className={`flex flex-wrap items-center gap-2 text-xs font-semibold ${softText}`}>
+                    {project.genre ? <span>{project.genre}</span> : null}
+                    {project.genre ? <span aria-hidden="true">&bull;</span> : null}
+                    <span>{formatWordProgress(project.progress_words)}</span>
                   </div>
                   <p className={`mt-4 text-sm leading-7 ${mutedText}`}>{project.description || "This writer has not added a project description yet."}</p>
                   {forumDiscussionHref || publicSampleHref ? (
@@ -322,8 +256,8 @@ export function PublicWriterProfilePageClient({
                   ) : null}
                 </div>
 
-                <div className={`rounded-md border p-5 ${insetClass}`}>
-                  <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${softText}`}>Public reach</p>
+                <div className={`border-l pl-6 ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
+                  <p className={`text-sm font-semibold ${softText}`}>Public reach</p>
                   <p className="mt-3 text-[1.75rem] font-semibold tracking-[-0.02em]">{profileView.public_analytics.total_chapter_views.toLocaleString()}</p>
                   <p className={`mt-3 text-sm leading-7 ${mutedText}`}>Chapter opens across this writer&apos;s visible public uploads.</p>
                 </div>
@@ -354,10 +288,10 @@ function SectionCard({
   children: React.ReactNode
 }) {
   return (
-    <section className={`rounded-lg border p-5 sm:p-6 ${isDark ? "border-white/[0.08] bg-[#141b23]" : "border-[#dde2e8] bg-white"} ${className}`.trim()}>
+    <section className={`border-t pt-8 ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"} ${className}`.trim()}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className={`text-3xs font-semibold uppercase tracking-[0.24em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{eyebrow}</p>
+          <p className={`text-sm font-semibold ${isDark ? "text-slate-400" : "text-slate-600"}`}>{eyebrow}</p>
           <h2 className="mt-1 font-display text-[2rem] tracking-[-0.03em]">{title}</h2>
         </div>
         {trailing ? <div className="sm:pt-1">{trailing}</div> : null}
@@ -392,35 +326,6 @@ function CompactStat({
   )
 }
 
-function MetricCard({
-  isDark,
-  label,
-  value,
-  detail,
-  icon,
-}: {
-  isDark: boolean
-  label: string
-  value: string
-  detail: string
-  icon: React.ReactNode
-}) {
-  return (
-    <div className={`rounded-md border p-4 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
-      <div className="flex items-start gap-3">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isDark ? "bg-white/[0.04] text-slate-300" : "bg-white text-slate-500"} border ${isDark ? "border-white/[0.08]" : "border-slate-200"}`}>
-          {icon}
-        </div>
-        <div className="min-w-0">
-          <p className={`text-3xs font-semibold uppercase tracking-[0.18em] ${isDark ? "text-slate-500" : "text-slate-500"}`}>{label}</p>
-          <p className="mt-2 text-[1.35rem] font-semibold tracking-[-0.02em]">{value}</p>
-          <p className={`mt-1 text-sm leading-6 ${isDark ? "text-slate-400" : "text-slate-600"}`}>{detail}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function TabButton({ isDark, active, onClick, label }: { isDark: boolean; active: boolean; onClick: () => void; label: string }) {
   return (
     <button
@@ -443,7 +348,7 @@ function TabButton({ isDark, active, onClick, label }: { isDark: boolean; active
 
 function PublicBookCard({ isDark, book }: { isDark: boolean; book: PublicBook }) {
   return (
-    <article className={`rounded-md border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
+    <article className={`border-b py-6 last:border-b-0 ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
         <span className={isDark ? "text-cyan-300" : "text-cyan-700"}>{book.genre || "Unspecified genre"}</span>
         <span className="text-slate-400">&bull;</span>
@@ -457,13 +362,13 @@ function PublicBookCard({ isDark, book }: { isDark: boolean; book: PublicBook })
         <span>{book.total_chapters ?? 0} chapters</span>
         <span>{book.analytics?.book_view_count?.toLocaleString?.() ?? 0} views</span>
       </div>
-      <div className="mt-5 flex flex-wrap gap-3">
-        <Link href={`/public/${book.public_slug || book.id}` as Route} className={`inline-flex rounded-md px-4 py-2 text-sm font-semibold transition ${isDark ? "bg-teal-300 text-slate-950 hover:bg-teal-200" : "bg-[#1f615d] text-white hover:bg-[#174c49]"}`}>
-          Read public book
+      <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold">
+        <Link href={`/public/${book.public_slug || book.id}` as Route} className={isDark ? "text-teal-300 hover:text-teal-200" : "text-[#1f615d] hover:text-[#174c49]"}>
+          Read public book &rarr;
         </Link>
         {book.active_forum_post_id ? (
-          <Link href={`/public/forum/${book.active_forum_post_id}` as Route} className={`inline-flex rounded-md border px-4 py-2 text-sm font-semibold transition ${isDark ? "border-white/10 bg-white/[0.03] text-white hover:bg-white/[0.08]" : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50"}`}>
-            Open discussion
+          <Link href={`/public/forum/${book.active_forum_post_id}` as Route} className={isDark ? "text-slate-300 hover:text-white" : "text-slate-700 hover:text-slate-950"}>
+            Open discussion &rarr;
           </Link>
         ) : null}
       </div>
@@ -477,7 +382,7 @@ function PostActivityCard({ isDark, post }: { isDark: boolean; post: PublicUserA
   const statusLabel = post.status === "open" ? "Open" : "Closed"
 
   return (
-    <article className={`rounded-md border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
+    <article className={`border-b py-6 last:border-b-0 ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
         <span className={isDark ? "text-cyan-300" : "text-cyan-700"}>{typeLabel}</span>
         <span className="text-slate-400">&bull;</span>
@@ -498,7 +403,7 @@ function PostActivityCard({ isDark, post }: { isDark: boolean; post: PublicUserA
 
 function CommentActivityCard({ isDark, comment }: { isDark: boolean; comment: PublicUserActivityComment }) {
   return (
-    <article className={`rounded-md border p-5 ${isDark ? "border-white/[0.08] bg-[#111820]" : "border-[#e5e7eb] bg-[#fbfcfd]"}`}>
+    <article className={`border-b py-6 last:border-b-0 ${isDark ? "border-white/[0.08]" : "border-[#dde2e8]"}`}>
       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]">
         <span className={comment.thread_type === "general" ? (isDark ? "text-cyan-300" : "text-cyan-700") : (isDark ? "text-amber-300" : "text-amber-700")}>
           {comment.thread_type === "general" ? "General" : "Novel"}
@@ -523,7 +428,7 @@ function CommentActivityCard({ isDark, comment }: { isDark: boolean; comment: Pu
 
 function InlineEmptyState({ isDark, icon, text }: { isDark: boolean; icon: React.ReactNode; text: string }) {
   return (
-    <div className={`flex items-center gap-3 rounded-md border px-4 py-4 text-sm ${isDark ? "border-white/[0.08] bg-[#111820] text-slate-500" : "border-[#e5e7eb] bg-[#fbfcfd] text-slate-500"}`}>
+    <div className={`flex items-center gap-3 py-5 text-sm ${isDark ? "text-slate-500" : "text-slate-500"}`}>
       <span className={isDark ? "text-slate-400" : "text-slate-500"}>{icon}</span>
       <span>{text}</span>
     </div>
@@ -555,31 +460,6 @@ function PostIcon() {
   )
 }
 
-function CommentIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 7.5h12A2.5 2.5 0 0120.5 10v5A2.5 2.5 0 0118 17.5H10l-4.5 3v-3H6A2.5 2.5 0 013.5 15v-5A2.5 2.5 0 016 7.5z" />
-    </svg>
-  )
-}
-
-function HeartIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z" />
-    </svg>
-  )
-}
-
-function EyeIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
-      <circle cx="12" cy="12" r="2.7" />
-    </svg>
-  )
-}
-
 function ReadersIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
@@ -602,23 +482,6 @@ function PageIcon() {
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M7 4.5h8l3 3V19.5H7z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 4.5v4h4" />
-    </svg>
-  )
-}
-
-function TypeIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7.5h16M9 7.5v9M15 7.5v9M7 16.5h10" />
-    </svg>
-  )
-}
-
-function CalendarIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 4.5v3M17 4.5v3M4.5 9h15" />
-      <rect x="4.5" y="6.5" width="15" height="13" rx="2.5" />
     </svg>
   )
 }

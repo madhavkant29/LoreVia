@@ -96,6 +96,16 @@ class FakeSessionContext:
         return False
 
 
+@pytest.fixture(autouse=True)
+def _treat_books_as_not_frozen(monkeypatch):
+    """These tests predate the administrative-freeze guard; keep them unfrozen."""
+
+    async def _not_frozen(*_args, **_kwargs):
+        return False
+
+    monkeypatch.setattr(analysis_consumer, "book_is_frozen", _not_frozen)
+
+
 def test_inflight_lock_ttl_exceeds_hard_limit():
     ANALYSIS_HARD_LIMIT = 15 * 60  # celery_app.py task_annotations time_limit
     MINIMUM_TTL = ANALYSIS_HARD_LIMIT + 300
@@ -385,6 +395,16 @@ async def test_analyse_chapter_queues_first_impression_only_on_first_ready_trans
     )
     queue_calls = []
     notifications = []
+    completed_books = []
+
+    async def complete_book(*args, **kwargs):
+        completed_books.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "app.services.pipeline_state_service.complete_book_after_analysis",
+        complete_book,
+    )
 
     monkeypatch.setattr(analysis_consumer, "AsyncSessionLocal", lambda: FakeSessionContext(db))
     monkeypatch.setattr(
@@ -465,6 +485,8 @@ async def test_analyse_chapter_queues_first_impression_only_on_first_ready_trans
     assert result["chapter_id"] == str(chapter.id)
     assert len(notifications) == 1
     assert len(queue_calls) == expected_queue_calls
+    assert len(completed_books) == 1
+    assert completed_books[0] == {"book_id": book.id}
     if expected_queue_calls:
         assert queue_calls[0] == {
             "book_id": book.id,

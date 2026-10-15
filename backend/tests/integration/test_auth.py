@@ -1638,6 +1638,22 @@ async def test_tier_limits_reflect_strict_free_plan(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_tier_limits_expose_architect_daily_advisor_and_scan_limits(client, auth_headers):
+    response = await client.get("/api/v1/auth/tier-limits", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["author_advisor_per_day"] == 30
+    assert payload["architect_advisor_per_day"] == 60
+    assert payload["author_high_cost_turns_per_day"] == 30
+    assert payload["architect_high_cost_turns_per_day"] == 60
+    assert payload["author_prediction_per_day"] == 30
+    assert payload["architect_prediction_per_day"] == 60
+    assert payload["architect_advisor_per_week"] == 420
+    assert payload["architect_advisor_per_month"] == 1800
+
+
+@pytest.mark.asyncio
 async def test_daily_word_goal_can_be_updated(client, auth_headers):
     response = await client.patch(
         "/api/v1/auth/me/daily-word-goal",

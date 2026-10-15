@@ -7,8 +7,8 @@ from fastapi import HTTPException
 from app.schemas.support import SupportRecentMessage, SupportUiContext
 from app.services import support_retrieval_service
 from app.services.support_retrieval_service import (
-    answer_support_question_ai,
     answer_support_question,
+    answer_support_question_ai,
     load_support_corpus,
     rank_support_articles,
 )

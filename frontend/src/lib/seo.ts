@@ -63,7 +63,7 @@ export const websiteJsonLd = {
     "@type": "Organization",
     name: SITE_NAME,
     url: SITE_URL,
-    logo: toAbsoluteUrl("/logoandtext.png"),
+    logo: toAbsoluteUrl("/logoandtextlight.png"),
   },
 }
 
@@ -72,7 +72,7 @@ export const organizationJsonLd = {
   "@type": "Organization",
   name: SITE_NAME,
   url: SITE_URL,
-  logo: toAbsoluteUrl("/logoandtext.png"),
+  logo: toAbsoluteUrl("/logoandtextlight.png"),
   sameAs: [
     "https://x.com/getlorevia",
   ],
@@ -188,7 +188,7 @@ export function buildArticleJsonLd({
       url: SITE_URL,
       logo: {
         "@type": "ImageObject",
-        url: toAbsoluteUrl("/logoandtext.png"),
+        url: toAbsoluteUrl("/logoandtextlight.png"),
       },
     },
     image: [toAbsoluteUrl(image)],

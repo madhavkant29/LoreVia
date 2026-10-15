@@ -1,6 +1,11 @@
 # LoreVia UI/UX Vulnerability Audit for Late-Stage Startup Readiness
 
+> Historical audit. Active implementation and verification are tracked in
+> [`frontend-professional-ui-redesign-tracker.md`](./frontend-professional-ui-redesign-tracker.md).
+
 Date: 2026-06-29
+
+Implementation status: Closed on 2026-09-30. The findings were resolved through the frontend professional UI redesign, and the final release evidence is recorded in the [redesign tracker](./frontend-professional-ui-redesign-tracker.md). The production verification covered every listed authenticated and public route at desktop, laptop, tablet, and 390px mobile widths, plus 1,121 unit tests and 112 end-to-end tests.
 
 ## Scope and Method
 

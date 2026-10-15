@@ -1,3 +1,3 @@
-import { MarketingFooterLayout } from "@/components/layout/MarketingFooterLayout"
-
-export default MarketingFooterLayout
+export default function StatusLayout({ children }: { children: React.ReactNode }) {
+  return children
+}

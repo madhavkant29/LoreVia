@@ -295,6 +295,19 @@ async def get_paddle_transaction_state(
         return _transaction_state_from_data(data)
 
 
+async def get_subscription(subscription_id: str) -> dict[str, Any] | None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            f"{PADDLE_API_BASE}/subscriptions/{subscription_id}",
+            headers=_headers(),
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        data = response.json().get("data") or {}
+        return data or None
+
+
 async def find_paddle_transaction_by_checkout_intent(
     checkout_intent_id: str,
     *,

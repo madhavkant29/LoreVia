@@ -71,4 +71,17 @@ if (process.env.E2E_NEXT_DIST_DIR) {
   nextConfig.distDir = process.env.E2E_NEXT_DIST_DIR
 }
 
+// Fail closed: a production bundle must never carry the E2E mock flag unless a
+// server-only acknowledgement was explicitly set for an approved test build.
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.NEXT_PUBLIC_E2E_MOCK_API === "1" &&
+  process.env.ADMIN_E2E_ALLOW_PRODUCTION !== "1"
+) {
+  throw new Error(
+    "Refusing to build a production bundle with NEXT_PUBLIC_E2E_MOCK_API=1. " +
+      "Unset the flag, or set ADMIN_E2E_ALLOW_PRODUCTION=1 for an approved test build.",
+  )
+}
+
 module.exports = nextConfig

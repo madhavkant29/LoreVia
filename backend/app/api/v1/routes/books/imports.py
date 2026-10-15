@@ -28,8 +28,14 @@ from app.schemas.books import (
     ReadabilityMetricsOut,
     ReadabilityRequestBody,
 )
+from app.services.book_freeze_service import frozen_conflict_message, is_book_frozen
 from app.services.book_service import create_empty_editor_project_with_series
-from app.services.book_upload_service import create_uploaded_book_from_raw
+from app.services.book_upload_service import (
+    DUPLICATE_UPLOAD_MESSAGE,
+    create_uploaded_book_from_raw,
+    find_active_duplicate_upload,
+    upload_source_fingerprint,
+)
 from app.services.manuscript_import_job_service import (
     cancel_manuscript_import_job,
     get_manuscript_import_job,
@@ -124,6 +130,12 @@ async def upload_book_endpoint(
     if not raw:
         raise HTTPException(400, "Uploaded file is empty")
     validate_document_upload_bytes(file.filename, raw, fmt)
+    fingerprint = upload_source_fingerprint(raw)
+    duplicate = await find_active_duplicate_upload(
+        db, user_id=current_user.id, fingerprint=fingerprint
+    )
+    if duplicate is not None:
+        raise HTTPException(409, DUPLICATE_UPLOAD_MESSAGE)
     preview = await load_or_build_upload_preview(
         user_id=current_user.id,
         raw=raw,
@@ -131,6 +143,13 @@ async def upload_book_endpoint(
         work_type=resolved_work_type,
     )
     total_words = int(preview.get("total_words") or 0)
+    if total_words <= 0:
+        raise HTTPException(
+            400,
+            "We couldn't find any readable text in this file. Scanned PDFs need OCR "
+            "before upload; otherwise re-export the manuscript as PDF, DOCX, EPUB, "
+            "TXT, or Markdown and try again.",
+        )
     await ensure_source_storage_capacity(db, current_user, len(raw))
     await ensure_active_word_capacity(db, current_user, total_words)
     cover_raw = None
@@ -279,7 +298,9 @@ async def import_manuscript_content(
 ):
     book = await get_owned_book(db, book_id, current_user.id)
     require_author_access(current_user)
-    ensure_project_writable(book)
+    if is_book_frozen(book):
+        raise HTTPException(409, frozen_conflict_message())
+    await ensure_project_writable(db, book)
     assert_editor_project_not_rebuilding(book)
     manuscript_files = [upload for upload in (files or []) if upload.filename]
     if manuscript_files:

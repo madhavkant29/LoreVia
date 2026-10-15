@@ -85,6 +85,8 @@ describe("PublicLibraryPageClient", () => {
     expect(view.querySelector('a[href="/public/atlas-rising"]')).not.toBeNull()
     expect(view.querySelector('a[href="/public/book-2"]')).not.toBeNull()
     expect(view.querySelector('a[href="/public/forum/post-1"]')?.textContent).toContain("Discussion")
+    expect(view.querySelector("[data-testid='public-book-list']")?.querySelectorAll("article")).toHaveLength(2)
+    expect(view.querySelectorAll("[data-testid='public-book-list'] .rounded-lg")).toHaveLength(0)
     expect(view.querySelector("main")?.className).toContain("bg-[#0a0f14]")
     expect(view.querySelector("button")?.textContent).toContain("Load more books")
 
@@ -123,7 +125,8 @@ describe("PublicLibraryPageClient", () => {
   it("renders the empty public library state", async () => {
     queryState.data = { pages: [{ items: [], next_cursor: null, has_more: false }], pageParams: [null] }
     const view = await renderElement(<PublicLibraryPageClient />)
-    expect(view.textContent).toContain("No public showcase books are available yet.")
+    expect(view.textContent).toContain("The public library is opening soon.")
+    expect(view.querySelector('a[href="/demo/workspace"]')).not.toBeNull()
     expect(view.querySelector('a[href="/public/forum"]')).not.toBeNull()
     expect(view.querySelector('a[href="/register"]')).not.toBeNull()
   })

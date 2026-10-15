@@ -9,6 +9,7 @@ const checkout = vi.fn()
 const checkoutPreview = vi.fn()
 const abandonCheckout = vi.fn()
 const portal = vi.fn()
+const subscription = vi.fn()
 let authUser: unknown = null
 let theme = "light"
 let scriptOnLoad: (() => void) | undefined
@@ -42,6 +43,7 @@ vi.mock("@/lib/api/billing", () => ({
     checkoutPreview: (...args: unknown[]) => checkoutPreview(...args),
     abandonCheckout: (...args: unknown[]) => abandonCheckout(...args),
     portal: (...args: unknown[]) => portal(...args),
+    subscription: (...args: unknown[]) => subscription(...args),
   },
 }))
 
@@ -100,6 +102,22 @@ afterEach(() => {
   checkoutPreview.mockReset()
   abandonCheckout.mockReset()
   portal.mockReset()
+  subscription.mockReset()
+  subscription.mockResolvedValue({
+    plan: "author_monthly",
+    plan_tier: "author",
+    status: "active",
+    display_state: "active",
+    price: { amount: 19, currency: "USD", interval: "month" },
+    current_period_start: "2026-09-19T00:00:00Z",
+    current_period_end: "2026-10-19T00:00:00Z",
+    cancel_at_period_end: false,
+    cancellation_scheduled_at: null,
+    next_charge_at: "2026-10-19T00:00:00Z",
+    auto_renew: true,
+    last_payment_status: null,
+    has_paddle_subscription: true,
+  })
   authUser = null
   theme = "light"
   scriptOnLoad = undefined
@@ -115,7 +133,7 @@ describe("runtime marketing and legal pages", () => {
   it("renders pricing plans and routes guests to registration", async () => {
     await renderElement(<PricingPlans surface="public" nonce="nonce-1" />)
 
-    expect(container?.textContent).toContain("Plans for fiction authors")
+    expect(container?.textContent).toContain("Every new account starts with 10 days of Author access")
     expect(container?.textContent).toContain("Free")
     expect(container?.textContent).toContain("Author")
     expect(container?.textContent).toContain("Architect")
@@ -237,7 +255,8 @@ describe("runtime marketing and legal pages", () => {
 
     expect(container?.textContent).toContain("Your current plan")
     expect(container?.textContent).toContain("Author")
-    expect(container?.textContent).toContain("Manage billing / cancel subscription")
+    expect(container?.textContent).toContain("Manage subscription")
+    expect(container?.textContent).toContain("Next renewal")
     expect(container?.querySelector('a[href="/refund"]')?.textContent).toContain("Refund policy")
     expect(container?.querySelector('a[href^="mailto:support@getlorevia.com"]')?.textContent).toContain("Request a refund")
 
@@ -245,11 +264,43 @@ describe("runtime marketing and legal pages", () => {
       billing_enabled: true,
       portal_url: "https://billing.example.test/session",
     })
-    await clickByText("Manage billing / cancel subscription")
+    await clickByText("Manage subscription")
 
     expect(portal).toHaveBeenCalledTimes(1)
     expect(checkoutPreview).not.toHaveBeenCalled()
     expect(window.location.href).toBe("https://billing.example.test/session")
+  })
+
+  it("shows scheduled cancellation instead of a renewal on the pricing surface", async () => {
+    authUser = {
+      id: "cancelling-user",
+      email: "cancelling@example.com",
+      tier: "author",
+      plan_tier: "author",
+      trial_active: false,
+    }
+    subscription.mockResolvedValue({
+      plan: "author_monthly",
+      plan_tier: "author",
+      status: "active",
+      display_state: "cancellation_scheduled",
+      price: { amount: 19, currency: "USD", interval: "month" },
+      current_period_start: "2026-09-19T00:00:00Z",
+      current_period_end: "2026-10-19T00:00:00Z",
+      cancel_at_period_end: true,
+      cancellation_scheduled_at: "2026-10-19T00:00:00Z",
+      next_charge_at: null,
+      auto_renew: false,
+      last_payment_status: null,
+      has_paddle_subscription: true,
+    })
+
+    await renderElement(<PricingPlans surface="app" />)
+
+    expect(container?.textContent).toContain("Cancellation scheduled")
+    expect(container?.textContent).toContain("October 19, 2026")
+    expect(container?.textContent).toContain("won't be charged again")
+    expect(container?.textContent).not.toContain("Next renewal")
   })
 
   it("cancels a still-pending transaction when Paddle checkout is closed", async () => {

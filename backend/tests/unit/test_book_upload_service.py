@@ -19,12 +19,20 @@ def _mock_upload_intent_io(monkeypatch):
         "clear_upload_intent",
         AsyncMock(return_value=True),
     )
+    monkeypatch.setattr(
+        book_upload_service,
+        "find_active_duplicate_upload",
+        AsyncMock(return_value=None),
+    )
 
 
 class _FailingCommitDb:
     def __init__(self) -> None:
         self.added = []
         self.rollback = AsyncMock()
+
+    async def execute(self, *_args, **_kwargs):
+        return None
 
     def add(self, value) -> None:
         self.added.append(value)

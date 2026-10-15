@@ -8,6 +8,7 @@ import { buildManuscriptRenderProps } from "./manuscriptPage.renderProps"
 import { useManuscriptRuntimeEffects } from "./manuscriptPage.runtimeEffects"
 import { useManuscriptPageSetup } from "./manuscriptPage.setup"
 import { ManuscriptOfflineSync } from "@/components/author/ManuscriptOfflineSync"
+import { ErrorCard } from "@/components/ui/ErrorCard"
 
 export function ManuscriptPageInner() {
   const setup = useManuscriptPageSetup()
@@ -27,6 +28,10 @@ export function ManuscriptPageInner() {
 
   if (setup.loading) {
     return <ManuscriptEditorSkeleton isDark={setup.isDark} />
+  }
+
+  if (documentBindings.loadError) {
+    return <div className="mx-auto max-w-2xl px-4 py-10"><ErrorCard title="Unable to open manuscript" message={documentBindings.loadError} onRetry={() => void documentBindings.retryLoad()} isDark={setup.isDark} variant="full" /></div>
   }
 
   return (

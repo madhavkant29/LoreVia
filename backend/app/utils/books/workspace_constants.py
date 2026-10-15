@@ -148,6 +148,7 @@ DEFAULT_WRITER_WORKSPACE = {
         "error_code": None,
     },
     "index_format": "arabic",
+    "source_fingerprint": None,
     "reprocess": {
         "auto_reprocess_enabled": True,
         "pending_chapters": [],

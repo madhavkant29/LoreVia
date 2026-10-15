@@ -17,6 +17,7 @@ from app.core.redis import (
 )
 from app.engine.character.deduplicator import character_name_keys
 from app.models.character import Character
+from app.services.book_freeze_service import book_is_frozen, is_book_frozen
 from app.services.character_identity.resolver import (
     reconcile_pending_first_name_alias_candidates,
 )
@@ -99,6 +100,9 @@ async def _process_chapter_in_generation(
     if await is_book_hidden(db, book.id):
         log.info("Skipping chapter processing for unavailable book %s", book.id)
         return False
+    if is_book_frozen(book):
+        log.info("Skipping chapter processing for frozen book %s", book.id)
+        return False
 
     from app.services.editor_project_service import get_rebuild_run_id
 
@@ -136,6 +140,13 @@ async def _process_chapter_in_generation(
         # Stage/reset the chapter in a short transaction. Provider calls below
         # must not hold a checked-out connection or chapter locks.
         await db.commit()
+        if await book_is_frozen(db, book.id):
+            log.info(
+                "Aborting frozen chapter extraction book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
         log.info(
             "ingestion_timing stage=chapter_db_load book_id=%s chapter=%s elapsed_ms=%s",
             book.id,
@@ -178,6 +189,13 @@ async def _process_chapter_in_generation(
         }
 
         llm_started = time.perf_counter()
+        if await book_is_frozen(db, book.id):
+            log.info(
+                "Aborting frozen chapter extraction before LLM book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
         llm_extraction = await collect_chapter_llm_extraction(
             db,
             book=book,
@@ -209,6 +227,13 @@ async def _process_chapter_in_generation(
         )
 
         raw_character_entities = llm_extraction.raw_character_entities
+        if await book_is_frozen(db, book.id):
+            log.info(
+                "Aborting frozen chapter extraction before resolution book_id=%s chapter=%s",
+                book.id,
+                chapter_number,
+            )
+            return False
         character_resolution = await resolve_chapter_character_entities(
             db,
             book=book,

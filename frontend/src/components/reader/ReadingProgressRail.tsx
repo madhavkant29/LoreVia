@@ -9,59 +9,14 @@ type ReadingProgressRailProps = {
   totalWords: number
 }
 
-export const ReadingProgressRail = memo(function ReadingProgressRail({
-  theme,
-  progressPercent,
-  wordsRead,
-  totalWords,
-}: ReadingProgressRailProps) {
-  const railFill = progressPercent !== null ? `${Math.max(0, Math.min(100, progressPercent))}%` : "0%"
-
+export const ReadingProgressRail = memo(function ReadingProgressRail({ theme, progressPercent, wordsRead, totalWords }: ReadingProgressRailProps) {
   return (
-    <aside className="reader-nonprint hidden xl:block">
-      <div className="sticky top-28 flex justify-end">
-        <div className={`flex min-h-[500px] w-[76px] flex-col items-center rounded-lg border px-3 py-5 ${theme === "dark"
-            ? "border-white/10 bg-[#0d1422] text-slate-300"
-            : "border-stone-200/80 bg-white/80 text-stone-600"
-          }`}>
-          <div className="text-center">
-            <p className={`text-2xl font-semibold ${theme === "dark" ? "text-white" : "text-stone-950"}`}>
-              {progressPercent ?? "-"}%
-            </p>
-            <p className={`mt-1 text-3xs uppercase tracking-[0.24em] ${theme === "dark" ? "text-slate-500" : "text-stone-400"}`}>
-              Of chapter
-            </p>
-          </div>
-          <div className={`my-6 flex flex-1 items-center ${theme === "dark" ? "text-slate-600" : "text-stone-300"}`}>
-            <div className="relative h-full w-[4px] rounded-full bg-current/30">
-              <div
-                className="absolute bottom-0 left-1/2 w-[4px] -translate-x-1/2 rounded-full bg-teal-700"
-                style={{ height: railFill }}
-              />
-              <div
-                className="absolute left-1/2 h-4 w-4 -translate-x-1/2 rounded-full border border-teal-700 bg-teal-700"
-                style={{ bottom: `calc(${railFill} - 7px)` }}
-              />
-            </div>
-          </div>
-          <div className="text-center">
-            <p className={`text-sm font-medium ${theme === "dark" ? "text-slate-200" : "text-stone-800"}`}>
-              {wordsRead.toLocaleString()}
-            </p>
-            <p className={`mt-1 text-3xs uppercase tracking-[0.24em] ${theme === "dark" ? "text-slate-500" : "text-stone-400"}`}>
-              of {totalWords.toLocaleString()} words
-            </p>
-          </div>
-          <div className={`mt-5 w-full rounded-md border px-2 py-2 text-center ${theme === "dark" ? "border-white/10 bg-white/[0.03]" : "border-stone-200 bg-white/70"}`}>
-            <p className={`text-3xs font-semibold uppercase tracking-[0.2em] ${theme === "dark" ? "text-teal-200" : "text-teal-700"}`}>
-              Mini map
-            </p>
-            <p className={`mt-1 text-xs leading-5 ${theme === "dark" ? "text-slate-400" : "text-stone-500"}`}>
-              Resume marker stays synced to this chapter.
-            </p>
-          </div>
-        </div>
-      </div>
+    <aside aria-label="Reading position" className={`reader-nonprint hidden border-l pl-4 text-sm xl:block ${theme === "dark" ? "border-white/15 text-slate-300" : "border-stone-300 text-stone-700"}`}>
+      <p className="font-medium">Position</p>
+      <p className={`mt-2 text-xl ${theme === "dark" ? "text-white" : "text-stone-950"}`}>{progressPercent === null ? "—" : `${progressPercent}%`}</p>
+      <p className="mt-2 leading-6">Through this chapter</p>
+      {totalWords > 0 ? <p className="mt-6 leading-6">{wordsRead.toLocaleString()} of {totalWords.toLocaleString()} words</p> : null}
+      <p className="mt-6 leading-6">Your position saves as you scroll.</p>
     </aside>
   )
 })

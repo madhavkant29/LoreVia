@@ -610,6 +610,83 @@ async def maybe_auto_reprocess_editor_project(
     return True, chapters_queued, rebuilt_words
 
 
+async def dispatch_manual_rebuild_with_reservations(
+    db: AsyncSession,
+    book: Book,
+) -> tuple[int, int]:
+    """Reserve processed words, then rebuild an editor project (manual retry).
+
+    Mirrors the manual reprocess endpoint so user-triggered retries cannot run
+    paid extraction and analysis without a processed-word reservation.
+    """
+    from app.models.user import User
+    from app.services.processing_allowance_service import (
+        MANUAL_REPROCESS_USAGE_KIND,
+        ProcessingReservationRequest,
+        manual_reprocess_source_prefix,
+        release_processing_reservations_for_source_prefix,
+        reserve_processing_word_batch,
+    )
+
+    user = await db.get(User, book.user_id)
+    if user is None:
+        raise RuntimeError("editor_project_owner_missing")
+    chapters = list(
+        (
+            await db.execute(
+                select(Chapter).where(Chapter.book_id == book.id, Chapter.word_count > 0)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    rebuild_run_id = uuid.uuid4().hex
+    source_prefix = manual_reprocess_source_prefix(rebuild_run_id)
+    reservations: list[Any] = []
+    if chapters:
+        reservations, _allowance = await reserve_processing_word_batch(
+            db,
+            user,
+            book_id=book.id,
+            usage_kind=MANUAL_REPROCESS_USAGE_KIND,
+            requests=[
+                ProcessingReservationRequest(
+                    source_id=f"{source_prefix}{chapter.id}:{chapter.content_version}",
+                    word_count=int(chapter.word_count or 0),
+                )
+                for chapter in chapters
+            ],
+        )
+    reservation_ids_by_chapter_id = {
+        chapter.id: reservation.id
+        for chapter, reservation in zip(chapters, reservations, strict=True)
+    }
+
+    try:
+        await prepare_rebuild(db, book, reason="manual_retry", rebuild_run_id=rebuild_run_id)
+        chapters_queued, total_words = await dispatch_rebuild(
+            db,
+            book,
+            reservation_ids_by_chapter_id=reservation_ids_by_chapter_id or None,
+            manual_reprocess=True,
+            run_kind="manual_reprocess",
+        )
+        await db.commit()
+    except EDITOR_REBUILD_DISPATCH_EXCEPTIONS:
+        await db.rollback()
+        if chapters:
+            await release_processing_reservations_for_source_prefix(
+                db,
+                user_id=book.user_id,
+                book_id=book.id,
+                usage_kind=MANUAL_REPROCESS_USAGE_KIND,
+                source_prefix=source_prefix,
+            )
+            await db.commit()
+        raise
+    return chapters_queued, total_words
+
+
 async def _transition_to_ready(db: AsyncSession, book: Book) -> None:
     """Mark a zero-chapter editor project as ready."""
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}

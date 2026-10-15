@@ -161,6 +161,7 @@ async def execute_manuscript_import_request(
             raw=raw,
             preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
             preserve_source_chapters=bool(book.preserve_source_chapters),
+            filename=str(upload.filename),
         )
         screenplay_payload = (
             parsed_payload.get("screenplay_payload") if upload_work_type == "screenplay" else None

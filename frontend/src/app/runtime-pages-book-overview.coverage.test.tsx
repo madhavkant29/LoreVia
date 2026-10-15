@@ -22,7 +22,7 @@ describe("book overview runtime page coverage", () => {
     await renderPage(<BookOverviewPage />)
 
     expect(text()).toContain("Project signals")
-    expect(text()).toContain("72% complete")
+    expect(text()).toContain("72% read")
     await click("Switch reader mode")
     expect(booksApiMock.setMode).toHaveBeenCalledWith("book-1", "reader")
     await click("Read")
@@ -57,6 +57,6 @@ describe("book overview runtime page coverage", () => {
     expect(text()).toContain("Failed to load book overview")
     await click("Retry")
     expect(queryRefetchMock).toHaveBeenCalled()
-    expect(replaceMock).toHaveBeenCalledWith("/library")
+    expect(replaceMock).not.toHaveBeenCalledWith("/library")
   })
 })

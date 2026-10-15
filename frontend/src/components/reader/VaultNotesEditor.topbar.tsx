@@ -1,52 +1,68 @@
 import type { RefObject } from "react"
 
-import { Tooltip } from "@/components/ui/Tooltip"
-import { IconMore, IconPlus, IconUpload } from "./VaultNotesEditor.icons"
+import { SUPPORT_HELP_EVENT } from "@/components/ui/ShortcutHelp"
+import { IconPlus, IconUpload } from "./VaultNotesEditor.icons"
 
 export function VaultNotesTopbar({
   busy,
   importInputRef,
   isDark,
+  inspectorOpen,
   selectedNoteAvailable,
   onCreateNote,
   onDuplicateCurrent,
   onExportNotes,
   onImportNotes,
+  onToggleInspector,
+  onOpenLibrary,
 }: {
   busy: boolean
   importInputRef: RefObject<HTMLInputElement | null>
   isDark: boolean
+  inspectorOpen: boolean
   selectedNoteAvailable: boolean
   onCreateNote: () => void
   onDuplicateCurrent: () => void
   onExportNotes: () => void
   onImportNotes: (file: File) => void
+  onToggleInspector: () => void
+  onOpenLibrary: () => void
 }) {
   return (
-    <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className={`flex flex-col gap-4 border-b pb-4 lg:flex-row lg:items-end lg:justify-between ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
       <div>
-        <h2 className={`font-serif text-[2rem] tracking-[-0.04em] ${isDark ? "text-white" : "text-stone-950"}`}>Vault notes workspace</h2>
-        <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-500"}`}>A book-native vault for character notes, links, themes, and evolving story context.</p>
+        <h1 className={`text-xl font-semibold tracking-tight ${isDark ? "text-white" : "text-stone-950"}`}>Notes</h1>
+        <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-stone-600"}`}>Organize references and edit one note at a time.</p>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onCreateNote} disabled={busy} className="inline-flex items-center gap-2 rounded-md bg-[#1f615d] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+        <button type="button" onClick={onOpenLibrary} className={`rounded-sm border px-3 py-2 text-sm xl:hidden ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-700"}`}>Browse notes</button>
+        <button type="button" onClick={onCreateNote} disabled={busy} className="inline-flex items-center gap-2 rounded-sm bg-teal-800 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-700 disabled:opacity-60">
           <IconPlus />
           New note
         </button>
-        <button type="button" onClick={() => importInputRef.current?.click()} disabled={busy} className={`inline-flex items-center gap-2 rounded-md border px-4 py-3 text-sm font-medium ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+        <button type="button" onClick={() => importInputRef.current?.click()} disabled={busy} className={`inline-flex items-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium ${isDark ? "border-white/10 text-slate-300 hover:bg-white/[0.04]" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
           <IconUpload />
           Import ZIP
         </button>
-        <button type="button" onClick={onExportNotes} disabled={busy} className="inline-flex items-center gap-2 rounded-md bg-[#1f615d] px-4 py-3 text-sm font-semibold text-white">
+        <button type="button" onClick={onExportNotes} disabled={busy} className={`inline-flex items-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium ${isDark ? "border-white/10 text-slate-300 hover:bg-white/[0.04]" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}>
           <IconUpload className="rotate-180" />
           Export ZIP
         </button>
-        <Tooltip content="Duplicate selected note">
-          <button type="button" aria-label="Duplicate selected note" onClick={onDuplicateCurrent} disabled={!selectedNoteAvailable || busy} className={`inline-flex h-[3rem] w-[3rem] items-center justify-center rounded-md border ${isDark ? "border-white/10 bg-white/[0.03] text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
-            <IconMore />
+        <button
+          type="button"
+          aria-pressed={inspectorOpen}
+          onClick={onToggleInspector}
+          disabled={!selectedNoteAvailable}
+          className={`rounded-sm border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${inspectorOpen ? isDark ? "border-teal-300 text-teal-200" : "border-teal-700 text-teal-700" : isDark ? "border-white/10 text-slate-300 hover:bg-white/[0.04]" : "border-stone-200 text-stone-600 hover:bg-stone-50"}`}
+        >
+          Details
+        </button>
+
+          <button type="button" aria-label="Duplicate selected note" onClick={onDuplicateCurrent} disabled={!selectedNoteAvailable || busy} className={`inline-flex items-center justify-center px-3 py-2 text-sm rounded-sm border ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-600"}`}>
+            Duplicate
           </button>
-        </Tooltip>
+        <button type="button" onClick={() => window.dispatchEvent(new Event(SUPPORT_HELP_EVENT))} className={`rounded-sm border px-3 py-2 text-sm ${isDark ? "border-white/10 text-slate-300" : "border-stone-200 text-stone-700"}`}>Help</button>
         <input
           ref={importInputRef}
           type="file"

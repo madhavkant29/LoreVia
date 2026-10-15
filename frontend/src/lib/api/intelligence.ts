@@ -30,7 +30,7 @@ import type {
   FirstImpressionResponse,
 } from "@/types/intelligence"
 
-const MAX_ADVISOR_PASSAGE_CHARS = 12_000
+export const MAX_ADVISOR_PASSAGE_CHARS = 12_000
 
 type AdvisorStreamHandlers = {
   onDelta?: (content: string) => void
@@ -373,6 +373,7 @@ export const intelligenceApi = {
 
   seriesContinuityCheck: (seriesId: string, bookId: string, text: string, chapterNum?: number) =>
     apiClient.post<SeriesContinuityResponse>(`/intelligence/series/${seriesId}/continuity-check`, {
+      messages: [],
       book_id: normalizeBookRouteId(bookId),
       text,
       chapter_num: chapterNum ?? null,
@@ -380,6 +381,7 @@ export const intelligenceApi = {
   seriesContinuityCheckStream: (seriesId: string, bookId: string, text: string, chapterNum?: number, handlers?: AdvisorStreamHandlers) =>
     requestSse<SeriesContinuityResponse>(`/intelligence/series/${seriesId}/continuity-check-stream`, {
       payload: {
+        messages: [],
         book_id: normalizeBookRouteId(bookId),
         text,
         chapter_num: chapterNum ?? null,

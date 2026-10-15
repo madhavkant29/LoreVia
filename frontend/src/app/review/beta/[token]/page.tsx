@@ -106,7 +106,7 @@ export default function GuestBetaReviewPage() {
     <main className="min-h-screen bg-stone-50 text-gray-950">
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-          <Image src="/logoandtext.png" alt="LoreVia" width={146} height={40} className="h-8 w-auto" />
+          <Image src="/logoandtextlight.png" alt="LoreVia" width={640} height={160} className="h-8 w-auto" />
           <span className="text-xs font-medium text-gray-500">Private review copy · expires {new Date(review.assignment.expires_at).toLocaleDateString()}</span>
         </div>
       </header>

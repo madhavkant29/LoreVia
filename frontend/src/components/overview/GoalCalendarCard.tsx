@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 
 import type { GoalCalendarItem, WriterWorkspace } from "@/types/book"
 
@@ -73,11 +73,6 @@ export function GoalCalendarCard({
     { label: "Session quota", value: writerWorkspace?.word_count_goals.session_target, unit: "words" },
   ]
 
-  useEffect(() => {
-    if (selectedDate.startsWith(visibleMonth)) return
-    setVisibleMonth(monthValueFromDate(selectedDate))
-  }, [selectedDate, visibleMonth])
-
   const addCalendarItem = async () => {
     const title = draftTitle.trim()
     if (!title || !writerWorkspace || !editable) return
@@ -118,11 +113,11 @@ export function GoalCalendarCard({
         <div>
           <div className="flex items-center gap-2">
             <PanelTitle isDark={isDark}>Goal Calendar</PanelTitle>
-            <span className={`inline-flex items-center rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-400" : "bg-slate-100 text-slate-500"}`}>
+            <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${isDark ? "bg-white/[0.05] text-slate-300" : "bg-slate-100 text-slate-600"}`}>
               {monthCompletedCount}/{monthItemCount || 0} done this month
             </span>
           </div>
-          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+          <p className={`mt-2 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
             Plan writing goals, track quotas, and keep each milestone attached to a day on the board.
           </p>
         </div>
@@ -130,7 +125,7 @@ export function GoalCalendarCard({
         <div className="flex flex-wrap items-center gap-2">
           {goalChips.map((goal) => (
             <div key={goal.label} className={`rounded-md border px-3 py-2 text-xs ${isDark ? "border-white/[0.08] bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
-              <p className={isDark ? "text-slate-500" : "text-slate-400"}>{goal.label}</p>
+              <p className={isDark ? "text-slate-300" : "text-slate-600"}>{goal.label}</p>
               <p className={`mt-1 font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                 {typeof goal.value === "number" && goal.value > 0 ? `${goal.value.toLocaleString()} ${goal.unit}` : "Not set"}
               </p>
@@ -151,7 +146,7 @@ export function GoalCalendarCard({
             </button>
             <div className="text-center">
               <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{formatPlannerMonth(visibleMonth)}</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Select a day to review the plan.</p>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>Select a day to review the plan.</p>
             </div>
             <button
               onClick={() => setVisibleMonth((current) => shiftMonthValue(current, 1))}
@@ -162,9 +157,9 @@ export function GoalCalendarCard({
             </button>
           </div>
 
-          <div className="mt-4 grid grid-cols-7 gap-2">
+          <div className="mt-4 grid grid-cols-7 gap-1 sm:gap-2">
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-              <div key={label} className={`px-1 text-center text-3xs font-semibold ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              <div key={label} className={`px-1 text-center text-xs font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                 {label}
               </div>
             ))}
@@ -178,8 +173,11 @@ export function GoalCalendarCard({
               return (
                 <button
                   key={day.value}
-                  onClick={() => setSelectedDate(day.value)}
-                  className={`min-h-[5.7rem] rounded-md border p-2 text-left transition ${
+                  onClick={() => { setSelectedDate(day.value); setVisibleMonth(monthValueFromDate(day.value)) }}
+                  aria-pressed={selected}
+                  aria-current={isToday ? "date" : undefined}
+                  aria-label={`${formatPlannerDate(day.value)}${isToday ? ", today" : ""}, ${dayItems.length} planning items`}
+                  className={`min-h-11 min-w-0 rounded-sm border p-1 sm:min-h-[5.7rem] sm:p-2 text-left transition ${
                     selected
                       ? isDark
                         ? "border-teal-800/25 bg-teal-800/10"
@@ -187,21 +185,22 @@ export function GoalCalendarCard({
                       : isDark
                         ? "border-white/[0.05] bg-[#101720] hover:bg-[#16202b]"
                         : "border-slate-200 bg-white hover:bg-slate-50"
-                  } ${!day.inMonth ? (isDark ? "text-slate-600" : "text-slate-300") : ""}`}
+                  } ${!day.inMonth ? (isDark ? "text-slate-400" : "text-slate-600") : ""}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`text-sm font-semibold ${selected ? "text-teal-800" : day.inMonth ? (isDark ? "text-slate-200" : "text-slate-700") : ""}`}>{day.label}</span>
-                    {isToday ? <span className="rounded-full bg-teal-800 px-1.5 py-0.5 text-3xs font-semibold text-white">Today</span> : null}
+                    <span className={`text-sm font-semibold ${selected ? (isDark ? "text-teal-200" : "text-teal-800") : day.inMonth ? (isDark ? "text-slate-200" : "text-slate-700") : ""}`}>{day.label}</span>
+                    {isToday ? <span className="hidden rounded-sm bg-teal-800 px-1.5 py-0.5 text-xs font-semibold text-white sm:inline">Today</span> : null}
                   </div>
-                  <div className="mt-3 space-y-1">
+                  {dayItems.length ? <span className="block text-center text-xs sm:hidden">·</span> : null}
+                  <div className="mt-3 hidden space-y-1 sm:block">
                     {dayItems.length > 0 ? (
                       <>
-                        <p className={`text-3xs font-medium ${isDark ? "text-slate-300" : "text-slate-600"}`}>{dayItems.length} item{dayItems.length === 1 ? "" : "s"}</p>
-                        <p className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{completedCount}/{dayItems.length} complete</p>
-                        {quotaTotal > 0 ? <p className="text-3xs font-semibold text-teal-800">{quotaTotal.toLocaleString()} quota</p> : null}
+                        <p className={`text-xs font-medium ${isDark ? "text-slate-300" : "text-slate-600"}`}>{dayItems.length} item{dayItems.length === 1 ? "" : "s"}</p>
+                        <p className={`text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{completedCount}/{dayItems.length} complete</p>
+                        {quotaTotal > 0 ? <p className="text-xs font-semibold text-teal-800 dark:text-teal-200">{quotaTotal.toLocaleString()} quota</p> : null}
                       </>
                     ) : (
-                      <p className={`text-3xs ${isDark ? "text-slate-600" : "text-slate-300"}`}>Open</p>
+                      <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>Open</p>
                     )}
                   </div>
                 </button>
@@ -214,12 +213,12 @@ export function GoalCalendarCard({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>{formatPlannerDate(selectedDate)}</p>
-              <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+              <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>
                 {selectedItems.length > 0 ? `${selectedItems.length} scheduled item${selectedItems.length === 1 ? "" : "s"}` : "No goals scheduled yet."}
               </p>
             </div>
             <div className="text-right">
-              <p className={`text-3xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>Selected quota</p>
+              <p className={`text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>Selected quota</p>
               <p className={`mt-1 text-sm font-semibold ${isDark ? "text-slate-200" : "text-slate-700"}`}>{selectedQuotaTotal > 0 ? selectedQuotaTotal.toLocaleString() : "-"}</p>
             </div>
           </div>
@@ -233,6 +232,7 @@ export function GoalCalendarCard({
                   <div className="flex items-start gap-3">
                     <input
                       type="checkbox"
+                      aria-label={`Mark ${item.title} complete`}
                       checked={item.completed}
                       disabled={!editable || saveState === "saving"}
                       onChange={() => void toggleCalendarItem(item.id)}
@@ -240,18 +240,18 @@ export function GoalCalendarCard({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className={`text-sm font-semibold ${item.completed ? (isDark ? "text-slate-500 line-through" : "text-slate-400 line-through") : isDark ? "text-slate-200" : "text-slate-700"}`}>
+                        <p className={`text-sm font-semibold ${item.completed ? (isDark ? "text-slate-300 line-through" : "text-slate-600 line-through") : isDark ? "text-slate-200" : "text-slate-700"}`}>
                           {item.title}
                         </p>
-                        {quotaLabel ? <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>{quotaLabel}</span> : null}
-                        {overdue ? <span className={`rounded-full px-2 py-1 text-3xs font-semibold ${isDark ? "bg-amber-500/12 text-amber-300" : "bg-amber-50 text-amber-700"}`}>Overdue</span> : null}
+                        {quotaLabel ? <span className={`rounded-full px-2 py-1 text-xs font-semibold ${isDark ? "bg-teal-800/10 text-teal-200" : "bg-teal-50 text-teal-800"}`}>{quotaLabel}</span> : null}
+                        {overdue ? <span className={`rounded-full px-2 py-1 text-xs font-semibold ${isDark ? "bg-amber-500/12 text-amber-300" : "bg-amber-50 text-amber-700"}`}>Overdue</span> : null}
                       </div>
-                      <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>{item.completed ? "Completed" : "Planned"} for {formatPlannerDate(item.due_date)}</p>
+                      <p className={`mt-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.completed ? "Completed" : "Planned"} for {formatPlannerDate(item.due_date)}</p>
                     </div>
                     <button
                       onClick={() => void removeCalendarItem(item.id)}
                       disabled={!editable || saveState === "saving"}
-                      className={`text-xs font-semibold ${isDark ? "text-slate-500 hover:text-rose-300 disabled:text-slate-700" : "text-slate-400 hover:text-rose-600 disabled:text-slate-300"}`}
+                      className={`text-xs font-semibold ${isDark ? "text-slate-300 hover:text-rose-300 disabled:text-slate-700" : "text-slate-600 hover:text-rose-600 disabled:text-slate-300"}`}
                     >
                       Remove
                     </button>
@@ -259,7 +259,7 @@ export function GoalCalendarCard({
                 </div>
               )
             }) : (
-              <div className={`rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-500" : "border-slate-200 text-slate-400"}`}>
+              <div className={`rounded-md border border-dashed p-4 text-sm ${isDark ? "border-white/[0.08] text-slate-300" : "border-slate-200 text-slate-600"}`}>
                 Nothing is scheduled for this day yet.
               </div>
             )}
@@ -280,23 +280,29 @@ export function GoalCalendarCard({
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1.2fr)_9rem]">
+              <label className="grid min-w-0 gap-2 text-sm">Planning item
               <input
                 value={draftTitle}
                 onChange={(event) => setDraftTitle(event.target.value)}
                 disabled={!editable || saveState === "saving"}
                 aria-label="Planning item"
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                className={`h-11 min-w-0 rounded-sm border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
               />
+              </label>
+              <label className="grid min-w-0 gap-2 text-sm">Date
               <input
                 type="date"
+                aria-label="Planning date"
                 value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value)}
+                onChange={(event) => { if (event.target.value) { setSelectedDate(event.target.value); setVisibleMonth(monthValueFromDate(event.target.value)) } }}
                 disabled={!editable || saveState === "saving"}
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                className={`h-11 min-w-0 rounded-sm border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
               />
+              </label>
             </div>
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,0.65fr)_minmax(0,0.65fr)_auto]">
+            <div className="mt-3 grid items-end gap-3 sm:grid-cols-[minmax(0,0.65fr)_minmax(0,0.65fr)_auto]">
+              <label className="grid min-w-0 gap-2 text-sm">Quota (optional)
               <input
                 type="number"
                 min="0"
@@ -305,18 +311,22 @@ export function GoalCalendarCard({
                 onChange={(event) => setDraftQuotaValue(event.target.value)}
                 disabled={!editable || saveState === "saving"}
                 aria-label="Planning quota"
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                className={`h-11 min-w-0 rounded-sm border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
               />
+              </label>
+              <label className="grid min-w-0 gap-2 text-sm">Unit
               <select
+                aria-label="Quota unit"
                 value={draftQuotaUnit}
                 onChange={(event) => setDraftQuotaUnit(event.target.value)}
                 disabled={!editable || saveState === "saving"}
-                className={`h-11 rounded-md border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
+                className={`h-11 min-w-0 rounded-sm border px-3 text-sm outline-none transition ${isDark ? "border-white/[0.08] bg-[#101720] text-slate-100 focus:border-teal-700" : "border-slate-200 bg-white text-slate-900 focus:border-teal-700"}`}
               >
                 {["words", "chapters", "scenes", "pages", "tasks"].map((unit) => (
                   <option key={unit} value={unit}>{unit}</option>
                 ))}
               </select>
+              </label>
               <button
                 onClick={() => void addCalendarItem()}
                 disabled={!editable || saveState === "saving" || !draftTitle.trim()}
@@ -339,11 +349,11 @@ export function GoalCalendarCard({
                           ? "bg-slate-600"
                           : "bg-slate-300"
                 }`} />
-                <p className={`text-xs ${saveState === "error" ? "text-rose-400" : isDark ? "text-slate-500" : "text-slate-400"}`}>
+                <p className={`text-xs ${saveState === "error" ? "text-rose-400" : isDark ? "text-slate-300" : "text-slate-600"}`}>
                   {saveMessage || (editable ? "Changes save back into this book workspace." : "Loading planner...")}
                 </p>
               </div>
-              <button type="button" onClick={onOpenManuscript} className="text-xs font-semibold text-teal-800">
+              <button type="button" onClick={onOpenManuscript} className="text-xs font-semibold text-teal-800 dark:text-teal-200">
                 Adjust word goals
               </button>
             </div>

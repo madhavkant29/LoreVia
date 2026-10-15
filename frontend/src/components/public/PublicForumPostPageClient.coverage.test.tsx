@@ -276,6 +276,8 @@ describe("PublicForumPostPageClient", () => {
     await renderClient(<PublicForumPostPageClient postId="post-1" initialPost={basePost} initialComments={[baseComment]} />)
     await waitForText("Reader interest")
     await waitForText("I can beta read this week.")
+    expect(container?.querySelector("[data-testid='forum-comment-thread']")).not.toBeNull()
+    expect(container?.querySelector("[data-testid='forum-comment-thread']")?.className).not.toContain("rounded-lg")
 
     await click("Edit discussion")
     setFieldValue(container?.querySelector("[aria-label='Discussion headline']") as HTMLInputElement, "Sharper gate chapter")

@@ -45,7 +45,6 @@ type ManuscriptWriteRailProps = {
   review: EditorialReview | null
   selectedCharCard: Character | null
   suggestions: AdvisorSuggestion[]
-  totalChapters: number | null
   vaultNotes: VaultNote[]
   warningSummary: WarningItem[]
   onBookNoteSaved: (note: BookNote) => void
@@ -73,7 +72,6 @@ export function ManuscriptWriteRail({
   review,
   selectedCharCard,
   suggestions,
-  totalChapters,
   vaultNotes,
   warningSummary,
   onBookNoteSaved,
@@ -88,7 +86,6 @@ export function ManuscriptWriteRail({
       <ManuscriptWriteRightRail
         isDark={isDark}
         bookId={bookId}
-        totalChapters={totalChapters}
         activeRightPane={activeRightPane}
         onOpenRightPane={onOpenRightPane}
         selectedCharCard={selectedCharCard}

@@ -57,7 +57,7 @@ export function WorkspaceModeSwitcher({
           )
         })}
       </div>
-      {!writingAvailable ? <p className="mt-1.5 text-xs text-amber-600">{writingUnavailableReason}</p> : null}
+      {!writingAvailable ? <p className={cn("mt-1.5 text-xs", isDark ? "text-amber-300" : "text-amber-800")}>{writingUnavailableReason}</p> : null}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/Button"
 import { Tooltip } from "@/components/ui/Tooltip"
@@ -27,6 +27,7 @@ export function ProjectMenu({
   onAddChapter,
   onPublish,
   onUnpublish,
+  onClose,
 }: {
   isDark: boolean
   busy: boolean
@@ -43,11 +44,36 @@ export function ProjectMenu({
   onAddChapter: () => void
   onPublish: () => void
   onUnpublish: () => void
+  onClose?: () => void
 }) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus()
+  }, [])
+  useEffect(() => {
+    function dismissOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !menuRef.current?.parentElement?.contains(event.target)) onClose?.()
+    }
+    document.addEventListener("pointerdown", dismissOutside)
+    return () => document.removeEventListener("pointerdown", dismissOutside)
+  }, [onClose])
   return (
     <div
+      ref={menuRef}
+      role="group"
+      aria-label="Project actions"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation()
+          menuRef.current?.parentElement?.querySelector<HTMLButtonElement>("button[aria-expanded]")?.focus()
+          onClose?.()
+        }
+      }}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && !event.currentTarget.parentElement?.contains(event.relatedTarget)) onClose?.()
+      }}
       onClick={(event) => event.stopPropagation()}
-      className={`absolute right-0 top-full z-30 mt-2 w-48 rounded-md border py-2 ${isDark ? "border-white/[0.08] bg-[#1b2023]" : "border-stone-200 bg-white"}`}
+      className={`absolute right-0 top-full z-[95] mt-2 w-48 rounded-md border py-2 ${isDark ? "border-white/[0.08] bg-[#1b2023]" : "border-stone-200 bg-white"}`}
     >
       <MenuButton isDark={isDark} onClick={onTogglePinned} label={isPinned ? "Unpin project" : "Pin project"} tooltip={isPinned ? "Remove this shortcut" : "Keep this project near the top"} />
       {isAuthor ? <MenuButton isDark={isDark} onClick={onAddChapter} label={`Add ${storyUnitLabel(workType)}`} tooltip="Import or draft the next unit" /> : null}

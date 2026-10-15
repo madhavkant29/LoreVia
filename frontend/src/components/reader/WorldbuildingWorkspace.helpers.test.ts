@@ -28,6 +28,7 @@ import {
   secondaryButtonClass,
   severityClass,
   softPanelClass,
+  worldRecordText,
   summarizeRecord,
   summarizeWikiEntryTypes,
   summarizeWorldElementTypes,
@@ -247,4 +248,11 @@ describe("WorldbuildingWorkspace helpers", () => {
       "12,500/20,000 active words · 1.3/5 GB source storage (reporting only)."
     )
   })
+})
+
+it("preserves titles, descriptions, suggestions, and source evidence without exposing internal IDs", () => {
+  expect(worldRecordText({ id: "private-id", title: "Oath", description: "The rule changes.", excerpt: "An original source excerpt.", suggestions: ["Explain the exception.", null], source: "Canon notes" })).toBe("Oath\n\nThe rule changes.\n\nAn original source excerpt.\n\nCanon notes\n\nExplain the exception.")
+  expect(worldRecordText({ title: "Same", description: "Same" })).toBe("Same")
+  expect(worldRecordText({ metadata: null })).toBe("No readable details were supplied.")
+  expect(worldRecordText("Plain evidence")).toBe("Plain evidence")
 })

@@ -31,6 +31,7 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
   onFindEvidence,
   onManualMerge,
   onOpenNotes,
+  onOpenContinuity,
   onOpenRelationships,
   onPartition,
   onRefreshEvidence,
@@ -50,6 +51,7 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
   onFindEvidence: () => void
   onManualMerge: () => void
   onOpenNotes: () => void
+  onOpenContinuity?: () => void
   onOpenRelationships: () => void
   onPartition: () => void
   onRefreshEvidence: () => void
@@ -82,8 +84,18 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
             key={value}
             type="button"
             role="tab"
+            id={`character-insights-${value}`}
+            aria-controls="character-insights-panel"
+            tabIndex={selectedTab === value ? 0 : -1}
             aria-selected={selectedTab === value}
             onClick={() => onSelectTab(value)}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+              event.preventDefault()
+              const next = event.key === "Home" ? "insights" : event.key === "End" ? "evidence" : value === "insights" ? "evidence" : "insights"
+              onSelectTab(next)
+              document.getElementById(`character-insights-${next}`)?.focus()
+            }}
             className={`pb-2 text-sm font-medium transition ${sidebarTabClasses(isDark, selectedTab === value)}`}
           >
             {label}
@@ -91,8 +103,9 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
         ))}
       </div>
 
+      <div id="character-insights-panel" role="tabpanel" aria-labelledby={`character-insights-${selectedTab}`} tabIndex={0}>
       {selectedTab === "insights" ? (
-        <div className="mt-4 space-y-4">
+        <div className="mt-2">
           <SidebarSurface isDark={isDark} title={`Continuity alerts ${continuityItems.length}`}>
             <div className="space-y-3">
               {continuityItems.length > 0 ? continuityItems.map((item, index) => (
@@ -100,23 +113,26 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
                   {item}
                 </AlertLine>
               )) : (
-                <p className={`text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-500"}`}>No character-specific continuity alerts are open.</p>
+                <p className={`text-sm leading-6 ${isDark ? "text-slate-400" : "text-stone-600"}`}>No character-specific continuity alerts are open.</p>
               )}
-              <button type="button" onClick={() => onSelectTab("insights")} className={linkButtonClasses(isDark)}>View all alerts</button>
+              {onOpenContinuity ? <button type="button" onClick={onOpenContinuity} className={linkButtonClasses(isDark)}>View all alerts</button> : null}
             </div>
           </SidebarSurface>
 
           <SidebarSurface isDark={isDark} title={hasStoredConfidence ? "Extraction confidence" : "Profile completeness"}>
-            <div className="flex items-center gap-4">
-              <HealthRing score={confidence} tone={health.tone} isDark={isDark} />
-              <div>
+            <div>
+              <div className="flex items-baseline justify-between gap-3">
                 <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>
                   {hasStoredConfidence
                     ? confidence >= 80 ? "High confidence" : confidence >= 55 ? "Medium confidence" : "Low confidence"
                     : `${confidence}% complete`}
                 </p>
-                <p className={`mt-1 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-500"}`}>{health.summary}</p>
+                <span className={`text-sm font-semibold ${isDark ? "text-slate-300" : "text-stone-700"}`}>{confidence}%</span>
               </div>
+              <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-white/10" : "bg-stone-200"}`}>
+                <div className={health.tone === "strong" ? "h-full bg-emerald-600" : health.tone === "moderate" ? "h-full bg-violet-600" : "h-full bg-amber-500"} style={{ width: `${confidence}%` }} />
+              </div>
+              <p className={`mt-2 text-xs leading-5 ${isDark ? "text-slate-400" : "text-stone-600"}`}>{health.summary}</p>
             </div>
             <button type="button" onClick={onFindEvidence} className={`mt-4 ${linkButtonClasses(isDark)}`}>View details</button>
           </SidebarSurface>
@@ -127,13 +143,13 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
                 <li key={question} className={`text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>- {question}</li>
               ))}
             </ul>
-            <button type="button" onClick={onOpenNotes} className={`mt-3 ${linkButtonClasses(isDark)}`}>View all questions</button>
+            <button type="button" onClick={onOpenNotes} className={`mt-3 ${linkButtonClasses(isDark)}`}>Open character notes</button>
           </SidebarSurface>
 
           <SidebarSurface isDark={isDark} title={`Revision notes ${revisionNotes.length}`}>
             <div className="space-y-3">
               {revisionNotes.map((note) => (
-                <div key={note} className={`rounded-md border px-3 py-3 text-sm leading-6 ${isDark ? "border-[#17202c] bg-black/20 text-slate-300" : "border-stone-200 bg-white text-stone-600"}`}>
+                <div key={note} className={`border-b pb-3 text-sm leading-6 last:border-b-0 last:pb-0 ${isDark ? "border-[#17202c] text-slate-300" : "border-stone-200 text-stone-600"}`}>
                   {note}
                 </div>
               ))}
@@ -151,13 +167,13 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
                     </span>
                   ))}
                 </div>
-                <div className={`mt-2 flex justify-between text-3xs ${isDark ? "text-slate-500" : "text-stone-400"}`}>
+                <div className={`mt-2 flex justify-between text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>
                   <span>{evidenceBars[0].chapter}</span>
                   <span>{evidenceBars[evidenceBars.length - 1].chapter}</span>
                 </div>
               </>
             ) : (
-              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No chapter evidence is loaded yet.</p>
+              <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>No chapter evidence is loaded yet.</p>
             )}
             <button type="button" onClick={onFindEvidence} className={`mt-3 ${linkButtonClasses(isDark)}`}>View all mentions</button>
           </SidebarSurface>
@@ -179,20 +195,21 @@ export const CharacterProfileRightRail = memo(function CharacterProfileRightRail
               <button type="button" onClick={onRefreshEvidence} className={actionButtonClasses(isDark)}>Refresh</button>
             </div>
             <div className="mt-4 space-y-3">
-              {evidenceLoading ? <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>Searching passages...</p> : null}
+              {evidenceLoading ? <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>Searching passages...</p> : null}
               {evidence.slice(0, 5).map((result, index) => (
-                <div key={`${character.id}-sidebar-evidence-${index}`} className={`rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20" : "border-stone-200 bg-white"}`}>
-                  <p className={`text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>Chapter {result.chapter_num}</p>
+                <div key={`${character.id}-sidebar-evidence-${index}`} className={`border-b pb-3 last:border-b-0 ${isDark ? "border-[#17202c]" : "border-stone-200"}`}>
+                  <p className={`text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>Chapter {result.chapter_num}</p>
                   <p className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-stone-900"}`}>{result.summary}</p>
                   <p className={`mt-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{result.text}</p>
                 </div>
               ))}
-              {evidence.length === 0 && !evidenceLoading ? <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-500"}>No evidence cards are loaded yet.</p> : null}
+              {evidence.length === 0 && !evidenceLoading ? <p className={isDark ? "text-sm text-slate-400" : "text-sm text-stone-600"}>No evidence cards are loaded yet.</p> : null}
               {evidenceError ? <p className="text-sm text-rose-400">{evidenceError}</p> : null}
             </div>
           </SidebarSurface>
         </div>
       )}
+      </div>
     </div>
   )
 })
@@ -232,7 +249,7 @@ function buildEvidenceBars(evidence: SearchResult[]) {
 function AlertLine({ children, isDark, tone }: { children: ReactNode; isDark: boolean; tone: "warning" | "neutral" }) {
   return (
     <div className={`flex gap-2 text-sm leading-6 ${isDark ? "text-slate-300" : "text-stone-700"}`}>
-      <span className={tone === "warning" ? "text-amber-500" : isDark ? "text-slate-500" : "text-stone-400"} aria-hidden="true">!</span>
+      <span className={tone === "warning" ? "text-amber-500" : isDark ? "text-slate-400" : "text-stone-600"} aria-hidden="true">!</span>
       <span>{children}</span>
     </div>
   )
@@ -244,38 +261,28 @@ function linkButtonClasses(isDark: boolean) {
 
 function SidebarSurface({ children, isDark, title }: { children: ReactNode; isDark: boolean; title: string }) {
   return (
-    <section className={`rounded-md border p-4 ${isDark ? "border-[#202a38] bg-[#10141d]/88" : "border-stone-200 bg-stone-50/75"}`}>
-      <p className={`text-3xs font-semibold uppercase tracking-[0.22em] ${isDark ? "text-slate-500" : "text-stone-400"}`}>{title}</p>
-      <div className="mt-4">{children}</div>
+    <section className={`border-b px-1 py-4 last:border-b-0 ${isDark ? "border-[#202a38]" : "border-stone-200"}`}>
+      <h3 className={`text-sm font-semibold ${isDark ? "text-slate-200" : "text-stone-800"}`}>{title}</h3>
+      <div className="mt-3">{children}</div>
     </section>
   )
 }
 
 function ContextRow({ action, detail, isDark, label, onClick }: { action: string; detail: string; isDark: boolean; label: string; onClick: () => void }) {
   return (
-    <div className={`flex items-center justify-between rounded-md border px-3 py-3 ${isDark ? "border-[#17202c] bg-black/20 text-slate-200" : "border-stone-200 bg-white text-stone-700"}`}>
+    <div className={`flex items-center justify-between border-b py-3 last:border-b-0 ${isDark ? "border-[#17202c] text-slate-200" : "border-stone-200 text-stone-700"}`}>
       <div>
         <p className="text-sm font-semibold">{label}</p>
-        <p className={`mt-1 text-xs ${isDark ? "text-slate-500" : "text-stone-500"}`}>{detail}</p>
+        <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-stone-600"}`}>{detail}</p>
       </div>
       <button type="button" onClick={onClick} className={`text-xs font-semibold ${isDark ? "text-slate-300 hover:text-white" : "text-stone-700 hover:text-stone-950"}`}>{action}</button>
     </div>
   )
 }
 
-function HealthRing({ score, tone, isDark }: { score: number; tone: CharacterHealth["tone"]; isDark: boolean }) {
-  const accent = tone === "strong" ? "#22c55e" : tone === "moderate" ? "#8b5cf6" : "#f59e0b"
-
-  return (
-    <div className="relative flex h-24 w-24 shrink-0 items-center justify-center rounded-full" style={{ background: `conic-gradient(${accent} ${score}%, ${isDark ? "rgba(255,255,255,0.09)" : "rgba(148,163,184,0.2)"} ${score}% 100%)` }}>
-      <div className={`flex h-[74px] w-[74px] items-center justify-center rounded-full text-2xl font-semibold ${isDark ? "bg-[#0d1016] text-white" : "bg-white text-stone-950"}`}>{score}%</div>
-    </div>
-  )
-}
-
 function sidebarTabClasses(isDark: boolean, active: boolean) {
   if (active) return isDark ? "border-b-2 border-teal-300 text-white" : "border-b-2 border-teal-700 text-stone-900"
-  return isDark ? "border-b-2 border-transparent text-slate-500 hover:text-slate-200" : "border-b-2 border-transparent text-stone-500 hover:text-stone-800"
+  return isDark ? "border-b-2 border-transparent text-slate-400 hover:text-slate-200" : "border-b-2 border-transparent text-stone-600 hover:text-stone-800"
 }
 
 function actionButtonClasses(isDark: boolean) {

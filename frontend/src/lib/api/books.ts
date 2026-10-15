@@ -229,12 +229,15 @@ async function listAllSavedQuotePages(): Promise<SavedQuote[]> {
     const page: SavedQuotePage = await apiClient.get<SavedQuotePage>("/books/quotes/page", {
       params: { limit: 100, ...(cursor ? { cursor } : {}) },
     }).then((response) => response.data)
+    if (!Array.isArray(page.items) || (page.has_more && !page.next_cursor)) {
+      throw new Error("Saved quotes pagination is incomplete. Refresh quotes to try again.")
+    }
     items.push(...page.items)
     cursor = page.next_cursor
-    if (cursor && seen.has(cursor)) break
+    if (cursor && seen.has(cursor)) throw new Error("Saved quotes pagination repeated a cursor. Refresh quotes to try again.")
     if (cursor) seen.add(cursor)
   } while (cursor)
-  return items
+  return [...new Map(items.map((quote) => [quote.id, quote])).values()]
 }
 
 async function listAllSavedNotePages(): Promise<BookNote[]> {
@@ -245,12 +248,15 @@ async function listAllSavedNotePages(): Promise<BookNote[]> {
     const page: BookNotePage = await apiClient.get<BookNotePage>("/books/notes/page", {
       params: { limit: 100, include_body: true, ...(cursor ? { cursor } : {}) },
     }).then((response) => response.data)
+    if (!Array.isArray(page.items) || (page.has_more && !page.next_cursor)) {
+      throw new Error("Saved notes pagination is incomplete. Refresh notes to try again.")
+    }
     items.push(...(page.items as BookNote[]))
     cursor = page.next_cursor
-    if (cursor && seen.has(cursor)) break
+    if (cursor && seen.has(cursor)) throw new Error("Saved notes pagination repeated a cursor. Refresh notes to try again.")
     if (cursor) seen.add(cursor)
   } while (cursor)
-  return items
+  return [...new Map(items.map((note) => [note.id, note])).values()]
 }
 
 function isManuscriptImportJob(
@@ -266,12 +272,16 @@ async function waitForManuscriptImport(
 ): Promise<ManuscriptImportResponse> {
   let job = initialJob
   const deadline = Date.now() + 30 * 60 * 1000
+  let delayMs = 1_500
   while (Date.now() < deadline) {
     onProgress?.(job.progress_completed, job.progress_total)
     if (job.status === "completed" && job.result) return job.result
-    if (job.status === "failed") throw new Error(job.error || "Manuscript import failed")
-    if (job.status === "cancelled") throw new Error("Manuscript import was cancelled")
-    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    if (job.status === "failed") {
+      throw new Error(job.error || "Manuscript import failed. Please try again.")
+    }
+    if (job.status === "cancelled") throw new Error("Manuscript import was cancelled.")
+    await waitForExportPollDelay(delayMs)
+    delayMs = Math.min(8_000, Math.round(delayMs * 1.5))
     job = await apiClient
       .get<ManuscriptImportJob>(bookPath(bookId, `/manuscript/import/${job.id}`))
       .then((response) => response.data)

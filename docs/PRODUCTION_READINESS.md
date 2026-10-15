@@ -17,7 +17,7 @@ These are release blockers because exposed credentials can be replayed, the new 
 
 ## Changes completed in the 2026-09-06 pass
 
-- Made Architect's `$39` tier at least **2.5× Author** across paired AI, advisor, scan, processing, storage, and cost limits. Author uses 12,000,000 tokens per 5-hour/week/30-day window; Architect uses 30,000,000. Tests enforce the ratio so it cannot silently regress.
+- Kept Architect's `$39` tier materially stronger than Author while making the daily quotas exact and customer-visible: Story Advisor and continuity/editorial scans are **30/day for Author and 60/day for Architect** in public copy, the `/auth/tier-limits` API, backend enforcement, and tests. AI tokens, processing, storage, and provider-cost limits remain at least **2.5× Author** (Author uses 12,000,000 tokens per 5-hour/week/30-day window; Architect uses 30,000,000). Tests enforce both the exact daily quotas and the remaining ratio guard so neither can silently regress.
 - Confirmed monthly and annual price IDs normalize to the same entitlement tier. Author annual is `$190/year`; Architect annual is `$390/year`. Annual billing changes cadence only, not monthly/rolling product limits.
 - Added durable Paddle checkout intent persistence and exact-intent recovery, plus webhook leases, provider-time ordering, terminal-state protection, and compensation for provider-success/local-persist failure paths.
 - Added leased execution claims and stale-worker protection for advisor, beta-reader, series, and suggestion jobs so duplicate deliveries do not repeat expensive provider work or overwrite newer terminal results.

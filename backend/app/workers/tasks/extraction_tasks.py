@@ -62,6 +62,15 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
         result = run_worker_coro(
             process_book(book_id, queue_wait_ms=queue_wait_ms, task_id=self.request.id)
         )
+        budget_blocked_error = (
+            str(result.get("error") or "")
+            if isinstance(result, dict)
+            else ""
+        )
+        budget_blocked = budget_blocked_error in {
+            "budget_exhausted",
+            "insufficient_remaining_budget",
+        }
         if execution_id:
 
             async def _complete_execution() -> None:
@@ -69,10 +78,20 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
                 from app.services.task_execution_service import (
                     complete_task_execution,
                     dispatch_pending_extraction_tasks,
+                    fail_task_execution,
                 )
 
                 async with AsyncSessionLocal() as db:
-                    await complete_task_execution(db, execution_id)
+                    if budget_blocked:
+                        await fail_task_execution(
+                            db,
+                            execution_id,
+                            error=RuntimeError(budget_blocked_error),
+                            terminal=True,
+                            category="budget_limited",
+                        )
+                    else:
+                        await complete_task_execution(db, execution_id)
                     await dispatch_pending_extraction_tasks(db)
 
             run_worker_coro(_complete_execution())
