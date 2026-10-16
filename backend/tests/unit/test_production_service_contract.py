@@ -294,6 +294,52 @@ def test_container_contract_accepts_pinned_runtime_and_blocking_image_scans() ->
     )
 
 
+def test_container_contract_accepts_hardened_redis_build() -> None:
+    compose_text = _production_compose_text().replace(
+        f"    image: {REDIS_IMAGE}\n",
+        "    build:\n      dockerfile: ops/redis/Dockerfile\n",
+    )
+    workflow_text = _workflow_text().replace(
+        REDIS_IMAGE, "lorevia-redis-security:${{ github.sha }}"
+    )
+
+    assert (
+        production_container_contract_errors(
+            compose_text,
+            _python_dockerfile_text(),
+            _python_dockerfile_text(),
+            _frontend_dockerfile_text(),
+            _nginx_dockerfile_text(),
+            workflow_text,
+            redis_dockerfile_text=f"FROM {REDIS_IMAGE}\nRUN apk upgrade --no-cache\n",
+        )
+        == []
+    )
+
+
+def test_container_contract_rejects_unpinned_hardened_redis_build() -> None:
+    compose_text = _production_compose_text().replace(
+        f"    image: {REDIS_IMAGE}\n",
+        "    build:\n      dockerfile: ops/redis/Dockerfile\n",
+    )
+    workflow_text = _workflow_text().replace(
+        REDIS_IMAGE, "lorevia-redis-security:${{ github.sha }}"
+    )
+
+    errors = production_container_contract_errors(
+        compose_text,
+        _python_dockerfile_text(),
+        _python_dockerfile_text(),
+        _frontend_dockerfile_text(),
+        _nginx_dockerfile_text(),
+        workflow_text,
+        redis_dockerfile_text="FROM redis:7-alpine\nRUN apk upgrade --no-cache\n",
+    )
+
+    assert "production Compose does not pin the supported Redis image digest" in errors
+    assert "CI production-image vulnerability gate is incomplete: Redis image" in errors
+
+
 def test_container_contract_requires_disk_backed_export_spool() -> None:
     compose_text = (
         _production_compose_text()

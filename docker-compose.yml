@@ -84,7 +84,9 @@ services:
 
   redis:
     <<: *runtime-hardening
-    image: redis:7.4.11-alpine3.21@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    build:
+      context: .
+      dockerfile: ops/redis/Dockerfile
     user: "999:1000"
     restart: unless-stopped
     # Load REDIS_PASSWORD from the same env file used by the app services so

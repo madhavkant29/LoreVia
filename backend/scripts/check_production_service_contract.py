@@ -22,11 +22,12 @@ BACKEND_WORKER_DOCKERFILE_PATH = REPO_ROOT / "backend" / "Dockerfile.worker"
 FRONTEND_DOCKERFILE_PATH = REPO_ROOT / "frontend" / "Dockerfile"
 NGINX_DOCKERFILE_PATH = REPO_ROOT / "ops" / "nginx" / "Dockerfile"
 NGINX_START_PATH = REPO_ROOT / "ops" / "nginx" / "start.sh"
+REDIS_DOCKERFILE_PATH = REPO_ROOT / "ops" / "redis" / "Dockerfile"
 CI_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ci-cd.yml"
 
 PYTHON_IMAGE = (
     "python:3.12.14-slim-trixie@"
-    "sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
+    "sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f"
 )
 FRONTEND_NODE_IMAGE = (
     "node:24.20.0-alpine3.23@"
@@ -38,7 +39,7 @@ NGINX_IMAGE = (
 )
 REDIS_IMAGE = (
     "redis:7.4.11-alpine3.21@"
-    "sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf"
+    "sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
 )
 
 REQUIRED_RUNTIME_SERVICES = frozenset(
@@ -154,6 +155,7 @@ def production_container_contract_errors(
     frontend_dockerfile_text: str,
     nginx_dockerfile_text: str,
     workflow_text: str,
+    redis_dockerfile_text: str | None = None,
 ) -> list[str]:
     """Describe release-image lifecycle or vulnerability-gate regressions."""
     errors: list[str] = []
@@ -250,7 +252,14 @@ def production_container_contract_errors(
             "production edge-proxy authentication is incomplete: "
             + ", ".join(missing_edge_secret_requirements)
         )
-    if f"image: {REDIS_IMAGE}" not in compose_text:
+    redis_direct_pin = f"image: {REDIS_IMAGE}" in compose_text
+    redis_hardened_build = (
+        "dockerfile: ops/redis/Dockerfile" in compose_text
+        and redis_dockerfile_text is not None
+        and redis_dockerfile_text.startswith(f"FROM {REDIS_IMAGE}\n")
+        and "apk upgrade --no-cache" in redis_dockerfile_text
+    )
+    if not (redis_direct_pin or redis_hardened_build):
         errors.append("production Compose does not pin the supported Redis image digest")
     if 'user: "999:1000"' not in compose_text:
         errors.append("production Redis does not declare its non-root runtime user")
@@ -344,7 +353,13 @@ def production_container_contract_errors(
         "backend image": "lorevia-backend-security:${{ github.sha }}" in scan_job,
         "worker image": "lorevia-worker-security:${{ github.sha }}" in scan_job,
         "Nginx image": "lorevia-nginx-security:${{ github.sha }}" in scan_job,
-        "Redis image": REDIS_IMAGE in scan_job,
+        "Redis image": (
+            REDIS_IMAGE in scan_job
+            or (
+                "lorevia-redis-security:${{ github.sha }}" in scan_job
+                and REDIS_IMAGE in (redis_dockerfile_text or "")
+            )
+        ),
         "frontend image": "lorevia-frontend-security:${{ github.sha }}" in scan_job,
         "offline hardened tokenizer probes": (
             scan_job.count("--network none --read-only") >= 2
@@ -404,6 +419,7 @@ def main() -> int:
             FRONTEND_DOCKERFILE_PATH.read_text(encoding="utf-8"),
             NGINX_DOCKERFILE_PATH.read_text(encoding="utf-8"),
             CI_WORKFLOW_PATH.read_text(encoding="utf-8"),
+            redis_dockerfile_text=REDIS_DOCKERFILE_PATH.read_text(encoding="utf-8"),
         )
     )
     errors.extend(nginx_edge_start_contract_errors(NGINX_START_PATH.read_text(encoding="utf-8")))

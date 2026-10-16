@@ -1,5 +1,12 @@
-FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+FROM python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 WORKDIR /app
+
+# Security gate: the pinned base digest can lag Debian point releases. Apply
+# repository security updates so the release image carries patched system
+# packages (checked by the container-image-scan CI job).
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 
 # Keep the network-facing process on a fixed unprivileged service account.
 # The image-owned local-storage directory is writable by the same account.
