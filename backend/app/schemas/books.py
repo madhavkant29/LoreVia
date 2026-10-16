@@ -565,9 +565,7 @@ class ManuscriptExportRequest(BaseModel):
     preset: str = Field(default="standard_manuscript", max_length=64)
     include_scene_metadata: bool = True
     include_toc: bool = False
-    font_family: Literal["serif", "sans", "mono", "italian-old-style", "eb-garamond"] = (
-        "serif"
-    )
+    font_family: Literal["serif", "sans", "mono", "italian-old-style", "eb-garamond"] = "serif"
     include_images: bool = False
     image_placement: Literal["end", "inline", "plates"] = "end"
     include_image_captions: bool = False

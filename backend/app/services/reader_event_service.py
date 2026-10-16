@@ -233,9 +233,8 @@ def _decode_reader_event_cursor(
     try:
         padding = "=" * (-len(cursor) % 4)
         payload = json.loads(base64.urlsafe_b64decode(f"{cursor}{padding}").decode("utf-8"))
-        if (
-            payload.get("book_id") != str(book_id)
-            or int(payload.get("max_visible_chapter")) != int(max_visible_chapter)
+        if payload.get("book_id") != str(book_id) or int(payload.get("max_visible_chapter")) != int(
+            max_visible_chapter
         ):
             raise InvalidReaderEventCursor("Reader event cursor does not match this request")
         return ReaderEventCursor(
@@ -389,11 +388,7 @@ async def backfill_reader_events_for_book(
         ).all()
     }
     characters = list(
-        (
-            await db.execute(select(Character).where(Character.book_id == book_id))
-        )
-        .scalars()
-        .all()
+        (await db.execute(select(Character).where(Character.book_id == book_id))).scalars().all()
     )
     growth_events_by_chapter: dict[int, list[dict[str, Any]]] = {}
     for character in characters:

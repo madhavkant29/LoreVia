@@ -567,9 +567,7 @@ async def detect_series_world_analysis(db: AsyncSession, series_id: uuid.UUID) -
             element for element in persisted_elements if element.source_scope == "story"
         )
         story_candidate_records.extend(
-            await list_world_source_candidate_payloads(
-                db, book_id=book.id, source_kind="chapter"
-            )
+            await list_world_source_candidate_payloads(db, book_id=book.id, source_kind="chapter")
         )
         world_candidate_records.extend(
             await list_world_source_candidate_payloads(

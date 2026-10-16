@@ -63,9 +63,7 @@ async def test_saved_quote_cursor_pages_do_not_skip_tied_timestamps(db):
     user = await _saved_content_rows(db)
 
     first = await list_saved_quotes_page(db, user_id=user.id, limit=2)
-    second = await list_saved_quotes_page(
-        db, user_id=user.id, limit=2, cursor=first["next_cursor"]
-    )
+    second = await list_saved_quotes_page(db, user_id=user.id, limit=2, cursor=first["next_cursor"])
 
     ids = [item["id"] for item in [*first["items"], *second["items"]]]
     assert len(ids) == 3
@@ -79,9 +77,7 @@ async def test_saved_note_pages_omit_body_by_default_and_include_it_on_request(d
     user = await _saved_content_rows(db)
 
     metadata_page = await list_saved_notes_page(db, user_id=user.id, limit=2)
-    body_page = await list_saved_notes_page(
-        db, user_id=user.id, limit=2, include_body=True
-    )
+    body_page = await list_saved_notes_page(db, user_id=user.id, limit=2, include_body=True)
 
     assert all(item["body"] is None for item in metadata_page["items"])
     assert all(item["body"].startswith("Body ") for item in body_page["items"])

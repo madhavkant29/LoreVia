@@ -118,6 +118,15 @@ if [[ -z "${REDIS_PASSWORD:-}" ]]; then
   exit 1
 fi
 
+# E2E bypass flags must never exist in a production deploy environment,
+# including anything that leaked in through the Compose env file.
+for e2e_flag in NEXT_PUBLIC_E2E_MOCK_API ADMIN_E2E_TEST_SECRET ADMIN_E2E_ALLOW_PRODUCTION; do
+  if [[ -n "${!e2e_flag:-}" ]]; then
+    echo "Refusing to deploy: ${e2e_flag} is set in the deploy environment."
+    exit 1
+  fi
+done
+
 if [[ -z "${ALEMBIC_DATABASE_URL:-}" ]]; then
   echo "ALEMBIC_DATABASE_URL must be exported before deploy."
   exit 1

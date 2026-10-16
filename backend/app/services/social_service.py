@@ -35,9 +35,11 @@ MAX_MESSAGE_PAGE_LIMIT = 200
 
 
 def _encode_cursor(payload: dict[str, str]) -> str:
-    return base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode()
-    ).decode().rstrip("=")
+    return (
+        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode())
+        .decode()
+        .rstrip("=")
+    )
 
 
 def _decode_cursor(cursor: str, *, error_detail: str) -> dict[str, object]:
@@ -167,9 +169,7 @@ def _conversation_summary(
             id=other_user.id,
             username=other_user.username or "member",
             messaging_permission=(
-                "friends_only"
-                if other_user.messaging_permission == "friends_only"
-                else "anyone"
+                "friends_only" if other_user.messaging_permission == "friends_only" else "anyone"
             ),
             friend_state=derive_friend_state(current_user_id, relationship),
             can_message=can_message_target(current_user_id, other_user, relationship),

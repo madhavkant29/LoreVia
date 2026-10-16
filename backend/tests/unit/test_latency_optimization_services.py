@@ -108,6 +108,7 @@ async def test_book_page_limits_rows_and_emits_next_cursor(monkeypatch):
         for index in range(3)
     ]
     db = _FakeDb([_ScalarResult(scalars=books)])
+
     async def _render(*_args, books, **_kwargs):
         assert len(books) == 2
         return []

@@ -64,9 +64,11 @@ def analyze_records(
         route = normalize_route(str(record.get("path") or ""))
         observed_date = None
         try:
-            observed_date = datetime.fromisoformat(
-                str(record.get("ts") or "").replace("Z", "+00:00")
-            ).date().isoformat()
+            observed_date = (
+                datetime.fromisoformat(str(record.get("ts") or "").replace("Z", "+00:00"))
+                .date()
+                .isoformat()
+            )
         except ValueError:
             pass
         groups[route].append(

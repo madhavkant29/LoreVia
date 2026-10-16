@@ -388,7 +388,7 @@ async def search_author_workspace(
         filters=filters,
         collaborator=collaborator,
     )
-    return results[:_workspace_result_limit(limit)]
+    return results[: _workspace_result_limit(limit)]
 
 
 async def search_author_workspace_page(
@@ -538,7 +538,7 @@ async def _collect_workspace_search_results(
                 case_sensitive=case_sensitive,
                 whole_word=whole_word,
                 regex=regex,
-            )
+            ),
         )
         scene_stmt = _apply_workspace_chapter_filter(
             scene_stmt,
@@ -583,9 +583,7 @@ async def _collect_workspace_search_results(
                     "scope": "scenes",
                     "id": str(scene_id),
                     "title": str(title or "Scene"),
-                    "excerpt": _workspace_excerpt(
-                        str(body or description or ""), search_query
-                    ),
+                    "excerpt": _workspace_excerpt(str(body or description or ""), search_query),
                     "chapter_number": scene_chapter_number,
                     "scene_id": str(scene_id),
                     "note_path": None,
@@ -646,8 +644,7 @@ async def _collect_workspace_search_results(
                                 whole_word=whole_word,
                                 regex=True,
                             ),
-                        )
-                        .order_by(note_rank.desc(), VaultNote.id.asc())
+                        ).order_by(note_rank.desc(), VaultNote.id.asc())
                     )
                 ).all()
         else:
@@ -692,24 +689,28 @@ async def _collect_workspace_search_results(
             partition_by=Chapter.id,
             order_by=(chunk_rank.desc(), BookChunk.chunk_index.asc()),
         )
-        chunk_match_stmt = select(
-            Chapter.id.label("chapter_id"),
-            Chapter.number.label("chapter_number"),
-            Chapter.title.label("chapter_title"),
-            BookChunk.text.label("chunk_text"),
-            BookChunk.chunk_index.label("chunk_index"),
-            chunk_rank.label("search_rank"),
-            chapter_match_order.label("chapter_match_order"),
-        ).join(BookChunk, BookChunk.chapter_id == Chapter.id).where(
-            Chapter.book_id == book.id,
-            BookChunk.book_id == book.id,
-            _workspace_search_predicate(
-                BookChunk.text,
-                search_query=search_query,
-                case_sensitive=case_sensitive,
-                whole_word=whole_word,
-                regex=regex,
-            ),
+        chunk_match_stmt = (
+            select(
+                Chapter.id.label("chapter_id"),
+                Chapter.number.label("chapter_number"),
+                Chapter.title.label("chapter_title"),
+                BookChunk.text.label("chunk_text"),
+                BookChunk.chunk_index.label("chunk_index"),
+                chunk_rank.label("search_rank"),
+                chapter_match_order.label("chapter_match_order"),
+            )
+            .join(BookChunk, BookChunk.chapter_id == Chapter.id)
+            .where(
+                Chapter.book_id == book.id,
+                BookChunk.book_id == book.id,
+                _workspace_search_predicate(
+                    BookChunk.text,
+                    search_query=search_query,
+                    case_sensitive=case_sensitive,
+                    whole_word=whole_word,
+                    regex=regex,
+                ),
+            )
         )
         chunk_match_stmt = _apply_workspace_chapter_filter(
             chunk_match_stmt,
@@ -815,9 +816,11 @@ def _encode_workspace_search_cursor(
         "f": fingerprint,
         "k": [sort_key[0], sort_key[1], sort_key[2]],
     }
-    return base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode()
-    ).decode().rstrip("=")
+    return (
+        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode())
+        .decode()
+        .rstrip("=")
+    )
 
 
 def _decode_workspace_search_cursor(
@@ -832,10 +835,7 @@ def _decode_workspace_search_cursor(
         payload = json.loads(base64.urlsafe_b64decode(padded_cursor.encode()))
         if not isinstance(payload, dict):
             raise ValueError("Cursor payload must be an object")
-        if (
-            payload.get("v") != WORKSPACE_SEARCH_CURSOR_VERSION
-            or payload.get("f") != fingerprint
-        ):
+        if payload.get("v") != WORKSPACE_SEARCH_CURSOR_VERSION or payload.get("f") != fingerprint:
             raise ValueError("Cursor does not match this search")
         raw_key = payload.get("k")
         if not isinstance(raw_key, list) or len(raw_key) != 3:
@@ -844,7 +844,11 @@ def _decode_workspace_search_cursor(
         if isinstance(rank, bool) or not isinstance(rank, (int, float)):
             raise ValueError("Cursor rank is invalid")
         rank_value = float(rank)
-        if not math.isfinite(rank_value) or not isinstance(scope, str) or not isinstance(item_id, str):
+        if (
+            not math.isfinite(rank_value)
+            or not isinstance(scope, str)
+            or not isinstance(item_id, str)
+        ):
             raise ValueError("Cursor sort key is invalid")
         return rank_value, scope, item_id
     except (binascii.Error, json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -920,9 +924,7 @@ def _workspace_search_predicate(
     if regex:
         return document.op("~" if case_sensitive else "~*")(search_query)
     if whole_word:
-        return document.op("~" if case_sensitive else "~*")(
-            rf"\m{re.escape(search_query)}\M"
-        )
+        return document.op("~" if case_sensitive else "~*")(rf"\m{re.escape(search_query)}\M")
     escaped_query = search_query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped_query}%"
     if case_sensitive:

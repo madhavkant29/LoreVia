@@ -85,9 +85,7 @@ def public_asset_origin_errors(
     if max_age is None:
         errors.append("public probe is missing Cache-Control max-age")
     elif max_age > maximum_cache_age:
-        errors.append(
-            f"public probe max-age {max_age}s exceeds the allowed {maximum_cache_age}s"
-        )
+        errors.append(f"public probe max-age {max_age}s exceeds the allowed {maximum_cache_age}s")
     if "must-revalidate" not in public_probe.cache_control.lower():
         errors.append("public probe is missing Cache-Control must-revalidate")
     if private_probe.status not in DENIED_STATUSES:
@@ -146,7 +144,9 @@ def main(argv: list[str] | None = None) -> int:
         maximum_cache_age = max(0, min(int(args.maximum_cache_age), 3600))
         timeout_seconds = max(0.1, min(float(args.timeout_seconds), 60.0))
         public_probe = probe_url(origin_url(base_url, public_key), timeout_seconds=timeout_seconds)
-        private_probe = probe_url(origin_url(base_url, private_key), timeout_seconds=timeout_seconds)
+        private_probe = probe_url(
+            origin_url(base_url, private_key), timeout_seconds=timeout_seconds
+        )
         listing_probe = probe_url(
             f"{base_url}/{PUBLIC_PREFIX.rstrip('/')}",
             timeout_seconds=timeout_seconds,

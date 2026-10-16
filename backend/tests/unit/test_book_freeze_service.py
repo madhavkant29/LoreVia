@@ -208,11 +208,7 @@ async def test_freeze_is_idempotent_and_audits_once(db: AsyncSession):
     assert first["status"] == "frozen"
     assert second["status"] == "already_frozen"
     audit_count = len(
-        (
-            await db.execute(
-                select(AdminAuditEvent).where(AdminAuditEvent.target_book_id == book.id)
-            )
-        )
+        (await db.execute(select(AdminAuditEvent).where(AdminAuditEvent.target_book_id == book.id)))
         .scalars()
         .all()
     )

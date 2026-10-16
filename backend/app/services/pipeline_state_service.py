@@ -591,9 +591,7 @@ async def complete_book_after_analysis(db: AsyncSession, *, book_id: Any) -> boo
         processed_count=processed_count,
         detailed_summary_count=detailed_summary_count,
     )
-    log.info(
-        "book_processing_completed book_id=%s chapters=%s", book.id, chapter_count
-    )
+    log.info("book_processing_completed book_id=%s chapters=%s", book.id, chapter_count)
     return True
 
 

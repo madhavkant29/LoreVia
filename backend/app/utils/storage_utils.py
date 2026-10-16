@@ -18,6 +18,7 @@ STORAGE_IO_EXCEPTIONS = (
     ClientError,
 )
 
+
 async def bounded_storage_map[Item, Result](
     items: Iterable[Item],
     operation: Callable[[Item], Awaitable[Result]],
@@ -33,9 +34,7 @@ async def bounded_storage_map[Item, Result](
     values = list(items)
     if not values:
         return []
-    configured_concurrency = (
-        settings.STORAGE_IO_CONCURRENCY if concurrency is None else concurrency
-    )
+    configured_concurrency = settings.STORAGE_IO_CONCURRENCY if concurrency is None else concurrency
     bounded_concurrency = max(1, min(int(configured_concurrency), len(values)))
     semaphore = asyncio.Semaphore(bounded_concurrency)
 

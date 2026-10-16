@@ -56,10 +56,13 @@ def test_probe_keys_enforce_public_private_boundary(value, public):
 
 
 def test_origin_url_requires_credential_free_https_and_quotes_key():
-    assert verify_public_asset_origin.origin_url(
-        "https://assets.getlorevia.com/root/",
-        "public-assets/book/chapter name/v1.txt",
-    ) == "https://assets.getlorevia.com/root/public-assets/book/chapter%20name/v1.txt"
+    assert (
+        verify_public_asset_origin.origin_url(
+            "https://assets.getlorevia.com/root/",
+            "public-assets/book/chapter name/v1.txt",
+        )
+        == "https://assets.getlorevia.com/root/public-assets/book/chapter%20name/v1.txt"
+    )
 
     with pytest.raises(ValueError):
         verify_public_asset_origin.validate_base_url("http://assets.getlorevia.com")

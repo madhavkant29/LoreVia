@@ -19,11 +19,20 @@ Deployment race / AI-cost safety:
 - **PostHog autocapture disabled** (`autocapture: false`).
 - **Library project menu z-index raised to `z-[95]`** so the analytics consent banner can no longer cover the menu/delete action on short viewports.
 
+## 1b. Pre-deployment safety hardening (final review round)
+
+- **Fail-closed rollback.** New `backend/scripts/legacy_rollback_hold.py`: before any code rollback, holds legacy state at the data level (hides frozen/pre-cutoff incomplete books from owned-book lookups, cancels every non-terminal legacy execution and outbox row, records the previous hidden state). The runbook now requires: stop the app stack → run the hold with the current image → verify zero non-terminal legacy executions → only then swap code. Schema is never downgraded; `/ready` verifies the older code can run on the migrated schema, and if it cannot, the stack stays stopped (fail-closed) with dump-restore as the recovery path. `--release` restores exactly the books the hold touched.
+- **Freeze override for skipped books.** `--include-processing-after-cutoff` (targeted `--book-id` only) lets an operator freeze a book skipped by `skipped_processing_after_cutoff` after investigation. Skipped books remain fail-closed automatically (gate holds dispatchers, claims, outbox, requeue, retry/continue and `ensure_project_writable`); the runbook documents the investigation + override procedure and the proof queries.
+- **Deploy-time E2E flag guard.** `deploy.sh` refuses to run when `NEXT_PUBLIC_E2E_MOCK_API`, `ADMIN_E2E_TEST_SECRET`, or `ADMIN_E2E_ALLOW_PRODUCTION` is present anywhere in the deploy environment (including leaked `backend/.env` values). Combined with the build guard and the three-switch `admin.server.ts` requirement, production cannot carry a live admin/mock bypass.
+- **Safer release staging.** The runbook replaced blanket `git add -A` with area-scoped staging, secret/junk pattern scans before and after staging, and a mandatory `git diff --cached` review.
+- **Provider spend verification (#2).** Confirmed: every customer-attributed provider call reserves tokens/cost **before** the call under a per-user advisory lock, so per-user USD ceilings (paid tiers) and tier token/window caps (all tiers) cannot be crossed jointly by concurrent calls (`test_concurrent_reservations_cannot_jointly_cross_author_ceiling`). All processing entry points reserve processed words first (initial ingestion, continue, manual reprocess, admin reprocess, editor auto-first, editor manual retry — the last one added this round, with a new regression test proving an exhausted allowance returns 403 and dispatches nothing). Editor rebuild/import reconciliation undercounting is an accounting under-count only; it is bounded by the token/USD caps and cannot produce uncontrolled spend. System-funded calls are rate-limited via `enforce_system_llm_rate_limit`.
+- **Post-freeze verification strengthened.** The runbook now requires two snapshots (immediately and ≥10 minutes after the freeze) proving zero non-terminal legacy executions, zero pending outbox rows, zero active runs/imports, and **zero new LLM/processing usage events for legacy books** — logs are supporting evidence only.
+
 ## 2. Verification ledger (this round, on the pinned local stack)
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Backend suite | `docker compose -f docker-compose-local.yml exec -T api pytest tests -q` | **2589 passed, 1 skipped** |
+| Backend suite | `docker compose -f docker-compose-local.yml exec -T api pytest tests -q` | **2598 passed, 1 skipped** |
 | Frontend unit suite | `cd frontend && npm.cmd test` | **1452 passed (277 files)** |
 | Frontend type-check | `npm.cmd run type-check` | clean |
 | Frontend lint | `npm.cmd run lint` | clean |
@@ -35,13 +44,13 @@ Deployment race / AI-cost safety:
 | Freeze dry run | `python scripts/freeze_legacy_manuscripts.py` | 140 candidates, 0 changed, no anomalies |
 | Cutoff idempotency | `--record-cutoff --execute --confirm YES_I_UNDERSTAND` on existing marker | "already persisted (no change)" |
 
-New regression tests added this round: `backend/tests/unit/test_legacy_cutoff_gates.py` (helper guards, 409s, requeue gate, claim dismissal, dispatcher holds, outbox cancel, import-job hold, editor-retry reservation), freeze-script `skipped_processing_after_cutoff`, plus updated fakes in existing suites (`_RetryDB.scalar`, `_FakeDB.scalar` for the audit-table lookup, `_FakeDb.scalar`).
+New regression tests added this round: `backend/tests/unit/test_legacy_cutoff_gates.py` (helper guards, 409s, requeue gate, claim dismissal, dispatcher holds, outbox cancel, import-job hold, editor-retry reservation + allowance bypass block), `backend/tests/unit/test_legacy_rollback_hold.py` (hold/release/idempotency/previous-hidden restoration), freeze-script `skipped_processing_after_cutoff` + targeted override, plus updated fakes in existing suites (`_RetryDB.scalar`, `_FakeDB.scalar` for the audit-table lookup, `_FakeDb.scalar`).
 
 E2E note: run Playwright after deleting `frontend/.next` if you previously ran `next build` in the same checkout; a stale dev cache caused four order-dependent failures that vanished with a clean cache (one of the four was a real menu/banner overlap, fixed above).
 
 ## 3. Deployment checklist (condensed; full runbook in `DEPLOY_AND_FREEZE.md`)
 
-- [ ] Commit and merge to `main` (deploy.sh refuses a dirty checkout).
+- [ ] Commit and merge to `main` using the area-scoped staging procedure in `DEPLOY_AND_FREEZE.md` section 0 (no `git add -A`; scan for secrets, review `git diff --cached`).
 - [ ] Confirm production assumptions: Vercel env has no `NEXT_PUBLIC_E2E_MOCK_API`/`ADMIN_E2E_TEST_SECRET`; VPS `backend/.env` complete (`DEBUG=false`, `PROCESSING_ALLOWANCES_MODE=enforce`, provider keys); production Alembic revision matches section 16 of `RELEASE_READINESS_AUDIT.md`; host `pg_dump` available.
 - [ ] `./deploy.sh` (it records the cutoff; watch for `legacy_freeze_cutoff_recorded` in the log and the health checks).
 - [ ] Verify release + cutoff + gate state (section 4 of the runbook).
@@ -52,12 +61,12 @@ E2E note: run Playwright after deleting `frontend/.next` if you previously ran `
 
 ## 4. Rollback triggers
 
-- Any legacy book starts processing or spends tokens after the cutoff.
+- Any legacy book starts processing or spends tokens after the cutoff (runbook section 7 proof queries).
 - A fresh (post-cutoff) upload stays stuck or gets frozen.
 - Frozen-book verification counters become nonzero after the freeze.
 - `PRODUCTION_VERIFICATION.md` fails on stuck/frozen-state or duplicate-guard deviation.
 
-Rollback: previous code revision + `up -d` (runbook section 8). Database rollback is restore-from-dump only; downgrades are blocked by policy.
+Rollback procedure is data-first and fail-closed (runbook section 8): stop the app stack → `legacy_rollback_hold.py --execute` with the current image → verify zero non-terminal legacy executions → swap code → verify `/ready` (schema) → start; release the hold after the gated revision is redeployed. Database rollback is restore-from-dump only; downgrades are blocked by policy.
 
 ## 5. Known/deferred items (do not block this release)
 

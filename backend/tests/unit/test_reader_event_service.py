@@ -144,11 +144,7 @@ async def test_reader_event_sync_replaces_only_the_changed_chapter_materializati
     )
 
     rows = (
-        (
-            await db.execute(
-                select(ReaderEvent).where(ReaderEvent.chapter_id == chapter.id)
-            )
-        )
+        (await db.execute(select(ReaderEvent).where(ReaderEvent.chapter_id == chapter.id)))
         .scalars()
         .all()
     )
@@ -221,11 +217,7 @@ async def test_reader_event_backfill_is_bounded_and_resumable(db):
     assert first_batch["has_more"] is True
     assert first_batch["next_cursor"] is not None
     first_rows = (
-        (
-            await db.execute(
-                select(ReaderEvent).where(ReaderEvent.book_id == book.id)
-            )
-        )
+        (await db.execute(select(ReaderEvent).where(ReaderEvent.book_id == book.id)))
         .scalars()
         .all()
     )

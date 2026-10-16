@@ -18,16 +18,43 @@ The whole procedure is: **deploy (cutoff recorded automatically, transition gate
 
 ## 0. Preconditions (run on your workstation)
 
-**[APPROVAL]** The working tree contains the reliability fixes, the one-time legacy freeze, and unrelated in-progress billing/redesign work. `deploy.sh` refuses a dirty checkout, so commit and push first (review `FULL_CHANGE_AUDIT.md` before doing this):
+**[APPROVAL]** The working tree contains the reliability fixes, the one-time legacy freeze, and unrelated in-progress billing/redesign work. `deploy.sh` refuses a dirty checkout, so every intended release file must be committed and pushed first. **Do not use `git add -A`** — review and stage deliberately so secrets and unrelated unfinished work cannot slip into the release:
 
 ```bash
 cd <repo>
+
+# 1. Know exactly what changed and what is new.
 git status --short
 git diff --stat HEAD
-git add -A
-git commit -m "fix: stabilize manuscript ingestion, add one-time legacy freeze, harden billing reconciliation"
+git ls-files --others --exclude-standard          # untracked files, review each path
+
+# 2. Review the full change audit and confirm the release scope.
+#    (FULL_CHANGE_AUDIT.md lists the intended release contents.)
+less FULL_CHANGE_AUDIT.md
+
+# 3. Secret and junk scan before staging anything.
+git status --porcelain | grep -Ei '\.env|secret|credential|\.pem|\.key|\.pfx|\.p12|dump|\.sqlite|\.db$|node_modules|\.next|test-results|playwright-report' \
+  || echo "no secret/junk paths in status"
+
+# 4. Stage by area, not globally. Replace the paths with the reviewed release scope.
+git add backend/app backend/scripts backend/migrations backend/tests backend/requirements.txt
+git add frontend/src frontend/public frontend/e2e frontend/scripts
+git add docs deploy.sh docker-compose.yml ops
+git add FULL_CHANGE_AUDIT.md RELIABILITY_AUDIT.md PRODUCTION_VERIFICATION.md \
+        STUCK_MANUSCRIPT_FREEZE.md DEPLOY_AND_FREEZE.md RELEASE_READINESS_AUDIT.md \
+        FINAL_RELEASE_CHECKLIST.md AGENTS.md README.md
+
+# 5. Verify the staged diff once more: this is exactly what ships.
+git diff --cached --stat
+git diff --cached --name-only | grep -Ei '\.env|secret|credential|\.pem|\.key|\.pfx|\.p12' \
+  && echo "STOP: secret-like file staged" && exit 1
+
+# 6. Commit and push only after the staged set matches the intended release.
+git commit -m "feat: harden ingestion reliability, release gating, and workspace redesign"
 git push origin <your-branch>
 ```
+
+If any unreviewed or unrelated change appears in `git diff --cached`, unstage it with `git restore --staged <path>` and handle it separately. Never stage `.env*`, key material, database dumps, build output, or test artifacts.
 
 Then merge into `main` per your process. Do not proceed until `main` contains the changes (`git log --oneline -1`).
 
@@ -180,7 +207,11 @@ Also confirm Sentry shows the new release and no new `MissingGreenlet` issues.
 The frontend is hosted on Vercel, so the VPS deploy does not update it. Promote the **same commit** you just deployed to the backend.
 
 1. In the Vercel dashboard, open the LoreVia project → Deployments, and confirm the Production deployment's commit SHA equals `git rev-parse HEAD` from step 3.
-2. Before promoting, verify the Production environment variables do **not** include `NEXT_PUBLIC_E2E_MOCK_API` or `ADMIN_E2E_TEST_SECRET`. (The production build now refuses to compile when `NEXT_PUBLIC_E2E_MOCK_API=1` unless `ADMIN_E2E_ALLOW_PRODUCTION=1` is explicitly set, so a misconfigured build fails instead of shipping; see section 10.)
+2. Before promoting, verify the Production environment variables do **not** include `NEXT_PUBLIC_E2E_MOCK_API`, `ADMIN_E2E_TEST_SECRET`, or `ADMIN_E2E_ALLOW_PRODUCTION`. Layer by layer:
+   - Vercel: check Production env vars for all three names and remove any match (Preview-only values are fine, Production is not).
+   - Repo: a production build refuses to compile with `NEXT_PUBLIC_E2E_MOCK_API=1` unless `ADMIN_E2E_ALLOW_PRODUCTION=1` is also set (`frontend/next.config.js`), and the admin session override additionally requires a non-empty `ADMIN_E2E_TEST_SECRET` and refuses entirely when `NODE_ENV=production` without all three flags (`frontend/src/lib/api/admin.server.ts`).
+   - VPS deploy: `deploy.sh` now refuses to deploy if any of the three flags is present in the deploy environment, including anything leaked through `backend/.env` (grep for the flags with `grep -n 'NEXT_PUBLIC_E2E_MOCK_API\|ADMIN_E2E_TEST_SECRET\|ADMIN_E2E_ALLOW_PRODUCTION' backend/.env` → must be empty).
+   - Post-deploy spot check: `curl -s -o /dev/null -w '%{http_code}' https://www.getlorevia.com/api/admin/session` should return a non-2xx for an unauthenticated request, and production data must never show E2E mock fixtures (e.g., "Ash Gate Sample" in the public library).
 3. Verify these Production variables exist and point at the VPS API: `NEXT_PUBLIC_API_URL` (e.g. `https://api.getlorevia.com/api/v1`), `API_ORIGIN` (server-side origin used by the `/api/v1` rewrite), `NEXT_PUBLIC_APP_URL`, Paddle (`NEXT_PUBLIC_PADDLE_CLIENT_TOKEN`, `NEXT_PUBLIC_PADDLE_ENV`), Supabase (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`), and the observability keys you use.
 4. Promote/Redeploy the verified commit to Production (the release process in `docs/hetzner-service-management.md` describes the same-commit contract).
 5. Cross-check the released SHA:
@@ -213,8 +244,54 @@ What to review:
   - `already_frozen` (previous run),
   - `skipped_ready` (completed books are never frozen),
   - `skipped_after_cutoff` (created after the cutoff; only possible with `--book-id`),
-  - `skipped_processing_after_cutoff` — the book's workspace shows processing activity newer than the cutoff. This should not happen once the gate is active; treat it as a stop-and-investigate signal and freeze such a book only with explicit intent (the gate still holds its queued work meanwhile).
+  - `skipped_processing_after_cutoff` — the book's workspace shows processing activity newer than the cutoff.
 - The `WARNING: N execution(s) are currently running` line can appear if a legacy execution was claimed just before the cutoff was recorded. Those are dismissed and stop before their next provider call; an LLM request already in flight may still complete once.
+
+### `skipped_processing_after_cutoff` — operator procedure
+
+A skipped book is **still fail-closed without any further action**: it was created before the cutoff and is not `ready`, so the transition gate keeps holding its work permanently (dispatchers skip its executions, worker claims dismiss delivered messages, outbox rows are cancelled, `requeue` refuses it, and retry/continue/`ensure_project_writable` return 409). It cannot automatically resume paid processing on this revision.
+
+Investigate, then decide:
+
+```bash
+cd /opt/lorevia/current
+# 1. See which books were skipped and why (processing activity timestamp).
+docker compose --env-file ./backend/.env -f docker-compose.yml exec -T backend \
+  python scripts/freeze_legacy_manuscripts.py --json | \
+  python -c "import json,sys; d=json.load(sys.stdin); [print(r['book_id'], r['status'], r['stage'], r['action']) for r in d['results'] if r['action']=='skipped_processing_after_cutoff']"
+
+# 2. Confirm the gate is holding it (must return gate-held counts, never running work).
+docker compose --env-file ./backend/.env -f docker-compose.yml exec -T backend \
+  python -c "
+import asyncio
+from app.core.database import engine
+from sqlalchemy import text
+async def main():
+    async with engine.connect() as conn:
+        rows = await conn.execute(text('''
+            SELECT b.id, b.status,
+                   (SELECT count(*) FROM task_executions e WHERE e.book_id=b.id AND e.status IN ('pending_dispatch','queued','running','paused')) AS non_terminal,
+                   (SELECT count(*) FROM task_executions e WHERE e.book_id=b.id AND e.status='dismissed' AND e.error_category='legacy_cutoff') AS gate_dismissed
+            FROM books b
+            WHERE b.created_at < (SELECT (metadata_json->>'cutoff')::timestamptz FROM admin_audit_events WHERE action_type='legacy_freeze_cutoff_recorded' ORDER BY created_at DESC LIMIT 1)
+              AND b.status <> 'ready'
+        '''))
+        for r in rows:
+            print(dict(r._mapping))
+asyncio.run(main())
+"
+```
+
+If the investigation shows the activity timestamp is stale/misleading and the project is genuinely abandoned, freeze it explicitly (targeted only):
+
+```bash
+docker compose --env-file ./backend/.env -f docker-compose.yml exec -T backend \
+  python scripts/freeze_legacy_manuscripts.py \
+  --book-id <book-uuid> --include-processing-after-cutoff \
+  --execute --confirm YES_I_UNDERSTAND
+```
+
+The override requires `--book-id` and cannot run globally. If the project is genuinely active (e.g., a user just re-uploaded or retried under a workaround), do not freeze it; instead investigate why its workspace activity is newer than the cutoff and confirm it is processing under the new deployment (its work would be post-cutoff and unaffected anyway).
 
 ---
 
@@ -294,11 +371,58 @@ Fresh manuscripts (created after the cutoff — never touched by the freeze):
 2. Uploading an identical file twice in a row shows: "This exact manuscript is already being processed in another project..."
 3. If the account's allowance is insufficient, the book fails visibly with the allowance message.
 
-Wait ~10 minutes and re-run the step 6 verification query: every counter must remain zero and frozen books must not receive new executions. Optionally confirm no new ingestion logs for them:
+### Proof that legacy processing stopped (mandatory, not log-based)
+
+Logs are supporting evidence only. The authoritative proof is that legacy books produce **zero new work and zero new AI spend** after the freeze. Run this twice — immediately after the freeze and again after at least 10 minutes:
 
 ```bash
-docker compose --env-file ./backend/.env -f docker-compose.yml logs --since 15m worker-extraction \
-  | grep -Ei 'book_processing_frozen' || true
+cd /opt/lorevia/current
+docker compose --env-file ./backend/.env -f docker-compose.yml exec -T backend \
+python -c "
+import asyncio
+from app.core.database import engine
+from sqlalchemy import text
+async def main():
+    async with engine.connect() as conn:
+        cutoff = (await conn.execute(text(\"select (metadata_json->>'cutoff')::timestamptz from admin_audit_events where action_type='legacy_freeze_cutoff_recorded' order by created_at desc limit 1\"))).scalar()
+        freeze_at = (await conn.execute(text(\"select max(created_at) from admin_audit_events where action_type='book_processing_frozen'\"))).scalar()
+        print('cutoff:', cutoff, 'freeze_at:', freeze_at)
+        legacy_ids = '''SELECT id FROM books WHERE id IN (
+            SELECT target_book_id FROM admin_audit_events WHERE action_type='book_processing_frozen'
+        ) OR (writer_workspace->'processing'->>'frozen' = 'true')'''
+        queries = {
+            'legacy_non_terminal_executions': f\"SELECT count(*) FROM task_executions WHERE book_id IN ({legacy_ids}) AND status IN ('pending_dispatch','queued','running','paused')\",
+            'legacy_pending_outbox_rows': f\"SELECT count(*) FROM task_dispatch_outbox o JOIN task_executions e ON e.id=o.execution_id WHERE e.book_id IN ({legacy_ids}) AND o.status IN ('pending','publishing','publish_failed')\",
+            'legacy_active_runs': f\"SELECT count(*) FROM book_processing_runs r WHERE r.book_id IN ({legacy_ids}) AND r.status IN ('queued','running','paused')\",
+            'legacy_active_import_jobs': f\"SELECT count(*) FROM manuscript_import_jobs j WHERE j.book_id IN ({legacy_ids}) AND j.status IN ('queued','running','cancel_requested')\",
+            'legacy_llm_events_after_freeze': f\"SELECT count(*) FROM llm_usage_events l WHERE l.book_id IN ({legacy_ids}) AND l.created_at > :freeze_at\",
+            'legacy_processing_events_after_freeze': f\"SELECT count(*) FROM processing_usage_events p WHERE p.book_id IN ({legacy_ids}) AND p.reserved_at > :freeze_at\",
+        }
+        for name, sql in queries.items():
+            value = (await conn.execute(text(sql), {'freeze_at': freeze_at})).scalar()
+            flag = 'OK' if int(value or 0) == 0 else 'FAIL'
+            print(f'{flag} {name}={value}')
+asyncio.run(main())
+"
+```
+
+Every line must print `OK ...=0` in both snapshots. If any counter is nonzero:
+
+- A nonzero `legacy_*` execution/outbox/run/import counter means legacy work restarted — stop, capture `docker compose logs --since 30m` for all workers, and roll back fail-closed per section 8.
+- A nonzero `legacy_llm_events_after_freeze` means provider tokens were spent on a frozen project — treat as a P0 incident: stop workers, preserve logs, and follow section 8.
+
+Supporting evidence (secondary): worker logs should contain no new ingestion for frozen books and may show the gate working:
+
+```bash
+docker compose --env-file ./backend/.env -f docker-compose.yml logs --since 15m worker-extraction worker-analysis \
+  | grep -Ei 'legacy_cutoff_execution_dismissed|manuscript_import_job_held_by_legacy_cutoff' || true
+```
+
+Optionally confirm no worker has legacy book work reserved:
+
+```bash
+docker compose --env-file ./backend/.env -f docker-compose.yml exec -T worker-extraction \
+  celery -A app.workers.celery_app inspect reserved --timeout=10 || true
 ```
 
 ---
@@ -320,10 +444,53 @@ mkdir -p /opt/lorevia/backups/supabase
 pg_dump "$ALEMBIC_DATABASE_URL" -F c -f "/opt/lorevia/backups/supabase/pre_freeze_$(date +%Y%m%d_%H%M%S).dump"
 ```
 
-Rollback code to the previous good revision:
+### Rollback (fail-closed)
+
+An older revision may predate the deployment transition gate, so held legacy work could restart and spend tokens if you simply roll the code back. The rollback is therefore **data-first and fail-closed**: hold the legacy state with the current (gated) image, keep the application stopped during the code swap, and only start the older code once no legacy work can run.
+
+**[⚠️ WRITES] [APPROVAL]**
 
 ```bash
 cd /opt/lorevia/current
+
+# 1. Stop everything that can process or accept requests (redis can stay up).
+docker compose --env-file ./backend/.env -f docker-compose.yml stop \
+  nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence worker-maintenance celery-beat
+
+# 2. Hold the legacy state using the CURRENT image (do this before rebuilding old code).
+docker compose --env-file ./backend/.env -f docker-compose.yml run --rm \
+  backend python scripts/legacy_rollback_hold.py                     # dry run, review
+docker compose --env-file ./backend/.env -f docker-compose.yml run --rm \
+  backend python scripts/legacy_rollback_hold.py \
+  --execute --confirm YES_I_UNDERSTAND
+```
+
+The hold (see `backend/scripts/legacy_rollback_hold.py`):
+
+- hides every frozen/pre-cutoff incomplete book from owned-book lookups (`hidden_at`), which every revision respects for ownership checks, and records the previous hidden state in `writer_workspace.processing.rollback_hold` so `--release` restores it exactly;
+- cancels every non-terminal legacy `task_executions` row (`status='dismissed'`, `error_category='rollback_hold'`) and its dispatch outbox rows;
+- is idempotent and dry-run by default.
+
+```bash
+# 3. Verify the hold before swapping code.
+docker compose --env-file ./backend/.env -f docker-compose.yml run --rm \
+  backend python -c "
+import asyncio
+from app.core.database import engine
+from sqlalchemy import text
+async def main():
+    async with engine.connect() as conn:
+        held = (await conn.execute(text(\"select count(*) from books where writer_workspace->'processing'->'rollback_hold' is not null\"))).scalar()
+        non_terminal = (await conn.execute(text(\"select count(*) from task_executions where status in ('pending_dispatch','queued','running','paused') and book_id in (select id from books where writer_workspace->'processing'->'rollback_hold' is not null)\"))).scalar()
+        print('held_books:', held, 'non_terminal_legacy_executions:', non_terminal)
+asyncio.run(main())
+"
+```
+
+Both numbers must print with `non_terminal_legacy_executions: 0` (a nonzero `held_books` with zero executions is the desired fail-closed state).
+
+```bash
+# 4. Swap to the previous revision and start the stack.
 git log --oneline -5
 git checkout <previous-good-sha>
 export RELEASE_SHA="$(git rev-parse HEAD)"
@@ -331,6 +498,25 @@ docker compose --env-file ./backend/.env -f docker-compose.yml build
 docker compose --env-file ./backend/.env -f docker-compose.yml up -d \
   redis nginx backend worker-extraction worker-analysis worker-embedding worker-intelligence worker-maintenance celery-beat
 ```
+
+**Schema compatibility:** do not run `alembic downgrade` (blocked by policy; the migration set is not a clean inverse). The older code runs against the already-migrated schema. This is safe for additive tables/columns, but verify it explicitly before trusting the rollback:
+
+```bash
+curl -s https://api.getlorevia.com/ready ; echo
+docker compose --env-file ./backend/.env -f docker-compose.yml ps
+```
+
+`/ready` runs the runtime schema compatibility check. If it fails, the older code cannot operate on the current schema: **keep the application stopped (fail-closed)** and either redeploy the gated revision or restore the pre-deploy dump (below), then redeploy matching code.
+
+```bash
+# 5. After the rollback is resolved and the gated revision is deployed again,
+#    release the hold so legacy projects return to normal frozen state.
+docker compose --env-file ./backend/.env -f docker-compose.yml exec -T backend \
+  python scripts/legacy_rollback_hold.py \
+  --release --execute --confirm YES_I_UNDERSTAND
+```
+
+Release only removes books/hidden state that the hold itself created (matched by the `rollback_hold` marker); user-hidden books and unrelated projects are never touched.
 
 Release frozen projects (targeted only; never resumes processing):
 **[⚠️ WRITES]**

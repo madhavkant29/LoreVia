@@ -182,7 +182,13 @@ async def test_support_ai_still_charges_unrelated_questions_before_declining(mon
         nonlocal calls
         calls += 1
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot verify that from LoreVia's support guides."))]
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="I cannot verify that from LoreVia's support guides."
+                    )
+                )
+            ]
         )
 
     monkeypatch.setattr(support_retrieval_service.settings, "SUPPORT_ASSISTANT_ENABLED", True)

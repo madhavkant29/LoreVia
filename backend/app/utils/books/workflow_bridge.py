@@ -126,8 +126,7 @@ async def preview_workflow_import(
         .all()
     )
     incoming_numbers = {
-        int(chapter.get("number") or index)
-        for index, chapter in enumerate(incoming, start=1)
+        int(chapter.get("number") or index) for index, chapter in enumerate(incoming, start=1)
     }
     matched_current = [chapter for chapter in current if int(chapter.number) in incoming_numbers]
     current_texts = await bounded_storage_map(

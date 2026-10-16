@@ -62,11 +62,7 @@ def process_book_task(self, book_id: str, execution_id: str | None = None):
         result = run_worker_coro(
             process_book(book_id, queue_wait_ms=queue_wait_ms, task_id=self.request.id)
         )
-        budget_blocked_error = (
-            str(result.get("error") or "")
-            if isinstance(result, dict)
-            else ""
-        )
+        budget_blocked_error = str(result.get("error") or "") if isinstance(result, dict) else ""
         budget_blocked = budget_blocked_error in {
             "budget_exhausted",
             "insufficient_remaining_budget",

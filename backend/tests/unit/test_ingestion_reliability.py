@@ -292,4 +292,3 @@ class TestLlmCoordinationRetryClassification:
 
         assert is_llm_coordination_retry_error(HTTPException(503, "upstream boom")) is False
         assert is_llm_coordination_retry_error(HTTPException(500, "LLM capacity")) is False
-

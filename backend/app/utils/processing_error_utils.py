@@ -26,13 +26,11 @@ _LEGACY_DOC_FAILURE: Final = (
 )
 
 _UNREADABLE_FILE_FAILURE: Final = (
-    "We couldn't read this manuscript file. Check that it opens correctly, "
-    "then upload it again."
+    "We couldn't read this manuscript file. Check that it opens correctly, then upload it again."
 )
 
 _EMPTY_TEXT_FAILURE: Final = (
-    "We couldn't find readable text in this manuscript. Check the file contents "
-    "and try again."
+    "We couldn't find readable text in this manuscript. Check the file contents and try again."
 )
 
 _PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (

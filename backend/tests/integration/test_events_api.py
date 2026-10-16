@@ -192,9 +192,9 @@ async def test_reader_events_v2_reads_materialized_rows_with_keyset_pagination(c
     second_payload = second_response.json()
     assert second_payload["has_more"] is False
     assert [item["event_title"] for item in second_payload["items"]] == ["Departure"]
-    assert {
-        item["id"] for item in first_payload["items"]
-    }.isdisjoint({item["id"] for item in second_payload["items"]})
+    assert {item["id"] for item in first_payload["items"]}.isdisjoint(
+        {item["id"] for item in second_payload["items"]}
+    )
 
     first_chapter_only = await client.get(
         f"/api/v1/reader/{book.id}/events/v2?chapter=1", headers=headers

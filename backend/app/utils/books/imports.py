@@ -538,12 +538,10 @@ def build_import_preview(
     elif format_name == "scrivener":
         from app.utils.scrivener_utils import parse_scrivener_archive
 
-        scrivener_chapters = parse_document_or_400(
-            parse_scrivener_archive, raw, filename="preview"
-        )
-        sample_text = "\n".join(
-            str(chapter.get("text") or "") for chapter in scrivener_chapters
-        )[:5000]
+        scrivener_chapters = parse_document_or_400(parse_scrivener_archive, raw, filename="preview")
+        sample_text = "\n".join(str(chapter.get("text") or "") for chapter in scrivener_chapters)[
+            :5000
+        ]
     elif format_name in ("txt", "md", "fountain"):
         sample_text = raw.decode("utf-8", errors="replace")[:5000]
         sample_text = book_text._normalize_unicode_replacements(sample_text)

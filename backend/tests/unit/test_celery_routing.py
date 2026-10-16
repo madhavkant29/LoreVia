@@ -43,9 +43,7 @@ def test_export_tasks_route_to_the_registered_maintenance_queue():
 
 
 def test_export_cleanup_and_public_asset_backfill_are_scheduled():
-    scheduled_tasks = {
-        entry["task"] for entry in celery_app.conf.beat_schedule.values()
-    }
+    scheduled_tasks = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
 
     assert "maintenance_tasks.cleanup_expired_manuscript_exports" in scheduled_tasks
     assert "maintenance_tasks.backfill_public_assets" in scheduled_tasks

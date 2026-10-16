@@ -184,7 +184,9 @@ def _source_out(article: SupportArticle) -> SupportSourceOut:
     )
 
 
-def _actions_for_article(article: SupportArticle, context: SupportUiContext) -> list[SupportActionOut]:
+def _actions_for_article(
+    article: SupportArticle, context: SupportUiContext
+) -> list[SupportActionOut]:
     return [
         SupportActionOut(
             label=str(link["label"]),
@@ -313,10 +315,7 @@ def _build_support_ai_user_prompt(
         if allow_detailed
         else "Keep the answer compact unless a short numbered path is needed."
     )
-    conversation = [
-        {"role": item.role, "content": item.content}
-        for item in recent_messages[-6:]
-    ]
+    conversation = [{"role": item.role, "content": item.content} for item in recent_messages[-6:]]
     return "\n\n".join(
         (
             f"User question:\n{message}",

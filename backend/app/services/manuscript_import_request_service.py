@@ -102,12 +102,8 @@ async def execute_manuscript_import_request(
             screenplay_batches.append(
                 {
                     "parsed_scenes": screenplay_payload["scenes"],
-                    "starting_number": min(
-                        int(cast(Any, job["number"])) for job in new_jobs
-                    ),
-                    "scene_numbers": {
-                        int(cast(Any, job["number"])) for job in new_jobs
-                    },
+                    "starting_number": min(int(cast(Any, job["number"])) for job in new_jobs),
+                    "scene_numbers": {int(cast(Any, job["number"])) for job in new_jobs},
                 }
             )
         else:
@@ -169,14 +165,10 @@ async def execute_manuscript_import_request(
         parsed = list(cast(list[dict[str, object]], parsed_payload["chapters"]))
         if upload_work_type != "screenplay" and not split_flag:
             merged_text = "\n\n".join(
-                str(chapter.get("text") or "").strip()
-                for chapter in parsed
-                if chapter.get("text")
+                str(chapter.get("text") or "").strip() for chapter in parsed if chapter.get("text")
             )
             merged_html_parts = [
-                str(chapter.get("html") or "").strip()
-                for chapter in parsed
-                if chapter.get("html")
+                str(chapter.get("html") or "").strip() for chapter in parsed if chapter.get("html")
             ]
             parsed = [
                 {
@@ -188,9 +180,7 @@ async def execute_manuscript_import_request(
                         else None
                     ),
                     "images": [
-                        image
-                        for chapter in parsed
-                        for image in list(chapter.get("images") or [])
+                        image for chapter in parsed for image in list(chapter.get("images") or [])
                     ],
                     "number": 1,
                 }
@@ -209,12 +199,8 @@ async def execute_manuscript_import_request(
             screenplay_batches.append(
                 {
                     "parsed_scenes": screenplay_payload["scenes"],
-                    "starting_number": min(
-                        int(cast(Any, job["number"])) for job in new_jobs
-                    ),
-                    "scene_numbers": {
-                        int(cast(Any, job["number"])) for job in new_jobs
-                    },
+                    "starting_number": min(int(cast(Any, job["number"])) for job in new_jobs),
+                    "scene_numbers": {int(cast(Any, job["number"])) for job in new_jobs},
                 }
             )
             resolved_book_work_type = "screenplay"

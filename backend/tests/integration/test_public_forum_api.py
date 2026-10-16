@@ -153,8 +153,7 @@ async def test_secondary_forum_collections_support_gapless_cursor_pages(client, 
     )
     assert second_interests_page.status_code == 200
     assert (
-        second_interests_page.json()["items"][0]["id"]
-        != first_interests_payload["items"][0]["id"]
+        second_interests_page.json()["items"][0]["id"] != first_interests_payload["items"][0]["id"]
     )
 
     for reader in (first_reader, second_reader):

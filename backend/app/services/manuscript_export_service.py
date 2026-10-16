@@ -112,16 +112,16 @@ def _validate_export_request(request: ManuscriptExportRequest) -> None:
         raise HTTPException(422, "Invalid novel export preset")
 
 
-async def _accessible_chapter_stats(db: AsyncSession, *, book: Book, collaborator: Any) -> tuple[int, int]:
+async def _accessible_chapter_stats(
+    db: AsyncSession, *, book: Book, collaborator: Any
+) -> tuple[int, int]:
     rows = (
         await db.execute(
             select(Chapter.number, Chapter.word_count).where(Chapter.book_id == book.id)
         )
     ).all()
     if collaborator is not None:
-        rows = [
-            row for row in rows if collaboration_allows_chapter(collaborator, int(row.number))
-        ]
+        rows = [row for row in rows if collaboration_allows_chapter(collaborator, int(row.number))]
     return len(rows), sum(max(int(row.word_count or 0), 0) for row in rows)
 
 
@@ -415,8 +415,12 @@ async def generate_manuscript_export_artifact(
         if not chapters:
             raise HTTPException(404, "No chapters available to export")
         preface = str(workspace.get("novel_preface") or "") if isinstance(workspace, dict) else ""
-        novel_front_matter = workspace.get("novel_front_matter") if isinstance(workspace, dict) else None
-        epub_metadata = workspace.get("novel_epub_metadata") if isinstance(workspace, dict) else None
+        novel_front_matter = (
+            workspace.get("novel_front_matter") if isinstance(workspace, dict) else None
+        )
+        epub_metadata = (
+            workspace.get("novel_epub_metadata") if isinstance(workspace, dict) else None
+        )
         cover_image = await load_novel_cover_image(book)
         common_kwargs = {
             "title": book.title or "LoreVia Novel",
@@ -531,9 +535,7 @@ async def process_manuscript_export_job(
 ) -> dict[str, Any]:
     job = (
         await db.execute(
-            select(ManuscriptExportJob)
-            .where(ManuscriptExportJob.id == job_id)
-            .with_for_update()
+            select(ManuscriptExportJob).where(ManuscriptExportJob.id == job_id).with_for_update()
         )
     ).scalar_one_or_none()
     if job is None:

@@ -971,9 +971,7 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
     if cutoff is not None:
         # Legacy executions stay pending_dispatch until the one-time freeze
         # dismisses them; they must not occupy dispatch slots or be published.
-        candidate_statement = candidate_statement.where(
-            TaskExecution.created_at >= cutoff
-        )
+        candidate_statement = candidate_statement.where(TaskExecution.created_at >= cutoff)
     candidates = (await db.execute(candidate_statement)).scalars().all()
     if not candidates:
         await db.commit()
@@ -1023,9 +1021,7 @@ async def dispatch_pending_extraction_tasks(db: AsyncSession) -> int:
         )
     pending_book_heads = {
         book_id: int(chapter_number)
-        for book_id, chapter_number in (
-            await db.execute(pending_book_heads_statement)
-        ).all()
+        for book_id, chapter_number in (await db.execute(pending_book_heads_statement)).all()
     }
     available_slots = max(
         int(settings.EXTRACTION_WORKER_CONCURRENCY) - sum(active.values()),

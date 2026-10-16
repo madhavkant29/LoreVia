@@ -50,9 +50,7 @@ def public_chapter_content_url(book: Book, chapter: Chapter) -> str | None:
     content_version = max(int(chapter.content_version or 1), 1)
     if int(getattr(chapter, "public_asset_version", 0) or 0) != content_version:
         return None
-    return public_asset_url(
-        public_chapter_asset_key(book.id, chapter.id, content_version)
-    )
+    return public_asset_url(public_chapter_asset_key(book.id, chapter.id, content_version))
 
 
 async def publish_public_chapter_asset(

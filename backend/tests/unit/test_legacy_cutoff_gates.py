@@ -15,6 +15,8 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 
+from app.core.config import settings
+
 from app.models.book import Book, Chapter
 from app.models.operations import ManuscriptImportJob, TaskDispatchOutbox, TaskExecution
 from app.models.user import AdminAuditEvent, ProcessingUsageEvent, User
@@ -104,7 +106,9 @@ async def _create_book(
     return book
 
 
-def _execution(book: Book | None, *, task_name: str, status: str, created_at: datetime) -> TaskExecution:
+def _execution(
+    book: Book | None, *, task_name: str, status: str, created_at: datetime
+) -> TaskExecution:
     return TaskExecution(
         identity_key=uuid.uuid4().hex,
         task_name=task_name,
@@ -197,14 +201,16 @@ async def test_requeue_gate_skips_pre_cutoff_books(monkeypatch, db) -> None:
     await db.commit()
     await record_freeze_cutoff(db, cutoff=datetime.now(UTC) - timedelta(minutes=1))
 
-    assert await pipeline_state_service.requeue_stalled_book_processing_if_needed(
-        db, book=legacy
-    ) is False
+    assert (
+        await pipeline_state_service.requeue_stalled_book_processing_if_needed(db, book=legacy)
+        is False
+    )
     assert dispatched == []
 
-    assert await pipeline_state_service.requeue_stalled_book_processing_if_needed(
-        db, book=fresh
-    ) is True
+    assert (
+        await pipeline_state_service.requeue_stalled_book_processing_if_needed(db, book=fresh)
+        is True
+    )
     assert dispatched == [fresh.id]
 
 
@@ -238,10 +244,16 @@ async def test_dispatchers_ignore_pre_cutoff_executions(db) -> None:
     book = await _create_book(db, user=user, status="processing")
     legacy_at = datetime.now(UTC) - timedelta(days=5)
     extraction = _execution(
-        book, task_name="extraction_tasks.process_book", status="pending_dispatch", created_at=legacy_at
+        book,
+        task_name="extraction_tasks.process_book",
+        status="pending_dispatch",
+        created_at=legacy_at,
     )
     analysis = _execution(
-        book, task_name="analysis_tasks.analyse_chapter", status="pending_dispatch", created_at=legacy_at
+        book,
+        task_name="analysis_tasks.analyse_chapter",
+        status="pending_dispatch",
+        created_at=legacy_at,
     )
     embedding = _execution(
         book,
@@ -345,9 +357,7 @@ async def test_editor_retry_reserves_processed_words(monkeypatch, db) -> None:
     )
 
     user = await _create_user(db)
-    book = await _create_book(
-        db, user=user, status="failed", chapter_count=2, editor_project=True
-    )
+    book = await _create_book(db, user=user, status="failed", chapter_count=2, editor_project=True)
     await db.commit()
 
     chapters_queued, total_words = await dispatch_manual_rebuild_with_reservations(db, book)
@@ -369,9 +379,7 @@ async def test_editor_retry_reserves_processed_words(monkeypatch, db) -> None:
     assert len(reservations) == 2
     assert all(event.status == "reserved" for event in reservations)
     executions = (
-        (
-            await db.execute(select(TaskExecution).where(TaskExecution.book_id == book.id))
-        )
+        (await db.execute(select(TaskExecution).where(TaskExecution.book_id == book.id)))
         .scalars()
         .all()
     )
@@ -379,3 +387,41 @@ async def test_editor_retry_reserves_processed_words(monkeypatch, db) -> None:
         (row.arguments_json or {}).get("processing_reservation_id") for row in executions
     }
     assert execution_arguments == {str(event.id) for event in reservations}
+
+
+@pytest.mark.asyncio
+async def test_editor_retry_cannot_bypass_exhausted_allowance(monkeypatch, db) -> None:
+    from app.services.editor_project_service import (
+        dispatch_manual_rebuild_with_reservations,
+    )
+
+    monkeypatch.setattr(settings, "PROCESSING_ALLOWANCES_MODE", "enforce")
+    monkeypatch.setattr(settings, "AUTHOR_MONTHLY_PROCESSED_WORD_LIMIT", 4)
+    monkeypatch.setattr(settings, "ARCHITECT_MONTHLY_PROCESSED_WORD_LIMIT", 4)
+
+    user = await _create_user(db)
+    book = await _create_book(db, user=user, status="failed", chapter_count=1, editor_project=True)
+    book_id = book.id
+    await db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await dispatch_manual_rebuild_with_reservations(db, book)
+
+    assert exc.value.status_code == 403
+    await db.rollback()
+    reservations = (
+        (
+            await db.execute(
+                select(ProcessingUsageEvent).where(ProcessingUsageEvent.book_id == book_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    executions = (
+        (await db.execute(select(TaskExecution).where(TaskExecution.book_id == book_id)))
+        .scalars()
+        .all()
+    )
+    assert reservations == []
+    assert executions == []

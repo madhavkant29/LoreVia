@@ -115,7 +115,9 @@ async def test_get_user_stats_cached_rebuilds_and_writes_display_snapshot_on_mis
 
 
 @pytest.mark.asyncio
-async def test_build_user_stats_assembles_display_aggregates_without_parallel_session_queries(monkeypatch):
+async def test_build_user_stats_assembles_display_aggregates_without_parallel_session_queries(
+    monkeypatch,
+):
     user = SimpleNamespace(id=uuid.uuid4())
     writing = _stats_payload().writing
 

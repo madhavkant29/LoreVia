@@ -30,7 +30,9 @@ async def list_notifications(
 ):
     if sync_revision_digests and response is not None:
         response.headers["Deprecation"] = "true"
-        response.headers["Warning"] = '299 - "sync_revision_digests is deprecated and has no effect"'
+        response.headers["Warning"] = (
+            '299 - "sync_revision_digests is deprecated and has no effect"'
+        )
     return await load_notification_page(
         db,
         current_user.id,

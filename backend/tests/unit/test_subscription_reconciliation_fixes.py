@@ -20,7 +20,9 @@ from app.models.user import Subscription, SubscriptionEvent, User
 from app.services.paddle_webhook_service import sync_subscription_from_paddle
 
 
-async def _create_subscription(db: AsyncSession, *, status: str = "active") -> tuple[User, Subscription]:
+async def _create_subscription(
+    db: AsyncSession, *, status: str = "active"
+) -> tuple[User, Subscription]:
     user = User(
         email=f"reconcile-{uuid.uuid4().hex[:8]}@lorevia.app",
         username=f"reconcile{uuid.uuid4().hex[:8]}",

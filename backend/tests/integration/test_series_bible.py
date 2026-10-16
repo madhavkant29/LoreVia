@@ -207,4 +207,3 @@ async def test_series_list_endpoint_is_not_shadowed_by_book_lookup(client, db):
     payload = response.json()
     names = [item["name"] for item in payload["items"]]
     assert "Neon Nights" in names
-

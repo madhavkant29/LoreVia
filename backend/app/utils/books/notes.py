@@ -300,8 +300,7 @@ async def get_book_note(
             select(BookNote, Chapter.title)
             .outerjoin(
                 Chapter,
-                (Chapter.book_id == BookNote.book_id)
-                & (Chapter.number == BookNote.chapter_number),
+                (Chapter.book_id == BookNote.book_id) & (Chapter.number == BookNote.chapter_number),
             )
             .where(BookNote.book_id == book.id, BookNote.id == note_id)
         )

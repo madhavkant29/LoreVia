@@ -271,9 +271,7 @@ async def get_public_uploads_analytics(
     if isinstance(cached, dict):
         return cached
     payload = await build_public_uploads_overview(db)
-    cache_payload = (
-        payload.model_dump(mode="json") if hasattr(payload, "model_dump") else payload
-    )
+    cache_payload = payload.model_dump(mode="json") if hasattr(payload, "model_dump") else payload
     await cache_set(cache_key, cache_payload, 300)
     return payload
 
@@ -402,8 +400,7 @@ async def get_public_chapter(
         "chapter_description": chapter.description,
         "total_chapters": book.total_chapters,
         "content_url": content_url,
-        "text_url": content_url
-        or (get_presigned_url(chapter.s3_key) if chapter.s3_key else None),
+        "text_url": content_url or (get_presigned_url(chapter.s3_key) if chapter.s3_key else None),
         "text_content": stored_payload.get("text"),
         "html_content": stored_payload.get("html"),
     }

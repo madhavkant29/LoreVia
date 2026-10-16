@@ -341,7 +341,10 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
             + (((anchored_threads / total_threads) if total_threads else 0.0) * 22)
             + (
                 (
-                    ((book.total_chapters or 0) - min(continuity_issue_count, book.total_chapters or 0))
+                    (
+                        (book.total_chapters or 0)
+                        - min(continuity_issue_count, book.total_chapters or 0)
+                    )
                     / (book.total_chapters or 1)
                 )
                 * 20
@@ -438,7 +441,9 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
             if world_issue_count
             else "No issues are recorded in the latest world-analysis pass. "
         )
-        world_detail += "Lore coverage still benefits from ongoing contradiction hunts and missing-rule checks."
+        world_detail += (
+            "Lore coverage still benefits from ongoing contradiction hunts and missing-rule checks."
+        )
     else:
         world_detail += "No world-gap analysis is available to measure consistency."
 
@@ -561,24 +566,51 @@ async def build_story_health_payload(db: AsyncSession, book: Book) -> StoryHealt
         status, summary = _story_health_status(overall_score)
     else:
         status = "Not available"
-        summary = "Story health needs analyzed manuscript evidence before a score can be calculated."
+        summary = (
+            "Story health needs analyzed manuscript evidence before a score can be calculated."
+        )
     return StoryHealthOut(
         score=overall_score,
         status=status,
         summary=summary,
         available=health_available,
         metrics=[
-            {"label": "Continuity", "score": continuity_score, "detail": continuity_detail, "available": continuity_available},
+            {
+                "label": "Continuity",
+                "score": continuity_score,
+                "detail": continuity_detail,
+                "available": continuity_available,
+            },
             {
                 "label": "Character consistency",
                 "score": character_score,
                 "detail": character_detail,
                 "available": character_available,
             },
-            {"label": "Timeline clarity", "score": timeline_score, "detail": timeline_detail, "available": timeline_available},
-            {"label": "Plot thread closure", "score": plot_score, "detail": plot_detail, "available": plot_available},
-            {"label": "Worldbuilding consistency", "score": world_score, "detail": world_detail, "available": world_available},
-            {"label": "Pacing", "score": pacing_score, "detail": pacing_detail, "available": pacing_available},
+            {
+                "label": "Timeline clarity",
+                "score": timeline_score,
+                "detail": timeline_detail,
+                "available": timeline_available,
+            },
+            {
+                "label": "Plot thread closure",
+                "score": plot_score,
+                "detail": plot_detail,
+                "available": plot_available,
+            },
+            {
+                "label": "Worldbuilding consistency",
+                "score": world_score,
+                "detail": world_detail,
+                "available": world_available,
+            },
+            {
+                "label": "Pacing",
+                "score": pacing_score,
+                "detail": pacing_detail,
+                "available": pacing_available,
+            },
             {
                 "label": "Dialogue/voice consistency",
                 "score": dialogue_score,

@@ -489,12 +489,8 @@ async def test_upload_book_endpoint_validates_and_persists(monkeypatch):
     )
     patch_route_dependency(monkeypatch, books, "resolve_owned_series_ids", _fake_resolve_series)
     patch_route_dependency(monkeypatch, books, "check_upload_limit", _async_value(None))
-    patch_route_dependency(
-        monkeypatch, books, "find_active_duplicate_upload", _async_value(None)
-    )
-    patch_route_dependency(
-        monkeypatch, books, "acquire_upload_fingerprint_lock", AsyncMock()
-    )
+    patch_route_dependency(monkeypatch, books, "find_active_duplicate_upload", _async_value(None))
+    patch_route_dependency(monkeypatch, books, "acquire_upload_fingerprint_lock", AsyncMock())
 
     def _upload_object(key, raw, content_type=None):
         label = "book" if key.startswith("books/") else "cover"

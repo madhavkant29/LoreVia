@@ -202,7 +202,9 @@ async def sync_world_document_elements(
     if document_ids is not None:
         affected_ids = replaced_ids | removed_ids
         if affected_ids:
-            delete_statement = delete_statement.where(WorldElement.world_document_id.in_(affected_ids))
+            delete_statement = delete_statement.where(
+                WorldElement.world_document_id.in_(affected_ids)
+            )
             await db.execute(delete_statement)
     else:
         await db.execute(delete_statement)

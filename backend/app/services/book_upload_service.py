@@ -45,9 +45,7 @@ async def acquire_upload_fingerprint_lock(
     """Serialize identical uploads for one user within the current transaction."""
     await db.execute(
         select(
-            func.pg_advisory_xact_lock(
-                func.hashtext(f"upload_fingerprint:{user_id}:{fingerprint}")
-            )
+            func.pg_advisory_xact_lock(func.hashtext(f"upload_fingerprint:{user_id}:{fingerprint}"))
         )
     )
 
@@ -110,9 +108,7 @@ async def create_uploaded_book_from_raw(
     fingerprint = upload_source_fingerprint(raw)
     # Serialize identical uploads for this user so two concurrent requests
     # cannot both pass the duplicate check and pay for two full analyses.
-    await acquire_upload_fingerprint_lock(
-        db, user_id=current_user.id, fingerprint=fingerprint
-    )
+    await acquire_upload_fingerprint_lock(db, user_id=current_user.id, fingerprint=fingerprint)
     duplicate = await find_active_duplicate_upload(
         db, user_id=current_user.id, fingerprint=fingerprint
     )

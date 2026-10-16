@@ -187,9 +187,12 @@ async def test_build_story_health_payload_handles_empty_runtime_data(monkeypatch
     assert next(metric for metric in payload.metrics if metric.label == "Pacing").detail.startswith(
         "No persisted"
     )
-    assert "No world-gap analysis" in next(
-        metric for metric in payload.metrics if metric.label == "Worldbuilding consistency"
-    ).detail
+    assert (
+        "No world-gap analysis"
+        in next(
+            metric for metric in payload.metrics if metric.label == "Worldbuilding consistency"
+        ).detail
+    )
 
 
 @pytest.mark.asyncio

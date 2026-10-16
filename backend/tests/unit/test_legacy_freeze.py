@@ -125,9 +125,7 @@ async def test_record_freeze_cutoff_is_write_once(db: AsyncSession):
     markers = (
         (
             await db.execute(
-                select(AdminAuditEvent).where(
-                    AdminAuditEvent.action_type == ACTION_CUTOFF_RECORDED
-                )
+                select(AdminAuditEvent).where(AdminAuditEvent.action_type == ACTION_CUTOFF_RECORDED)
             )
         )
         .scalars()
@@ -143,7 +141,9 @@ async def test_dry_run_lists_legacy_books_without_modifying_anything(
     user = await _create_user(db)
     legacy_pending = await _create_book(db, user=user, status="pending", age_days=10)
     legacy_failed = await _create_book(db, user=user, status="failed", age_days=20)
-    legacy_editor = await _create_book(db, user=user, status="processing", age_days=30, editor_project=True)
+    legacy_editor = await _create_book(
+        db, user=user, status="processing", age_days=30, editor_project=True
+    )
     ready = await _create_book(db, user=user, status="ready", age_days=10)
     post_cutoff = await _create_book(db, user=user, status="processing", age_days=-0.05)
     await db.commit()
@@ -172,7 +172,9 @@ async def test_execute_freezes_all_legacy_books_and_persists_cutoff(db: AsyncSes
     user = await _create_user(db)
     legacy_pending = await _create_book(db, user=user, status="pending", age_days=10)
     legacy_failed = await _create_book(db, user=user, status="failed", age_days=20)
-    legacy_editor = await _create_book(db, user=user, status="failed", age_days=30, editor_project=True)
+    legacy_editor = await _create_book(
+        db, user=user, status="failed", age_days=30, editor_project=True
+    )
     post_cutoff = await _create_book(db, user=user, status="processing", age_days=-0.05)
     await db.commit()
 
@@ -243,15 +245,17 @@ async def test_conflicting_explicit_cutoff_is_refused(db: AsyncSession):
     await _create_book(db, user=user, status="pending", age_days=10)
     await db.commit()
 
-    recorded = await legacy_script.run(legacy_script.parse_args(["--record-cutoff", "--execute", "--confirm", legacy_script.CONFIRMATION_PHRASE]))
+    recorded = await legacy_script.run(
+        legacy_script.parse_args(
+            ["--record-cutoff", "--execute", "--confirm", legacy_script.CONFIRMATION_PHRASE]
+        )
+    )
     assert recorded == 0
     persisted = await load_persisted_freeze_cutoff(db)
     assert persisted is not None
 
     with pytest.raises(SystemExit):
-        await legacy_script.run(
-            legacy_script.parse_args(["--cutoff", "2000-01-01T00:00:00Z"])
-        )
+        await legacy_script.run(legacy_script.parse_args(["--cutoff", "2000-01-01T00:00:00Z"]))
 
 
 @pytest.mark.asyncio
@@ -395,3 +399,57 @@ async def test_freeze_skips_books_processing_after_cutoff(
     assert is_book_frozen(book) is False
     assert book.status == "processing"
     assert summary["results"][0]["action"] == "skipped_processing_after_cutoff"
+
+
+@pytest.mark.asyncio
+async def test_processing_after_cutoff_override_requires_target_and_freezes(
+    db: AsyncSession, capsys: pytest.CaptureFixture[str]
+):
+    user = await _create_user(db)
+    book = await _create_book(db, user=user, status="processing", age_days=10)
+    workspace = dict(book.writer_workspace)
+    workspace["processing"] = {
+        **workspace["processing"],
+        "started_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    book.writer_workspace = workspace
+    await db.commit()
+
+    refused = await legacy_script.run(
+        legacy_script.parse_args(
+            [
+                "--include-processing-after-cutoff",
+                "--json",
+                "--execute",
+                "--confirm",
+                legacy_script.CONFIRMATION_PHRASE,
+            ]
+        )
+    )
+    assert refused == 2
+    await db.refresh(book)
+    assert is_book_frozen(book) is False
+
+    result = await legacy_script.run(
+        legacy_script.parse_args(
+            [
+                "--book-id",
+                str(book.id),
+                "--cutoff",
+                (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+                "--include-processing-after-cutoff",
+                "--json",
+                "--execute",
+                "--confirm",
+                legacy_script.CONFIRMATION_PHRASE,
+            ]
+        )
+    )
+    summary = _summary_from_output(capsys)
+
+    assert result == 0
+    await db.refresh(book)
+    assert is_book_frozen(book) is True
+    assert summary["results"][0]["action"] == "freeze"
+    assert summary["results"][0]["override"] == "processing_after_cutoff"

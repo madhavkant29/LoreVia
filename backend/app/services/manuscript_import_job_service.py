@@ -269,9 +269,7 @@ async def dispatch_pending_manuscript_import_jobs(
     if legacy_cutoff is not None:
         # Pre-cutoff imports are held for the one-time freeze; dispatch would
         # parse files and can trigger paid analysis.
-        job_statement = job_statement.where(
-            ManuscriptImportJob.created_at >= legacy_cutoff
-        )
+        job_statement = job_statement.where(ManuscriptImportJob.created_at >= legacy_cutoff)
     jobs = list((await db.execute(job_statement)).scalars().all())
     dispatched = 0
     for job in jobs:
@@ -383,11 +381,7 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
         return {"status": job.status, "job_id": str(job_id)}
 
     legacy_cutoff = await load_persisted_freeze_cutoff(db)
-    if (
-        legacy_cutoff is not None
-        and job.created_at is not None
-        and job.created_at < legacy_cutoff
-    ):
+    if legacy_cutoff is not None and job.created_at is not None and job.created_at < legacy_cutoff:
         # Deployment transition gate: a message delivered before the cutoff was
         # recorded must not parse files or queue paid analysis. The one-time
         # freeze cancels this job explicitly; leave it untouched here.
@@ -446,12 +440,8 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
             screenplay_batches.append(
                 {
                     "parsed_scenes": screenplay_payload["scenes"],
-                    "starting_number": min(
-                        int(cast(Any, item["number"])) for item in new_jobs
-                    ),
-                    "scene_numbers": {
-                        int(cast(Any, item["number"])) for item in new_jobs
-                    },
+                    "starting_number": min(int(cast(Any, item["number"])) for item in new_jobs),
+                    "scene_numbers": {int(cast(Any, item["number"])) for item in new_jobs},
                 }
             )
         else:
@@ -665,8 +655,7 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
                     "file_count": len(job.source_files_json or []) if job is not None else 0,
                     "failure_category": (
                         "validation"
-                        if isinstance(exc, HTTPException)
-                        and 400 <= int(exc.status_code) < 500
+                        if isinstance(exc, HTTPException) and 400 <= int(exc.status_code) < 500
                         else "processing"
                     ),
                 },

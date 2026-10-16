@@ -337,7 +337,9 @@ async def mark_series_world_analysis_stale(
 ) -> WorldAnalysisState:
     state = await get_series_world_analysis_state(db, series_id, for_update=True)
     if state is None:
-        state = WorldAnalysisState(series_id=series_id, scope="series", status=WORLD_ANALYSIS_QUEUED)
+        state = WorldAnalysisState(
+            series_id=series_id, scope="series", status=WORLD_ANALYSIS_QUEUED
+        )
         db.add(state)
     state.stale_at = datetime.now(UTC)
     state.refresh_job_id = refresh_job_id
@@ -414,15 +416,9 @@ async def mark_world_analysis_failed(
     return state
 
 
-async def mark_related_series_world_analysis_stale(
-    db: AsyncSession, *, book_id: uuid.UUID
-) -> None:
+async def mark_related_series_world_analysis_stale(db: AsyncSession, *, book_id: uuid.UUID) -> None:
     series_ids = set(
-        (
-            await db.scalars(
-                select(SeriesBook.series_id).where(SeriesBook.book_id == book_id)
-            )
-        ).all()
+        (await db.scalars(select(SeriesBook.series_id).where(SeriesBook.book_id == book_id))).all()
     )
     for series_id in series_ids:
         await mark_series_world_analysis_stale(db, series_id=series_id)
@@ -456,8 +452,7 @@ async def record_world_source_observations(
             WorldSourceObservation.generation_id == generation_id
         )
     existing = {
-        row.candidate_key: row
-        for row in (await db.execute(existing_statement)).scalars().all()
+        row.candidate_key: row for row in (await db.execute(existing_statement)).scalars().all()
     }
     observations: list[WorldSourceObservation] = []
     for candidate in candidates:
@@ -510,8 +505,6 @@ async def list_world_source_candidate_payloads(
             WorldBuildingDocument.id == WorldSourceObservation.world_document_id,
         ).where(WorldBuildingDocument.is_active.is_(True))
     elif source_kind == "chapter":
-        statement = statement.join(
-            Chapter, Chapter.id == WorldSourceObservation.chapter_id
-        )
+        statement = statement.join(Chapter, Chapter.id == WorldSourceObservation.chapter_id)
     rows = (await db.execute(statement)).scalars().all()
     return [dict(payload) for payload in rows if isinstance(payload, dict)]

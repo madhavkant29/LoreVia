@@ -117,9 +117,7 @@ test("authenticated launch surfaces avoid clipping, duplicate ids, and fixed-lay
   ] as const) {
     await page.setViewportSize(viewport)
     for (const route of selectedAuthenticatedRoutes) {
-      await page.goto(route.path)
-      await expect(page.locator("body")).toBeVisible()
-      await page.locator("h1, h2").filter({ visible: true }).first().waitFor({ state: "visible", timeout: 15_000 })
+      await gotoAndWaitForHeading(page, route.path)
       await page.waitForTimeout(100)
 
       const audit = await collectLayoutAudit(page)
@@ -150,9 +148,7 @@ test("public launch surfaces avoid clipping, unnamed fields, and fixed-layer col
   ] as const) {
     await page.setViewportSize(viewport)
     for (const route of selectedPublicRoutes) {
-      await page.goto(route.path)
-      await expect(page.locator("body")).toBeVisible()
-      await page.locator("h1, h2").filter({ visible: true }).first().waitFor({ state: "visible", timeout: 15_000 })
+      await gotoAndWaitForHeading(page, route.path)
       await page.waitForTimeout(100)
 
       const audit = await collectLayoutAudit(page)
@@ -162,6 +158,23 @@ test("public launch surfaces avoid clipping, unnamed fields, and fixed-layer col
 
   expect(violations).toEqual([])
 })
+
+async function gotoAndWaitForHeading(page: Page, path: string) {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(path)
+      await expect(page.locator("body")).toBeVisible()
+      await page.locator("h1, h2").filter({ visible: true }).first().waitFor({ state: "visible", timeout: 30_000 })
+      return
+    } catch (error) {
+      lastError = error
+      // The dev server can restart under memory pressure during long audits.
+      await page.waitForTimeout(2_000)
+    }
+  }
+  throw lastError
+}
 
 function collectViolations(
   violations: string[],

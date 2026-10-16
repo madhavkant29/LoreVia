@@ -55,9 +55,15 @@ def test_cursor_encoders_round_trip_and_reject_malformed_values():
     item_id = uuid.uuid4()
     timestamp = _timestamp()
     timestamp_cursor_pairs = (
-        (public_catalog_service.encode_public_book_page_cursor, public_catalog_service.decode_public_book_page_cursor),
+        (
+            public_catalog_service.encode_public_book_page_cursor,
+            public_catalog_service.decode_public_book_page_cursor,
+        ),
         (notes._encode_book_note_page_cursor, notes._decode_book_note_page_cursor),
-        (scene_records._encode_novel_scene_page_cursor, scene_records._decode_novel_scene_page_cursor),
+        (
+            scene_records._encode_novel_scene_page_cursor,
+            scene_records._decode_novel_scene_page_cursor,
+        ),
         (reader_utils.encode_plot_thread_page_cursor, reader_utils.decode_plot_thread_page_cursor),
     )
 
@@ -246,12 +252,8 @@ async def test_scene_and_plot_thread_pages_omit_detail_fields_without_lazy_loadi
         return {newest_thread.id: ["main"]}
 
     monkeypatch.setattr(reader_utils, "list_custom_tags_for_entity_ids", _thread_tags)
-    threads_db = _DB(
-        [_Result(scalars=[newest_thread, older_thread])], scalar_values=[4]
-    )
-    threads_page = await reader_utils.list_plot_threads_page(
-        threads_db, book_id=book_id, limit=1
-    )
+    threads_db = _DB([_Result(scalars=[newest_thread, older_thread])], scalar_values=[4])
+    threads_page = await reader_utils.list_plot_threads_page(threads_db, book_id=book_id, limit=1)
 
     assert threads_page["has_more"] is True
     assert threads_page["items"][0]["title"] == "The hidden gate"
@@ -293,7 +295,9 @@ async def test_public_catalog_page_uses_card_projection_and_caches_first_page(mo
         copyright_warning=False,
         created_at=created_at,
     )
-    older_book = SimpleNamespace(**{**book.__dict__, "id": uuid.uuid4(), "created_at": _timestamp(1)})
+    older_book = SimpleNamespace(
+        **{**book.__dict__, "id": uuid.uuid4(), "created_at": _timestamp(1)}
+    )
     cache: dict[str, dict] = {}
 
     async def _cache_get(key):

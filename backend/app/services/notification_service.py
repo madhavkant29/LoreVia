@@ -65,7 +65,10 @@ async def load_notification_page(
         # intelligence; post-commit workers own that work now.
         log.info(
             "deprecated_notification_digest_sync_requested",
-            extra={"metric": "notifications.deprecated_sync_revision_digests", "user_id": str(user_id)},
+            extra={
+                "metric": "notifications.deprecated_sync_revision_digests",
+                "user_id": str(user_id),
+            },
         )
     statement = (
         select(Notification)
@@ -80,13 +83,7 @@ async def load_notification_page(
             (Notification.created_at < cursor_created_at)
             | ((Notification.created_at == cursor_created_at) & (Notification.id < cursor_id))
         )
-    rows = (
-        (
-            await db.execute(statement)
-        )
-        .scalars()
-        .all()
-    )
+    rows = (await db.execute(statement)).scalars().all()
     has_more = len(rows) > limit
     items = rows[:limit]
     unread_count = int(

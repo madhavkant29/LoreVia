@@ -279,13 +279,10 @@ async def get_novel_scene(
     ).scalar_one_or_none()
     if scene is None:
         raise HTTPException(404, "Scene not found")
-    if (
-        collaborator is not None
-        and (
-            scene.chapter_number is None
-            or not collaboration_access.collaboration_allows_chapter(
-                collaborator, int(scene.chapter_number)
-            )
+    if collaborator is not None and (
+        scene.chapter_number is None
+        or not collaboration_access.collaboration_allows_chapter(
+            collaborator, int(scene.chapter_number)
         )
     ):
         raise HTTPException(404, "Scene not found")

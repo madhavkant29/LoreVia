@@ -41,7 +41,9 @@ def _stub_world_analysis_staleness(monkeypatch):
         no_op,
     )
     monkeypatch.setattr(world_building_document_workflow_utils, "mark_book_cache_dirty", no_op)
-    monkeypatch.setattr(world_building_document_workflow_utils, "mark_user_dashboard_cache_dirty", no_op)
+    monkeypatch.setattr(
+        world_building_document_workflow_utils, "mark_user_dashboard_cache_dirty", no_op
+    )
 
 
 @pytest.mark.asyncio

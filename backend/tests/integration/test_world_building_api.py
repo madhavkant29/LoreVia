@@ -303,12 +303,18 @@ async def test_world_read_endpoints_use_persisted_rows_without_storage_or_extrac
     async def unexpected_sync(*_args, **_kwargs):
         raise AssertionError("world GET attempted an extraction sync")
 
-    monkeypatch.setattr("app.utils.world_building_document_utils.download_book", unexpected_storage_read)
+    monkeypatch.setattr(
+        "app.utils.world_building_document_utils.download_book", unexpected_storage_read
+    )
     monkeypatch.setattr(
         "app.utils.world_building_candidate_record_utils.download_book", unexpected_storage_read
     )
-    monkeypatch.setattr("app.utils.world_building_story_utils.download_book", unexpected_storage_read)
-    monkeypatch.setattr("app.utils.world_building_utils.sync_world_document_elements", unexpected_sync)
+    monkeypatch.setattr(
+        "app.utils.world_building_story_utils.download_book", unexpected_storage_read
+    )
+    monkeypatch.setattr(
+        "app.utils.world_building_utils.sync_world_document_elements", unexpected_sync
+    )
 
     for path in (
         f"/api/v1/intelligence/{book.id}/world-building/elements",

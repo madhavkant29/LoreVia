@@ -449,9 +449,7 @@ async def _build_public_book_craft_profile(
 ) -> dict[str, Any]:
     story_health = await build_story_health_payload(db, book)
     metrics_by_label = {
-        str(metric.label): int(metric.score)
-        for metric in story_health.metrics
-        if metric.available
+        str(metric.label): int(metric.score) for metric in story_health.metrics if metric.available
     }
     story_health_score = float(story_health.score) if story_health.available else None
     sampled_text = await _sample_public_book_text(db, book=book)

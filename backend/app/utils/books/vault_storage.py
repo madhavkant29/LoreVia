@@ -146,7 +146,9 @@ async def list_vault_notes_page(
     rows = list(
         (
             await db.execute(
-                statement.order_by(VaultNote.path.asc(), VaultNote.id.asc()).limit(bounded_limit + 1)
+                statement.order_by(VaultNote.path.asc(), VaultNote.id.asc()).limit(
+                    bounded_limit + 1
+                )
             )
         )
         .scalars()

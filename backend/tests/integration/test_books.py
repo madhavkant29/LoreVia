@@ -207,9 +207,7 @@ async def test_saved_quotes_and_notes_cursor_endpoints_page_tied_rows(client, db
     quote_ids = {
         item["id"] for item in [*quote_first.json()["items"], *quote_second.json()["items"]]
     }
-    note_ids = {
-        item["id"] for item in [*note_first.json()["items"], *note_second.json()["items"]]
-    }
+    note_ids = {item["id"] for item in [*note_first.json()["items"], *note_second.json()["items"]]}
     assert len(quote_ids) == 3
     assert len(note_ids) == 3
     assert note_second.json()["items"][0]["body"].startswith("Body ")

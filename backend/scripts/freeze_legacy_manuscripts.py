@@ -88,6 +88,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Release frozen books. Requires --book-id; there is no global unfreeze.",
     )
+    parser.add_argument(
+        "--include-processing-after-cutoff",
+        action="store_true",
+        help=(
+            "Targeted escape hatch: allow freezing a legacy book whose workspace "
+            "shows processing activity newer than the cutoff. Requires --book-id "
+            "and should only be used after manual investigation."
+        ),
+    )
     parser.add_argument("--execute", action="store_true", help="Apply changes.")
     parser.add_argument("--confirm", help=f"Required with --execute: {CONFIRMATION_PHRASE}")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable output.")
@@ -108,9 +117,7 @@ def _target_book_ids(args: argparse.Namespace) -> list[uuid.UUID]:
         raise SystemExit(f"Invalid --book-id value: {exc}") from exc
 
 
-async def _resolve_cutoff(
-    db, args: argparse.Namespace
-) -> tuple[datetime, datetime | None, str]:
+async def _resolve_cutoff(db, args: argparse.Namespace) -> tuple[datetime, datetime | None, str]:
     """Return (effective cutoff, persisted cutoff, source).
 
     A fixed cutoff is required: an explicitly provided value may never disagree
@@ -132,9 +139,7 @@ async def _resolve_cutoff(
     return datetime.now(UTC), None, "now"
 
 
-async def _load_legacy_candidates(
-    db, cutoff: datetime, target_ids: list[uuid.UUID]
-) -> list[Book]:
+async def _load_legacy_candidates(db, cutoff: datetime, target_ids: list[uuid.UUID]) -> list[Book]:
     if target_ids:
         # Explicit targets are always loaded so the output can explain why a
         # book was skipped (after cutoff, ready, already frozen) instead of
@@ -170,15 +175,12 @@ def _latest_processing_activity(book: Book) -> datetime | None:
 async def _describe_book(db, book: Book, cutoff: datetime) -> dict[str, Any]:
     user = await db.get(User, book.user_id)
     execution_rows = (
-        (
-            await db.execute(
-                select(TaskExecution.status, func.count())
-                .where(TaskExecution.book_id == book.id)
-                .group_by(TaskExecution.status)
-            )
+        await db.execute(
+            select(TaskExecution.status, func.count())
+            .where(TaskExecution.book_id == book.id)
+            .group_by(TaskExecution.status)
         )
-        .all()
-    )
+    ).all()
     execution_counts = {str(status): int(count) for status, count in execution_rows}
     non_terminal = sum(
         execution_counts.get(status, 0) for status in NON_TERMINAL_EXECUTION_STATUSES
@@ -198,17 +200,13 @@ async def _describe_book(db, book: Book, cutoff: datetime) -> dict[str, Any]:
     )
     total_words = int(
         await db.scalar(
-            select(func.coalesce(func.sum(Chapter.word_count), 0)).where(
-                Chapter.book_id == book.id
-            )
+            select(func.coalesce(func.sum(Chapter.word_count), 0)).where(Chapter.book_id == book.id)
         )
         or 0
     )
     created_at = book.created_at if book.created_at.tzinfo else book.created_at.replace(tzinfo=UTC)
     processing = (
-        book.writer_workspace.get("processing")
-        if isinstance(book.writer_workspace, dict)
-        else None
+        book.writer_workspace.get("processing") if isinstance(book.writer_workspace, dict) else None
     )
     latest_activity = _latest_processing_activity(book)
     return {
@@ -236,7 +234,9 @@ def _print_results(summary: dict[str, Any]) -> None:
         f"changed={summary['changed']} skipped={summary['skipped']}"
     )
     if summary["cutoff_will_be_persisted"]:
-        print("First execution will persist this cutoff so later runs can never freeze newer books.")
+        print(
+            "First execution will persist this cutoff so later runs can never freeze newer books."
+        )
     if summary["in_flight_total"]:
         print(
             f"WARNING: {summary['in_flight_total']} execution(s) are currently running. "
@@ -251,10 +251,7 @@ def _print_results(summary: dict[str, Any]) -> None:
             "frozen={frozen} action={action}".format(**item)
         )
     if not summary["applied"]:
-        print(
-            "\nDry run only. Re-run with --execute --confirm "
-            f"{CONFIRMATION_PHRASE} to apply."
-        )
+        print(f"\nDry run only. Re-run with --execute --confirm {CONFIRMATION_PHRASE} to apply.")
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -268,6 +265,13 @@ async def run(args: argparse.Namespace) -> int:
     if args.unfreeze and not args.book_id:
         print("Refusing to unfreeze: --book-id is required (no global unfreeze).", file=sys.stderr)
         return 2
+    if args.include_processing_after_cutoff and not args.book_id:
+        print(
+            "Refusing --include-processing-after-cutoff without --book-id: "
+            "this override is targeted-only.",
+            file=sys.stderr,
+        )
+        return 2
     if args.record_cutoff and not apply_changes:
         print("--record-cutoff requires --execute --confirm (it is a write).", file=sys.stderr)
         return 2
@@ -280,7 +284,9 @@ async def run(args: argparse.Namespace) -> int:
 
     async with AsyncSessionLocal() as db:
         cutoff, persisted, source = await _resolve_cutoff(db, args)
-        action = "unfreeze" if args.unfreeze else ("record_cutoff" if args.record_cutoff else "freeze")
+        action = (
+            "unfreeze" if args.unfreeze else ("record_cutoff" if args.record_cutoff else "freeze")
+        )
         cutoff_will_be_persisted = persisted is None and action == "freeze"
 
         if args.record_cutoff:
@@ -358,14 +364,17 @@ async def run(args: argparse.Namespace) -> int:
                 skipped += 1
                 results.append(description)
                 continue
-            if description["processing_after_cutoff"]:
+            if description["processing_after_cutoff"] and not args.include_processing_after_cutoff:
                 # The workspace shows processing activity newer than the cutoff.
                 # Never freeze a book that may be legitimately running under
-                # the new deployment; investigate it manually instead.
+                # the new deployment; investigate it manually instead. The
+                # deployment transition gate keeps holding its queued work.
                 description["action"] = "skipped_processing_after_cutoff"
                 skipped += 1
                 results.append(description)
                 continue
+            if description["processing_after_cutoff"]:
+                description["override"] = "processing_after_cutoff"
             description["action"] = "freeze"
             if apply_changes:
                 outcome = await freeze_book_processing(

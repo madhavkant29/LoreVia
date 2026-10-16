@@ -275,14 +275,11 @@ def production_container_contract_errors(
         ),
     }
     missing_export_spool = [
-        requirement
-        for requirement, present in export_spool_requirements.items()
-        if not present
+        requirement for requirement, present in export_spool_requirements.items() if not present
     ]
     if missing_export_spool:
         errors.append(
-            "production export spool contract is incomplete: "
-            + ", ".join(missing_export_spool)
+            "production export spool contract is incomplete: " + ", ".join(missing_export_spool)
         )
     if (
         "> /tmp/redis.conf" not in compose_text
@@ -409,9 +406,7 @@ def main() -> int:
             CI_WORKFLOW_PATH.read_text(encoding="utf-8"),
         )
     )
-    errors.extend(
-        nginx_edge_start_contract_errors(NGINX_START_PATH.read_text(encoding="utf-8"))
-    )
+    errors.extend(nginx_edge_start_contract_errors(NGINX_START_PATH.read_text(encoding="utf-8")))
     if errors:
         for error in errors:
             print(error, file=sys.stderr)

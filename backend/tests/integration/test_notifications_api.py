@@ -155,7 +155,9 @@ async def test_notification_cursor_has_no_gaps_or_duplicates_across_ties(client,
     await db.flush()
     created_at = datetime(2026, 1, 1, tzinfo=UTC)
     notifications = [
-        Notification(user_id=owner.id, kind="test", title=str(index), body="", created_at=created_at)
+        Notification(
+            user_id=owner.id, kind="test", title=str(index), body="", created_at=created_at
+        )
         for index in range(5)
     ]
     db.add_all(notifications)

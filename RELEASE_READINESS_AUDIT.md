@@ -163,7 +163,7 @@ Final hardening round (same session, after this audit's first pass):
 - Library project menu could be covered by the analytics consent banner on short viewports (delete action unclickable); menu z-index raised to the app's dropdown convention (z-[95]).
 - PostHog autocapture disabled.
 
-Verification ledger for this round: backend 2589 passed / 1 skipped (Docker Compose Local); frontend 1452 passed / 277 files, type-check, lint, production build clean; Playwright smoke 108/108 with a clean .next (4 earlier failures were a stale dev cache after next build plus the one real menu-overlap bug, now fixed); deployment-transition rehearsal 7/7; freeze dry-run 140 candidates / 0 changed and --record-cutoff no-op on repeat.
+Verification ledger for this round: backend 2598 passed / 1 skipped (Docker Compose Local); frontend 1452 passed / 277 files, type-check, lint, production build clean; Playwright smoke 108/108 with a clean .next (4 earlier failures were a stale dev cache after next build plus the one real menu-overlap bug, now fixed); deployment-transition rehearsal 7/7; freeze dry-run 140 candidates / 0 changed and --record-cutoff no-op on repeat.
 
 Conditions for the GO:
 1. Commit and review the tree; deploy per DEPLOY_AND_FREEZE.md (deploy.sh records the cutoff automatically; do not set SKIP_LEGACY_CUTOFF_RECORD).

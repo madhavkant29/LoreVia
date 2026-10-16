@@ -40,8 +40,7 @@ log = logging.getLogger("lorevia.freeze")
 FREEZE_KIND = "administrative_freeze"
 FREEZE_REASON_LEGACY_IMPORT = "interrupted_legacy_import"
 FROZEN_USER_MESSAGE = (
-    "Import interrupted - please upload again. "
-    "Your project and files have been preserved."
+    "Import interrupted - please upload again. Your project and files have been preserved."
 )
 LEGACY_INCOMPLETE_MESSAGE = (
     "This project predates the current release and its interrupted import is "
@@ -82,9 +81,7 @@ def is_book_frozen(book: Book) -> bool:
 
 async def book_is_frozen(db: AsyncSession, book_id: uuid.UUID) -> bool:
     """Authoritative freeze check that re-reads the stored workspace."""
-    workspace = await db.scalar(
-        select(Book.writer_workspace).where(Book.id == book_id)
-    )
+    workspace = await db.scalar(select(Book.writer_workspace).where(Book.id == book_id))
     if not isinstance(workspace, dict):
         return False
     processing = workspace.get("processing")
@@ -298,9 +295,7 @@ async def freeze_book_processing(
     Editor projects are only frozen when the caller opts in (the one-time
     legacy freeze does; interactive flows do not).
     """
-    await db.execute(
-        select(func.pg_advisory_xact_lock(func.hashtext(f"admin_freeze:{book_id}")))
-    )
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"admin_freeze:{book_id}"))))
     book = await db.get(Book, book_id, with_for_update=True)
     if book is None:
         return {"status": "missing", "book_id": str(book_id)}
@@ -317,7 +312,11 @@ async def freeze_book_processing(
 
     if book.status not in FREEZABLE_BOOK_STATUSES:
         await db.commit()
-        return {"status": "skipped", "reason": f"unfreezable_status:{book.status}", "book_id": str(book_id)}
+        return {
+            "status": "skipped",
+            "reason": f"unfreezable_status:{book.status}",
+            "book_id": str(book_id),
+        }
 
     now = datetime.now(UTC)
 
@@ -404,9 +403,7 @@ async def freeze_book_processing(
     book.status = "failed"
 
     preserved_chapters = int(
-        await db.scalar(
-            select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id)
-        )
+        await db.scalar(select(func.count()).select_from(Chapter).where(Chapter.book_id == book.id))
         or 0
     )
     metadata = {
@@ -457,9 +454,7 @@ async def unfreeze_book_processing(
     The book is left in a normal, user-visible failed state with a retry
     action; an operator must still trigger any restart explicitly.
     """
-    await db.execute(
-        select(func.pg_advisory_xact_lock(func.hashtext(f"admin_freeze:{book_id}")))
-    )
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"admin_freeze:{book_id}"))))
     book = await db.get(Book, book_id, with_for_update=True)
     if book is None:
         return {"status": "missing", "book_id": str(book_id)}

@@ -121,10 +121,14 @@ async def test_source_observation_replacement_deletes_removed_and_empty_candidat
         candidates=[{"name": "North Gate"}],
     )
     rows = (
-        await db.execute(
-            select(WorldSourceObservation).where(WorldSourceObservation.book_id == book.id)
+        (
+            await db.execute(
+                select(WorldSourceObservation).where(WorldSourceObservation.book_id == book.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [row.payload["name"] for row in rows] == ["North Gate"]
     assert rows[0].source_fingerprint == content_sha256("second")
 

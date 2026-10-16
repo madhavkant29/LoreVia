@@ -136,7 +136,9 @@ async def prepare_advisor_reply_context(
     if world_mode == "gap_detection":
         intent_hint = "[AUTHOR INTENT DETECTED: check world-building, canon, lore coverage, and world-gap issues]"
     elif world_mode == "story_integration":
-        intent_hint = "[AUTHOR INTENT DETECTED: use world-building lore to find story integration options]"
+        intent_hint = (
+            "[AUTHOR INTENT DETECTED: use world-building lore to find story integration options]"
+        )
 
     augmented_last = (
         f"{last_user_msg}\n\n"

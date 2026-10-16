@@ -298,9 +298,7 @@ async def list_saved_quotes_page_endpoint(
     current_user=Depends(get_current_user),
 ):
     require_author_access(current_user)
-    return await list_saved_quotes_page(
-        db, user_id=current_user.id, limit=limit, cursor=cursor
-    )
+    return await list_saved_quotes_page(db, user_id=current_user.id, limit=limit, cursor=cursor)
 
 
 @router.get("/notes", response_model=list[BookNoteOut])

@@ -32,9 +32,7 @@ def test_auth_latency_report_normalizes_routes_and_applies_measurement_gate():
             f"/api/v1/books/123e4567-e89b-42d3-a456-426614174000/chapters/{index}",
             auth_ms=60,
             duration_ms=200,
-            ts=(
-                datetime(2026, 9, 1, tzinfo=UTC) + timedelta(days=(index - 1) % 7)
-            ).isoformat(),
+            ts=(datetime(2026, 9, 1, tzinfo=UTC) + timedelta(days=(index - 1) % 7)).isoformat(),
         )
         for index in range(1, 101)
     ]
@@ -73,12 +71,7 @@ def test_auth_latency_cli_ignores_non_json_lines(monkeypatch, capsys):
     )
     monkeypatch.setattr(analyze_auth_latency.sys, "stdin", stream)
 
-    assert (
-        analyze_auth_latency.main(
-            ["-", "--minimum-samples", "1", "--minimum-days", "1"]
-        )
-        == 0
-    )
+    assert analyze_auth_latency.main(["-", "--minimum-samples", "1", "--minimum-days", "1"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["eligible_samples"] == 1
     assert report["measurement_candidates"] == []

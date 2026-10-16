@@ -126,9 +126,7 @@ def test_active_export_request_index_is_unique_and_partial():
         "export_format",
         "options_json",
     ]
-    assert str(index.dialect_options["postgresql"]["where"]) == (
-        "status IN ('queued', 'running')"
-    )
+    assert str(index.dialect_options["postgresql"]["where"]) == ("status IN ('queued', 'running')")
 
 
 @pytest.mark.asyncio
