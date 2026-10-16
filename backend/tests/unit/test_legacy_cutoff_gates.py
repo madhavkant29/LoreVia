@@ -16,7 +16,6 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select
 
 from app.core.config import settings
-
 from app.models.book import Book, Chapter
 from app.models.operations import ManuscriptImportJob, TaskDispatchOutbox, TaskExecution
 from app.models.user import AdminAuditEvent, ProcessingUsageEvent, User
