@@ -548,14 +548,21 @@ async def create_tracked_chat_completion(
         raise
     try:
         response = await client.chat.completions.create(model=model, **kwargs)
-    except LLM_PROVIDER_CALL_EXCEPTIONS as exc:
+    except BaseException as exc:
         await _fail_llm_reservation_best_effort(fail_llm_reservation, reservation)
-        await record_provider_failure(
-            permit,
-            transient=is_transient_llm_provider_error(exc),
-        )
+        if isinstance(exc, LLM_PROVIDER_CALL_EXCEPTIONS):
+            await record_provider_failure(
+                permit,
+                transient=is_transient_llm_provider_error(exc),
+            )
+        else:
+            await release_provider_circuit_permit(permit)
         raise
-    await finish_llm_reservation(reservation, response)
+    try:
+        await finish_llm_reservation(reservation, response)
+    except BaseException:
+        await release_provider_circuit_permit(permit)
+        raise
     await record_provider_success(permit)
     return response
 
@@ -608,14 +615,21 @@ async def create_tracked_embedding(
         raise
     try:
         response = await client.embeddings.create(model=model, **kwargs)
-    except LLM_PROVIDER_CALL_EXCEPTIONS as exc:
+    except BaseException as exc:
         await _fail_llm_reservation_best_effort(fail_llm_reservation, reservation)
-        await record_provider_failure(
-            permit,
-            transient=is_transient_llm_provider_error(exc),
-        )
+        if isinstance(exc, LLM_PROVIDER_CALL_EXCEPTIONS):
+            await record_provider_failure(
+                permit,
+                transient=is_transient_llm_provider_error(exc),
+            )
+        else:
+            await release_provider_circuit_permit(permit)
         raise
-    await finish_llm_reservation(reservation, response)
+    try:
+        await finish_llm_reservation(reservation, response)
+    except BaseException:
+        await release_provider_circuit_permit(permit)
+        raise
     await record_provider_success(permit)
     return response
 

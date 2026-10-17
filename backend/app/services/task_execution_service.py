@@ -686,7 +686,10 @@ async def resume_temporary_capacity_pauses(
             if execution.processing_run_id
             else None
         )
-        if execution.error_category == "llm_capacity" and execution.attempt_count >= execution.max_attempts:
+        if (
+            execution.error_category == "llm_capacity"
+            and execution.attempt_count >= execution.max_attempts
+        ):
             # Older rows were created before capacity pauses refunded their
             # claim. Refund the most recent capacity-only claim so they can
             # recover after this deployment instead of failing in claim().

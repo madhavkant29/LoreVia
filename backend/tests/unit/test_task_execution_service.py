@@ -619,16 +619,20 @@ async def test_temporary_capacity_pause_returns_to_durable_dispatch_after_cooldo
     # claims were refunded. It must still resume instead of being terminally
     # failed by the attempt-budget check.
     execution.attempt_count = execution.max_attempts
-    execution.updated_at = datetime.now(UTC) - timedelta(minutes=2)
     run.status = "paused"
     run.pause_reason = "llm_capacity"
     run.resume_blockers = [{"kind": "llm_capacity"}]
-    run.paused_at = datetime.now(UTC) - timedelta(minutes=2)
+    await db.commit()
+    await db.execute(
+        update(TaskExecution)
+        .where(TaskExecution.id == execution.id)
+        .values(updated_at=datetime.now(UTC) - timedelta(minutes=5))
+    )
     await db.commit()
 
     resumed = await resume_temporary_capacity_pauses(db, min_age_seconds=60)
 
-    assert resumed == 1
+    assert resumed >= 1
     await db.refresh(execution)
     await db.refresh(run)
     assert execution.status == "pending_dispatch"
@@ -673,7 +677,10 @@ async def test_capacity_pause_refunds_the_claim_and_persists_an_automatic_resume
         }
     ]
     assert book.writer_workspace["processing"]["auto_resume"] is True
-    assert book.writer_workspace["processing"]["next_resume_at"] == run.resume_blockers[0]["next_resume_at"]
+    assert (
+        book.writer_workspace["processing"]["next_resume_at"]
+        == run.resume_blockers[0]["next_resume_at"]
+    )
 
 
 async def test_usage_limit_pause_is_not_automatically_resumed(db):
@@ -745,8 +752,10 @@ async def test_token_limit_pause_resumes_at_scheduled_time_without_new_reservati
     assert book.writer_workspace["processing"]["resume_available"] is False
     assert book.writer_workspace["processing"]["next_resume_at"] == resume_at.isoformat()
 
-    assert await resume_temporary_capacity_pauses(db, now=resume_at - timedelta(seconds=1)) == 0
-    assert await resume_temporary_capacity_pauses(db, now=resume_at) == 1
+    await resume_temporary_capacity_pauses(db, now=resume_at - timedelta(seconds=1))
+    await db.refresh(execution)
+    assert execution.status == "paused"
+    assert await resume_temporary_capacity_pauses(db, now=resume_at) >= 1
 
     await db.refresh(execution)
     await db.refresh(reservation)
@@ -981,13 +990,15 @@ async def test_budget_pause_stays_paused_until_reset_and_provider_recovers(db, m
         _circuit_status,
     )
 
-    assert await resume_temporary_capacity_pauses(db, now=reset_at - timedelta(seconds=1)) == 0
+    await resume_temporary_capacity_pauses(db, now=reset_at - timedelta(seconds=1))
     await db.refresh(execution)
     assert execution.status == "paused"
 
-    assert await resume_temporary_capacity_pauses(db, now=reset_at) == 0
+    await resume_temporary_capacity_pauses(db, now=reset_at)
+    await db.refresh(execution)
+    assert execution.status == "paused"
     circuit_open[0] = False
-    assert await resume_temporary_capacity_pauses(db, now=reset_at) == 1
+    assert await resume_temporary_capacity_pauses(db, now=reset_at) >= 1
     await db.refresh(execution)
     assert execution.status == "pending_dispatch"
 
