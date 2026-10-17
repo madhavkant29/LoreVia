@@ -56,6 +56,15 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: useQueryMock,
+  useInfiniteQuery: ({ queryKey }: { queryKey: string }) => {
+    const result = useQueryMock({ queryKey })
+    return {
+      ...result,
+      data: result.data ? { pages: [result.data] } : undefined,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+    }
+  },
   useQueryClient: () => ({ prefetchQuery: vi.fn() }),
 }))
 vi.mock("@/lib/api/books", () => ({ booksApi: booksApiMock }))

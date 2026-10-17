@@ -48,7 +48,7 @@ vi.mock("@/lib/api/billing", () => ({
 }))
 
 vi.mock("@/lib/stores/authStore", () => ({
-  useAuthStore: () => ({ user: authUser }),
+  useAuthStore: () => ({ user: authUser, hydrated: true }),
 }))
 
 vi.mock("@/lib/stores/preferencesStore", () => ({
