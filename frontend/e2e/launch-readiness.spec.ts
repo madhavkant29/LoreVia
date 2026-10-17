@@ -117,6 +117,8 @@ test("authenticated launch surfaces avoid clipping, duplicate ids, and fixed-lay
   ] as const
 
   for (const route of selectedAuthenticatedRoutes) {
+    // Load each route at the desktop baseline so the sidebar is not audited mid-transition from mobile.
+    await page.setViewportSize(viewports[0])
     await gotoAndWaitForHeading(page, route.path)
     for (const viewport of viewports) {
       await page.setViewportSize(viewport)
