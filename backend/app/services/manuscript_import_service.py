@@ -13,6 +13,10 @@ from app.core.redis import mark_user_dashboard_cache_dirty
 from app.models.book import Book, Chapter, ChapterMedia
 from app.models.progress import ReadingProgress
 from app.schemas.books import ChapterConsistencyReport, ManuscriptImportResult
+from app.services.book_section_service import (
+    append_import_structure_plans,
+    persist_book_sections,
+)
 from app.services.notification_service import enqueue_revision_digest_refresh
 from app.services.processing_allowance_service import ensure_active_word_capacity
 from app.services.task_execution_service import (
@@ -63,7 +67,10 @@ async def persist_manuscript_import(
     first_pdf_raw_for_cover: bytes | None,
     total_file_size: int,
     files_were_uploaded: bool,
+    structure_batches: list[dict[str, Any]] | None = None,
 ) -> ManuscriptImportResult:
+    structure_batches = structure_batches or []
+    append_import_structure_plans(book, structure_batches)
     imported_word_counts = {
         int(cast(Any, job["number"])): len(str(job.get("text") or "").split())
         for job in import_jobs
@@ -190,6 +197,7 @@ async def persist_manuscript_import(
             getattr(book, "is_editor_project", False)
             or not should_auto_reprocess
             or queue_extraction_after_import
+            or not job.get("include_in_analysis", True)
         ):
             chapter = await persist_editor_chapter_content(
                 db,
@@ -203,11 +211,11 @@ async def persist_manuscript_import(
                 content_version=int(job.get("content_version") or 1),
                 images=images,
             )
-            if not should_auto_reprocess:
+            if not should_auto_reprocess and job.get("include_in_analysis", True):
                 update_reprocess_metadata(book, add_pending_chapters=[job_number])
-            elif queue_extraction_after_import:
+            elif queue_extraction_after_import and job.get("include_in_analysis", True):
                 queued_extraction_chapters.append((chapter.id, job_number))
-            if not getattr(book, "is_editor_project", False) and not queue_extraction_after_import:
+            if not getattr(book, "is_editor_project", False) and not queue_extraction_after_import and job.get("include_in_analysis", True):
                 analysis_candidate_numbers.append(job_number)
         else:
             await _process_chapter(
@@ -266,6 +274,22 @@ async def persist_manuscript_import(
             parsed_scenes=cast(list[Any], batch["parsed_scenes"]),
             starting_number=int(cast(Any, batch["starting_number"])),
             replace_scene_numbers=cast(set[int], batch["scene_numbers"]),
+        )
+
+    for batch in structure_batches:
+        batch_jobs = cast(list[dict[str, Any]], batch["jobs"])
+        if not batch_jobs:
+            continue
+        chapter_rows = (await db.execute(
+            select(Chapter).where(
+                Chapter.book_id == book.id,
+                Chapter.number.in_([int(item["number"]) for item in batch_jobs]),
+            )
+        )).scalars().all()
+        await persist_book_sections(
+            db, book=book, plan=cast(dict[str, Any], batch["plan"]),
+            chapter_rows=chapter_rows, chapters=batch_jobs,
+            import_scope=str(batch["scope"]),
         )
 
     total_chapters = (

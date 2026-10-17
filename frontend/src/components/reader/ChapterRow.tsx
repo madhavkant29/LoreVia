@@ -27,9 +27,9 @@ function formatTagLabel(tag: string) {
 
 function buildMetadata(chapter: ChapterListItem) {
   const items = [
-    { label: "Processing", value: chapter.processed ? "Processed" : "Queued" },
+    { label: "Processing", value: chapter.analysis_included === false ? "Readable supplemental section" : chapter.processed ? "Processed" : "Queued" },
     { label: "Read status", value: chapter.read ? "Marked as read" : "Unread" },
-    { label: "Intelligence", value: chapter.intelligence_available === true ? "Indexed and ready" : chapter.intelligence_available === false ? "Not ready yet" : "Index status unavailable" },
+    { label: "Intelligence", value: chapter.analysis_included === false ? "Excluded from story analysis" : chapter.intelligence_available === true ? "Indexed and ready" : chapter.intelligence_available === false ? "Not ready yet" : "Index status unavailable" },
   ]
 
   const tags = Array.from(new Set((chapter.tags ?? []).filter(Boolean))).slice(0, 3)
@@ -41,7 +41,7 @@ function buildMetadata(chapter: ChapterListItem) {
 }
 
 export const ChapterRow = memo(function ChapterRow({ chapter, summary = null, unitLabel, isDark, readBusy, deleteBusy = false, actionsDisabled = false, onOpen, onToggleRead, onDelete }: ChapterRowProps) {
-  const kindLabel = chapterKindShortLabel(chapter.chapter_kind, chapter.number, unitLabel === "Scene" ? "Sc." : "Ch.")
+  const kindLabel = chapter.printed_label || chapterKindShortLabel(chapter.chapter_kind, chapter.number, unitLabel === "Scene" ? "Sc." : "Ch.")
   const title = chapter.title || kindLabel
   const metadata = buildMetadata(chapter)
   const tags = metadata.find((item) => item.label === "Tags")?.value ?? null
@@ -107,7 +107,7 @@ export const ChapterRow = memo(function ChapterRow({ chapter, summary = null, un
           <p className={`mt-3 max-w-4xl text-sm leading-7 ${isDark ? "text-slate-300" : "text-stone-600"}`}>{summary.content}</p>
         </details>
       ) : (
-        <p className={`mt-3 text-xs sm:ml-[5.75rem] ${isDark ? "text-slate-400" : "text-stone-600"}`}>{unitLabel} recap is not available yet.</p>
+        <p className={`mt-3 text-xs sm:ml-[5.75rem] ${isDark ? "text-slate-400" : "text-stone-600"}`}>{chapter.analysis_included === false ? "This section is readable but excluded from story analysis." : `${unitLabel} recap is not available yet.`}</p>
       ) : null}
     </article>
   )

@@ -121,6 +121,10 @@ class ChapterListItemOut(BaseModel):
     number: int
     title: str | None = None
     chapter_kind: str = "chapter"
+    printed_label: str | None = None
+    parent_part_id: str | None = None
+    parent_part_title: str | None = None
+    analysis_included: bool | None = None
     word_count: int | None = None
     processed: bool
     intelligence_available: bool = True

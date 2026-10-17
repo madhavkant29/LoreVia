@@ -1,5 +1,7 @@
 "use client"
 
+import { Fragment } from "react"
+
 import { ChapterRow } from "@/components/reader/ChapterRow"
 import type { ChapterListItem, SummaryCollectionItem } from "@/types/reader"
 
@@ -40,9 +42,11 @@ export function ChapterList({
       </div>
 
       <div className={`mt-3 border-y ${isDark ? "border-white/[0.08]" : "border-stone-200"}`}>
-        {chapters.map((chapter) => (
+        {chapters.map((chapter, index) => <Fragment key={chapter.number}>
+          {chapter.parent_part_id && chapter.parent_part_id !== chapters[index - 1]?.parent_part_id ? (
+            <h3 className={`border-b px-1 py-4 font-serif text-lg ${isDark ? "border-white/[0.08] text-slate-100" : "border-stone-200 text-stone-900"}`}>{chapter.parent_part_title}</h3>
+          ) : null}
           <ChapterRow
-            key={chapter.number}
             chapter={chapter}
             summary={summaries.find((summary) => summary.chapter_number === chapter.number) ?? null}
             unitLabel={unitLabel}
@@ -54,7 +58,7 @@ export function ChapterList({
             onToggleRead={() => onToggleChapterRead(chapter.number, !chapter.read)}
             onDelete={onDeleteChapter && (!canDeleteChapter || canDeleteChapter(chapter.number)) ? () => onDeleteChapter(chapter.number) : undefined}
           />
-        ))}
+        </Fragment>)}
       </div>
     </section>
   )

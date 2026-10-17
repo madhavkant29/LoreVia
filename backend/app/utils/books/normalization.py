@@ -386,6 +386,12 @@ _CHAPTER_KIND_LABELS: dict[str, str] = {
     "index": "Index",
     "title_page": "Title Page",
     "copyright": "Copyright",
+    "notes": "Author’s Note",
+    "glossary": "Glossary",
+    "chronology": "Chronology",
+    "part_opening": "Part Opening",
+    "interlude": "Interlude",
+    "unknown": "Section",
 }
 
 _CHAPTER_KIND_ALIASES: dict[str, str] = {

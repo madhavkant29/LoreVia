@@ -42,6 +42,7 @@ from app.models.intelligence import (
     WorldGapAnalysis,
 )
 from app.models.tag import CustomTag
+from app.services.book_section_service import filter_analysis_eligible_chapters
 from app.utils.advisor_utils import invalidate_advisor_caches_for_book
 from app.utils.ingestion_utils import build_chapter_dispatch_plan, merge_processing_pipeline
 
@@ -442,7 +443,8 @@ async def dispatch_rebuild(
     chapters_result = await db.execute(
         select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.number.asc())
     )
-    chapters = chapters_result.scalars().all()
+    readable_chapters = list(chapters_result.scalars().all())
+    chapters = await filter_analysis_eligible_chapters(db, book.id, readable_chapters)
 
     total_words = 0
     chapter_numbers: list[int] = []
@@ -456,7 +458,7 @@ async def dispatch_rebuild(
         await _transition_to_ready(db, book)
         return 0, 0
 
-    book.total_chapters = len(chapter_numbers)
+    book.total_chapters = sum(bool(chapter.word_count and chapter.word_count > 0) for chapter in readable_chapters)
     workspace = dict(book.writer_workspace) if isinstance(book.writer_workspace, dict) else {}
     if isinstance(workspace.get("processing"), dict):
         workspace["processing"]["chapters_total"] = len(chapter_numbers)
@@ -546,6 +548,7 @@ async def maybe_auto_reprocess_editor_project(
         .scalars()
         .all()
     )
+    chapters = await filter_analysis_eligible_chapters(db, book.id, chapters)
     total_words = sum(int(chapter.word_count or 0) for chapter in chapters)
     if total_words < AUTO_FIRST_REPROCESS_WORD_THRESHOLD:
         return False, 0, total_words
@@ -640,6 +643,7 @@ async def dispatch_manual_rebuild_with_reservations(
         .scalars()
         .all()
     )
+    chapters = await filter_analysis_eligible_chapters(db, book.id, chapters)
     rebuild_run_id = uuid.uuid4().hex
     source_prefix = manual_reprocess_source_prefix(rebuild_run_id)
     reservations: list[Any] = []

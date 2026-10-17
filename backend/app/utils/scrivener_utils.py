@@ -85,7 +85,7 @@ def _text_to_rtf(text: str) -> bytes:
     return ("{\\rtf1\\ansi\\deff0\n" + "".join(escaped) + "\n}").encode("ascii")
 
 
-def parse_scrivener_archive(raw: bytes) -> list[dict]:
+def parse_scrivener_archive(raw: bytes, *, include_structure: bool = False) -> list[dict]:
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             members = _validated_scrivener_members(archive)
@@ -108,7 +108,8 @@ def parse_scrivener_archive(raw: bytes) -> list[dict]:
             )
             chapters = []
             for item in candidates:
-                if str(item.attrib.get("Type") or "").lower() != "text":
+                item_type = str(item.attrib.get("Type") or "").lower()
+                if item is draft or item_type not in ({"text", "folder", "draftfolder"} if include_structure else {"text"}):
                     continue
                 item_id = str(item.attrib.get("UUID") or item.attrib.get("ID") or "").strip()
                 if not item_id:
@@ -120,19 +121,26 @@ def parse_scrivener_archive(raw: bytes) -> list[dict]:
                     f"Files/Data/{item_id}/content.txt",
                 )
                 content_name = next((name for name in members if name.endswith(suffixes)), None)
-                if content_name is None:
+                if content_name is None and item_type == "text":
                     continue
-                content_member = members[content_name]
-                if content_member.file_size > SCRIVENER_MAX_DOCUMENT_BYTES:
-                    raise HTTPException(413, "A Scrivener manuscript document is too large.")
-                content = archive.read(content_member)
-                text = (
-                    _rtf_to_text(content)
-                    if content_name.lower().endswith(".rtf")
-                    else content.decode("utf-8", errors="replace")
-                )
-                if text.strip():
-                    chapters.append({"number": len(chapters) + 1, "title": title, "text": text})
+                text = ""
+                if content_name is not None:
+                    content_member = members[content_name]
+                    if content_member.file_size > SCRIVENER_MAX_DOCUMENT_BYTES:
+                        raise HTTPException(413, "A Scrivener manuscript document is too large.")
+                    content = archive.read(content_member)
+                    text = (
+                        _rtf_to_text(content)
+                        if content_name.lower().endswith(".rtf")
+                        else content.decode("utf-8", errors="replace")
+                    )
+                if text.strip() or (include_structure and item_type != "text"):
+                    chapter = {"number": len(chapters) + 1, "title": title, "text": text}
+                    if include_structure:
+                        if item_type != "text":
+                            chapter["section_type"] = "part"
+                        chapter["source_location"] = content_name or f"Scrivener binder {item_id}"
+                    chapters.append(chapter)
             if not chapters:
                 raise HTTPException(
                     400, "No manuscript documents were found in this Scrivener project."

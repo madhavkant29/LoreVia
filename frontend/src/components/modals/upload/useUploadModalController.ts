@@ -510,6 +510,14 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
           chunkLongDocuments,
           workType: effectiveWorkType,
           files,
+          structurePlan: files.length === 1 && splitIntoChapters && !replaceExisting && importPreview?.source_sha256 && importPreview.content_sha256 && importPreview.parser_version
+            ? {
+                source_sha256: importPreview.source_sha256,
+                content_sha256: importPreview.content_sha256,
+                parser_version: importPreview.parser_version,
+                sections: importPreview.sections,
+              }
+            : undefined,
           onProgress: (completed, total) => {
             setUploadStage("processing")
             const percent = total > 0 ? Math.round((completed / total) * 100) : 0
@@ -588,6 +596,14 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
           preserveChapterNumbers: effectivePreserve,
           preserveSourceChapters,
           forceSingleManuscript: importAsSingle,
+          structurePlan: !importAsSingle && importPreview?.source_sha256 && importPreview.content_sha256 && importPreview.parser_version
+            ? {
+                source_sha256: importPreview.source_sha256,
+                content_sha256: importPreview.content_sha256,
+                parser_version: importPreview.parser_version,
+                sections: importPreview.sections,
+              }
+            : undefined,
           workType,
           coverFile: autoExtractCover ? null : coverFile,
           mode,
@@ -661,6 +677,8 @@ export function useUploadModalController({ onClose, initialMode, initialExisting
       return
     }
     setError(null)
+    setImportPreview(null)
+    setShowEditor(false)
     setFiles(selectedFiles)
   }
 

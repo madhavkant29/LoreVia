@@ -387,7 +387,7 @@ async def test_upload_pipeline_stages_and_processes_multiple_chapters(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -554,7 +554,7 @@ async def test_process_book_persists_isbn_and_copyright_warning(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": 1},
@@ -687,7 +687,7 @@ async def test_upload_pipeline_rejects_noise_characters_and_records_diagnostics(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -845,7 +845,7 @@ async def test_upload_pipeline_routes_low_confidence_new_character_into_review_q
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -966,7 +966,7 @@ async def test_upload_pipeline_promotes_grounded_first_pass_full_name(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -1212,7 +1212,7 @@ async def test_upload_pipeline_collapses_same_batch_full_name_and_short_name_dup
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -1370,7 +1370,7 @@ async def test_unresolved_relationships_become_relationship_review_records(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -1466,7 +1466,7 @@ async def test_upload_pipeline_continues_when_cover_upload_fails(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -1552,7 +1552,7 @@ async def test_upload_pipeline_recovers_named_characters_when_llm_extraction_fai
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},
@@ -1656,7 +1656,7 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(
         {"number": 2, "source_number": 2, "title": "Chapter 2", "text": "Middle text."},
         {"number": 3, "source_number": 3, "title": "Chapter 3", "text": "Ending text."},
     ]
-    parse_calls: list[bool] = []
+    parse_calls: list[str] = []
 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
@@ -1664,13 +1664,11 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
 
-    def _fake_parse_pdf(
-        raw: bytes, *, split_large_chapters: bool = True, language: str | None = None
-    ):
-        parse_calls.append(split_large_chapters)
+    def _fake_parse_pdf(raw: bytes, *, language: str | None = None):
+        parse_calls.append("structured")
         return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
 
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_structure", _fake_parse_pdf)
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
 
     response = await client.post(
@@ -1691,7 +1689,7 @@ async def test_upload_pipeline_preserves_chapter_numbers_when_requested(
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 3}
-    assert parse_calls == [True, False]
+    assert parse_calls == ["structured", "structured"]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -1731,7 +1729,7 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
             "text": "Very long intact middle text.",
         },
     ]
-    parse_calls: list[bool] = []
+    parse_calls: list[str] = []
 
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_book_task", _ProcessBookTask())
     monkeypatch.setattr("app.workers.tasks.extraction_tasks.process_chapter_task", _ChapterTask())
@@ -1739,13 +1737,11 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
 
-    def _fake_parse_pdf(
-        raw: bytes, *, split_large_chapters: bool = True, language: str | None = None
-    ):
-        parse_calls.append(split_large_chapters)
+    def _fake_parse_pdf(raw: bytes, *, language: str | None = None):
+        parse_calls.append("structured")
         return parsed_chapters, {"source": "pdf", "chapter_count": len(parsed_chapters)}
 
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_structure", _fake_parse_pdf)
     monkeypatch.setattr("app.parsers.pdf_parser.extract_first_page_cover", lambda raw: None)
 
     response = await client.post(
@@ -1766,7 +1762,7 @@ async def test_upload_pipeline_preserves_source_chapters_exactly_when_requested(
     result = await process_book(str(book_id), queue_wait_ms=8)
 
     assert result == {"book_id": str(book_id), "chapters": 2}
-    assert parse_calls == [True, False]
+    assert parse_calls == ["structured", "structured"]
 
     book = await db.get(Book, book_id)
     assert book is not None
@@ -1806,7 +1802,7 @@ async def test_upload_pipeline_stops_when_book_is_hidden_mid_processing(
         "app.services.extraction_book_processing_service.download_book", lambda key: VALID_PDF_BYTES
     )
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
+        "app.parsers.pdf_parser.parse_pdf_structure",
         lambda raw, *, split_large_chapters=True, language=None: (
             chapters,
             {"source": "pdf", "chapter_count": len(chapters)},

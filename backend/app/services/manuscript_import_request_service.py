@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any, cast
 
 from fastapi import HTTPException, UploadFile
@@ -14,6 +15,10 @@ from app.services.manuscript_import_job_service import (
     should_queue_manuscript_import,
 )
 from app.services.manuscript_import_service import persist_manuscript_import
+from app.services.upload_preview_service import (
+    accept_upload_structure_plan,
+    load_or_build_upload_preview,
+)
 from app.utils.books.chapter_titles import normalize_chapter_title
 from app.utils.books.continuity import as_bool
 from app.utils.books.imports import (
@@ -46,12 +51,15 @@ async def execute_manuscript_import_request(
     expected_content_version: int | None,
     chunk_long_documents: str,
     split_into_chapters: str,
+    structure_plan: str | None = None,
 ) -> tuple[ManuscriptImportResult | ManuscriptImportJobOut, bool]:
     """Stage a durable large import or parse and persist a small import."""
     if not text and not files:
         raise HTTPException(400, "Provide text or one or more files")
 
     manuscript_files = [upload for upload in (files or []) if upload.filename]
+    if structure_plan is not None and len(manuscript_files) != 1:
+        raise HTTPException(400, "An edited outline requires exactly one manuscript file.")
     if should_queue_manuscript_import(manuscript_files):
         queued = await create_manuscript_import_job(
             db,
@@ -67,10 +75,12 @@ async def execute_manuscript_import_request(
             expected_content_version=expected_content_version,
             chunk_long_documents=chunk_long_documents,
             split_into_chapters=split_into_chapters,
+            structure_plan=structure_plan,
         )
         return queued, True
 
     import_jobs: list[dict[str, object]] = []
+    structure_batches: list[dict[str, Any]] = []
     screenplay_batches: list[dict[str, object]] = []
     normalized_title = normalize_chapter_title(title) if title is not None else None
     next_number = await next_chapter_number(db, book.id)
@@ -151,6 +161,15 @@ async def execute_manuscript_import_request(
         resolved_import_format = resolved_import_format or format_name
         if format_name == "pdf" and first_pdf_raw_for_cover is None:
             first_pdf_raw_for_cover = raw
+        accepted_plan = None
+        if structure_plan is not None:
+            preview = await load_or_build_upload_preview(
+                user_id=current_user.id, raw=raw,
+                format_name=format_name, work_type=upload_work_type,
+            )
+            accepted_plan = accept_upload_structure_plan(
+                preview=preview, raw=raw, submitted=structure_plan,
+            )
         parsed_payload = await parse_book_upload_for_ingestion(
             format_name=format_name,
             work_type=upload_work_type,
@@ -158,6 +177,7 @@ async def execute_manuscript_import_request(
             preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
             preserve_source_chapters=bool(book.preserve_source_chapters),
             filename=str(upload.filename),
+            proposed_plan=accepted_plan,
         )
         screenplay_payload = (
             parsed_payload.get("screenplay_payload") if upload_work_type == "screenplay" else None
@@ -192,9 +212,15 @@ async def execute_manuscript_import_request(
             start_number=base_number,
             replace_existing=replace_flag and len(parsed) == 1,
             chunk_long_documents=False if upload_work_type == "screenplay" else chunk_flag,
-            preserve_exact_structure=preserve_exact_structure,
+            preserve_exact_structure=preserve_exact_structure or bool(parsed_payload.get("structure_plan")),
         )
         import_jobs.extend(new_jobs)
+        if upload_work_type != "screenplay" and split_flag and not replace_flag:
+            structure_batches.append({
+                "scope": str(uuid.uuid4()),
+                "plan": parsed_payload["structure_plan"],
+                "jobs": new_jobs,
+            })
         if upload_work_type == "screenplay" and screenplay_payload is not None:
             screenplay_batches.append(
                 {
@@ -231,5 +257,6 @@ async def execute_manuscript_import_request(
         first_pdf_raw_for_cover=first_pdf_raw_for_cover,
         total_file_size=total_file_size,
         files_were_uploaded=bool(manuscript_files),
+        structure_batches=structure_batches,
     )
     return result, False

@@ -31,6 +31,8 @@ SectionTypeLiteral = Literal[
     "appendix",
     "glossary",
     "notes",
+    "chronology",
+    "part_opening",
     "unknown",
 ]
 
@@ -41,6 +43,7 @@ _INCLUDE_BY_DEFAULT: frozenset[SectionTypeLiteral] = frozenset(
         "prologue",
         "epilogue",
         "interlude",
+        "part_opening",
     }
 )
 
@@ -54,6 +57,7 @@ _EXCLUDE_BY_DEFAULT: frozenset[SectionTypeLiteral] = frozenset(
         "acknowledgements",
         "glossary",
         "notes",
+        "chronology",
     }
 )
 
@@ -89,6 +93,15 @@ class SectionMeta(BaseModel):
     end_page: int | None = None
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     include_in_analysis: bool = True
+    parent_id: str | None = None
+    source_label: str | None = None
+    source_location: str | None = None
+    start_block: int = Field(default=0, ge=0)
+    end_block: int = Field(default=0, ge=0)
+    word_count: int = 0
+    opening_excerpt: str = ""
+    closing_excerpt: str = ""
+    warnings: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_heading(
@@ -125,6 +138,7 @@ class ImportWarning(BaseModel):
 
     message: str
     severity: Literal["info", "warning", "error"] = "warning"
+    section_id: str | None = None
 
 
 class ImportPreview(BaseModel):
@@ -138,6 +152,14 @@ class ImportPreview(BaseModel):
     title: str = ""
     author: str = ""
     sections: list[SectionMeta] = Field(default_factory=list)
+    source_sha256: str | None = None
+    content_sha256: str | None = None
+    parser_version: str | None = None
+    block_count: int = 0
+    block_word_counts: list[int] = Field(default_factory=list)
+    block_openings: list[str] = Field(default_factory=list)
+    block_closings: list[str] = Field(default_factory=list)
+    block_locations: list[str | None] = Field(default_factory=list)
     chapter_count: int = 0
     toc_detected: bool = False
     front_matter_count: int = 0
@@ -229,7 +251,11 @@ class ImportPreview(BaseModel):
         for anomaly in diagnostics.get("anomalies", []):
             warnings.append(
                 ImportWarning(
-                    message=f"Parse anomaly detected: {anomaly}",
+                    message=(
+                        "This PDF has no extractable text. Export a text-based PDF or OCR it before importing."
+                        if anomaly == "no_extractable_text"
+                        else f"Parse anomaly detected: {anomaly}"
+                    ),
                     severity="warning",
                 )
             )

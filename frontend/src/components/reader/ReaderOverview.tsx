@@ -99,9 +99,10 @@ export function ReaderOverview({
   const formatLabel = formatBookFormatLabel(book.format)
   const chapterCount = chapters.length || book.total_chapters || 0
   const chapterUnit = book.work_type === "screenplay" ? "Scene" : "Chapter"
-  const currentChapterLabel = currentChapter?.title?.trim()
-    ? `${chapterUnit} ${continueChapter} - ${currentChapter.title}`
-    : `${chapterUnit} ${continueChapter}`
+  const currentChapterBaseLabel = currentChapter?.printed_label || chapterKindLabel(currentChapter?.chapter_kind, continueChapter, chapterUnit)
+  const currentChapterLabel = currentChapter?.title?.trim() && currentChapter.title.trim() !== currentChapterBaseLabel
+    ? `${currentChapterBaseLabel} - ${currentChapter.title}`
+    : currentChapterBaseLabel
   const noteCountLabel = savedItemsLoading ? "Loading notes" : savedItemsError ? "Notes unavailable" : `${bookNotes.length} note${bookNotes.length === 1 ? "" : "s"}`
   const highlightCountLabel = savedItemsLoading ? "Loading highlights" : savedItemsError ? "Highlights unavailable" : `${savedQuotes.length} highlight${savedQuotes.length === 1 ? "" : "s"}`
   const summaryCountLabel = `${summaryReadyCount} ready`
@@ -128,7 +129,7 @@ export function ReaderOverview({
     <div className="space-y-5" data-reader-overview>
       <header className={cn("flex flex-wrap items-end justify-between gap-4 border-b pb-4", isDark ? "border-white/10" : "border-slate-200")}>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Book overview</h1>
+          <h1 className="font-serif text-2xl font-semibold tracking-tight sm:text-3xl">Book overview</h1>
           <p className={cn("mt-1 text-sm", mutedClass(isDark))}>Continue reading, revisit a chapter, or find your notes.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -140,25 +141,26 @@ export function ReaderOverview({
       {showRecall && recall ? <RecallCard recall={recall} lastChapter={recallChapter} onDismiss={dismissRecall} onContinue={onContinueReading} /> : null}
 
       <section className={readerPanelClass(isDark)} aria-label="Current book">
-        <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-6">
-          <SmartBookCover src={coverUrlOverride !== null ? coverUrlOverride : book.cover_url} title={book.title} isDark={isDark} className="aspect-[0.72] w-full overflow-hidden rounded-sm sm:row-span-2"
+        <div className="grid items-start gap-5 md:grid-cols-[minmax(10rem,15rem)_minmax(0,1fr)] md:gap-7 xl:grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)] xl:gap-9">
+          <SmartBookCover src={coverUrlOverride !== null ? coverUrlOverride : book.cover_url} title={book.title} isDark={isDark} className="aspect-[0.72] w-full max-w-[17rem] overflow-hidden rounded-sm shadow-xl shadow-black/20 md:row-span-2"
             overlay={<CoverEditOverlay bookId={bookId} isDark={isDark} hasCover={Boolean(coverUrlOverride !== null ? coverUrlOverride : book.cover_url)} onCoverUpdated={(updated) => setCoverUrlOverride(updated.cover_url ?? null)} />} />
-          <div className="min-w-0">
-            <h2 className="break-words font-serif text-2xl leading-tight sm:text-3xl">{book.title}</h2>
+          <div className="min-w-0 md:pt-1">
+            <h2 className="break-words font-serif text-2xl leading-tight sm:text-3xl xl:text-4xl">{book.title}</h2>
             <p className={cn("mt-2 text-sm", mutedClass(isDark))}>{book.author || "Unknown author"}{book.genre ? ` · ${book.genre}` : ""}</p>
             <p className={cn("mt-3 hidden max-w-3xl text-sm leading-6 sm:block", mutedClass(isDark))}>{aboutCopy}</p>
           </div>
-          <div className="col-span-2 space-y-4 sm:col-start-2 sm:col-span-1">
+          <div className="space-y-4 md:col-start-2">
             <p className={cn("text-sm leading-6 sm:hidden", mutedClass(isDark))}>{aboutCopy}</p>
-            <div>
+            <div className={cn("border-t pt-4", isDark ? "border-white/10" : "border-slate-200")}>
+              <p className={cn("mb-2 text-xs font-medium uppercase tracking-[0.16em]", mutedClass(isDark))}>Continue reading</p>
               <div className="flex flex-wrap justify-between gap-2 text-sm">
                 <span>{chapters.length ? currentChapterLabel : "No chapters available yet"}</span>
                 <span className={mutedClass(isDark)}>{percentComplete}% read · {formatReadingDuration(remainingMinutes)} left</span>
               </div>
-              <div className={cn("mt-3 h-1", isDark ? "bg-white/10" : "bg-slate-200")}><div className="h-full bg-teal-600" style={{ width: `${percentComplete}%` }} /></div>
+              <div className={cn("mt-3 h-1.5 overflow-hidden rounded-full", isDark ? "bg-white/10" : "bg-slate-200")}><div className="h-full rounded-full bg-teal-600" style={{ width: `${percentComplete}%` }} /></div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={!chapters.length} onClick={onContinueReading} className="inline-flex min-h-11 items-center gap-2 rounded-sm bg-teal-800 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"><ReaderIcon name="book" />Continue Reading</button>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button type="button" disabled={!chapters.length} onClick={onContinueReading} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-sm bg-teal-800 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"><ReaderIcon name="book" />Continue Reading</button>
               <button type="button" onClick={() => onNavigate(`/${bookId}/chapters`)} className={softButtonClass(isDark)}>Browse chapter recaps</button>
             </div>
             <p className={cn("text-xs", mutedClass(isDark))}>{summaryCountLabel} chapter recaps · {highlightCountLabel} · {noteCountLabel}</p>
@@ -166,22 +168,22 @@ export function ReaderOverview({
         </div>
       </section>
 
-      <form role="search" aria-label="Search this book" onSubmit={(event) => { event.preventDefault(); submitSearch() }} className="space-y-2">
+      <form role="search" aria-label="Search this book" onSubmit={(event) => { event.preventDefault(); submitSearch() }} className={cn(readerPanelClass(isDark), "space-y-2")}>
         <label htmlFor="overview-book-search" className="block text-sm font-medium">Search this book, notes, or summaries</label>
         <div className="flex gap-2">
-          <input id="overview-book-search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search words, people, or places" className={cn("min-h-11 min-w-0 flex-1 rounded-sm border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600", isDark ? "border-white/15 placeholder:text-slate-400" : "border-slate-300 placeholder:text-slate-500")} />
+          <input id="overview-book-search" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search words, people, or places" className={cn("min-h-11 min-w-0 flex-1 rounded-sm border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600", isDark ? "border-white/15 placeholder:text-slate-400" : "border-slate-300 placeholder:text-slate-500")} />
           <button type="submit" className={softButtonClass(isDark)}>Search</button>
         </div>
       </form>
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className={readerPanelClass(isDark)}>
-          <h2 className="text-base font-semibold">Chapters</h2>
+          <h2 className="font-serif text-lg font-semibold">Chapters</h2>
           <div className={cn("mt-3 divide-y", isDark ? "divide-white/10" : "divide-slate-200")}>
             {previewChapters.length ? previewChapters.map((chapter) => (
               <button key={chapter.number} type="button" onClick={() => onNavigate(`/${bookId}/chapter/${chapter.number}`)} aria-current={chapter.number === continueChapter ? "location" : undefined}
                 className={cn("flex min-h-14 w-full items-center justify-between gap-4 px-2 py-3 text-left focus-visible:ring-2 focus-visible:ring-teal-600", chapter.number === continueChapter ? isDark ? "bg-teal-900/30" : "bg-teal-50" : isDark ? "hover:bg-white/5" : "hover:bg-slate-50")}>
-                <span className="min-w-0"><span className={cn("block text-xs", mutedClass(isDark))}>{chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}</span><span className="mt-1 block break-words text-sm font-medium">{chapter.title || chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}</span></span>
+                <span className="min-w-0"><span className={cn("block text-xs", mutedClass(isDark))}>{chapter.parent_part_title ? `${chapter.parent_part_title} · ` : ""}{chapter.printed_label || chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}</span><span className="mt-1 block break-words text-sm font-medium">{chapter.title || chapter.printed_label || chapterKindLabel(chapter.chapter_kind, chapter.number, chapterUnit)}</span></span>
                 <span className={cn("shrink-0 text-xs", mutedClass(isDark))}>{chapter.number === continueChapter ? "Current" : chapter.read ? "Read" : "Unread"}</span>
               </button>
             )) : <p className={cn("py-4 text-sm leading-6", mutedClass(isDark))}>{book.status === "ready" ? "This book has no chapters yet. Browse chapters to see available content." : "Chapters will appear here as processing finishes."}</p>}
@@ -189,14 +191,14 @@ export function ReaderOverview({
           <button type="button" onClick={() => onNavigate(`/${bookId}/chapters`)} className={readerFooterLinkClass(isDark)}>View all chapters <ReaderIcon name="arrow" /></button>
         </section>
         <section className={readerPanelClass(isDark)}>
-          <h2 className="text-base font-semibold">Notes &amp; highlights</h2>
+          <h2 className="font-serif text-lg font-semibold">Notes &amp; highlights</h2>
           {savedItemsError && onRetrySavedItems ? <div className="mt-3"><ErrorCard isDark={isDark} variant="compact" message="Saved items could not be refreshed. Retry or open your notes and highlights directly." onRetry={onRetrySavedItems} /></div> : null}
           <p className={cn("mt-2 text-sm", mutedClass(isDark))}>{noteCountLabel} · {highlightCountLabel} · {bookmarkCount} saved reading position</p>
           {recentNote ? <div className={cn("mt-4 border-l-2 pl-4", isDark ? "border-slate-600" : "border-slate-300")}>
             <p className={cn("text-xs", mutedClass(isDark))}>Recent note · {recentNote.chapter_number ? `${chapterUnit} ${recentNote.chapter_number}` : "Whole book"} · {formatRecentDateLabel(recentNote.updated_at)}</p>
             <blockquote className="mt-2 break-words text-sm leading-7">{truncatePreview(recentNotePreview)}</blockquote>
           </div> : <p className={cn("mt-4 text-sm leading-6", mutedClass(isDark))}>Save a note while reading and it will appear here for quick recall.</p>}
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <button type="button" onClick={() => onNavigate(`/${bookId}/notes`)} className={softButtonClass(isDark)}>Open Notes</button>
             <button type="button" onClick={() => onNavigate("/quotes")} className={softButtonClass(isDark)}>Open Highlights</button>
           </div>
@@ -208,8 +210,11 @@ export function ReaderOverview({
         </section>
       </div>
 
-      <details className={readerPanelClass(isDark)}>
-        <summary className="cursor-pointer text-base font-semibold">Reading details &amp; story memory</summary>
+      <details className={readerPanelClass(isDark)} open>
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-serif text-lg font-semibold">
+          <span>Reading details &amp; story memory</span>
+          <span aria-hidden="true" className={cn("text-lg font-normal", mutedClass(isDark))}>⌄</span>
+        </summary>
         <div className="mt-5 grid gap-6 lg:grid-cols-2">
           <section>
             <h2 className="text-sm font-semibold">Reading details</h2>
@@ -253,7 +258,7 @@ function DetailRow({ isDark, label, value }: { isDark: boolean; label: string; v
 }
 
 function readerPanelClass(isDark: boolean) {
-  return cn("min-w-0 rounded-sm border p-4 sm:p-5", isDark ? "border-white/10 bg-[#0d121b]" : "border-slate-200 bg-white")
+  return cn("min-w-0 rounded-md border p-4 sm:p-5", isDark ? "border-white/10 bg-[#0d1720]" : "border-slate-200 bg-white")
 }
 
 function softButtonClass(isDark: boolean) {

@@ -43,6 +43,14 @@ async def apply_ingestion_token_budget(
     all_chapters: list[dict[str, Any]],
 ) -> dict[str, Any]:
     full_tokens = sum(count_tokens(chapter["text"]) for chapter in all_chapters)
+    if not all_chapters:
+        return {
+            "full_tokens": 0,
+            "processed_tokens": 0,
+            "was_truncated": False,
+            "ai_chapters": [],
+            "error": None,
+        }
     if user is None or has_paid_reading_access(user):
         return {
             "full_tokens": full_tokens,

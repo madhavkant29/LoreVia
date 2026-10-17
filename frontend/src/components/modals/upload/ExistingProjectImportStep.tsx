@@ -3,7 +3,8 @@
 import type { Dispatch, RefObject, SetStateAction } from "react"
 
 import { Tooltip } from "@/components/ui/Tooltip"
-import type { BookSelector, ChapterConsistencyReport } from "@/types/book"
+import { ImportStructureEditor } from "@/components/modals/ImportStructureEditor"
+import type { BookSelector, ChapterConsistencyReport, ImportPreview } from "@/types/book"
 
 import { buildImportOutcomeCards } from "./uploadUtils"
 
@@ -39,6 +40,12 @@ type Props = {
   setChunkLongDocuments: Dispatch<SetStateAction<boolean>>
   infoButtonClass: string
   chapterReports: ChapterConsistencyReport[]
+  importPreview: ImportPreview | null
+  setImportPreview: Dispatch<SetStateAction<ImportPreview | null>>
+  previewLoading: boolean
+  fetchPreview: () => Promise<void>
+  showEditor: boolean
+  setShowEditor: Dispatch<SetStateAction<boolean>>
 }
 
 export function ExistingProjectImportStep({
@@ -71,6 +78,12 @@ export function ExistingProjectImportStep({
   setChunkLongDocuments,
   infoButtonClass,
   chapterReports,
+  importPreview,
+  setImportPreview,
+  previewLoading,
+  fetchPreview,
+  showEditor,
+  setShowEditor,
 }: Props) {
   if (!isManagingExisting) return null
 
@@ -139,12 +152,37 @@ export function ExistingProjectImportStep({
               </div>
             </>
           ) : (
+            <>
             <div onClick={() => inputRef.current?.click()} className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition-colors ${isDark ? "border-white/15 bg-white/[0.03] hover:border-indigo-400" : "border-gray-300 bg-white hover:border-indigo-400"}`}>
               <input ref={inputRef} type="file" multiple accept={chapterUploadAccept} className="hidden" onChange={(event) => { onFilesSelected(Array.from(event.target.files ?? [])); event.target.value = "" }} />
               <p className={`text-sm ${isDark ? files.length > 0 ? "text-slate-100" : "text-slate-400" : files.length > 0 ? "text-slate-700" : "text-slate-400"}`}>
                 {files.length > 0 ? files.length === 1 ? files[0].name : `${files.length} files selected` : chapterUploadHelp}
               </p>
             </div>
+            {files.length === 1 && !isScreenplayWorkspace && splitIntoChapters && !replaceExisting ? (
+              <div className="space-y-2">
+                <button type="button" disabled={previewLoading} onClick={() => void fetchPreview()} className="text-sm font-semibold text-teal-500 underline disabled:opacity-50">
+                  {previewLoading ? "Reading structure…" : "Preview and correct outline"}
+                </button>
+                {importPreview ? (
+                  <div className="space-y-2 text-xs">
+                    <p className="font-semibold">Full proposed outline ({importPreview.sections.length} sections)</p>
+                    <div className="max-h-72 space-y-1 overflow-y-auto">
+                      {importPreview.sections.map((section) => <div key={section.id} className={`rounded border p-2 ${isDark ? "border-white/10" : "border-slate-200"}`}>
+                        <p>{section.parent_id ? "↳ " : ""}{section.title} · {section.type} · {section.word_count ?? 0} words · {section.source_location ?? "Location unavailable"}</p>
+                        {section.opening_excerpt ? <p className="opacity-70">Starts: {section.opening_excerpt}</p> : null}
+                        {section.closing_excerpt ? <p className="opacity-70">Ends: {section.closing_excerpt}</p> : null}
+                        {section.warnings?.map((warning) => <p key={warning} className="text-amber-500">{warning}</p>)}
+                      </div>)}
+                    </div>
+                    {importPreview.sections.some((section) => section.type === "unknown") ? <p className="text-amber-500">Unclassified sections will be analyzed and use processed-word allowance; check for supplemental text.</p> : null}
+                    <button type="button" onClick={() => setShowEditor(true)} className="font-semibold text-teal-500 underline">Correct outline</button>
+                    {showEditor ? <ImportStructureEditor sections={importPreview.sections} blockWordCounts={importPreview.block_word_counts} blockOpenings={importPreview.block_openings} blockClosings={importPreview.block_closings} blockLocations={importPreview.block_locations} isDark={isDark} onSave={(sections) => { setImportPreview({ ...importPreview, sections }); setShowEditor(false) }} onCancel={() => setShowEditor(false)} /> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            </>
           )}
         </div>
 

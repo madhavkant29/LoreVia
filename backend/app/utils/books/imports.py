@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import os
 import re
 import uuid
@@ -21,6 +22,11 @@ from app.utils.books import (
     manuscript,
     normalization,
 )
+from app.utils.books.structure_plan import (
+    build_structure_plan,
+    materialize_structure_plan,
+    validate_structure_plan,
+)
 
 
 def report_sentence(text: str | None) -> str:
@@ -29,6 +35,44 @@ def report_sentence(text: str | None) -> str:
         return ""
     lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
     return lines[0] if lines else ""
+
+
+def require_extractable_manuscript_text(chapters: list[dict], format_name: str) -> None:
+    """Reject image-only or empty document imports before they become empty chapters."""
+    if any(
+        re.sub(r"\[\[IMAGE:[^\]]+\]\]", "", str(chapter.get("text") or "")).strip()
+        for chapter in chapters
+    ):
+        return
+    raise HTTPException(
+        400,
+        f"No extractable text was found in this {format_name.upper()} file. Export a text-based copy or run OCR before importing.",
+    )
+
+
+def decode_manuscript_text(raw: bytes) -> str:
+    """Decode common text-manuscript encodings without silently dropping bytes."""
+    try:
+        if raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+            text = raw.decode("utf-32")
+        elif raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+            text = raw.decode("utf-16")
+        else:
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                text = raw.decode("cp1252")
+    except UnicodeError as exc:
+        raise HTTPException(
+            400,
+            "This text file could not be decoded. Save it as UTF-8 and try again.",
+        ) from exc
+    if "\x00" in text:
+        raise HTTPException(
+            400,
+            "This text file contains invalid control bytes. Save it as UTF-8 and try again.",
+        )
+    return text
 
 
 # Document parsers raise many library-specific exception types for corrupt or
@@ -82,9 +126,20 @@ def _parse_docx_text(raw: bytes) -> str:
     from io import BytesIO
 
     from docx import Document
+    from docx.table import Table
 
     doc = Document(BytesIO(raw))
-    text = "\n".join(paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip())
+    blocks: list[str] = []
+    for item in doc.iter_inner_content():
+        if isinstance(item, Table):
+            for row in item.rows:
+                cells = [" ".join(cell.text.split()) for cell in row.cells]
+                row_text = " | ".join(cell for cell in cells if cell)
+                if row_text:
+                    blocks.append(row_text)
+        elif item.text.strip():
+            blocks.append(item.text.strip())
+    text = "\n\n".join(blocks)
     return book_text._normalize_unicode_replacements(text)
 
 
@@ -108,12 +163,83 @@ def _sample_epub_text(raw: bytes) -> str:
     book = epub_lib.read_epub(BytesIO(raw))
     sample_text = ""
     for item in book.get_items_of_type(9):  # ITEM_DOCUMENT
-        content = item.get_content().decode("utf-8", errors="ignore")
-        soup = BeautifulSoup(content, "html.parser")
+        soup = BeautifulSoup(item.get_content(), "html.parser")
         sample_text += soup.get_text()
         if len(sample_text) > 5000:
             break
     return sample_text
+
+
+def parse_structured_prose_upload(
+    *, format_name: str, raw: bytes, filename: str,
+    proposed_plan: dict[str, Any] | None = None,
+    language: str | None = None,
+    include_block_context: bool = False,
+) -> dict[str, Any]:
+    """Use the same source-matched outline for preview and queued prose ingestion."""
+    diagnostics: dict[str, Any] | None = None
+    if format_name == "pdf":
+        from app.parsers.pdf_parser import parse_pdf_structure
+
+        parsed, diagnostics = parse_document_or_400(parse_pdf_structure, raw, filename=filename, language=language)
+    elif format_name == "epub":
+        from app.parsers.epub_parser import parse_epub_structure
+
+        parsed = parse_document_or_400(parse_epub_structure, raw, filename=filename)
+    elif format_name in {"docx", "doc"}:
+        from app.parsers.docx_structure import parse_docx_structure
+
+        parsed = parse_document_or_400(parse_docx_structure, raw, filename=filename)
+    elif format_name in {"txt", "md"}:
+        from app.parsers.text_parser import parse_text_structure
+
+        source_text = decode_manuscript_text(raw)
+        heading_language = language or ("en" if re.search(r"(?im)^\s*chapter\s+\d+\b", source_text) else None)
+        parsed = parse_text_structure(source_text, language=heading_language, title=os.path.splitext(filename)[0])
+    elif format_name == "scrivener":
+        from app.utils.scrivener_utils import parse_scrivener_archive
+
+        parsed = parse_document_or_400(parse_scrivener_archive, raw, filename=filename, include_structure=True)
+    else:
+        raise ValueError(f"Unsupported format: {format_name}")
+    require_extractable_manuscript_text(parsed, format_name)
+    sample = " ".join(str(section.get("text") or "") for section in parsed)[:5000]
+    detected_language = language or (
+        diagnostics.get("detected_language") if diagnostics else None
+    ) or "en"
+    if diagnostics is None and language is None:
+        from app.utils.language_utils import detect_language
+
+        detected_language = detect_language(sample)["detected"]
+        if format_name in {"txt", "md"} and re.search(r"(?im)^\s*chapter\s+\d+\b", source_text):
+            detected_language = "en"
+    detected = build_structure_plan(raw, parsed, language=detected_language)
+    plan = validate_structure_plan(proposed_plan, detected)
+    chapters = materialize_structure_plan(plan)
+    persisted_plan = {key: value for key, value in plan.items() if key not in {"blocks", "block_locations", "images_by_marker"}}
+    persisted_plan["toc_entries"] = {
+        section["id"]: plan["blocks"][section["start_block"]:section["end_block"]]
+        for section in plan["sections"] if section["type"] == "toc"
+    }
+    persisted_plan["warnings"] = [
+        {"message": warning, "section_id": section["id"], "severity": "warning"}
+        for section in plan["sections"] for warning in section.get("warnings", [])
+    ]
+    result = {
+        "chapters": chapters,
+        "structure_plan": persisted_plan,
+        "parser_diagnostics": diagnostics,
+        "detected_language": detected_language,
+        "block_count": len(detected["blocks"]),
+    }
+    if include_block_context:
+        result.update({
+            "block_word_counts": [len(block.split()) for block in plan["blocks"]],
+            "block_openings": [block[:180] for block in plan["blocks"]],
+            "block_closings": [block[-180:] for block in plan["blocks"]],
+            "block_locations": plan["block_locations"],
+        })
+    return result
 
 
 async def next_chapter_number(db: AsyncSession, book_id: uuid.UUID) -> int:
@@ -144,7 +270,10 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
     if lower.endswith(".pdf"):
         from app.parsers.pdf_parser import parse_pdf
 
-        chapters = await parse_document_or_400_async(parse_pdf, raw, filename=filename)
+        chapters = await parse_document_or_400_async(
+            parse_pdf, raw, filename=filename, split_large_chapters=False
+        )
+        require_extractable_manuscript_text(chapters, "pdf")
         if split_into_chapters and chapters:
             return chapters
         merged_text = "\n\n".join(
@@ -154,7 +283,10 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
     if lower.endswith(".epub"):
         from app.parsers.epub_parser import parse_epub
 
-        chapters = await parse_document_or_400_async(parse_epub, raw, filename=filename)
+        chapters = await parse_document_or_400_async(
+            parse_epub, raw, filename=filename, split_large_chapters=False
+        )
+        require_extractable_manuscript_text(chapters, "epub")
         if split_into_chapters and chapters:
             return chapters
         merged_text = "\n\n".join(
@@ -190,7 +322,7 @@ async def parse_import_upload(filename: str, raw: bytes, split_into_chapters: bo
                 "Legacy .doc files require additional system dependencies. Please convert to .docx format.",
             )
     if lower.endswith(".txt") or lower.endswith(".md") or lower.endswith(".fountain"):
-        text = raw.decode("utf-8", errors="replace")
+        text = decode_manuscript_text(raw)
         text = book_text._normalize_unicode_replacements(text)
         if lower.endswith(".md"):
             # Convert markdown to HTML for proper rendering
@@ -292,7 +424,7 @@ async def parse_screenplay_upload(filename: str, raw: bytes) -> dict[str, Any]:
         or lower.endswith(".screenplay")
         or lower.endswith(".script")
     ):
-        source_text = raw.decode("utf-8", errors="ignore")
+        source_text = decode_manuscript_text(raw)
     else:
         raise HTTPException(400, f"Unsupported screenplay format: {filename}")
 
@@ -327,6 +459,7 @@ async def parse_book_upload_for_ingestion(
     preserve_source_chapters: bool,
     language: str | None = None,
     filename: str | None = None,
+    proposed_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     display_filename = filename or normalization.upload_filename_for_format(format_name)
     if work_type == "screenplay":
@@ -338,48 +471,15 @@ async def parse_book_upload_for_ingestion(
             "detected_language": language or "en",
         }
 
-    preserve_exact_structure = preserve_chapter_numbers or preserve_source_chapters
-
-    if format_name == "pdf":
-        from app.parsers.pdf_parser import parse_pdf_with_diagnostics
-
-        chapters, parser_diagnostics = await parse_document_or_400_async(
-            parse_pdf_with_diagnostics,
-            raw,
-            filename=display_filename,
-            split_large_chapters=not preserve_exact_structure,
-            language=language,
-        )
-        return {
-            "chapters": chapters,
-            "screenplay_payload": None,
-            "parser_diagnostics": parser_diagnostics,
-            "detected_language": parser_diagnostics.get("detected_language", "en"),
-        }
-
-    if format_name == "epub":
-        from app.parsers.epub_parser import parse_epub
-
-        chapters = await parse_document_or_400_async(
-            parse_epub,
-            raw,
-            filename=display_filename,
-            split_large_chapters=not preserve_exact_structure,
-        )
-        return {
-            "chapters": chapters,
-            "screenplay_payload": None,
-            "parser_diagnostics": None,
-            "detected_language": language or "en",
-        }
-
-    parsed = await parse_import_upload(display_filename, raw, False)
-    return {
-        "chapters": parsed,
-        "screenplay_payload": None,
-        "parser_diagnostics": None,
-        "detected_language": language or "en",
-    }
+    parsed = await asyncio.to_thread(
+        parse_structured_prose_upload,
+        format_name=format_name,
+        raw=raw,
+        filename=display_filename,
+        proposed_plan=proposed_plan,
+        language=language,
+    )
+    return {**parsed, "screenplay_payload": None}
 
 
 def normalize_imported_chapters(
@@ -429,6 +529,8 @@ def normalize_imported_chapters(
                     "html": html if len(parts) == 1 else manuscript.manuscript_text_to_html(part),
                     "description": description,
                     "chapter_kind": chapter_kind if len(parts) == 1 else "chapter",
+                    "structure_section_id": chapter.get("structure_section_id") if len(parts) == 1 else None,
+                    "include_in_analysis": chapter.get("include_in_analysis", True),
                     "images": images
                     if len(parts) == 1
                     else _filter_import_images_for_text(part, images),
@@ -490,18 +592,28 @@ def build_import_preview(
     Performs parsing and structure detection only — no DB writes, no Celery dispatch.
     This function is synchronous; callers should wrap in asyncio.to_thread() if needed.
     """
-    from app.parsers.heading_patterns import classify_heading_type
-    from app.parsers.text_parser import parse_text_chapters
-    from app.schemas.section import ImportPreview, SectionMeta
+    from app.schemas.section import ImportPreview, ImportWarning, SectionMeta
 
     preview = ImportPreview()
 
     if work_type == "screenplay":
-        # Screenplay parsing is async; caller must wrap this function in asyncio event loop
-        # For now, handle screenplay by extracting text and treating as single chapter
         from app.parsers.screenplay_parser import parse_screenplay
 
-        source_text = raw.decode("utf-8", errors="ignore")
+        if format_name == "pdf":
+            from app.parsers.pdf_parser import parse_pdf
+
+            parsed_pages = parse_document_or_400(
+                parse_pdf, raw, filename="preview", split_large_chapters=False
+            )
+            require_extractable_manuscript_text(parsed_pages, "pdf")
+            source_text = "\n\n".join(
+                str(chapter.get("text") or "").strip()
+                for chapter in parsed_pages if chapter.get("text")
+            )
+        elif format_name in ("txt", "md", "fountain", "screenplay", "script"):
+            source_text = decode_manuscript_text(raw)
+        else:
+            raise HTTPException(400, f"Unsupported screenplay format: {format_name}")
         scenes = parse_screenplay(source_text)
         sections: list[SectionMeta] = []
         for i, scene in enumerate(scenes, start=1):
@@ -520,119 +632,54 @@ def build_import_preview(
         preview.compute_confidence()
         return preview.model_dump()
 
-    # Build sample text for language detection when not provided
-    sample_text = ""
-    if format_name == "pdf":
-        sample_text = parse_document_or_400(_sample_pdf_text, raw, filename="preview")
-    elif format_name == "epub":
-        sample_text = parse_document_or_400(_sample_epub_text, raw, filename="preview")
-    elif format_name == "doc":
-        raise HTTPException(
-            400,
-            "Legacy .doc files require additional system dependencies. Please convert to .docx format.",
+    try:
+        parsed = parse_structured_prose_upload(
+            format_name=format_name, raw=raw, filename="preview", language=language,
+            include_block_context=True,
         )
-    elif format_name == "docx":
-        sample_text = "\n".join(
-            parse_document_or_400(_parse_docx_text, raw, filename="preview").splitlines()[:30]
-        )
-    elif format_name == "scrivener":
-        from app.utils.scrivener_utils import parse_scrivener_archive
-
-        scrivener_chapters = parse_document_or_400(parse_scrivener_archive, raw, filename="preview")
-        sample_text = "\n".join(str(chapter.get("text") or "") for chapter in scrivener_chapters)[
-            :5000
-        ]
-    elif format_name in ("txt", "md", "fountain"):
-        sample_text = raw.decode("utf-8", errors="replace")[:5000]
-        sample_text = book_text._normalize_unicode_replacements(sample_text)
-
-    # Auto-detect language if not provided
-    if language is None and sample_text:
-        from app.utils.language_utils import detect_language
-
-        lang_result = detect_language(sample_text, max_chars=5000)
-        language = lang_result["detected"]
-        preview.language_confidence = lang_result["confidence"]
-    preview.detected_language = language or "en"
-
-    chapters: list[dict] = []
-    diagnostics: dict[str, Any] | None = None
-
-    preserve_exact = preserve_chapter_numbers or preserve_source_chapters
-
-    if format_name == "pdf":
-        from app.parsers.pdf_parser import parse_pdf_with_diagnostics
-
-        chapters, diagnostics = parse_document_or_400(
-            parse_pdf_with_diagnostics,
-            raw,
-            filename="preview",
-            split_large_chapters=not preserve_exact,
-            language=language,
-        )
-    elif format_name == "epub":
-        from app.parsers.epub_parser import parse_epub
-
-        chapters = parse_document_or_400(
-            parse_epub,
-            raw,
-            filename="preview",
-            split_large_chapters=not preserve_exact,
-        )
-    elif format_name == "docx":
-        text = parse_document_or_400(_parse_docx_text, raw, filename="preview")
-        chapters = parse_text_chapters(text, language=language)
-    elif format_name == "scrivener":
-        from app.utils.scrivener_utils import parse_scrivener_archive
-
-        chapters = parse_document_or_400(parse_scrivener_archive, raw, filename="preview")
-    elif format_name in ("txt", "md", "fountain"):
-        text = raw.decode("utf-8", errors="replace")
-        text = book_text._normalize_unicode_replacements(text)
-        chapters = parse_text_chapters(text, language=language)
-    else:
-        raise ValueError(f"Unsupported format for preview: {format_name}")
-
-    sections = []
-    for ch in chapters:
-        title = ch.get("title", "")
-        stype = ch.get("section_type", "unknown")
-        num = ch.get("number") or ch.get("source_number")
-        confidence = 1.0 if classify_heading_type(title, language or "en")[0] != "unknown" else 0.5
-        sections.append(
-            SectionMeta.from_heading(
-                title=title,
-                type_=stype,
-                number=num,
-                confidence=confidence,
-            )
-        )
-
+    except HTTPException as exc:
+        if format_name != "pdf" or "No extractable text" not in str(exc.detail):
+            raise
+        preview.raw_diagnostics = {"anomalies": ["no_extractable_text"]}
+        preview.warnings = [ImportWarning(
+            message="This PDF has no extractable text. Export a text-based PDF or OCR it before importing."
+        )]
+        preview.source_size_bytes = len(raw)
+        return preview.model_dump()
+    plan = parsed["structure_plan"]
+    sections = [SectionMeta.model_validate(item) for item in plan["sections"]]
     preview.sections = sections
-    preview.total_words = sum(len(str(chapter.get("text") or "").split()) for chapter in chapters)
+    preview.source_sha256 = plan["source_sha256"]
+    preview.content_sha256 = plan["content_sha256"]
+    preview.parser_version = plan["parser_version"]
+    preview.block_count = parsed["block_count"]
+    preview.block_word_counts = parsed["block_word_counts"]
+    preview.block_openings = parsed["block_openings"]
+    preview.block_closings = parsed["block_closings"]
+    preview.block_locations = parsed["block_locations"]
+    preview.detected_language = parsed["detected_language"]
+    preview.chapter_count = sum(section.type == "chapter" for section in sections)
+    preview.toc_detected = any(section.type == "toc" for section in sections)
+    preview.front_matter_count = sum(
+        section.type in {"notes", "chronology", "preface", "foreword", "dedication"}
+        for section in sections
+    )
+    preview.total_words = sum(
+        section.word_count for section in sections if section.type not in {"part", "toc"}
+    )
     preview.source_size_bytes = len(raw)
-
-    if diagnostics:
-        preview.build_from_parser_diagnostics(diagnostics, sections=sections)
-    else:
-        section_counts: dict[str, int] = {}
-        for s in sections:
-            section_counts[s.type] = section_counts.get(s.type, 0) + 1
-        mini_diag = {
-            "detected_language": preview.detected_language,
-            "detected_language_confidence": preview.language_confidence,
-            "chapter_count": len(chapters),
-            "heading_count": len(sections),
-            "toc_detected": section_counts.get("toc", 0) > 0,
-            "front_matter_count": sum(
-                v
-                for k, v in section_counts.items()
-                if k in ("preface", "foreword", "acknowledgements", "dedication")
-            ),
-            "anomalies": [],
-            "fallback_strategy": None,
-            "total_pages": 0,
-        }
-        preview.build_from_parser_diagnostics(mini_diag, sections=sections)
-
+    preview.raw_diagnostics = parsed["parser_diagnostics"]
+    preview.warnings = [
+        ImportWarning(message=warning, section_id=section.id)
+        for section in sections for warning in section.warnings
+    ]
+    for anomaly in (parsed["parser_diagnostics"] or {}).get("anomalies", []):
+        preview.warnings.append(ImportWarning(message=f"Source extraction needs review: {anomaly}"))
+    if any(section.type == "unknown" for section in sections):
+        preview.warnings.append(ImportWarning(
+            message="Unclassified text will be imported for reading and included in AI analysis. It may include supplemental material."
+        ))
+    preview.confidence = round(
+        1 - min(0.75, 0.25 * sum(section.type == "unknown" for section in sections)), 2
+    )
     return preview.model_dump()

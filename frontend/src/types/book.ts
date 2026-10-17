@@ -597,6 +597,8 @@ export interface ChapterConsistencyReport {
   plot_threads_opened: string[]
   plot_threads_resolved: string[]
   continuity_flags: string[]
+  editorial_concerns?: { issue: string; evidence: string; suggestion: string }[] | null
+  revision_question?: { question: string; evidence: string } | null
 }
 
 export interface StoryHealthMetric {
@@ -1383,7 +1385,7 @@ export type SectionType =
   | "title_page" | "copyright" | "dedication" | "toc" | "foreword"
   | "preface" | "acknowledgements" | "prologue" | "part" | "chapter"
   | "interlude" | "epilogue" | "afterword" | "appendix" | "glossary"
-  | "notes" | "unknown"
+  | "notes" | "chronology" | "part_opening" | "unknown"
 
 export interface SectionMeta {
   id: string
@@ -1394,11 +1396,21 @@ export interface SectionMeta {
   end_page: number | null
   confidence: number
   include_in_analysis: boolean
+  parent_id?: string | null
+  source_label?: string | null
+  source_location?: string | null
+  start_block?: number
+  end_block?: number
+  word_count?: number
+  opening_excerpt?: string
+  closing_excerpt?: string
+  warnings?: string[]
 }
 
 export interface ImportWarning {
   message: string
   severity: "info" | "warning" | "error"
+  section_id?: string | null
 }
 
 export interface ImportPreview {
@@ -1407,6 +1419,14 @@ export interface ImportPreview {
   title: string
   author: string
   sections: SectionMeta[]
+  source_sha256?: string | null
+  content_sha256?: string | null
+  parser_version?: string | null
+  block_count?: number
+  block_word_counts?: number[]
+  block_openings?: string[]
+  block_closings?: string[]
+  block_locations?: Array<string | null>
   chapter_count: number
   toc_detected: boolean
   front_matter_count: number

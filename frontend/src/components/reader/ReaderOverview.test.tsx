@@ -115,6 +115,7 @@ describe("ReaderOverview", () => {
     expect(view.textContent).toContain("Story Memory")
     expect(view.textContent).toContain("1 ready")
     expect(view.textContent).toContain("Not opened yet")
+    expect(view.querySelector("details")?.hasAttribute("open")).toBe(true)
     expect(view.textContent).not.toContain("Story Pulse")
   })
   it("offers one chapter list and a labelled search that trims and encodes the query", () => {

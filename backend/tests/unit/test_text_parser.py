@@ -18,6 +18,43 @@ def test_parse_english_chapters():
     assert chapters[2]["title"] == "Chapter 3"
 
 
+def test_markdown_chapter_headings_split_without_losing_short_real_chapters():
+    first = " ".join(["Mara hears the bell before anyone reaches the gate."] * 4)
+    second = " ".join(["The watchman brings the key to the eastern wall."] * 4)
+    chapters = parse_text_chapters(
+        f"# Chapter 1: The Bell\n\n{first}\n\n## Chapter 2: The Gate\n\n{second}",
+        language="en",
+    )
+
+    assert [chapter["title"] for chapter in chapters] == ["Chapter 1: The Bell", "Chapter 2: The Gate"]
+    assert first in chapters[0]["text"]
+    assert second in chapters[1]["text"]
+
+
+def test_one_word_chapter_between_longer_chapters_keeps_its_boundary():
+    prose = "The guard crossed the harbor before sunrise and found the archive gate standing open."
+    text = f"Chapter 1\n{prose}\nChapter 2\nNo.\nChapter 3\n{prose}"
+
+    chapters = parse_text_chapters(text, language="en")
+
+    assert [chapter["title"] for chapter in chapters] == ["Chapter 1", "Chapter 2", "Chapter 3"]
+    assert chapters[1]["text"] == "No."
+    assert "No." not in chapters[0]["text"]
+
+
+def test_narrative_before_first_detected_heading_is_preserved_without_a_toc():
+    opening = "At dawn, Mara hid the key beneath the harbor stones before the guards arrived."
+    body = "The bell rang across the harbor wall. " * 5
+    chapters = parse_text_chapters(
+        f"{opening}\n\nChapter 1\n{body}\n\nChapter 2\n{body}",
+        language="en",
+    )
+
+    assert len(chapters) == 2
+    assert opening in chapters[0]["text"]
+    assert opening not in chapters[1]["text"]
+
+
 def test_parse_french_chapters():
     body = "travail " * 120
     text = f"Chapitre 1: SCYLLA\n{body}\n\nChapitre 2: LE CHANGE-FORME\n{body}"

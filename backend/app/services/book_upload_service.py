@@ -103,6 +103,7 @@ async def create_uploaded_book_from_raw(
     preserve_chapter_numbers: bool,
     preserve_source_chapters: bool,
     force_single_manuscript: bool,
+    structure_plan: dict[str, Any] | None = None,
 ) -> dict[str, str | bool]:
     book_id = uuid.uuid4()
     fingerprint = upload_source_fingerprint(raw)
@@ -159,6 +160,7 @@ async def create_uploaded_book_from_raw(
             preserve_chapter_numbers=preserve_chapter_numbers,
             preserve_source_chapters=preserve_source_chapters,
             force_single_manuscript=force_single_manuscript,
+            import_structure=structure_plan,
             writer_workspace={"source_fingerprint": fingerprint},
         )
         db.add(book)

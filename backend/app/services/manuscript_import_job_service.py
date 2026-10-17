@@ -19,8 +19,13 @@ from app.models.operations import ManuscriptImportJob
 from app.models.user import User
 from app.schemas.books import ManuscriptImportJobOut, ManuscriptImportResult
 from app.services.book_freeze_service import load_persisted_freeze_cutoff
+from app.services.book_section_service import append_import_structure_plans
 from app.services.manuscript_import_service import persist_manuscript_import
 from app.services.processing_allowance_service import ensure_source_storage_capacity
+from app.services.upload_preview_service import (
+    accept_upload_structure_plan,
+    load_or_build_upload_preview,
+)
 from app.utils.books.chapter_titles import normalize_chapter_title
 from app.utils.books.continuity import as_bool
 from app.utils.books.imports import (
@@ -107,6 +112,7 @@ async def create_manuscript_import_job(
     expected_content_version: int | None,
     chunk_long_documents: str,
     split_into_chapters: str,
+    structure_plan: str | None = None,
 ) -> ManuscriptImportJobOut:
     if not files:
         raise HTTPException(400, "Provide one or more manuscript files")
@@ -142,6 +148,7 @@ async def create_manuscript_import_job(
     uploaded_keys: list[str] = []
     total_bytes = 0
     sources: list[dict[str, Any]] = []
+    staged_plans: list[dict[str, Any]] = []
     try:
         for upload in files:
             filename = str(upload.filename or "").strip()
@@ -161,6 +168,24 @@ async def create_manuscript_import_job(
                 work_type if work_type is not None else book.work_type,
             )
             validate_document_upload_bytes(filename, raw, format_name)
+            accepted_plan = None
+            if structure_plan is not None:
+                preview = await load_or_build_upload_preview(
+                    user_id=current_user.id, raw=raw,
+                    format_name=format_name, work_type=upload_work_type,
+                )
+                accepted_plan = accept_upload_structure_plan(
+                    preview=preview, raw=raw, submitted=structure_plan,
+                )
+            if upload_work_type != "screenplay":
+                staged = await parse_book_upload_for_ingestion(
+                    format_name=format_name, work_type=upload_work_type, raw=raw,
+                    preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
+                    preserve_source_chapters=bool(book.preserve_source_chapters),
+                    filename=filename, proposed_plan=accepted_plan,
+                )
+                accepted_plan = cast(dict[str, Any], staged["structure_plan"])
+            scope = str(uuid.uuid4())
             safe_filename = _safe_source_filename(filename)
             source_key = (
                 f"manuscript-imports/{current_user.id}/{book.id}/{job.id}/"
@@ -180,8 +205,12 @@ async def create_manuscript_import_job(
                     "format": format_name,
                     "work_type": upload_work_type,
                     "size": len(raw),
+                    "structure_plan": accepted_plan,
+                    "structure_scope": scope,
                 }
             )
+            if accepted_plan and as_bool(split_into_chapters) and not as_bool(replace_existing):
+                staged_plans.append({"scope": scope, "plan": accepted_plan})
     except MANUSCRIPT_IMPORT_STAGE_EXCEPTIONS:
         await delete_storage_keys_best_effort(uploaded_keys, context="manuscript_import_stage")
         raise
@@ -194,6 +223,7 @@ async def create_manuscript_import_job(
         await delete_storage_keys_best_effort(uploaded_keys, context="manuscript_import_stage")
         raise
     job.source_files_json = sources
+    append_import_structure_plans(book, staged_plans)
     job.progress_total = len(sources) + 1
     db.add(job)
     try:
@@ -416,6 +446,7 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
         default=book.work_type or "novel",
     )
     import_jobs: list[dict[str, object]] = []
+    structure_batches: list[dict[str, Any]] = []
     screenplay_batches: list[dict[str, object]] = []
     first_pdf_raw_for_cover: bytes | None = None
     resolved_import_format: str | None = None
@@ -483,6 +514,7 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
                 preserve_chapter_numbers=bool(book.preserve_chapter_numbers),
                 preserve_source_chapters=bool(book.preserve_source_chapters),
                 filename=filename,
+                proposed_plan=cast(dict[str, Any] | None, source.get("structure_plan")),
             )
             screenplay_payload = (
                 parsed_payload.get("screenplay_payload")
@@ -531,9 +563,15 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
                     if upload_work_type == "screenplay"
                     else bool(request.get("chunk_long_documents"))
                 ),
-                preserve_exact_structure=preserve_exact_structure,
+                preserve_exact_structure=preserve_exact_structure or bool(parsed_payload.get("structure_plan")),
             )
             import_jobs.extend(new_jobs)
+            if upload_work_type != "screenplay" and bool(request.get("split_into_chapters", True)) and not replace_existing:
+                structure_batches.append({
+                    "scope": str(source["structure_scope"]),
+                    "plan": parsed_payload["structure_plan"],
+                    "jobs": new_jobs,
+                })
             if upload_work_type == "screenplay" and screenplay_payload is not None:
                 screenplay_batches.append(
                     {
@@ -607,6 +645,7 @@ async def process_manuscript_import_job(db: AsyncSession, job_id: uuid.UUID) -> 
             first_pdf_raw_for_cover=first_pdf_raw_for_cover,
             total_file_size=total_file_size,
             files_were_uploaded=True,
+            structure_batches=structure_batches,
         )
         job.status = "completed"
         job.result_json = result.model_dump(mode="json")

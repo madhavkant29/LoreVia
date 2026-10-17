@@ -26,6 +26,7 @@ from app.utils.language_utils import detect_language
 # Minimum word count of body text that must follow a heading to accept it
 # as a valid chapter boundary (avoids isolated headings / TOC entries).
 MIN_BODY_WORDS_AFTER_HEADING = 100
+MIN_SHORT_CHAPTER_WORDS = 12
 
 # Minimum number of valid headings in the document needed to trust the
 # chapter-split result. Below this, return a single-chapter fallback.
@@ -83,7 +84,7 @@ def parse_text_chapters(
 
     # ── Split into lines ──────────────────────────────────────────────
     raw_lines = text.splitlines()
-    lines = [line.strip() for line in raw_lines]
+    lines = [re.sub(r"^#{1,6}\s+", "", line.strip()) for line in raw_lines]
 
     # ── Find candidate heading line indices ───────────────────────────
     heading_candidates: list[tuple[int, str, str]] = []
@@ -106,7 +107,14 @@ def parse_text_chapters(
         body_text = " ".join(line for line in body_lines if line)
         body_words = len(body_text.split())
 
-        if body_words >= MIN_BODY_WORDS_AFTER_HEADING:
+        if body_words >= MIN_BODY_WORDS_AFTER_HEADING or (
+            stype in {"chapter", "prologue", "epilogue", "scene"}
+            and (
+                body_words >= MIN_SHORT_CHAPTER_WORDS
+                or (body_words > 0 and body_text.rstrip().endswith((".", "!", "?", "…")))
+            )
+            and not has_toc_signals(body_lines[:8])
+        ):
             valid_headings.append((idx, heading, stype))
 
     # ── TOC detection on candidate headings ──────────────────────────
@@ -137,10 +145,17 @@ def parse_text_chapters(
 
     # ── Build chapter dicts from valid heading splits ─────────────────
     chapters: list[dict] = []
+    leading_lines = raw_lines[: valid_headings[0][0]]
+    keep_leading_text = bool(" ".join(leading_lines).strip()) and not (
+        has_toc_signals(leading_lines)
+        or any(is_toc_indicator(line.strip()) for line in leading_lines)
+    )
     for i, (idx, heading, stype) in enumerate(valid_headings):
         next_idx = valid_headings[i + 1][0] if i + 1 < len(valid_headings) else len(lines)
         # Reconstruct the chapter text from original (untrimmed) raw_lines
         raw_body = raw_lines[idx + 1 : next_idx]
+        if i == 0 and keep_leading_text:
+            raw_body = [*leading_lines, "", *raw_body]
 
         # Extract a clean title from the heading line, recovering any body
         # text that was merged onto the same line (common in some ebooks).
@@ -159,6 +174,86 @@ def parse_text_chapters(
         )
 
     return chapters
+
+
+def parse_text_structure(
+    text: str,
+    *,
+    language: str | None = None,
+    title: str = "Manuscript",
+    heading_hint_lines: set[int] | None = None,
+    chapter_hint_lines: set[int] | None = None,
+    source_name: str = "line",
+) -> list[dict]:
+    """Keep front/back matter and Part boundaries while avoiding TOC-only headings."""
+    if not text.strip():
+        return []
+    detected_language = language or detect_language(text)["detected"]
+    heading_regex = build_heading_regex(languages=[detected_language])
+    raw_lines = text.splitlines()
+    candidates: list[tuple[int, str, str]] = []
+    for index, raw_line in enumerate(raw_lines):
+        line = re.sub(r"^#{1,6}\s+", "", raw_line.strip())
+        if not line or is_toc_indicator(line):
+            continue
+        explicit = bool(heading_regex.fullmatch(line))
+        styled = heading_hint_lines is not None and index in heading_hint_lines
+        if not explicit and not styled:
+            continue
+        kind, _ = classify_heading_type(line, detected_language)
+        if kind == "unknown" and chapter_hint_lines and index in chapter_hint_lines:
+            kind = "chapter"
+        candidates.append((index, line, kind))
+
+    accepted: list[tuple[int, str, str]] = []
+    for index, (line_index, heading, kind) in enumerate(candidates):
+        next_index = candidates[index + 1][0] if index + 1 < len(candidates) else len(raw_lines)
+        body = " ".join(line.strip() for line in raw_lines[line_index + 1 : next_index] if line.strip())
+        words = len(body.split())
+        if kind in {"part", "toc"}:
+            accepted.append((line_index, heading, kind))
+        elif kind in {"notes", "chronology", "preface", "foreword", "appendix", "afterword", "glossary", "acknowledgements", "dedication", "prologue", "epilogue", "interlude"}:
+            if words or kind in {"dedication", "prologue", "epilogue"}:
+                accepted.append((line_index, heading, kind))
+        elif words >= MIN_SHORT_CHAPTER_WORDS or (
+            words > 0 and body.rstrip().endswith((".", "!", "?", "…"))
+        ):
+            if not has_toc_signals(raw_lines[line_index + 1 : min(next_index, line_index + 9)]):
+                accepted.append((line_index, heading, kind))
+        elif words and not has_toc_signals(raw_lines[line_index + 1 : min(next_index, line_index + 9)]):
+            accepted.append((line_index, heading, "unknown"))
+
+    if not accepted:
+        return [{
+            "title": title, "text": text.strip(), "number": 1,
+            "section_type": "unknown", "source_location": f"{source_name} 1",
+            "start_line": 1, "end_line": len(raw_lines),
+        }]
+
+    from app.parsers.pdf_parser import _extract_source_number_from_heading
+
+    sections: list[dict] = []
+    if accepted[0][0] > 0:
+        leading = "\n".join(raw_lines[: accepted[0][0]]).strip()
+        if leading:
+            sections.append({
+                "title": "Opening material", "text": leading, "section_type": "unknown",
+                "source_location": f"{source_name} 1–{accepted[0][0]}",
+                "start_line": 1, "end_line": accepted[0][0],
+            })
+    for index, (line_index, heading, kind) in enumerate(accepted):
+        end = accepted[index + 1][0] if index + 1 < len(accepted) else len(raw_lines)
+        body = "\n".join(raw_lines[line_index + 1 : end]).strip()
+        sections.append({
+            "number": len(sections) + 1,
+            "title": heading,
+            "text": body,
+            "section_type": kind,
+            "source_number": _extract_source_number_from_heading(heading),
+            "source_location": f"{source_name} {line_index + 1}–{end}",
+            "start_line": line_index + 1, "end_line": end,
+        })
+    return sections
 
 
 def _extract_clean_heading(line: str) -> tuple[str, str]:

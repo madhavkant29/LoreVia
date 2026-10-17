@@ -665,6 +665,37 @@ class Chapter(Base):
     )
 
 
+class BookSection(Base):
+    """Stable imported outline entry; existing books need no backfill."""
+
+    __tablename__ = "book_sections"
+    __table_args__ = (
+        UniqueConstraint("chapter_id", name="uq_book_sections_chapter_id"),
+        Index("ix_book_sections_book_order", "book_id", "display_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    book_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("book_sections.id", ondelete="SET NULL"), nullable=True
+    )
+    chapter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True
+    )
+    source_section_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_label: Mapped[str | None] = mapped_column(String(200))
+    source_location: Mapped[str | None] = mapped_column(String(255))
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_block: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_block: Mapped[int] = mapped_column(Integer, nullable=False)
+    include_in_analysis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    warnings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
 class ChapterVersion(Base):
     __tablename__ = "chapter_versions"
     __table_args__ = (

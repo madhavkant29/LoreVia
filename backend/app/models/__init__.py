@@ -7,6 +7,7 @@ from app.models.book import (
     BookForumInterest,
     BookForumPost,
     BookNote,
+    BookSection,
     BookUploadCharge,
     Chapter,
     ChapterMedia,

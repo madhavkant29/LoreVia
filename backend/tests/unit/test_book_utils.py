@@ -1,6 +1,7 @@
 """Unit tests for book_utils functions."""
 
 import io
+import json
 import uuid
 from contextlib import nullcontext
 from datetime import UTC, datetime
@@ -40,6 +41,7 @@ from app.utils.books.imports import (
     build_import_preview,
     normalize_imported_chapters,
     parse_book_upload_for_ingestion,
+    require_extractable_manuscript_text,
     parse_import_upload,
     parse_screenplay_upload,
 )
@@ -1981,10 +1983,15 @@ We have to go now.
 async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(monkeypatch):
     chapters = [{"number": 1, "title": "Chapter 1", "text": "Opening text."}]
     diagnostics = {"source": "pdf", "chapter_count": 1, "fallback_strategy": None}
+    parse_calls: list[str] = []
+
+    def _fake_parse_pdf(raw, *, language=None):
+        parse_calls.append("structured")
+        return chapters, diagnostics
 
     monkeypatch.setattr(
-        "app.parsers.pdf_parser.parse_pdf_with_diagnostics",
-        lambda raw, *, split_large_chapters=True, language=None: (chapters, diagnostics),
+        "app.parsers.pdf_parser.parse_pdf_structure",
+        _fake_parse_pdf,
     )
 
     payload = await parse_book_upload_for_ingestion(
@@ -1995,24 +2002,28 @@ async def test_parse_book_upload_for_ingestion_returns_pdf_parser_diagnostics(mo
         preserve_source_chapters=False,
     )
 
-    assert payload["chapters"] == chapters
+    assert [(chapter["title"], chapter["text"]) for chapter in payload["chapters"]] == [
+        ("Chapter 1", "Opening text.")
+    ]
+    assert payload["structure_plan"]["parser_version"]
     assert payload["parser_diagnostics"] == diagnostics
+    assert parse_calls == ["structured"]
 
 
 @pytest.mark.asyncio
 async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_source_preservation(
     monkeypatch,
 ):
-    parse_calls: list[bool] = []
+    parse_calls: list[str] = []
 
-    def _fake_parse_pdf(raw, *, split_large_chapters=True, language=None):
-        parse_calls.append(split_large_chapters)
+    def _fake_parse_pdf(raw, *, language=None):
+        parse_calls.append("structured")
         return (
             [{"number": 1, "title": "Chapter 7", "text": "Original full chapter"}],
             {"source": "pdf"},
         )
 
-    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_with_diagnostics", _fake_parse_pdf)
+    monkeypatch.setattr("app.parsers.pdf_parser.parse_pdf_structure", _fake_parse_pdf)
 
     payload = await parse_book_upload_for_ingestion(
         format_name="pdf",
@@ -2022,8 +2033,32 @@ async def test_parse_book_upload_for_ingestion_disables_large_split_for_exact_so
         preserve_source_chapters=True,
     )
 
-    assert parse_calls == [False]
+    assert parse_calls == ["structured"]
     assert payload["chapters"][0]["title"] == "Chapter 7"
+
+
+def test_require_extractable_manuscript_text_rejects_image_only_documents():
+    with pytest.raises(HTTPException, match="No extractable text") as error:
+        require_extractable_manuscript_text([{"text": "[[IMAGE:cover]]"}], "pdf")
+    assert error.value.status_code == 400
+    require_extractable_manuscript_text([{"text": "[[IMAGE:cover]]\nMara opens the gate."}], "pdf")
+
+
+@pytest.mark.asyncio
+async def test_pdf_ingestion_rejects_a_parser_result_without_manuscript_text(monkeypatch):
+    monkeypatch.setattr(
+        "app.parsers.pdf_parser.parse_pdf_structure",
+        lambda *_args, **_kwargs: ([{"title": "Full Text", "text": ""}], {"source": "pdf"}),
+    )
+    with pytest.raises(HTTPException, match="No extractable text") as error:
+        await parse_book_upload_for_ingestion(
+            format_name="pdf",
+            work_type="novel",
+            raw=b"%PDF-1.4 mock",
+            preserve_chapter_numbers=False,
+            preserve_source_chapters=True,
+        )
+    assert error.value.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -2077,6 +2112,11 @@ async def test_chapter_consistency_reports_load_full_context(db):
         [
             ChapterSummary(
                 chapter_id=chapters[1].id, mode="short", content="Mara confronts Jon at the gate."
+            ),
+            ChapterSummary(
+                chapter_id=chapters[1].id,
+                mode="editorial_note",
+                content=json.dumps([{"issue": "The reconciliation is abrupt.", "evidence": "Mara confronts Jon.", "suggestion": "Show what changes Mara's mind."}]),
             ),
             CharacterRelationship(
                 book_id=book.id,
@@ -2160,6 +2200,9 @@ async def test_chapter_consistency_reports_load_full_context(db):
     )
     assert latest.plot_threads_resolved == ["The sealed gate"]
     assert "Mara confronts Jon" in latest.summary
+    assert latest.editorial_concerns is not None
+    assert latest.editorial_concerns[0].issue == "The reconciliation is abrupt."
+    assert reports[1].editorial_concerns is None
 
     prewriting = await build_prewriting_check(db, book, upcoming_chapter=3)
     assert prewriting["upcoming_chapter"] == 3
@@ -2296,14 +2339,14 @@ async def test_parse_import_upload_covers_text_markdown_pdf_epub_and_unsupported
 
     monkeypatch.setattr(
         "app.parsers.pdf_parser.parse_pdf",
-        lambda _raw: [
+        lambda _raw, **_kwargs: [
             {"number": 1, "title": "One", "text": "First"},
             {"number": 2, "title": "Two", "text": "Second"},
         ],
     )
     monkeypatch.setattr(
         "app.parsers.epub_parser.parse_epub",
-        lambda _raw: [{"number": 1, "title": "EPUB", "text": "Book text"}],
+        lambda _raw, **_kwargs: [{"number": 1, "title": "EPUB", "text": "Book text"}],
     )
     merged_pdf = await parse_import_upload("book.pdf", b"pdf", False)
     split_pdf = await parse_import_upload("book.pdf", b"pdf", True)

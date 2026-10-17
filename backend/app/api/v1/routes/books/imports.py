@@ -53,7 +53,11 @@ from app.services.processing_allowance_service import (
     ensure_source_storage_capacity,
     summarize_processing_allowances,
 )
-from app.services.upload_preview_service import load_or_build_upload_preview
+from app.services.upload_preview_service import (
+    accept_upload_structure_plan,
+    import_word_totals,
+    load_or_build_upload_preview,
+)
 from app.utils.billing_utils import require_author_access
 from app.utils.books.collaboration_access import (
     assert_editor_project_not_rebuilding,
@@ -96,6 +100,7 @@ async def upload_book_endpoint(
     preserve_chapter_numbers: str = Form("false"),
     preserve_source_chapters: str = Form("false"),
     force_single_manuscript: str = Form("false"),
+    structure_plan: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     __=Depends(rate_limit_upload),
@@ -142,7 +147,10 @@ async def upload_book_endpoint(
         format_name=fmt,
         work_type=resolved_work_type,
     )
-    total_words = int(preview.get("total_words") or 0)
+    accepted_structure = accept_upload_structure_plan(
+        preview=preview, raw=raw, submitted=structure_plan
+    )
+    total_words, _analysis_words = import_word_totals(preview, accepted_structure)
     if total_words <= 0:
         raise HTTPException(
             400,
@@ -182,6 +190,7 @@ async def upload_book_endpoint(
         preserve_chapter_numbers=as_bool(preserve_chapter_numbers),
         preserve_source_chapters=as_bool(preserve_source_chapters),
         force_single_manuscript=as_bool(force_single_manuscript),
+        structure_plan=accepted_structure,
     )
 
 
@@ -218,13 +227,13 @@ async def preview_upload_endpoint(
         work_type=resolved_work_type,
     )
     allowance = await summarize_processing_allowances(db, current_user)
-    total_words = int(preview.get("total_words") or 0)
+    total_words, analysis_words = import_word_totals(preview)
     preview.update(
         {
             "source_size_bytes": len(raw),
             "projected_active_words": allowance.active_analyzed_words + total_words,
             "active_word_limit": allowance.active_word_limit,
-            "projected_monthly_processed_words": allowance.monthly_processed_words + total_words,
+            "projected_monthly_processed_words": allowance.monthly_processed_words + analysis_words,
             "monthly_processed_word_limit": allowance.monthly_processed_word_limit,
             "projected_source_storage_bytes": allowance.source_storage_bytes + len(raw),
             "source_storage_limit_bytes": allowance.source_storage_limit_bytes,
@@ -291,6 +300,7 @@ async def import_manuscript_content(
     expected_content_version: int | None = Form(None),
     chunk_long_documents: str = Form("false"),
     split_into_chapters: str = Form("true"),
+    structure_plan: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
     _: Any = None,
@@ -319,6 +329,7 @@ async def import_manuscript_content(
         expected_content_version=expected_content_version,
         chunk_long_documents=chunk_long_documents,
         split_into_chapters=split_into_chapters,
+        structure_plan=structure_plan,
     )
     if accepted and response is not None:
         response.status_code = 202

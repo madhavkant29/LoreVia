@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.storage import download_book, upload_binary
 from app.models.book import Book, Chapter
 from app.models.user import User
+from app.services.book_section_service import persist_book_sections
 from app.services.extraction_budget_service import apply_ingestion_token_budget
 from app.services.extraction_chapter_content_service import _ensure_chapter_stub
 from app.services.extraction_chapter_queue_service import queue_initial_extraction_chapters
@@ -149,17 +150,30 @@ async def process_book_ingestion_and_queue(
         raw=raw,
         preserve_chapter_numbers=book.preserve_chapter_numbers,
         preserve_source_chapters=book.preserve_source_chapters,
+        proposed_plan=(book.import_structure if isinstance(book.import_structure, dict)
+                       and book.import_structure.get("parser_version") else None),
     )
     chapters = cast(list[dict[str, Any]], parsed_payload["chapters"])
     screenplay_payload = cast(dict[str, Any] | None, parsed_payload.get("screenplay_payload"))
     parser_diagnostics = cast(dict[str, Any] | None, parsed_payload.get("parser_diagnostics"))
+    structure_plan = cast(dict[str, Any] | None, parsed_payload.get("structure_plan"))
 
     detected_language = parsed_payload.get("detected_language", "en")
     if detected_language and detected_language != "en":
         book.language = detected_language
         await db.commit()
 
-    if parser_diagnostics:
+    if structure_plan:
+        additional_imports = (
+            book.import_structure.get("additional_imports")
+            if isinstance(book.import_structure, dict) else None
+        )
+        book.import_structure = {
+            **structure_plan,
+            **({"additional_imports": additional_imports} if additional_imports else {}),
+        }
+        await db.commit()
+    elif parser_diagnostics:
         sections = []
         for ch in chapters:
             sections.append(
@@ -191,8 +205,8 @@ async def process_book_ingestion_and_queue(
     all_chapters = apply_chapter_number_strategy(
         chapters,
         preserve_chapter_numbers=(book.preserve_chapter_numbers or book.preserve_source_chapters)
-        and book.work_type != "screenplay",
-        generic_titles=book.work_type != "screenplay"
+        and book.work_type != "screenplay" and not structure_plan,
+        generic_titles=book.work_type != "screenplay" and not structure_plan
         and not (book.preserve_chapter_numbers or book.preserve_source_chapters),
     )
 
@@ -233,11 +247,12 @@ async def process_book_ingestion_and_queue(
     user = await db.get(User, book.user_id)
 
     budget_started = time.perf_counter()
+    ai_candidates = [chapter for chapter in all_chapters if chapter.get("include_in_analysis", True)]
     budget_result = await apply_ingestion_token_budget(
         db,
         book=book,
         user=user,
-        all_chapters=all_chapters,
+        all_chapters=ai_candidates,
     )
     log.info(
         "ingestion_timing stage=budget book_id=%s elapsed_ms=%s outcome=%s",
@@ -349,6 +364,12 @@ async def process_book_ingestion_and_queue(
         .scalars()
         .all()
     )
+    if structure_plan and not book.force_single_manuscript:
+        await persist_book_sections(
+            db, book=book, plan=structure_plan,
+            chapter_rows=chapter_rows, chapters=all_chapters,
+        )
+        await db.commit()
     chapters_by_number = {int(chapter.number): chapter for chapter in chapter_rows}
     processing_run = await get_or_create_processing_run(
         db,
@@ -358,6 +379,17 @@ async def process_book_ingestion_and_queue(
     )
     processing_run.status = "running"
     processing_run.started_at = processing_run.started_at or datetime.now(UTC)
+    if not ai_chapters:
+        processing_run.status = "completed"
+        processing_run.completed_at = datetime.now(UTC)
+        book.status = "ready"
+        book.writer_workspace = update_book_processing_state(
+            book, status="ready", stage="analysis", total_chapters=0,
+            completed_chapters=0, started_at=processing_started_at,
+            queue_wait_ms=queue_wait_ms,
+        )
+        await db.commit()
+        return {"book_id": book_id, "chapters": len(all_chapters)}
     queue_started = time.perf_counter()
     queue_result = await queue_initial_extraction_chapters(
         db,

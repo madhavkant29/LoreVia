@@ -33,7 +33,7 @@ from app.engine.character.entity_filters import (
     character_visibility_score,
 )
 from app.engine.character.profile_builder import build_description
-from app.models.book import Book, Chapter, ChapterMedia
+from app.models.book import Book, BookSection, Chapter, ChapterMedia
 from app.models.character import Character
 from app.models.intelligence import ChapterSummary, PlotThread
 from app.models.progress import ReadingProgress
@@ -804,6 +804,14 @@ async def build_chapter_list_payload(
         entity_ids=[chapter.id for chapter in chapters],
         book_id=book.id,
     )
+    section_by_chapter: dict[uuid.UUID, BookSection] = {}
+    parts_by_id: dict[uuid.UUID, BookSection] = {}
+    if (book.import_structure or {}).get("parser_version") or (book.import_structure or {}).get("additional_imports"):
+        outline = (await db.execute(
+            select(BookSection).where(BookSection.book_id == book.id).order_by(BookSection.display_order)
+        )).scalars().all()
+        section_by_chapter = {section.chapter_id: section for section in outline if section.chapter_id}
+        parts_by_id = {section.id: section for section in outline if section.kind == "part"}
     return {
         "read_upto": read_upto,
         "current_chapter": read_upto,
@@ -812,9 +820,21 @@ async def build_chapter_list_payload(
                 "number": chapter.number,
                 "title": chapter.title,
                 "chapter_kind": getattr(chapter, "chapter_kind", "chapter"),
+                "printed_label": section_by_chapter[chapter.id].source_label
+                if chapter.id in section_by_chapter else None,
+                "parent_part_id": str(section_by_chapter[chapter.id].parent_id)
+                if chapter.id in section_by_chapter and section_by_chapter[chapter.id].parent_id else None,
+                "parent_part_title": parts_by_id[section_by_chapter[chapter.id].parent_id].title
+                if chapter.id in section_by_chapter and section_by_chapter[chapter.id].parent_id in parts_by_id else None,
+                "analysis_included": section_by_chapter[chapter.id].include_in_analysis
+                if chapter.id in section_by_chapter else None,
                 "word_count": getattr(chapter, "word_count", None),
                 "processed": chapter.processed,
-                "intelligence_available": intelligence_map.get(chapter.number, True),
+                "intelligence_available": (
+                    False if chapter.id in section_by_chapter
+                    and not section_by_chapter[chapter.id].include_in_analysis
+                    else intelligence_map.get(chapter.number, True)
+                ),
                 "read": access.workspace_shell == "author" or chapter.number in read_set,
                 "analysis_status": chapter_analysis_status(chapter),
                 "tags": tags_by_chapter.get(chapter.id, []),
@@ -1190,11 +1210,11 @@ def parse_chapter_from_source(book: Book, chapter_num: int) -> dict | None:
         if book.format == "pdf":
             from app.parsers.pdf_parser import parse_pdf
 
-            chapters = parse_pdf(raw, split_large_chapters=not preserve_numbers)
+            chapters = parse_pdf(raw, split_large_chapters=False)
         else:
             from app.parsers.epub_parser import parse_epub
 
-            chapters = parse_epub(raw, split_large_chapters=not preserve_numbers)
+            chapters = parse_epub(raw, split_large_chapters=False)
         chapters = apply_chapter_number_strategy(
             chapters,
             preserve_chapter_numbers=preserve_numbers,

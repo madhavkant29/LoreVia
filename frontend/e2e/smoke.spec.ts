@@ -44,19 +44,19 @@ test("marketing home page renders the core value proposition", async ({ page }) 
   await expect(page.getByText("Includes a 10-day Author trial. No payment required.").first()).toBeVisible()
 })
 
-test("homepage limits the product walkthrough to three evidence stories", async ({ page }, testInfo) => {
+test("homepage product walkthrough renders every workspace step", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/")
 
-  await expect(page.locator("[data-showcase-step]")).toHaveCount(3)
-  await expect(page.getByRole("heading", { name: "From manuscript evidence to a revision decision." })).toBeVisible()
-  await expect(page.locator("#features figure button")).toHaveCount(0)
-  await expect(page.locator("#features img")).toHaveCount(4)
+  await expect(page.locator("[data-showcase-step]")).toHaveCount(7)
+  await expect(page.getByRole("heading", { name: "One manuscript. Every hidden inconsistency surfaced." })).toBeVisible()
+  expect(await page.locator("#features img").count()).toBeGreaterThanOrEqual(10)
+  expect(await page.locator("#features figure button").count()).toBeGreaterThanOrEqual(2)
   await page.screenshot({ path: testInfo.outputPath("homepage-desktop.png"), fullPage: true })
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()
-  await expect(page.locator("[data-showcase-step]")).toHaveCount(3)
+  await expect(page.locator("[data-showcase-step]")).toHaveCount(7)
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
   await page.screenshot({ path: testInfo.outputPath("homepage-mobile.png"), fullPage: true })
 })
@@ -1078,6 +1078,65 @@ test("library renders a mocked project and opens the upload modal", async ({ pag
   await page.screenshot({ path: test.info().outputPath("library-mobile.png"), fullPage: true })
   expect(consoleMessages.some((message) => /Maximum update depth|ReferenceError|TypeError|Unhandled/i.test(message))).toBe(false)
   expect(pageErrors).toEqual([])
+})
+
+test("warned prose outline corrections are sent with the exact upload", async ({ page }) => {
+  await installMockApi(page)
+  await page.route("**/api/v1/books/upload/preview", async (route) => {
+    await route.fulfill({ json: {
+      detected_language: "en", language_confidence: 1, title: "Harbor", author: "",
+      source_sha256: "source-hash", content_sha256: "content-hash", parser_version: "prose-structure-2", block_count: 3,
+      sections: [
+        { id: "part-1", type: "part", title: "Part I", number: 1, start_block: 0, end_block: 0, include_in_analysis: false, word_count: 0, source_location: "line 1" },
+        { id: "note-1", type: "notes", title: "Author's Note", number: null, start_block: 0, end_block: 1, include_in_analysis: false, word_count: 8, source_location: "line 2", opening_excerpt: "A note from the author.", closing_excerpt: "A note from the author." },
+        { id: "unknown-1", type: "unknown", title: "Unclassified passage", number: null, start_block: 1, end_block: 2, include_in_analysis: true, word_count: 12, source_location: "line 4", opening_excerpt: "The harbor lamp went dark.", closing_excerpt: "The harbor lamp went dark.", warnings: ["The section type is uncertain."] },
+        { id: "chapter-1", type: "chapter", title: "Chapter 1", number: 1, parent_id: "part-1", start_block: 2, end_block: 3, include_in_analysis: true, word_count: 15, source_location: "line 6", opening_excerpt: "Mara returned home.", closing_excerpt: "Mara returned home." },
+      ],
+      chapter_count: 1, toc_detected: false, front_matter_count: 1, confidence: 0.7,
+      warnings: [{ severity: "warning", section_id: "unknown-1", message: "The section type is uncertain." }],
+      total_words: 35, source_size_bytes: 80, allowance_allowed: true,
+      projected_active_words: 35, active_word_limit: 100000, projected_monthly_processed_words: 27,
+      monthly_processed_word_limit: 100000, projected_source_storage_bytes: 80, source_storage_limit_bytes: 1000000,
+    } })
+  })
+  let submitted = ""
+  await page.route("**/api/v1/books/upload", async (route) => {
+    submitted = route.request().postData() ?? ""
+    await route.fulfill({ status: 202, json: { book_id: "book-1", status: "processing" } })
+  })
+  await page.goto("/library")
+  await page.getByRole("button", { name: /^new project$/i }).first().click()
+  const dialog = page.getByRole("dialog", { name: "Upload manuscript" })
+  await dialog.getByRole("button", { name: /^author mode$/i }).click()
+  await dialog.locator('input[type="file"]').first().setInputFiles({
+    name: "harbor.txt", mimeType: "text/plain", buffer: Buffer.from("Author's Note\nA note from the author.\nChapter 1\nMara returned home."),
+  })
+  await dialog.getByRole("button", { name: "Preview structure" }).click()
+  await expect(dialog.getByText("Review uncertain boundaries")).toBeVisible()
+  await expect(dialog.getByText("Unclassified passage")).toBeVisible()
+  await dialog.getByRole("button", { name: "Edit structure" }).click()
+  await dialog.getByRole("textbox", { name: "Section 3 title" }).fill("Harbor interlude")
+  await dialog.getByRole("button", { name: "Save changes" }).click()
+  await dialog.getByLabel("Title", { exact: true }).fill("Harbor")
+  await dialog.getByRole("button", { name: "Confirm & Import" }).click()
+  await expect.poll(() => submitted).toContain("Harbor interlude")
+  expect(submitted).toContain("structure_plan")
+  expect(submitted).toContain("source-hash")
+
+  await page.route("**/api/v1/reader/book-1/chapters", async (route) => {
+    await route.fulfill({ json: {
+      read_upto: 0, current_chapter: 0,
+      chapters: [
+        { number: 1, title: "Chapter 1", chapter_kind: "chapter", printed_label: "Chapter 1", parent_part_id: "part-one", parent_part_title: "Part I", processed: true, intelligence_available: true, read: false, tags: [] },
+        { number: 2, title: "Chapter 1", chapter_kind: "chapter", printed_label: "Chapter 1", parent_part_id: "part-two", parent_part_title: "Part II", processed: true, intelligence_available: true, read: false, tags: [] },
+      ],
+    } })
+  })
+  await page.goto(`${BOOK_ROUTE}/chapters`)
+  await expect(page.getByRole("heading", { name: "Part I", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Part II", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Open chapter 2: Chapter 1" }).click()
+  await expect(page).toHaveURL(/\/chapter\/2$/, { timeout: 30_000 })
 })
 
 test("account notes and quotes use compact searchable rows", async ({ page }) => {

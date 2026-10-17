@@ -187,6 +187,12 @@ export const UploadModal = memo(function UploadModal({
             setChunkLongDocuments={setChunkLongDocuments}
             infoButtonClass={infoButtonClass}
             chapterReports={chapterReports}
+            importPreview={importPreview}
+            setImportPreview={setImportPreview}
+            previewLoading={previewLoading}
+            fetchPreview={fetchPreview}
+            showEditor={showEditor}
+            setShowEditor={setShowEditor}
           />
 
           <AdvancedImportSettings

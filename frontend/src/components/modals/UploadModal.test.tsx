@@ -327,7 +327,7 @@ describe("UploadModal", () => {
     await chooseFile(view, new File(["chapter"], "gate.pdf", { type: "application/pdf" }))
     await clickButton(view, "Preview structure")
     expect(view.textContent).toContain("Structure preview")
-    expect(view.textContent).toContain("92% confident")
+    expect(view.textContent).toContain("Outline ready for review")
     expect(view.textContent).toContain("Chapter One")
 
     await clickButton(view, "Edit structure")

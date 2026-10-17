@@ -11,6 +11,7 @@ from app.core.redis import mark_book_cache_dirty
 from app.models.book import Book, Chapter
 from app.models.operations import TaskExecution
 from app.schemas.books import ManuscriptReprocessBody, ManuscriptReprocessOut
+from app.services.book_section_service import filter_analysis_eligible_chapters
 from app.services.processing_allowance_service import (
     MANUAL_REPROCESS_USAGE_KIND,
     ProcessingReservationRequest,
@@ -109,6 +110,7 @@ async def start_manual_manuscript_reprocess(
         .scalars()
         .all()
     )
+    chapters = await filter_analysis_eligible_chapters(db, book.id, list(chapters))
 
     if not chapters:
         raise HTTPException(400, "Save at least one chapter before reprocessing")

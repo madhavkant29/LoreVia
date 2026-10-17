@@ -428,8 +428,8 @@ export const booksApi = {
     apiClient.get<ManuscriptAnnotation[]>(bookPath(id, "/annotations"), {
       params: typeof chapterNumber === "number" ? { chapter_number: chapterNumber } : undefined,
     }).then(r => r.data),
-  getChapterReports: (id: string, limit = 12) =>
-    apiClient.get<ChapterConsistencyReport[]>(bookPath(id, "/chapter-reports"), { params: { limit } }).then(r => r.data),
+  getChapterReports: (id: string, limit = 12, beforeChapter?: number) =>
+    apiClient.get<ChapterConsistencyReport[]>(bookPath(id, "/chapter-reports"), { params: { limit, ...(beforeChapter !== undefined ? { before_chapter: beforeChapter } : {}) } }).then(r => r.data),
   getPreWritingCheck: (id: string, upcomingChapter?: number) =>
     apiClient.get<PreWritingCheck>(bookPath(id, "/pre-writing-check"), { params: typeof upcomingChapter === "number" ? { upcoming_chapter: upcomingChapter } : undefined }).then(r => r.data),
   getStoryHealth: (id: string) =>
@@ -1290,6 +1290,7 @@ export const booksApi = {
       workType?: BookWorkType
       coverFile?: File | null
       mode?: "reader" | "author"
+      structurePlan?: { source_sha256: string; content_sha256: string; parser_version: string; sections: import("@/types/book").SectionMeta[] }
       onProgress?: (percent: number) => void
     }
   ) => {
@@ -1309,6 +1310,7 @@ export const booksApi = {
     form.append("preserve_chapter_numbers", options?.preserveChapterNumbers ? "true" : "false")
     form.append("preserve_source_chapters", options?.preserveSourceChapters ? "true" : "false")
     form.append("force_single_manuscript", options?.forceSingleManuscript ? "true" : "false")
+    if (options?.structurePlan) form.append("structure_plan", JSON.stringify(options.structurePlan))
     if (options?.coverFile) form.append("cover_file", options.coverFile)
     return apiClient.post("/books/upload", form, {
       onUploadProgress: (event) => {
@@ -1335,6 +1337,7 @@ export const booksApi = {
       splitIntoChapters?: boolean
       workType?: BookWorkType
       files?: File[]
+      structurePlan?: { source_sha256: string; content_sha256: string; parser_version: string; sections: import("@/types/book").SectionMeta[] }
       onProgress?: (completed: number, total: number) => void
     }
   ) => {
@@ -1348,6 +1351,7 @@ export const booksApi = {
     if (payload.chunkLongDocuments) form.append("chunk_long_documents", "true")
     if (payload.splitIntoChapters === false) form.append("split_into_chapters", "false")
     if (payload.workType) form.append("work_type", payload.workType)
+    if (payload.structurePlan) form.append("structure_plan", JSON.stringify(payload.structurePlan))
     payload.files?.forEach((file) => form.append("files", file))
     return apiClient.post<ManuscriptImportResponse | ManuscriptImportJob>(
       bookPath(bookId, "/manuscript/import"),
