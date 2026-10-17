@@ -108,7 +108,11 @@ def _validate_same_origin_request(request: Request) -> None:
     except ValueError:
         raise HTTPException(403, "Invalid request origin.")
 
-    if settings.DEBUG and parsed.scheme in {"http", "https"} and parsed.hostname in {"localhost", "127.0.0.1", "[::1]", "::1"}:
+    if (
+        settings.DEBUG
+        and parsed.scheme in {"http", "https"}
+        and parsed.hostname in {"localhost", "127.0.0.1", "[::1]", "::1"}
+    ):
         return
     if request_origin.rstrip("/") not in allowed_origins:
         raise HTTPException(403, "Invalid request origin.")

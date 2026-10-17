@@ -117,7 +117,17 @@ async def test_persist_chapter_summary_payloads_updates_existing_and_inserts_mis
                 "themes": [{"theme": "trust"}],
             },
             "short": {"content": "Replacement short summary"},
-            "editorial_note": {"content": json.dumps([{"issue": "The gate opens without a choice.", "evidence": "The gate opened.", "suggestion": "Show the choice."}])},
+            "editorial_note": {
+                "content": json.dumps(
+                    [
+                        {
+                            "issue": "The gate opens without a choice.",
+                            "evidence": "The gate opened.",
+                            "suggestion": "Show the choice.",
+                        }
+                    ]
+                )
+            },
         },
     )
     await db.commit()
@@ -136,7 +146,18 @@ async def test_persist_chapter_summary_payloads_updates_existing_and_inserts_mis
     assert persisted == ["short", "detailed", "editorial_note"]
     assert [(row.mode, row.content) for row in rows] == [
         ("detailed", "Replacement summary"),
-        ("editorial_note", json.dumps([{"issue": "The gate opens without a choice.", "evidence": "The gate opened.", "suggestion": "Show the choice."}])),
+        (
+            "editorial_note",
+            json.dumps(
+                [
+                    {
+                        "issue": "The gate opens without a choice.",
+                        "evidence": "The gate opened.",
+                        "suggestion": "Show the choice.",
+                    }
+                ]
+            ),
+        ),
         ("short", "Replacement short summary"),
     ]
     assert rows[0].id == existing.id

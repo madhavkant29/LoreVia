@@ -34,8 +34,7 @@ async def test_csrf_bootstrap_sets_a_browser_readable_cookie(client):
 
     assert response.status_code == 204
     assert any(
-        header.startswith("lorevia_csrf=")
-        for header in response.headers.get_list("set-cookie")
+        header.startswith("lorevia_csrf=") for header in response.headers.get_list("set-cookie")
     )
 
 

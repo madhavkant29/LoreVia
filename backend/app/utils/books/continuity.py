@@ -51,7 +51,13 @@ def parse_chapter_editorial_note(
         payload = json.loads(content)
     except (TypeError, ValueError):
         return None, None
-    items = payload if isinstance(payload, list) else payload.get("concerns") if isinstance(payload, dict) else None
+    items = (
+        payload
+        if isinstance(payload, list)
+        else payload.get("concerns")
+        if isinstance(payload, dict)
+        else None
+    )
     question_data = payload.get("revision_question") if isinstance(payload, dict) else None
     if not isinstance(items, list):
         return None, None
@@ -391,8 +397,7 @@ async def build_chapter_consistency_report(
         summary_line = f"{summary_line} This upload surfaced " + ", ".join(additions) + "."
 
     editorial_concerns, revision_question = (
-        parse_chapter_editorial_note(editorial_note.content)
-        if editorial_note else (None, None)
+        parse_chapter_editorial_note(editorial_note.content) if editorial_note else (None, None)
     )
 
     return ChapterConsistencyReport(

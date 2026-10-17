@@ -72,9 +72,7 @@ def test_parse_epub_uses_spine_order_and_keeps_short_real_chapters_and_paragraph
         b"<html><h1>Chapter 1</h1><p>Mara <em>keeps</em> the key near the gate.</p>"
         b"<p>The guard notices the empty lock.</p></html>"
     )
-    second = FakeEpubItem(
-        b"<html><h1>Chapter 2</h1><p>The gate opens before sunrise.</p></html>"
-    )
+    second = FakeEpubItem(b"<html><h1>Chapter 2</h1><p>The gate opens before sunrise.</p></html>")
     fake_book = SimpleNamespace(
         spine=[("first", "yes"), ("second", "yes")],
         get_item_with_id=lambda item_id: {"first": first, "second": second}[item_id],
@@ -93,9 +91,13 @@ def test_parse_epub_uses_spine_order_and_keeps_short_real_chapters_and_paragraph
 def test_parse_epub_splits_multiple_chapters_in_one_spine_document(monkeypatch):
     first = "Mara keeps the archive key while the watchman circles the gate. " * 4
     second = "The watchman returns and sees that the key is missing. " * 4
-    fake_book = SimpleNamespace(get_items=lambda: [FakeEpubItem(
-        f"<html><h1>Chapter 1</h1><p>{first}</p><h1>Chapter 2</h1><p>{second}</p></html>".encode()
-    )])
+    fake_book = SimpleNamespace(
+        get_items=lambda: [
+            FakeEpubItem(
+                f"<html><h1>Chapter 1</h1><p>{first}</p><h1>Chapter 2</h1><p>{second}</p></html>".encode()
+            )
+        ]
+    )
     monkeypatch.setattr(epub_parser.epub, "read_epub", lambda path: fake_book)
 
     chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)
@@ -146,7 +148,9 @@ def test_parse_real_epub_obeys_spine_order_and_preserves_inline_text(tmp_path):
     book.set_title("Spine Order Test")
     book.set_language("en")
     first = epub.EpubHtml(title="Chapter 1", file_name="first.xhtml", lang="en")
-    first.content = "<html><body><h1>Chapter 1</h1><p>Un<em>break</em>able proof appears.</p></body></html>"
+    first.content = (
+        "<html><body><h1>Chapter 1</h1><p>Un<em>break</em>able proof appears.</p></body></html>"
+    )
     second = epub.EpubHtml(title="Chapter 2", file_name="second.xhtml", lang="en")
     second.content = "<html><body><h1>Chapter 2</h1><p>The answer follows.</p></body></html>"
     book.add_item(second)
@@ -166,9 +170,9 @@ def test_parse_real_epub_obeys_spine_order_and_preserves_inline_text(tmp_path):
 
 
 def test_epub_keeps_a_very_short_chapter_with_an_explicit_chapter_heading(monkeypatch):
-    fake_book = SimpleNamespace(get_items=lambda: [FakeEpubItem(
-        b"<html><h1>Chapter 3</h1><p>She vanished.</p></html>"
-    )])
+    fake_book = SimpleNamespace(
+        get_items=lambda: [FakeEpubItem(b"<html><h1>Chapter 3</h1><p>She vanished.</p></html>")]
+    )
     monkeypatch.setattr(epub_parser.epub, "read_epub", lambda path: fake_book)
 
     chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)
@@ -179,9 +183,9 @@ def test_epub_keeps_a_very_short_chapter_with_an_explicit_chapter_heading(monkey
 
 
 def test_epub_keeps_a_one_word_chapter_with_an_explicit_heading(monkeypatch):
-    fake_book = SimpleNamespace(get_items=lambda: [FakeEpubItem(
-        b"<html><h1>Chapter 4</h1><p>No.</p></html>"
-    )])
+    fake_book = SimpleNamespace(
+        get_items=lambda: [FakeEpubItem(b"<html><h1>Chapter 4</h1><p>No.</p></html>")]
+    )
     monkeypatch.setattr(epub_parser.epub, "read_epub", lambda path: fake_book)
 
     chapters = epub_parser.parse_epub(b"fake epub bytes", split_large_chapters=False)

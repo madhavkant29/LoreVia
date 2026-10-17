@@ -70,7 +70,9 @@ async def test_prepare_chapter_chunks_with_embeddings_builds_complete_rows(monke
     assert prepared.texts == ["first chunk", "second chunk"]
     assert [item.text for item in prepared.rows] == ["first chunk", "second chunk"]
     assert [item.chunk_index for item in prepared.rows] == [0, 1]
-    assert [item.token_count for item in prepared.rows] == [count_tokens(text) for text in prepared.texts]
+    assert [item.token_count for item in prepared.rows] == [
+        count_tokens(text) for text in prepared.texts
+    ]
     assert prepared.rows[0].book_id == book.id
     assert prepared.rows[0].chapter_id == chapter.id
     assert calls[0][0] == "chunk"
@@ -86,8 +88,14 @@ async def test_prepare_chapter_chunks_with_embeddings_builds_complete_rows(monke
 @pytest.mark.asyncio
 async def test_prepared_chunk_token_count_is_not_a_whitespace_word_count(monkeypatch):
     passage = "こんにちは世界" * 8
-    monkeypatch.setattr(extraction_chapter_embedding_service, "chunk_text", lambda *_args, **_kwargs: [passage])
-    monkeypatch.setattr(extraction_chapter_embedding_service, "build_chunk_embedding_text", lambda **_kwargs: passage)
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service, "chunk_text", lambda *_args, **_kwargs: [passage]
+    )
+    monkeypatch.setattr(
+        extraction_chapter_embedding_service,
+        "build_chunk_embedding_text",
+        lambda **_kwargs: passage,
+    )
 
     async def fake_embed_batch(batch, **_kwargs):
         return [[0.1, 0.2] for _ in batch]

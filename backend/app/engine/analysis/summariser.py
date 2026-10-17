@@ -109,7 +109,8 @@ async def generate_summary(
                 system=(
                     part_system
                     if attempt == 0
-                    else part_system + "\nYour previous response was not valid JSON with a nonempty summary. Return the requested JSON object only."
+                    else part_system
+                    + "\nYour previous response was not valid JSON with a nonempty summary. Return the requested JSON object only."
                 ),
                 user=passage,
                 openai_model=settings.OPENAI_EXTRACT_MODEL,
@@ -130,8 +131,14 @@ async def generate_summary(
                 data = json.loads(_strip_json_fence(content))
             except (TypeError, ValueError):
                 data = None
-            if isinstance(data, dict) and isinstance(data.get("summary"), str) and data["summary"].strip():
-                payloads.append(_normalize_summary_payload(data, fallback=content, source_text=passage))
+            if (
+                isinstance(data, dict)
+                and isinstance(data.get("summary"), str)
+                and data["summary"].strip()
+            ):
+                payloads.append(
+                    _normalize_summary_payload(data, fallback=content, source_text=passage)
+                )
                 break
             if attempt == 1:
                 raise ValueError(f"Detailed summary for passage {part_index} is incomplete")
@@ -361,9 +368,7 @@ def _strip_json_fence(content: str) -> str:
     return stripped.strip()
 
 
-def _normalize_summary_payload(
-    data: dict, fallback: str, source_text: str = ""
-) -> dict:
+def _normalize_summary_payload(data: dict, fallback: str, source_text: str = "") -> dict:
     key_events = []
     for item in data.get("key_events") or []:
         if isinstance(item, dict):
@@ -436,7 +441,9 @@ def _normalize_editorial_concerns(value: object, source_text: str) -> list[dict[
         suggestion = " ".join(str(item.get("suggestion") or "").split()).strip()
         if not issue or not evidence or evidence.casefold() not in normalized_source:
             continue
-        concerns.append({"issue": issue[:500], "evidence": evidence[:500], "suggestion": suggestion[:500]})
+        concerns.append(
+            {"issue": issue[:500], "evidence": evidence[:500], "suggestion": suggestion[:500]}
+        )
         if len(concerns) >= 3:
             break
     return concerns

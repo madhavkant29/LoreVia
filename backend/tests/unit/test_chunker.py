@@ -79,7 +79,9 @@ def test_overlap_never_pushes_a_chunk_past_the_hard_token_cap():
     limit = max(count_tokens(paragraph) for paragraph in paragraphs) + 3
     chunks = chunk_text(
         "\n\n".join(paragraphs),
-        config=ChunkingConfig(target_tokens=limit - 2, max_tokens=limit, min_tokens=0, overlap_tokens=limit - 3),
+        config=ChunkingConfig(
+            target_tokens=limit - 2, max_tokens=limit, min_tokens=0, overlap_tokens=limit - 3
+        ),
     )
 
     assert len(chunks) > 1
