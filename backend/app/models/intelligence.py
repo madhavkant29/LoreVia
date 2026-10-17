@@ -235,13 +235,12 @@ class ReaderEvent(GenerationScopedMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
     )
     chapter_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("chapters.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     character_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("characters.id", ondelete="SET NULL"), index=True
@@ -698,12 +697,11 @@ class WorldSourceObservation(GenerationScopedMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False
     )
     world_document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("world_building_documents.id", ondelete="SET NULL"),
-        index=True,
     )
     chapter_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chapters.id", ondelete="SET NULL"), index=True
@@ -757,14 +755,14 @@ class WorldAnalysisState(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     book_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), index=True
+        UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE")
     )
     series_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE"), index=True
+        UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE")
     )
     scope: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="queued", server_default="queued", index=True
+        String(16), nullable=False, default="queued", server_default="queued"
     )
     input_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
     payload: Mapped[dict | None] = mapped_column(JSONB, default=dict)

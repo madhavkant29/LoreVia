@@ -233,17 +233,35 @@ config.set_main_option(
 target_metadata = Base.metadata
 
 
+_UNSTABLE_EXPRESSION_INDEXES = {
+    ("book_vault_notes", "ix_book_vault_notes_text_search"),
+    ("novel_scenes", "ix_novel_scenes_text_search"),
+}
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    if (
+        type_ == "table"
+        and reflected
+        and getattr(obj, "schema", None) not in (None, "public")
+    ):
+        return False
+    # PostgreSQL deparses these tsvector expressions differently from their
+    # SQLAlchemy text forms, causing Alembic 1.13 to report false drop/add pairs.
+    if (
+        type_ == "index"
+        and (getattr(getattr(obj, "table", None), "name", None), name)
+        in _UNSTABLE_EXPRESSION_INDEXES
+    ):
+        return False
+    return True
+
+
 def do_run(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        include_object=lambda obj, name, type_, reflected, compare_to: (
-            not (
-                type_ == "table"
-                and reflected
-                and getattr(obj, "schema", None) not in (None, "public")
-            )
-        ),
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -270,13 +288,7 @@ def run_migrations_offline() -> None:
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
-        include_object=lambda obj, name, type_, reflected, compare_to: (
-            not (
-                type_ == "table"
-                and reflected
-                and getattr(obj, "schema", None) not in (None, "public")
-            )
-        ),
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()

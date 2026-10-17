@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,6 +50,18 @@ class DirectConversation(Base):
         UniqueConstraint(
             "participant_a_user_id", "participant_b_user_id", name="uq_direct_conversations_pair"
         ),
+        Index(
+            "ix_direct_conversations_a_activity_id",
+            "participant_a_user_id",
+            text("COALESCE(last_message_at, created_at) DESC"),
+            text("id DESC"),
+        ),
+        Index(
+            "ix_direct_conversations_b_activity_id",
+            "participant_b_user_id",
+            text("COALESCE(last_message_at, created_at) DESC"),
+            text("id DESC"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -80,6 +92,20 @@ class DirectConversation(Base):
 
 class DirectMessage(Base):
     __tablename__ = "direct_messages"
+    __table_args__ = (
+        Index(
+            "ix_direct_messages_conversation_created_id",
+            "conversation_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_direct_messages_recipient_unread_conversation",
+            "recipient_user_id",
+            "conversation_id",
+            postgresql_where=text("recipient_read_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id: Mapped[uuid.UUID] = mapped_column(
