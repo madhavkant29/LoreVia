@@ -37,6 +37,7 @@ NGINX_IMAGE = (
     "nginx:1.30.4-alpine3.24@"
     "sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c"
 )
+NGINX_LIBEXPAT_REQUIREMENT = "libexpat>=2.9.0-r0"
 REDIS_IMAGE = (
     "redis:7.4.11-alpine3.21@"
     "sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
@@ -222,6 +223,8 @@ def production_container_contract_errors(
         errors.append("ops/nginx/Dockerfile does not use the pinned stable Nginx image")
     if "apk upgrade --no-cache" not in nginx_dockerfile_text:
         errors.append("Nginx runtime does not install current Alpine security fixes")
+    if NGINX_LIBEXPAT_REQUIREMENT not in nginx_dockerfile_text:
+        errors.append("Nginx runtime does not require the fixed libexpat version")
     if "\nUSER 101:101\n" not in nginx_dockerfile_text:
         errors.append("Nginx image does not declare its non-root runtime user")
     if "pid        /tmp/nginx.pid;" not in nginx_dockerfile_text:

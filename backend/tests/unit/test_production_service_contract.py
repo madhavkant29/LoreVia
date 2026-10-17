@@ -1,6 +1,7 @@
 from scripts.check_production_service_contract import (
     FRONTEND_NODE_IMAGE,
     NGINX_IMAGE,
+    NGINX_LIBEXPAT_REQUIREMENT,
     PYTHON_IMAGE,
     REDIS_IMAGE,
     REQUIRED_RUNTIME_SERVICES,
@@ -151,6 +152,7 @@ def _production_compose_text() -> str:
 def _nginx_dockerfile_text() -> str:
     return (
         f"FROM {NGINX_IMAGE}\n"
+        f"RUN apk add --no-cache '{NGINX_LIBEXPAT_REQUIREMENT}'\n"
         "RUN apk upgrade --no-cache\n"
         "RUN sed -i 's#pid        /run/nginx.pid;#pid        /tmp/nginx.pid;#' "
         "/etc/nginx/nginx.conf\n"
@@ -597,6 +599,24 @@ def test_container_contract_rejects_unpatched_or_floating_support_images() -> No
         "production Compose does not build the security-patched Nginx image",
         "production Compose does not pin the supported Redis image digest",
     ]
+
+
+def test_container_contract_requires_fixed_libexpat_version() -> None:
+    nginx_dockerfile = _nginx_dockerfile_text().replace(
+        NGINX_LIBEXPAT_REQUIREMENT,
+        "libexpat",
+    )
+
+    errors = production_container_contract_errors(
+        _production_compose_text(),
+        _python_dockerfile_text(),
+        _python_dockerfile_text(),
+        _frontend_dockerfile_text(),
+        nginx_dockerfile,
+        _workflow_text(),
+    )
+
+    assert errors == ["Nginx runtime does not require the fixed libexpat version"]
 
 
 def test_container_contract_rejects_floating_python_images() -> None:
