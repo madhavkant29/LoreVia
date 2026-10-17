@@ -139,6 +139,32 @@ describe("normalizeProcessingStatus", () => {
     expect(status?.detail).not.toContain("Token limit reached")
   })
 
+  it("describes temporary coordination capacity separately from token limits", () => {
+    const status = normalizeProcessingStatus({
+      status: "paused",
+      stage: "usage_limited",
+      chapters_completed: 0,
+      chapters_total: 2,
+      pause_reason: "llm_capacity",
+      auto_resume: true,
+      resume_available: false,
+      next_resume_at: "2026-09-01T00:00:00Z",
+      resume_blockers: [{
+        kind: "llm_capacity",
+        detail: "LLM capacity is temporarily busy. Retry shortly.",
+        auto_resume: true,
+        next_resume_at: "2026-09-01T00:00:00Z",
+      }],
+    })
+
+    expect(status?.paused).toBe(true)
+    expect(status?.autoResume).toBe(true)
+    expect(status?.detail).toContain("AI processing capacity is temporarily busy")
+    expect(status?.detail).toContain("retry automatically around")
+    expect(status?.detail).toContain("0/2 chapters complete")
+    expect(status?.detail).not.toContain("Token limit reached")
+  })
+
   it("distinguishes support-required failures from retryable failures", () => {
     const status = normalizeProcessingStatus({
       status: "failed",

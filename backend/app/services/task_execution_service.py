@@ -33,6 +33,10 @@ DISPATCHABLE_EXECUTION_STATUSES = ("pending_dispatch", "queued")
 OUTBOX_READY_STATUSES = ("pending", "publish_failed")
 EXECUTION_LEASE_SECONDS = 30 * 60
 OUTBOX_LEASE_SECONDS = 5 * 60
+# Capacity rejections happen before a provider call.  Give Redis' short-lived
+# rate/concurrency guard time to clear before asking the durable sweep to
+# dispatch the execution again.
+CAPACITY_PAUSE_RETRY_SECONDS = 60
 EXTRACTION_TASK_NAMES = (
     "extraction_tasks.process_book",
     "extraction_tasks.process_chapter",
@@ -533,9 +537,23 @@ async def pause_task_execution(
         await db.commit()
         await _clear_task_execution_cache_lease_best_effort(execution.id)
         return
+    now = datetime.now(UTC)
+    normalized_blocker = dict(blocker)
+    if reason == "llm_capacity":
+        # A capacity rejection is raised by our local coordination guard before
+        # an LLM request reaches the provider.  It must not consume the task's
+        # finite provider-attempt budget; otherwise two brief rate/concurrency
+        # collisions permanently fail an otherwise healthy import.
+        execution.attempt_count = max(int(execution.attempt_count or 0) - 1, 0)
+        normalized_blocker["auto_resume"] = True
+        normalized_blocker.setdefault(
+            "next_resume_at",
+            (now + timedelta(seconds=CAPACITY_PAUSE_RETRY_SECONDS)).isoformat(),
+        )
+
     execution.status = "paused"
     execution.error_category = reason
-    execution.error_detail = json.dumps(blocker, default=str)[:4000]
+    execution.error_detail = json.dumps(normalized_blocker, default=str)[:4000]
     execution.locked_until = None
     run = (
         await db.get(BookProcessingRun, execution.processing_run_id, with_for_update=True)
@@ -545,10 +563,10 @@ async def pause_task_execution(
     if run is not None:
         run.status = "paused"
         run.pause_reason = reason
-        run.resume_blockers = [blocker]
+        run.resume_blockers = [normalized_blocker]
         run.next_chapter_number = execution.chapter_number
-        run.paused_at = datetime.now(UTC)
-        await write_book_pause_state(db, run, blocker=blocker)
+        run.paused_at = now
+        await write_book_pause_state(db, run, blocker=normalized_blocker)
     await db.commit()
     await _clear_task_execution_cache_lease_best_effort(execution.id)
 
@@ -639,12 +657,18 @@ async def resume_temporary_capacity_pauses(
             continue
         blocker = parse_processing_blocker(execution.error_detail)
         if execution.error_category == "llm_capacity":
-            cooldowns = (60, 180, 600)
-            cooldown_index = min(max(int(execution.attempt_count or 1) - 1, 0), 2)
-            deterministic_jitter = int(execution.id.int % 31)
-            eligible_at = execution.updated_at + timedelta(
-                seconds=cooldowns[cooldown_index] + deterministic_jitter
-            )
+            scheduled_resume_at = parse_processing_resume_at(blocker.get("next_resume_at"))
+            if scheduled_resume_at is not None:
+                eligible_at = scheduled_resume_at
+            else:
+                # Compatibility for pauses written before next_resume_at was
+                # persisted for capacity rejections.
+                cooldowns = (60, 180, 600)
+                cooldown_index = min(max(int(execution.attempt_count or 1) - 1, 0), 2)
+                deterministic_jitter = int(execution.id.int % 31)
+                eligible_at = execution.updated_at + timedelta(
+                    seconds=cooldowns[cooldown_index] + deterministic_jitter
+                )
             if execution.updated_at > cutoff or eligible_at > current:
                 continue
         else:
@@ -662,7 +686,12 @@ async def resume_temporary_capacity_pauses(
             if execution.processing_run_id
             else None
         )
-        if execution.attempt_count >= execution.max_attempts:
+        if execution.error_category == "llm_capacity" and execution.attempt_count >= execution.max_attempts:
+            # Older rows were created before capacity pauses refunded their
+            # claim. Refund the most recent capacity-only claim so they can
+            # recover after this deployment instead of failing in claim().
+            execution.attempt_count = max(int(execution.attempt_count or 0) - 1, 0)
+        elif execution.attempt_count >= execution.max_attempts:
             execution.status = "failed_terminal"
             execution.error_category = "attempt_exhausted"
             execution.error_detail = "Temporary LLM capacity remained unavailable."

@@ -615,7 +615,10 @@ async def test_temporary_capacity_pause_returns_to_durable_dispatch_after_cooldo
     execution.status = "paused"
     execution.error_category = "llm_capacity"
     execution.error_detail = "temporary capacity"
-    execution.attempt_count = 1
+    # This represents a legacy capacity pause created before capacity-only
+    # claims were refunded. It must still resume instead of being terminally
+    # failed by the attempt-budget check.
+    execution.attempt_count = execution.max_attempts
     execution.updated_at = datetime.now(UTC) - timedelta(minutes=2)
     run.status = "paused"
     run.pause_reason = "llm_capacity"
@@ -629,9 +632,48 @@ async def test_temporary_capacity_pause_returns_to_durable_dispatch_after_cooldo
     await db.refresh(execution)
     await db.refresh(run)
     assert execution.status == "pending_dispatch"
+    assert execution.attempt_count == execution.max_attempts - 1
     assert execution.error_category is None
     assert run.status == "queued"
     assert run.resume_blockers == []
+
+
+async def test_capacity_pause_refunds_the_claim_and_persists_an_automatic_resume(db):
+    user, book = await _processing_user_and_book(db, uuid.uuid4().hex[:8])
+    run = await get_or_create_processing_run(db, user_id=user.id, book_id=book.id)
+    execution = await ensure_task_execution(
+        db,
+        task_name="analysis_tasks.analyse_chapter",
+        processing_run=run,
+        chapter_number=2,
+        arguments={"book_id": str(book.id), "chapter_id": str(uuid.uuid4())},
+    )
+    execution.status = "running"
+    execution.attempt_count = 1
+    await db.commit()
+
+    await pause_task_execution(
+        db,
+        str(execution.id),
+        reason="llm_capacity",
+        blocker={"kind": "llm_capacity", "detail": "LLM capacity is temporarily busy."},
+    )
+
+    await db.refresh(execution)
+    await db.refresh(run)
+    await db.refresh(book)
+    assert execution.status == "paused"
+    assert execution.attempt_count == 0
+    assert run.resume_blockers == [
+        {
+            "kind": "llm_capacity",
+            "detail": "LLM capacity is temporarily busy.",
+            "auto_resume": True,
+            "next_resume_at": run.resume_blockers[0]["next_resume_at"],
+        }
+    ]
+    assert book.writer_workspace["processing"]["auto_resume"] is True
+    assert book.writer_workspace["processing"]["next_resume_at"] == run.resume_blockers[0]["next_resume_at"]
 
 
 async def test_usage_limit_pause_is_not_automatically_resumed(db):
